@@ -20,6 +20,7 @@ defmodule Hive.DoctorTest do
       assert :git_installed in checks
       assert :claude_installed in checks
       assert :database_ok in checks
+      assert :settings_valid in checks
       assert :orphan_cells in checks
       assert :stale_bees in checks
     end
@@ -184,6 +185,86 @@ defmodule Hive.DoctorTest do
 
         {:error, _} ->
           # Not in a hive workspace, skip
+          :ok
+      end
+    end
+  end
+
+  describe "check/1 - settings_valid" do
+    test "reports ok when no settings files exist" do
+      result = Doctor.check(:settings_valid)
+      assert result.name == :settings_valid
+      # Either :ok (no files to check) or :warn (not in workspace)
+      assert result.status in [:ok, :warn]
+    end
+
+    test "reports warn when a settings file has old-format hooks" do
+      case Hive.hive_dir() do
+        {:ok, path} ->
+          queen_claude_dir = Path.join([path, ".hive", "queen", ".claude"])
+          settings_path = Path.join(queen_claude_dir, "settings.json")
+          File.mkdir_p!(queen_claude_dir)
+
+          old_format = %{
+            "permissions" => %{"allow" => []},
+            "hooks" => %{
+              "SessionStart" => [
+                %{"type" => "command", "command" => "hive prime --queen"}
+              ]
+            }
+          }
+
+          File.write!(settings_path, Jason.encode!(old_format))
+
+          result = Doctor.check(:settings_valid)
+          assert result.name == :settings_valid
+          assert result.status == :warn
+          assert result.fixable == true
+          assert result.message =~ "outdated"
+
+        {:error, _} ->
+          :ok
+      end
+    end
+  end
+
+  describe "fix/1 - settings_valid" do
+    test "regenerates settings with new format" do
+      case Hive.hive_dir() do
+        {:ok, path} ->
+          queen_claude_dir = Path.join([path, ".hive", "queen", ".claude"])
+          settings_path = Path.join(queen_claude_dir, "settings.json")
+          File.mkdir_p!(queen_claude_dir)
+
+          old_format = %{
+            "permissions" => %{"allow" => []},
+            "hooks" => %{
+              "SessionStart" => [
+                %{"type" => "command", "command" => "hive prime --queen"}
+              ]
+            }
+          }
+
+          File.write!(settings_path, Jason.encode!(old_format))
+
+          result = Doctor.fix(:settings_valid)
+          assert result.name == :settings_valid
+          assert result.status == :ok
+          assert result.message =~ "Regenerated"
+
+          # Verify new format
+          {:ok, content} = File.read(settings_path)
+          {:ok, settings} = Jason.decode(content)
+          hooks = settings["hooks"]
+
+          Enum.each(hooks, fn {_event, entries} ->
+            Enum.each(entries, fn entry ->
+              assert Map.has_key?(entry, "hooks"), "Expected new format with 'hooks' key"
+              assert Map.has_key?(entry, "matcher"), "Expected new format with 'matcher' key"
+            end)
+          end)
+
+        {:error, _} ->
           :ok
       end
     end

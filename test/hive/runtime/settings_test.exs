@@ -25,7 +25,7 @@ defmodule Hive.Runtime.SettingsTest do
     test "SessionStart hook runs hive prime with the bee ID" do
       settings = Settings.build_settings("bee-abc123", "/tmp/test-hive")
 
-      [hook] = settings["hooks"]["SessionStart"]
+      [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["SessionStart"]
       assert hook["type"] == "command"
       assert hook["command"] =~ "prime --bee bee-abc123"
     end
@@ -33,7 +33,7 @@ defmodule Hive.Runtime.SettingsTest do
     test "Stop hook runs hive costs record with the bee ID" do
       settings = Settings.build_settings("bee-abc123", "/tmp/test-hive")
 
-      [hook] = settings["hooks"]["Stop"]
+      [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["Stop"]
       assert hook["type"] == "command"
       assert hook["command"] =~ "costs record --bee bee-abc123"
     end
@@ -77,7 +77,7 @@ defmodule Hive.Runtime.SettingsTest do
     test "SessionStart hook runs hive prime --queen" do
       settings = Settings.build_queen_settings("/tmp/test-hive")
 
-      [hook] = settings["hooks"]["SessionStart"]
+      [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["SessionStart"]
       assert hook["type"] == "command"
       assert hook["command"] =~ "prime --queen"
     end
@@ -85,7 +85,7 @@ defmodule Hive.Runtime.SettingsTest do
     test "Stop hook runs hive costs record --queen" do
       settings = Settings.build_queen_settings("/tmp/test-hive")
 
-      [hook] = settings["hooks"]["Stop"]
+      [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["Stop"]
       assert hook["type"] == "command"
       assert hook["command"] =~ "costs record --queen"
     end

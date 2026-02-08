@@ -30,6 +30,7 @@ defmodule Hive.Doctor do
     :hive_initialized,
     :database_ok,
     :config_valid,
+    :settings_valid,
     :orphan_cells,
     :stale_bees,
     :queen_workspace,
@@ -70,6 +71,7 @@ defmodule Hive.Doctor do
   def check(:hive_initialized), do: check_hive_initialized()
   def check(:database_ok), do: check_database_ok()
   def check(:config_valid), do: check_config_valid()
+  def check(:settings_valid), do: check_settings_valid()
   def check(:orphan_cells), do: check_orphan_cells()
   def check(:stale_bees), do: check_stale_bees()
   def check(:queen_workspace), do: check_queen_workspace()
@@ -86,6 +88,7 @@ defmodule Hive.Doctor do
   def fix(:stale_bees), do: fix_stale_bees()
   def fix(:queen_workspace), do: fix_queen_workspace()
   def fix(:config_valid), do: fix_config_valid()
+  def fix(:settings_valid), do: fix_settings_valid()
   def fix(name), do: %{name: name, status: :error, message: "Not fixable", fixable: false}
 
   @doc """
@@ -149,6 +152,47 @@ defmodule Hive.Doctor do
 
       {:error, _} ->
         result(:config_valid, :warn, "Cannot check config: not in a hive workspace")
+    end
+  end
+
+  defp check_settings_valid do
+    case Hive.hive_dir() do
+      {:ok, path} ->
+        settings_files = collect_settings_files(path)
+
+        case settings_files do
+          [] ->
+            result(:settings_valid, :ok, "No settings files to check")
+
+          files ->
+            old_format_count =
+              Enum.count(files, fn file ->
+                case File.read(file) do
+                  {:ok, content} ->
+                    case Jason.decode(content) do
+                      {:ok, %{"hooks" => hooks}} -> has_old_format_hooks?(hooks)
+                      _ -> false
+                    end
+
+                  _ ->
+                    false
+                end
+              end)
+
+            if old_format_count == 0 do
+              result(:settings_valid, :ok, "All settings files use current hooks format")
+            else
+              result(
+                :settings_valid,
+                :warn,
+                "#{old_format_count} settings file(s) use outdated hooks format",
+                true
+              )
+            end
+        end
+
+      {:error, _} ->
+        result(:settings_valid, :warn, "Cannot check: not in a hive workspace")
     end
   end
 
@@ -280,6 +324,58 @@ defmodule Hive.Doctor do
     end
   end
 
+  defp fix_settings_valid do
+    case Hive.hive_dir() do
+      {:ok, path} ->
+        regenerated = 0
+
+        # Regenerate queen settings
+        queen_workspace = Path.join([path, ".hive", "queen"])
+
+        regenerated =
+          if File.dir?(queen_workspace) do
+            case Hive.Runtime.Settings.generate_queen(path, queen_workspace) do
+              :ok -> regenerated + 1
+              _ -> regenerated
+            end
+          else
+            regenerated
+          end
+
+        # Regenerate active cell settings
+        active_cells =
+          try do
+            Store.filter(:cells, fn c -> c.status == "active" end)
+          rescue
+            _ -> []
+          end
+
+        regenerated =
+          Enum.reduce(active_cells, regenerated, fn cell, acc ->
+            bee_id = cell.bee_id
+            worktree = cell.worktree_path
+
+            if bee_id && worktree && File.dir?(worktree) do
+              case Hive.Runtime.Settings.generate(bee_id, path, worktree) do
+                :ok -> acc + 1
+                _ -> acc
+              end
+            else
+              acc
+            end
+          end)
+
+        if regenerated > 0 do
+          result(:settings_valid, :ok, "Regenerated #{regenerated} settings file(s)")
+        else
+          result(:settings_valid, :ok, "No settings files needed regeneration")
+        end
+
+      {:error, _} ->
+        result(:settings_valid, :error, "Cannot fix: not in a hive workspace")
+    end
+  end
+
   defp maybe_fix(%{status: status, fixable: true, name: name}) when status in [:warn, :error] do
     fix(name)
   end
@@ -337,4 +433,33 @@ defmodule Hive.Doctor do
   defp format_size(bytes) when bytes < 1024, do: "#{bytes} B"
   defp format_size(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
   defp format_size(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MB"
+
+  defp collect_settings_files(hive_root) do
+    queen_settings = Path.join([hive_root, ".hive", "queen", ".claude", "settings.json"])
+
+    cell_settings =
+      try do
+        Store.filter(:cells, fn c -> c.status == "active" end)
+        |> Enum.map(fn cell ->
+          Path.join([cell.worktree_path, ".claude", "settings.json"])
+        end)
+      rescue
+        _ -> []
+      end
+
+    [queen_settings | cell_settings]
+    |> Enum.filter(&File.exists?/1)
+  end
+
+  defp has_old_format_hooks?(hooks) when is_map(hooks) do
+    Enum.any?(hooks, fn {_event, entries} ->
+      is_list(entries) and
+        Enum.any?(entries, fn
+          %{"type" => _} -> true
+          _ -> false
+        end)
+    end)
+  end
+
+  defp has_old_format_hooks?(_), do: false
 end
