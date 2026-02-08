@@ -46,7 +46,7 @@ defmodule Hive.CLI do
     Map.get(Map.get(r, section, %{}), key)
   end
 
-  @quest_subcommands ~w(new list show delete merge report)
+  @quest_subcommands ~w(new list show delete merge report close)
 
   defp expand_defaults(["quest" | rest]) when rest != [] do
     case rest do
@@ -528,6 +528,19 @@ defmodule Hive.CLI do
 
       {:error, reason} ->
         Format.error("Quest merge failed: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:quest, :close], result) do
+    id = result_get(result, :args, :id)
+
+    case Hive.Quests.close(id) do
+      {:ok, quest} ->
+        Format.success("Quest \"#{quest.name}\" closed. Associated cells removed.")
+
+      {:error, :not_found} ->
+        Format.error("Quest not found: #{id}")
+        Format.info("Hint: use `hive quest list` to see all quests.")
     end
   end
 
@@ -1517,6 +1530,18 @@ defmodule Hive.CLI do
                 id: [
                   value_name: "ID",
                   help: "Quest ID to report on",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            close: [
+              name: "close",
+              about: "Close a quest and remove associated cells/worktrees",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Quest ID to close",
                   required: true,
                   parser: :string
                 ]

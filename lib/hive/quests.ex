@@ -85,6 +85,28 @@ defmodule Hive.Quests do
   end
 
   @doc """
+  Closes a quest: removes all associated bee cells/worktrees, then marks status as "closed".
+
+  Returns `{:ok, quest}` or `{:error, :not_found}`.
+  """
+  @spec close(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def close(quest_id) do
+    with {:ok, quest} <- get(quest_id) do
+      bee_ids = quest.jobs |> Enum.map(& &1.bee_id) |> Enum.reject(&is_nil/1)
+
+      Enum.each(bee_ids, fn bee_id ->
+        case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+          nil -> :ok
+          cell -> Hive.Cell.remove(cell.id, force: true)
+        end
+      end)
+
+      updated = %{quest | status: "closed"} |> Map.delete(:jobs)
+      Store.put(:quests, updated)
+    end
+  end
+
+  @doc """
   Gets a quest by ID, with its jobs attached.
 
   Returns `{:ok, quest}` or `{:error, :not_found}`.

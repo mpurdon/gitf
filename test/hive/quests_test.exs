@@ -161,6 +161,62 @@ defmodule Hive.QuestsTest do
     end
   end
 
+  describe "close/1" do
+    test "sets quest status to closed", %{comb: comb} do
+      {:ok, quest} = Quests.create(%{goal: "Close me", comb_id: comb.id})
+
+      assert {:ok, closed} = Quests.close(quest.id)
+      assert closed.status == "closed"
+
+      # Verify persisted
+      assert {:ok, fetched} = Quests.get(quest.id)
+      assert fetched.status == "closed"
+    end
+
+    test "closes quest with jobs that have no bees", %{comb: comb} do
+      {:ok, quest} = Quests.create(%{goal: "Quest with unassigned jobs"})
+
+      {:ok, _job} =
+        Hive.Jobs.create(%{title: "Unassigned job", quest_id: quest.id, comb_id: comb.id})
+
+      assert {:ok, closed} = Quests.close(quest.id)
+      assert closed.status == "closed"
+    end
+
+    test "attempts to remove active cells for assigned bees", %{comb: comb} do
+      {:ok, quest} = Quests.create(%{goal: "Quest with bees"})
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Job with bee",
+          quest_id: quest.id,
+          comb_id: comb.id,
+          status: "done"
+        })
+
+      {:ok, bee} = Store.insert(:bees, %{name: "test-bee", job_id: job.id, status: "stopped"})
+      Hive.Jobs.assign(job.id, bee.id)
+
+      {:ok, _cell} =
+        Store.insert(:cells, %{
+          bee_id: bee.id,
+          comb_id: comb.id,
+          worktree_path: "/tmp/fake-worktree-#{bee.id}",
+          branch: "bee/#{bee.id}",
+          status: "active"
+        })
+
+      # close/1 will attempt Cell.remove which may fail on fake worktree,
+      # but quest status should still be set to "closed"
+      assert {:ok, closed} = Quests.close(quest.id)
+      assert closed.status == "closed"
+    end
+
+    test "returns error for unknown quest" do
+      assert {:error, :not_found} = Quests.close("qst-nonexistent")
+    end
+  end
+
   describe "add_job/2" do
     test "creates a job linked to the quest", %{comb: comb} do
       {:ok, quest} = Quests.create(%{goal: "Quest with jobs"})
