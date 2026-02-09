@@ -189,6 +189,246 @@ defmodule Hive.QueenTest do
       assert Process.alive?(Process.whereis(Hive.Queen))
     end
 
+    test "updates quest status to completed on job_complete" do
+      # Create records: comb, quest, job (done), bee
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "quest-adv-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "quest-adv-test-#{:erlang.unique_integer([:positive])}",
+          status: "active"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Only job",
+          quest_id: quest.id,
+          comb_id: comb.id
+        })
+
+      {:ok, bee} =
+        Store.insert(:bees, %{name: "adv-bee", status: "working", job_id: job.id})
+
+      # Move job to "done" state
+      {:ok, _} = Hive.Jobs.assign(job.id, bee.id)
+      {:ok, _} = Hive.Jobs.start(job.id)
+      {:ok, _} = Hive.Jobs.complete(job.id)
+
+      Queen.start_session()
+
+      waggle = %{
+        id: "wag-adv-1",
+        from: bee.id,
+        to: "queen",
+        subject: "job_complete",
+        body: "Done",
+        read: false
+      }
+
+      send(Process.whereis(Hive.Queen), {:waggle_received, waggle})
+      Process.sleep(50)
+
+      {:ok, updated_quest} = Hive.Quests.get(quest.id)
+      assert updated_quest.status == "completed"
+    end
+
+    test "sends quest_completed waggle on completion" do
+      # Subscribe to queen topic to receive the waggle
+      Hive.Waggle.subscribe("waggle:queen")
+
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "wag-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "wag-quest-#{:erlang.unique_integer([:positive])}",
+          status: "active"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Single job",
+          quest_id: quest.id,
+          comb_id: comb.id
+        })
+
+      {:ok, bee} =
+        Store.insert(:bees, %{name: "wag-bee", status: "working", job_id: job.id})
+
+      {:ok, _} = Hive.Jobs.assign(job.id, bee.id)
+      {:ok, _} = Hive.Jobs.start(job.id)
+      {:ok, _} = Hive.Jobs.complete(job.id)
+
+      Queen.start_session()
+
+      waggle = %{
+        id: "wag-complete-1",
+        from: bee.id,
+        to: "queen",
+        subject: "job_complete",
+        body: "Done",
+        read: false
+      }
+
+      send(Process.whereis(Hive.Queen), {:waggle_received, waggle})
+
+      assert_receive {:waggle_received, %{subject: "quest_completed"}}, 500
+    end
+
+    test "attempts to spawn bee for next pending job after completion" do
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "spawn-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "spawn-quest-#{:erlang.unique_integer([:positive])}",
+          status: "active"
+        })
+
+      {:ok, job_1} =
+        Hive.Jobs.create(%{
+          title: "First job",
+          quest_id: quest.id,
+          comb_id: comb.id
+        })
+
+      {:ok, job_2} =
+        Hive.Jobs.create(%{
+          title: "Second job",
+          quest_id: quest.id,
+          comb_id: comb.id
+        })
+
+      # job_2 depends on job_1
+      {:ok, _dep} = Hive.Jobs.add_dependency(job_2.id, job_1.id)
+
+      {:ok, bee} =
+        Store.insert(:bees, %{name: "spawn-bee", status: "working", job_id: job_1.id})
+
+      # Complete job_1
+      {:ok, _} = Hive.Jobs.assign(job_1.id, bee.id)
+      {:ok, _} = Hive.Jobs.start(job_1.id)
+      {:ok, _} = Hive.Jobs.complete(job_1.id)
+
+      Queen.start_session()
+
+      waggle = %{
+        id: "wag-spawn-1",
+        from: bee.id,
+        to: "queen",
+        subject: "job_complete",
+        body: "Done",
+        read: false
+      }
+
+      send(Process.whereis(Hive.Queen), {:waggle_received, waggle})
+      Process.sleep(100)
+
+      # Quest should be updated (not completed yet since job_2 is pending)
+      {:ok, updated_quest} = Hive.Quests.get(quest.id)
+      # Status should be "pending" (job_2 is pending) or "active" if spawn succeeded
+      # The spawn itself may fail (no real git worktree), but Queen should not crash
+      assert Process.alive?(Process.whereis(Hive.Queen))
+      assert updated_quest.status in ["pending", "active"]
+    end
+
+    test "updates quest status on retry exhaustion" do
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "exhaust-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "exhaust-quest-#{:erlang.unique_integer([:positive])}",
+          status: "active"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Failing job",
+          quest_id: quest.id,
+          comb_id: comb.id
+        })
+
+      {:ok, bee} =
+        Store.insert(:bees, %{
+          name: "exhaust-bee",
+          status: "working",
+          job_id: job.id
+        })
+
+      # Move job to failed state
+      {:ok, _} = Hive.Jobs.assign(job.id, bee.id)
+      {:ok, _} = Hive.Jobs.start(job.id)
+      {:ok, _} = Hive.Jobs.fail(job.id)
+
+      Queen.start_session()
+
+      # Pre-load retry count to max so next failure triggers exhaustion
+      # We do this by sending the state update via sys to set retry_counts
+      :sys.replace_state(Process.whereis(Hive.Queen), fn state ->
+        put_in(state.retry_counts[job.id], 3)
+      end)
+
+      waggle = %{
+        id: "wag-exhaust-1",
+        from: bee.id,
+        to: "queen",
+        subject: "job_failed",
+        body: "Failed again",
+        read: false
+      }
+
+      send(Process.whereis(Hive.Queen), {:waggle_received, waggle})
+      Process.sleep(50)
+
+      # After exhausting retries, quest status should reflect failure
+      {:ok, updated_quest} = Hive.Quests.get(quest.id)
+      assert updated_quest.status == "failed"
+    end
+
+    test "handles validation_failed waggle like job_failed" do
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "val-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "val-quest-#{:erlang.unique_integer([:positive])}",
+          status: "active"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Validation test job",
+          quest_id: quest.id,
+          comb_id: comb.id
+        })
+
+      {:ok, bee} =
+        Store.insert(:bees, %{name: "val-bee", status: "working", job_id: job.id})
+
+      {:ok, _} = Hive.Jobs.assign(job.id, bee.id)
+      {:ok, _} = Hive.Jobs.start(job.id)
+      {:ok, _} = Hive.Jobs.fail(job.id)
+
+      Queen.start_session()
+
+      waggle = %{
+        id: "wag-val-1",
+        from: bee.id,
+        to: "queen",
+        subject: "validation_failed",
+        body: "Tests did not pass",
+        read: false
+      }
+
+      send(Process.whereis(Hive.Queen), {:waggle_received, waggle})
+      Process.sleep(50)
+
+      # Should not crash and should attempt retry
+      assert Process.alive?(Process.whereis(Hive.Queen))
+    end
+
     test "handles port data messages without crashing" do
       # Simulate port messages that the Queen's Claude session would produce.
       # We create a real port so the guard `when is_port(port)` passes.

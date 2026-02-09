@@ -165,11 +165,18 @@ defmodule Hive.Queen do
 
   defp handle_waggle(%{subject: "job_complete"} = waggle, state) do
     Logger.info("Bee #{waggle.from} reports job complete: #{waggle.body}")
-    update_in(state.active_bees, &Map.delete(&1, waggle.from))
+    state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
+    advance_quest(waggle.from, state)
   end
 
   defp handle_waggle(%{subject: "job_failed"} = waggle, state) do
     Logger.warning("Bee #{waggle.from} reports job failed: #{waggle.body}")
+    state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
+    maybe_retry_job(waggle, state)
+  end
+
+  defp handle_waggle(%{subject: "validation_failed"} = waggle, state) do
+    Logger.warning("Bee #{waggle.from} reports validation failed: #{waggle.body}")
     state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
     maybe_retry_job(waggle, state)
   end
@@ -216,12 +223,72 @@ defmodule Hive.Queen do
           end
         else
           Logger.warning("Job #{job_id} exhausted #{state.max_retries} retries")
+          best_effort_update_quest_status(job_id)
           state
         end
 
       _ ->
         state
     end
+  end
+
+  # -- Private: quest advancement -----------------------------------------------
+
+  defp advance_quest(bee_id, state) do
+    with {:ok, bee} <- Hive.Bees.get(bee_id),
+         true <- not is_nil(bee.job_id),
+         {:ok, job} <- Hive.Jobs.get(bee.job_id) do
+      quest_id = job.quest_id
+      Hive.Quests.update_status!(quest_id)
+
+      case Hive.Quests.get(quest_id) do
+        {:ok, %{status: "completed"} = quest} ->
+          Logger.info("Quest completed: #{quest.name} (#{quest_id})")
+          Hive.Waggle.send("system", "queen", "quest_completed",
+            "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done")
+          state
+
+        {:ok, quest} ->
+          spawn_ready_jobs(quest, state)
+
+        _ ->
+          state
+      end
+    else
+      _ -> state
+    end
+  end
+
+  defp best_effort_update_quest_status(job_id) do
+    with {:ok, job} <- Hive.Jobs.get(job_id) do
+      Hive.Quests.update_status!(job.quest_id)
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp spawn_ready_jobs(quest, state) do
+    pending_jobs =
+      quest.jobs
+      |> Enum.filter(&(&1.status == "pending"))
+      |> Enum.filter(&Hive.Jobs.ready?(&1.id))
+
+    active_count = Hive.Bees.list(status: "working") |> length()
+    available_slots = max(state.max_bees - active_count, 0)
+
+    pending_jobs
+    |> Enum.take(available_slots)
+    |> Enum.reduce(state, fn job, acc ->
+      case Hive.Bees.spawn(job.id, job.comb_id, acc.hive_root) do
+        {:ok, bee} ->
+          Logger.info("Auto-spawned bee #{bee.id} for job #{job.id} (#{job.title})")
+          acc
+
+        {:error, reason} ->
+          Logger.warning("Failed to auto-spawn bee for job #{job.id}: #{inspect(reason)}")
+          acc
+      end
+    end)
   end
 
   defp check_quest_budget(quest_id) do
