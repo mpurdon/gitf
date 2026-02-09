@@ -264,6 +264,29 @@ defmodule Hive.CLI do
     end
   end
 
+  defp dispatch([:comb, :rename], result) do
+    name = result_get(result, :args, :name)
+    new_name = result_get(result, :args, :new_name)
+
+    case Hive.Comb.rename(name, new_name) do
+      {:ok, comb} ->
+        Format.success("Comb renamed to \"#{comb.name}\" (#{comb.id})")
+
+      {:error, :not_found} ->
+        Format.error("Comb not found: #{name}")
+        Format.info("Hint: use `hive comb list` to see all combs.")
+
+      {:error, :name_already_taken} ->
+        Format.error("A comb named \"#{new_name}\" already exists.")
+
+      {:error, {:rename_failed, reason}} ->
+        Format.error("Failed to rename directory: #{inspect(reason)}")
+
+      {:error, reason} ->
+        Format.error("Failed to rename comb: #{inspect(reason)}")
+    end
+  end
+
   defp dispatch([:waggle, :list], result) do
     to = result_get(result, :options, :to)
     opts = if to, do: [to: to], else: []
@@ -1384,6 +1407,24 @@ defmodule Hive.CLI do
                   value_name: "NAME",
                   help: "Name or ID of the comb to set as current",
                   required: false,
+                  parser: :string
+                ]
+              ]
+            ],
+            rename: [
+              name: "rename",
+              about: "Rename a comb and update all tracking references",
+              args: [
+                name: [
+                  value_name: "NAME",
+                  help: "Current name or ID of the comb",
+                  required: true,
+                  parser: :string
+                ],
+                new_name: [
+                  value_name: "NEW_NAME",
+                  help: "New name for the comb",
+                  required: true,
                   parser: :string
                 ]
               ]

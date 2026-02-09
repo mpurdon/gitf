@@ -123,6 +123,41 @@ defmodule Hive.Comb do
     end
   end
 
+  @doc """
+  Renames a comb and updates all stored path references.
+
+  If the comb directory exists on disk and its basename matches the old name,
+  the directory is also renamed and all cell/bee paths are updated.
+
+  Returns `{:ok, updated_comb}` or `{:error, reason}`.
+  """
+  @spec rename(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def rename(name_or_id, new_name) do
+    with {:ok, comb} <- get(name_or_id),
+         :ok <- validate_name_available(new_name, comb.id) do
+      old_name = comb.name
+      updated = %{comb | name: new_name}
+
+      if comb.path && File.dir?(comb.path) && Path.basename(comb.path) == old_name do
+        new_path = Path.join(Path.dirname(comb.path), new_name)
+
+        case File.rename(comb.path, new_path) do
+          :ok ->
+            updated = %{updated | path: new_path}
+            Store.put(:combs, updated)
+            update_stored_paths(comb.path, new_path)
+            {:ok, updated}
+
+          {:error, reason} ->
+            {:error, {:rename_failed, reason}}
+        end
+      else
+        Store.put(:combs, updated)
+        {:ok, updated}
+      end
+    end
+  end
+
   # -- Private helpers -------------------------------------------------------
 
   defp add_local(path, opts) do
@@ -191,5 +226,30 @@ defmodule Hive.Comb do
     |> String.split("/")
     |> List.last()
     |> String.replace(~r/\.git$/, "")
+  end
+
+  defp validate_name_available(name, excluding_id) do
+    case Store.find_one(:combs, fn c -> c.name == name && c.id != excluding_id end) do
+      nil -> :ok
+      _existing -> {:error, :name_already_taken}
+    end
+  end
+
+  defp update_stored_paths(old_path, new_path) do
+    Store.filter(:cells, fn c ->
+      is_binary(c[:worktree_path]) && String.starts_with?(c.worktree_path, old_path)
+    end)
+    |> Enum.each(fn cell ->
+      updated_path = String.replace_prefix(cell.worktree_path, old_path, new_path)
+      Store.put(:cells, %{cell | worktree_path: updated_path})
+    end)
+
+    Store.filter(:bees, fn b ->
+      is_binary(b[:cell_path]) && String.starts_with?(b.cell_path, old_path)
+    end)
+    |> Enum.each(fn bee ->
+      updated_path = String.replace_prefix(bee.cell_path, old_path, new_path)
+      Store.put(:bees, %{bee | cell_path: updated_path})
+    end)
   end
 end
