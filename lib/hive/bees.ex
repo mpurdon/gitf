@@ -80,6 +80,32 @@ defmodule Hive.Bees do
   end
 
   @doc """
+  Revives a dead bee by spawning a new bee into its existing worktree.
+
+  The dead bee must be "stopped" or "crashed". Its cell and worktree are
+  reassigned to the new bee, which receives a prompt instructing it to
+  finalize the existing work rather than starting over.
+
+  Returns `{:ok, new_bee}` or `{:error, reason}`.
+  """
+  @spec revive(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def revive(dead_bee_id, hive_root, opts \\ []) do
+    with {:ok, dead_bee} <- get(dead_bee_id),
+         :ok <- validate_dead(dead_bee),
+         {:ok, cell} <- find_active_cell(dead_bee_id),
+         :ok <- validate_worktree_exists(cell),
+         {:ok, job} <- Hive.Jobs.get(dead_bee.job_id),
+         {:ok, new_bee} <- create_bee_record(Keyword.get(opts, :name, generate_bee_name()), dead_bee.job_id),
+         {:ok, _cell} <- Hive.Cell.adopt(cell.id, new_bee.id),
+         :ok <- revive_job(job, new_bee.id),
+         prompt = build_revive_prompt(job),
+         {:ok, _pid} <- start_worker(new_bee.id, job.id, cell.comb_id, hive_root,
+                           Keyword.merge(opts, [revive: true, cell_id: cell.id, prompt: prompt])) do
+      {:ok, new_bee}
+    end
+  end
+
+  @doc """
   Lists bees with optional filters.
 
   ## Options
@@ -271,5 +297,55 @@ defmodule Hive.Bees do
   defp escape_shell(str) do
     # Single-quote the string, escaping any single quotes within
     "'" <> String.replace(str, "'", "'\\''") <> "'"
+  end
+
+  # -- Revive helpers ----------------------------------------------------------
+
+  defp validate_dead(%{status: status}) when status in ["stopped", "crashed"], do: :ok
+  defp validate_dead(_bee), do: {:error, :bee_still_active}
+
+  defp find_active_cell(bee_id) do
+    case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+      nil -> {:error, :no_active_cell}
+      cell -> {:ok, cell}
+    end
+  end
+
+  defp validate_worktree_exists(%{worktree_path: path}) do
+    if File.dir?(path), do: :ok, else: {:error, :worktree_not_found}
+  end
+
+  defp revive_job(%{status: "failed"} = job, new_bee_id) do
+    case Hive.Jobs.revive(job.id, new_bee_id) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp revive_job(%{status: "done"}, _new_bee_id), do: :ok
+
+  defp revive_job(job, new_bee_id) do
+    # running or assigned — just update the bee_id
+    Store.put(:jobs, %{job | bee_id: new_bee_id})
+    :ok
+  end
+
+  defp build_revive_prompt(job) do
+    description = if job.description, do: "\n\n#{job.description}", else: ""
+
+    """
+    You are continuing work on: "#{job.title}"#{description}
+
+    IMPORTANT: There is existing work in this worktree from a previous session.
+    Your task is to FINALIZE this work, not start over:
+
+    1. Run `git status` and `git diff` to see what changes exist
+    2. Review any uncommitted changes for correctness
+    3. Commit changes with descriptive commit messages
+    4. Run tests or validation if applicable
+    5. Report completion when everything is committed and verified
+
+    Do NOT start the work over from scratch. Finalize what's already here.
+    """
   end
 end

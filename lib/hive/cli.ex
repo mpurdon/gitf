@@ -495,6 +495,23 @@ defmodule Hive.CLI do
     end
   end
 
+  defp dispatch([:bee, :revive], result) do
+    dead_bee_id = result_get(result, :args, :bee_id)
+
+    with {:ok, hive_root} <- Hive.hive_dir() do
+      case Hive.Bees.revive(dead_bee_id, hive_root) do
+        {:ok, bee} ->
+          Format.success("Revived into bee \"#{bee.name}\" (#{bee.id}) using #{dead_bee_id}'s worktree")
+
+        {:error, reason} ->
+          Format.error("Failed to revive: #{inspect(reason)}")
+      end
+    else
+      {:error, :not_in_hive} ->
+        Format.error("Not inside a hive workspace. Run `hive init` first.")
+    end
+  end
+
   defp dispatch([:quest, :report], result) do
     id = result_get(result, :args, :id)
 
@@ -1453,6 +1470,18 @@ defmodule Hive.CLI do
                   help: "Failure reason",
                   parser: :string,
                   required: false
+                ]
+              ]
+            ],
+            revive: [
+              name: "revive",
+              about: "Revive a dead bee — spawn a new bee into its existing worktree to finish the work",
+              args: [
+                bee_id: [
+                  value_name: "BEE_ID",
+                  help: "ID of the dead bee whose worktree to reuse",
+                  required: true,
+                  parser: :string
                 ]
               ]
             ]

@@ -131,6 +131,102 @@ defmodule Hive.BeesTest do
     end
   end
 
+  describe "revive/3" do
+    test "creates new bee in dead bee's worktree", ctx do
+      # Spawn a bee and let it finish (echo exits immediately)
+      {:ok, bee} =
+        Bees.spawn(ctx.job.id, ctx.comb.id, ctx.hive_root,
+          name: "doomed-bee",
+          claude_executable: "/bin/echo",
+          prompt: "hello"
+        )
+
+      Process.sleep(1_000)
+
+      # Bee should be stopped now; mark it as crashed for revive testing
+      {:ok, stopped_bee} = Bees.get(bee.id)
+      Store.put(:bees, %{stopped_bee | status: "crashed"})
+
+      # The job was completed by the worker — mark it failed so revive transition works
+      {:ok, job} = Hive.Jobs.get(ctx.job.id)
+      Store.put(:jobs, %{job | status: "failed"})
+
+      # Revive
+      {:ok, new_bee} = Bees.revive(bee.id, ctx.hive_root, claude_executable: "/bin/echo")
+
+      assert new_bee.id != bee.id
+      assert new_bee.job_id == bee.job_id
+
+      # Cell should be reassigned to new bee
+      cell = Store.find_one(:cells, fn c -> c.bee_id == new_bee.id and c.status == "active" end)
+      assert cell != nil
+
+      Process.sleep(1_000)
+    end
+
+    test "fails for active bee", ctx do
+      {:ok, bee} = Store.insert(:bees, %{name: "active-bee", status: "working", job_id: ctx.job.id})
+      assert {:error, :bee_still_active} = Bees.revive(bee.id, ctx.hive_root)
+    end
+
+    test "fails with no cell", ctx do
+      {:ok, bee} = Store.insert(:bees, %{name: "no-cell-bee", status: "crashed", job_id: ctx.job.id})
+      assert {:error, :no_active_cell} = Bees.revive(bee.id, ctx.hive_root)
+    end
+
+    test "revive transitions failed job to running", ctx do
+      # Spawn and let it finish
+      {:ok, bee} =
+        Bees.spawn(ctx.job.id, ctx.comb.id, ctx.hive_root,
+          name: "revive-job-test",
+          claude_executable: "/bin/echo",
+          prompt: "hello"
+        )
+
+      Process.sleep(1_000)
+
+      {:ok, stopped_bee} = Bees.get(bee.id)
+      Store.put(:bees, %{stopped_bee | status: "crashed"})
+
+      {:ok, job} = Hive.Jobs.get(ctx.job.id)
+      Store.put(:jobs, %{job | status: "failed"})
+
+      {:ok, new_bee} = Bees.revive(bee.id, ctx.hive_root, claude_executable: "/bin/echo")
+
+      {:ok, updated_job} = Hive.Jobs.get(ctx.job.id)
+      assert updated_job.status == "running"
+      assert updated_job.bee_id == new_bee.id
+
+      Process.sleep(1_000)
+    end
+
+    test "revive leaves done job alone", ctx do
+      # Spawn and let it complete
+      {:ok, bee} =
+        Bees.spawn(ctx.job.id, ctx.comb.id, ctx.hive_root,
+          name: "done-job-test",
+          claude_executable: "/bin/echo",
+          prompt: "hello"
+        )
+
+      Process.sleep(1_000)
+
+      {:ok, stopped_bee} = Bees.get(bee.id)
+      Store.put(:bees, %{stopped_bee | status: "crashed"})
+
+      # Job is "done" from the worker completing — leave it done
+      {:ok, job} = Hive.Jobs.get(ctx.job.id)
+      assert job.status == "done"
+
+      {:ok, _new_bee} = Bees.revive(bee.id, ctx.hive_root, claude_executable: "/bin/echo")
+
+      {:ok, still_done_job} = Hive.Jobs.get(ctx.job.id)
+      assert still_done_job.status == "done"
+
+      Process.sleep(1_000)
+    end
+  end
+
   # -- Helpers -----------------------------------------------------------------
 
   defp create_temp_git_repo do

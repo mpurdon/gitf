@@ -85,6 +85,19 @@ defmodule Hive.Cell do
   end
 
   @doc """
+  Reassigns a cell to a new bee without touching the worktree or branch on disk.
+
+  Returns `{:ok, cell}` or `{:error, :not_found}`.
+  """
+  @spec adopt(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
+  def adopt(cell_id, new_bee_id) do
+    with {:ok, cell} <- get(cell_id) do
+      updated = %{cell | bee_id: new_bee_id}
+      Store.put(:cells, updated)
+    end
+  end
+
+  @doc """
   Finds cells whose associated bee no longer exists or has stopped.
 
   Returns orphaned cells that are still marked "active" but have no

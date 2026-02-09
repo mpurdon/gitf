@@ -27,6 +27,7 @@ defmodule Hive.Jobs do
     {"running", :complete} => "done",
     {"running", :fail} => "failed",
     {"failed", :reset} => "pending",
+    {"failed", :revive} => "running",
     {"pending", :block} => "blocked",
     {"running", :block} => "blocked",
     {"blocked", :unblock} => "pending"
@@ -105,6 +106,21 @@ defmodule Hive.Jobs do
          {:ok, next_status} <- validate_transition(job.status, :reset) do
       cleanup_bee_and_cell(job.bee_id)
       updated = %{job | status: next_status, bee_id: nil}
+      Store.put(:jobs, updated)
+    end
+  end
+
+  @doc """
+  Revives a failed job by assigning it to a new bee.
+
+  Transitions: failed -> running. Unlike `reset`, this does NOT clean up
+  the old cell/worktree — the new bee reuses the existing worktree.
+  """
+  @spec revive(String.t(), String.t()) :: {:ok, map()} | {:error, atom()}
+  def revive(job_id, bee_id) do
+    with {:ok, job} <- get(job_id),
+         {:ok, next_status} <- validate_transition(job.status, :revive) do
+      updated = %{job | status: next_status, bee_id: bee_id}
       Store.put(:jobs, updated)
     end
   end

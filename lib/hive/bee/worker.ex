@@ -209,6 +209,14 @@ defmodule Hive.Bee.Worker do
   # -- Private: provisioning ---------------------------------------------------
 
   defp provision(state) do
+    if Keyword.get(state.opts, :revive, false) do
+      provision_revive(state)
+    else
+      provision_fresh(state)
+    end
+  end
+
+  defp provision_fresh(state) do
     with {:ok, cell} <- create_cell(state),
          :ok <- update_bee_working(state, cell),
          :ok <- maybe_transition_job(state),
@@ -221,6 +229,16 @@ defmodule Hive.Bee.Worker do
            port: port,
            status: :running
        }}
+    end
+  end
+
+  defp provision_revive(state) do
+    cell_id = Keyword.fetch!(state.opts, :cell_id)
+
+    with {:ok, cell} <- Hive.Cell.get(cell_id),
+         :ok <- update_bee_working(state, cell),
+         {:ok, port} <- spawn_process(state, cell) do
+      {:ok, %{state | cell_id: cell.id, port: port, status: :running}}
     end
   end
 
@@ -308,8 +326,14 @@ defmodule Hive.Bee.Worker do
 
   defp mark_success(state) do
     update_bee_status(state.bee_id, "stopped")
-    Hive.Jobs.complete(state.job_id)
-    Hive.Jobs.unblock_dependents(state.job_id)
+
+    case Hive.Jobs.get(state.job_id) do
+      {:ok, %{status: "done"}} -> :ok
+      _ ->
+        Hive.Jobs.complete(state.job_id)
+        Hive.Jobs.unblock_dependents(state.job_id)
+    end
+
     record_costs_from_events(state)
 
     # Validation pipeline
