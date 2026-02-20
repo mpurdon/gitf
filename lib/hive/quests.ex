@@ -35,7 +35,10 @@ defmodule Hive.Quests do
         name: name,
         goal: goal,
         status: attrs[:status] || "pending",
-        comb_id: attrs[:comb_id] || attrs["comb_id"]
+        comb_id: attrs[:comb_id] || attrs["comb_id"],
+        current_phase: "pending",
+        research_summary: nil,
+        implementation_plan: nil
       }
 
       Store.insert(:quests, record)
@@ -212,5 +215,47 @@ defmodule Hive.Quests do
     job_attrs
     |> Map.put(:quest_id, quest_id)
     |> Hive.Jobs.create()
+  end
+
+  # -- Phase Management --------------------------------------------------------
+
+  @doc """
+  Transitions a quest to a new phase.
+
+  Records the transition and updates the quest's current_phase.
+  Returns `{:ok, quest}` or `{:error, reason}`.
+  """
+  @spec transition_phase(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def transition_phase(quest_id, to_phase, reason \\ nil) do
+    case Store.get(:quests, quest_id) do
+      nil ->
+        {:error, :not_found}
+
+      quest ->
+        from_phase = Map.get(quest, :current_phase, "pending")
+        
+        # Record transition with monotonic sequence for ordering
+        transition = %{
+          quest_id: quest_id,
+          from_phase: from_phase,
+          to_phase: to_phase,
+          reason: reason,
+          seq: System.monotonic_time(:microsecond)
+        }
+        Store.insert(:quest_phase_transitions, transition)
+
+        # Update quest
+        updated = Map.put(quest, :current_phase, to_phase)
+        Store.put(:quests, updated)
+    end
+  end
+
+  @doc """
+  Gets phase transition history for a quest.
+  """
+  @spec get_phase_transitions(String.t()) :: [map()]
+  def get_phase_transitions(quest_id) do
+    Store.filter(:quest_phase_transitions, fn t -> t.quest_id == quest_id end)
+    |> Enum.sort_by(&Map.get(&1, :seq, 0))
   end
 end

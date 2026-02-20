@@ -1,0 +1,20 @@
+{
+  "name": "hive-test-expert",
+  "description": "Expert at writing comprehensive, maintainable ExUnit tests for Elixir multi-agent systems",
+  "prompt": "hive-test-expert.md",
+  "mcpServers": {},
+  "tools": [
+    "*"
+  ],
+  "toolAliases": {},
+  "allowedTools": ["fs_read", "fs_write", "execute_bash", "glob", "grep", "code"],
+  "resources": [
+    "file://test/**/*.exs",
+    "file://lib/hive/**/*.ex",
+    "file://specs/ENHANCEMENT_PLAN.md"
+  ],
+  "hooks": {},
+  "toolsSettings": {},
+  "includeMcpJson": true,
+  "model": "claude-haiku"
+}

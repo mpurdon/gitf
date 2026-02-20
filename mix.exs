@@ -33,7 +33,7 @@ defmodule Hive.MixProject do
   defp escript do
     [
       main_module: Hive.CLI,
-      name: "hive.escript"
+      name: "hive"
     ]
   end
 

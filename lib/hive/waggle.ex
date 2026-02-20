@@ -119,6 +119,15 @@ defmodule Hive.Waggle do
   defp broadcast(to, message) do
     Phoenix.PubSub.broadcast(@pubsub, "waggle:#{to}", message)
   rescue
-    _ -> :ok
+    e in ArgumentError ->
+      # No subscribers — safe to ignore
+      _ = e
+      :ok
+
+    e ->
+      require Logger
+      Logger.error("Waggle broadcast failed for #{to}: #{Exception.message(e)}")
+      :telemetry.execute([:hive, :waggle, :broadcast_error], %{}, %{to: to, error: e})
+      :ok
   end
 end

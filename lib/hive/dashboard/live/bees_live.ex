@@ -58,6 +58,8 @@ defmodule Hive.Dashboard.BeesLive do
                 <th>Name</th>
                 <th>Status</th>
                 <th>Job ID</th>
+                <th>Model</th>
+                <th>Context</th>
               </tr>
             </thead>
             <tbody>
@@ -70,6 +72,16 @@ defmodule Hive.Dashboard.BeesLive do
                   <td>{bee.name}</td>
                   <td><span class={"badge #{status_badge(bee.status)}"}>{bee.status}</span></td>
                   <td style="font-family:monospace; font-size:0.8rem">{bee.job_id || "-"}</td>
+                  <td style="font-size:0.8rem">{Map.get(bee, :assigned_model, "-")}</td>
+                  <td>
+                    <%= if Map.has_key?(bee, :context_percentage) do %>
+                      <span class={"badge #{context_badge(bee.context_percentage)}"}>
+                        {Float.round(bee.context_percentage / 1, 1)}%
+                      </span>
+                    <% else %>
+                      <span class="badge badge-grey">-</span>
+                    <% end %>
+                  </td>
                 </tr>
               <% end %>
             </tbody>
@@ -95,4 +107,8 @@ defmodule Hive.Dashboard.BeesLive do
   defp status_dot_color("stopped"), do: "#484f58"
   defp status_dot_color("crashed"), do: "#f85149"
   defp status_dot_color(_), do: "#484f58"
+  
+  defp context_badge(percentage) when percentage >= 45, do: "badge-red"
+  defp context_badge(percentage) when percentage >= 40, do: "badge-yellow"
+  defp context_badge(_), do: "badge-green"
 end

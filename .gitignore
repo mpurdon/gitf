@@ -24,6 +24,10 @@ hive-*.tar
 
 # Compiled escript binary (built via "mix escript.build").
 /hive
+/hive.escript
+
+# Runtime log file.
+hive.log
 
 # Claude Code local config.
 .claude/

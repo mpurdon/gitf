@@ -26,6 +26,8 @@ defmodule Hive.Queen do
   require Logger
 
   @name Hive.Queen
+  @waggle_recovery_interval :timer.seconds(30)
+  @waggle_stale_seconds 30
 
   # -- Client API ------------------------------------------------------------
 
@@ -82,6 +84,8 @@ defmodule Hive.Queen do
 
   @impl true
   def init(%{hive_root: hive_root}) do
+    Logger.metadata(component: :queen)
+
     # Subscribe to waggle messages addressed to the queen
     Hive.Waggle.subscribe("waggle:queen")
 
@@ -93,7 +97,6 @@ defmodule Hive.Queen do
       hive_root: hive_root,
       port: nil,
       max_bees: max_bees,
-      retry_counts: %{},
       max_retries: 3
     }
 
@@ -105,6 +108,11 @@ defmodule Hive.Queen do
     end
 
     Logger.info("Queen initialized at #{hive_root}")
+
+    # Recover any missed waggles from before we started
+    send(self(), :recover_missed_waggles)
+    schedule_waggle_recovery()
+
     {:ok, state}
   end
 
@@ -153,6 +161,17 @@ defmodule Hive.Queen do
     {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
+  def handle_info(:recover_missed_waggles, state) do
+    state = recover_missed_waggles(state)
+    {:noreply, state}
+  end
+
+  def handle_info(:schedule_waggle_recovery, state) do
+    state = recover_missed_waggles(state)
+    schedule_waggle_recovery()
+    {:noreply, state}
+  end
+
   def handle_info(msg, state) do
     Logger.debug("Queen received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -181,6 +200,18 @@ defmodule Hive.Queen do
     maybe_retry_job(waggle, state)
   end
 
+  defp handle_waggle(%{subject: "quest_advance"} = waggle, state) do
+    # Handle quest phase advancement requests
+    quest_id = waggle.body
+    case Hive.Queen.Orchestrator.advance_quest(quest_id) do
+      {:ok, new_phase} ->
+        Logger.info("Quest #{quest_id} advanced to #{new_phase} phase")
+      {:error, reason} ->
+        Logger.warning("Failed to advance quest #{quest_id}: #{inspect(reason)}")
+    end
+    state
+  end
+
   defp handle_waggle(waggle, state) do
     Logger.debug("Queen received waggle from #{waggle.from}: #{waggle.subject}")
     state
@@ -192,7 +223,13 @@ defmodule Hive.Queen do
     case Hive.Bees.get(waggle.from) do
       {:ok, bee} when not is_nil(bee.job_id) ->
         job_id = bee.job_id
-        attempts = Map.get(state.retry_counts, job_id, 0)
+
+        # Read persisted retry count from job record (survives Queen restarts)
+        attempts =
+          case Hive.Jobs.get(job_id) do
+            {:ok, job} -> Map.get(job, :retry_count, 0)
+            _ -> 0
+          end
 
         if attempts < state.max_retries do
           Logger.info("Retrying job #{job_id} (attempt #{attempts + 1}/#{state.max_retries})")
@@ -202,10 +239,9 @@ defmodule Hive.Queen do
               # Check budget before spawning retry
               case check_quest_budget(job.quest_id) do
                 :ok ->
-                  Hive.Bees.spawn(job_id, job.comb_id, state.hive_root)
-                  |> case do
+                  case Hive.Bees.spawn(job_id, job.comb_id, state.hive_root) do
                     {:ok, _bee} ->
-                      put_in(state.retry_counts[job_id], attempts + 1)
+                      state
 
                     {:error, reason} ->
                       Logger.warning("Retry spawn failed for job #{job_id}: #{inspect(reason)}")
@@ -249,24 +285,59 @@ defmodule Hive.Queen do
       quest_id = job.quest_id
       Hive.Quests.update_status!(quest_id)
 
-      case Hive.Quests.get(quest_id) do
-        {:ok, %{status: "completed"} = quest} ->
-          Logger.info("Quest completed: #{quest.name} (#{quest_id})")
-
+      # Try to advance quest through orchestrator
+      case Hive.Queen.Orchestrator.advance_quest(quest_id) do
+        {:ok, "completed"} ->
+          Logger.info("Quest completed: #{quest_id}")
           Hive.Waggle.send(
             "system",
             "queen",
             "quest_completed",
-            "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
+            "Quest #{quest_id} — all jobs done"
           )
-
           state
 
-        {:ok, quest} ->
-          spawn_ready_jobs(quest, state)
+        {:ok, _new_phase} ->
+          # Orchestrator returned a non-completed phase; check actual quest status
+          # in case update_status! already marked it completed (simple quests
+          # without the phase system)
+          case Hive.Quests.get(quest_id) do
+            {:ok, %{status: "completed"} = quest} ->
+              Logger.info("Quest completed: #{quest.name} (#{quest_id})")
+              Hive.Waggle.send(
+                "system",
+                "queen",
+                "quest_completed",
+                "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
+              )
+              state
 
-        _ ->
-          state
+            {:ok, quest} ->
+              spawn_ready_jobs(quest, state)
+
+            _ ->
+              state
+          end
+
+        {:error, _reason} ->
+          # Fall back to original logic
+          case Hive.Quests.get(quest_id) do
+            {:ok, %{status: "completed"} = quest} ->
+              Logger.info("Quest completed: #{quest.name} (#{quest_id})")
+              Hive.Waggle.send(
+                "system",
+                "queen",
+                "quest_completed",
+                "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
+              )
+              state
+
+            {:ok, quest} ->
+              spawn_ready_jobs(quest, state)
+
+            _ ->
+              state
+          end
       end
     else
       _ -> state
@@ -284,27 +355,35 @@ defmodule Hive.Queen do
   defp spawn_ready_jobs(%{status: "planning"}, state), do: state
 
   defp spawn_ready_jobs(quest, state) do
-    pending_jobs =
-      quest.jobs
-      |> Enum.filter(&(&1.status == "pending"))
-      |> Enum.filter(&Hive.Jobs.ready?(&1.id))
+    # Check budget proactively before spawning
+    case check_quest_budget(quest.id) do
+      {:error, :budget_exceeded} ->
+        Logger.warning("Budget exceeded for quest #{quest.id}, skipping spawn")
+        state
 
-    active_count = Hive.Bees.list(status: "working") |> length()
-    available_slots = max(state.max_bees - active_count, 0)
+      :ok ->
+        pending_jobs =
+          quest.jobs
+          |> Enum.filter(&(&1.status == "pending"))
+          |> Enum.filter(&Hive.Jobs.ready?(&1.id))
 
-    pending_jobs
-    |> Enum.take(available_slots)
-    |> Enum.reduce(state, fn job, acc ->
-      case Hive.Bees.spawn(job.id, job.comb_id, acc.hive_root) do
-        {:ok, bee} ->
-          Logger.info("Auto-spawned bee #{bee.id} for job #{job.id} (#{job.title})")
-          acc
+        active_count = Hive.Bees.list(status: "working") |> length()
+        available_slots = max(state.max_bees - active_count, 0)
 
-        {:error, reason} ->
-          Logger.warning("Failed to auto-spawn bee for job #{job.id}: #{inspect(reason)}")
-          acc
-      end
-    end)
+        pending_jobs
+        |> Enum.take(available_slots)
+        |> Enum.reduce(state, fn job, acc ->
+          case Hive.Bees.spawn(job.id, job.comb_id, acc.hive_root) do
+            {:ok, bee} ->
+              Logger.info("Auto-spawned bee #{bee.id} for job #{job.id} (#{job.title})")
+              acc
+
+            {:error, reason} ->
+              Logger.warning("Failed to auto-spawn bee for job #{job.id}: #{inspect(reason)}")
+              acc
+          end
+        end)
+    end
   end
 
   defp check_quest_budget(quest_id) do
@@ -314,6 +393,32 @@ defmodule Hive.Queen do
     end
   rescue
     _ -> :ok
+  end
+
+  # -- Private: waggle recovery ------------------------------------------------
+
+  defp schedule_waggle_recovery do
+    Process.send_after(self(), :schedule_waggle_recovery, @waggle_recovery_interval)
+  end
+
+  defp recover_missed_waggles(state) do
+    cutoff = DateTime.add(DateTime.utc_now(), -@waggle_stale_seconds, :second)
+
+    unread =
+      Hive.Waggle.list(to: "queen", read: false)
+      |> Enum.filter(fn w ->
+        DateTime.compare(w.inserted_at, cutoff) == :lt
+      end)
+
+    Enum.reduce(unread, state, fn waggle, acc ->
+      Logger.info("Recovering missed waggle: #{waggle.subject} from #{waggle.from}")
+      Hive.Waggle.mark_read(waggle.id)
+      handle_waggle(waggle, acc)
+    end)
+  rescue
+    e ->
+      Logger.warning("Waggle recovery failed: #{Exception.message(e)}")
+      state
   end
 
   # -- Private: Claude session management ------------------------------------

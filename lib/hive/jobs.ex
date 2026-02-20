@@ -46,13 +46,47 @@ defmodule Hive.Jobs do
   @spec create(map()) :: {:ok, map()} | {:error, term()}
   def create(attrs) do
     with :ok <- validate_required(attrs, [:title, :quest_id, :comb_id]) do
+      # Auto-classify and recommend model if not provided
+      classification =
+        if attrs[:job_type] && attrs[:recommended_model] do
+          %{
+            job_type: attrs[:job_type],
+            complexity: attrs[:complexity] || "moderate",
+            recommended_model: attrs[:recommended_model],
+            reason: attrs[:model_selection_reason]
+          }
+        else
+          Hive.Jobs.Classifier.classify_and_recommend(
+            attrs[:title] || attrs["title"],
+            attrs[:description] || attrs["description"]
+          )
+        end
+
       record = %{
         title: attrs[:title] || attrs["title"],
         description: attrs[:description] || attrs["description"],
         status: attrs[:status] || attrs["status"] || "pending",
         quest_id: attrs[:quest_id] || attrs["quest_id"],
         comb_id: attrs[:comb_id] || attrs["comb_id"],
-        bee_id: attrs[:bee_id] || attrs["bee_id"]
+        bee_id: attrs[:bee_id] || attrs["bee_id"],
+        council_id: attrs[:council_id],
+        council_wave: attrs[:council_wave],
+        council_experts: attrs[:council_experts],
+        review_of_job_id: attrs[:review_of_job_id],
+        # Multi-model support fields
+        job_type: classification.job_type,
+        complexity: classification.complexity,
+        recommended_model: classification.recommended_model,
+        assigned_model: attrs[:assigned_model] || classification.recommended_model,
+        model_selection_reason: classification[:reason],
+        verification_criteria: attrs[:verification_criteria] || [],
+        estimated_context_tokens: attrs[:estimated_context_tokens],
+        # Verification fields
+        verification_status: "pending",
+        verification_result: nil,
+        verified_at: nil,
+        # Retry tracking (persisted, survives Queen restarts)
+        retry_count: attrs[:retry_count] || 0
       }
 
       Store.insert(:jobs, record)
@@ -105,7 +139,8 @@ defmodule Hive.Jobs do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, :reset) do
       cleanup_bee_and_cell(job.bee_id)
-      updated = %{job | status: next_status, bee_id: nil}
+      retry_count = Map.get(job, :retry_count, 0) + 1
+      updated = %{job | status: next_status, bee_id: nil, retry_count: retry_count}
       Store.put(:jobs, updated)
     end
   end
@@ -162,19 +197,19 @@ defmodule Hive.Jobs do
     jobs =
       case Keyword.get(opts, :quest_id) do
         nil -> jobs
-        v -> Enum.filter(jobs, &(&1.quest_id == v))
+        v -> Enum.filter(jobs, &(Map.get(&1, :quest_id) == v))
       end
 
     jobs =
       case Keyword.get(opts, :status) do
         nil -> jobs
-        v -> Enum.filter(jobs, &(&1.status == v))
+        v -> Enum.filter(jobs, &(Map.get(&1, :status) == v))
       end
 
     jobs =
       case Keyword.get(opts, :bee_id) do
         nil -> jobs
-        v -> Enum.filter(jobs, &(&1.bee_id == v))
+        v -> Enum.filter(jobs, &(Map.get(&1, :bee_id) == v))
       end
 
     Enum.sort_by(jobs, & &1.inserted_at, {:desc, DateTime})

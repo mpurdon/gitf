@@ -26,7 +26,11 @@ defmodule Hive.Runtime.Models do
   @spec spawn_headless(String.t(), String.t(), keyword()) :: {:ok, port()} | {:error, term()}
   def spawn_headless(prompt, cwd, opts \\ []) do
     {:ok, plugin} = resolve_plugin(opts)
-    plugin.spawn_headless(prompt, cwd, opts)
+    service_key = plugin_service_key(plugin)
+
+    Hive.CircuitBreaker.call(service_key, fn ->
+      plugin.spawn_headless(prompt, cwd, opts)
+    end)
   end
 
   @doc """
@@ -37,7 +41,11 @@ defmodule Hive.Runtime.Models do
   @spec spawn_interactive(String.t(), keyword()) :: {:ok, port()} | {:error, term()}
   def spawn_interactive(cwd, opts \\ []) do
     {:ok, plugin} = resolve_plugin(opts)
-    plugin.spawn_interactive(cwd, opts)
+    service_key = plugin_service_key(plugin)
+
+    Hive.CircuitBreaker.call(service_key, fn ->
+      plugin.spawn_interactive(cwd, opts)
+    end)
   end
 
   @doc """
@@ -97,6 +105,51 @@ defmodule Hive.Runtime.Models do
 
     if function_exported?(plugin, :extract_session_id, 1) do
       plugin.extract_session_id(events)
+    else
+      nil
+    end
+  end
+
+  @doc """
+  Get the context limit for a model.
+  
+  Returns the maximum context window size in tokens.
+  """
+  @spec get_context_limit(String.t(), keyword()) :: {:ok, integer()} | {:error, term()}
+  def get_context_limit(model, opts \\ []) do
+    {:ok, plugin} = resolve_plugin(opts)
+
+    if function_exported?(plugin, :get_context_limit, 1) do
+      plugin.get_context_limit(model)
+    else
+      # Default to 200k for Claude models
+      {:ok, 200_000}
+    end
+  end
+
+  @doc """
+  Get information about a specific model.
+  """
+  @spec get_model_info(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def get_model_info(model, opts \\ []) do
+    {:ok, plugin} = resolve_plugin(opts)
+
+    if function_exported?(plugin, :get_model_info, 1) do
+      plugin.get_model_info(model)
+    else
+      {:error, :not_supported}
+    end
+  end
+
+  @doc """
+  List all available models from the active plugin.
+  """
+  @spec list_available_models(keyword()) :: [String.t()]
+  def list_available_models(opts \\ []) do
+    {:ok, plugin} = resolve_plugin(opts)
+
+    if function_exported?(plugin, :list_available_models, 0) do
+      plugin.list_available_models()
     else
       nil
     end
@@ -205,5 +258,13 @@ defmodule Hive.Runtime.Models do
       {:ok, module} -> {:ok, module}
       :error -> {:ok, @default_plugin}
     end
+  end
+
+  defp plugin_service_key(plugin) do
+    plugin
+    |> Module.split()
+    |> List.last()
+    |> String.downcase()
+    |> Kernel.<>("-api")
   end
 end

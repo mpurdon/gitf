@@ -400,73 +400,7 @@ defmodule Hive.AgentProfile do
   end
 
   defp generate_via_model(comb_path, prompt) do
-    case Hive.Runtime.Models.find_executable() do
-      {:ok, _} ->
-        case Hive.Runtime.Models.spawn_headless(prompt, comb_path, output_format: :text) do
-          {:ok, port} ->
-            collect_port_output(port)
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-
-      {:error, :not_found} ->
-        {:error, :model_not_found}
-    end
-  end
-
-  defp collect_port_output(port) do
-    collect_port_output(port, [])
-  end
-
-  defp collect_port_output(port, acc) do
-    receive do
-      {^port, {:data, data}} ->
-        collect_port_output(port, [acc, data])
-
-      {^port, {:exit_status, 0}} ->
-        output = IO.iodata_to_binary(acc)
-        {:ok, extract_text_content(output)}
-
-      {^port, {:exit_status, code}} ->
-        {:error, {:exit_code, code}}
-    after
-      120_000 ->
-        # 2 minute timeout for generation
-        Port.close(port)
-        {:error, :timeout}
-    end
-  end
-
-  defp extract_text_content(output) do
-    # The output might be stream-json format. Try to extract text content.
-    # Each line could be a JSON object with type "assistant" containing text.
-    lines = String.split(output, "\n", trim: true)
-
-    text_parts =
-      Enum.flat_map(lines, fn line ->
-        case Jason.decode(line) do
-          {:ok, %{"type" => "assistant", "message" => %{"content" => content}}} ->
-            content
-            |> Enum.filter(fn block -> Map.get(block, "type") == "text" end)
-            |> Enum.map(fn block -> Map.get(block, "text", "") end)
-
-          {:ok, %{"type" => "result", "result" => result}} when is_binary(result) ->
-            [result]
-
-          _ ->
-            []
-        end
-      end)
-
-    case text_parts do
-      [] ->
-        # Fallback: if not JSON, assume raw text
-        output
-
-      parts ->
-        Enum.join(parts, "")
-    end
+    Hive.AgentProfile.Generation.generate_via_model(prompt, comb_path)
   end
 
   defp build_fallback_agent(agent_key, agent_name, title, description) do

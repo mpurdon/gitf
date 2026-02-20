@@ -123,6 +123,9 @@ defmodule Hive.Bee.Worker do
     comb_id = Keyword.fetch!(opts, :comb_id)
     hive_root = Keyword.fetch!(opts, :hive_root)
 
+    # Set correlation IDs for structured logging
+    Logger.metadata(bee_id: bee_id, job_id: job_id, comb_id: comb_id)
+
     state = %{
       bee_id: bee_id,
       job_id: job_id,
@@ -174,6 +177,9 @@ defmodule Hive.Bee.Worker do
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     events = Hive.Runtime.Models.parse_output(data)
     update_progress(state.bee_id, events)
+    
+    # Track context usage from events
+    track_context_usage(state.bee_id, events)
 
     {:noreply,
      %{state | output: [state.output, data], parsed_events: state.parsed_events ++ events}}
@@ -219,6 +225,12 @@ defmodule Hive.Bee.Worker do
   end
 
   defp provision_fresh(state) do
+    # Enrich logging metadata with quest_id
+    case Hive.Jobs.get(state.job_id) do
+      {:ok, job} -> Logger.metadata(quest_id: job.quest_id)
+      _ -> :ok
+    end
+
     with {:ok, cell} <- create_cell(state),
          :ok <- update_bee_working(state, cell),
          :ok <- maybe_transition_job(state),
@@ -282,10 +294,25 @@ defmodule Hive.Bee.Worker do
     prompt = build_prompt(state)
     executable = Keyword.get(state.opts, :claude_executable)
 
+    # Get the assigned model from the bee record
+    model =
+      case Store.get(:bees, state.bee_id) do
+        %{assigned_model: model} when is_binary(model) -> model
+        _ -> nil
+      end
+
+    # Build spawn options with model
+    spawn_opts =
+      if model do
+        [model: model]
+      else
+        []
+      end
+
     case executable do
       nil ->
         # Settings are generated during cell creation (Hive.Cell.create/3)
-        Hive.Runtime.Models.spawn_headless(prompt, cell.worktree_path)
+        Hive.Runtime.Models.spawn_headless(prompt, cell.worktree_path, spawn_opts)
 
       exe_path ->
         # Testing path: use provided executable instead of Claude
@@ -394,6 +421,12 @@ defmodule Hive.Bee.Worker do
   defp maybe_ensure_agent(state, cell) do
     case Hive.Jobs.get(state.job_id) do
       {:ok, job} ->
+        # Council expert installation: if the job has council_experts, install those
+        if Map.get(job, :council_id) && Map.get(job, :council_experts) do
+          Hive.Council.install_experts(job.council_id, job.council_experts, cell.worktree_path)
+        end
+
+        # Standard comb-level agent
         case Store.get(:combs, cell.comb_id) do
           nil ->
             :ok
@@ -445,6 +478,36 @@ defmodule Hive.Bee.Worker do
     end)
   rescue
     _ -> :ok
+  end
+
+  defp track_context_usage(bee_id, events) do
+    # Extract token usage from events
+    costs = Hive.Runtime.Models.extract_costs(events)
+
+    Enum.each(costs, fn cost ->
+      input = cost["input_tokens"] || cost[:input_tokens] || 0
+      output = cost["output_tokens"] || cost[:output_tokens] || 0
+
+      if input > 0 or output > 0 do
+        case Hive.Runtime.ContextMonitor.record_usage(bee_id, input, output) do
+          {:ok, :handoff_needed} ->
+            Logger.warning("Bee #{bee_id} needs handoff - context at critical level")
+
+          {:ok, :critical} ->
+            Logger.warning("Bee #{bee_id} context usage critical")
+
+          {:ok, :warning} ->
+            Logger.info("Bee #{bee_id} context usage warning")
+
+          _ ->
+            :ok
+        end
+      end
+    end)
+  rescue
+    error ->
+      Logger.debug("Failed to track context usage for bee #{bee_id}: #{inspect(error)}")
+      :ok
   end
 
   defp maybe_validate(state) do

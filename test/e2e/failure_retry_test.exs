@@ -83,10 +83,9 @@ defmodule Hive.E2E.FailureRetryTest do
     {:ok, _} = Hive.Jobs.start(job1.id)
     {:ok, _} = Hive.Jobs.fail(job1.id)
 
-    # Pre-load retry count to max so next failure triggers exhaustion
-    :sys.replace_state(Process.whereis(Hive.Queen), fn state ->
-      put_in(state.retry_counts[job1.id], 3)
-    end)
+    # Set retry_count on job record to max so next failure triggers exhaustion
+    job_record = Hive.Store.get(:jobs, job1.id)
+    Hive.Store.put(:jobs, Map.put(job_record, :retry_count, 3))
 
     # Send failure waggle directly to Queen
     waggle = %{

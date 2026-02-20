@@ -1,0 +1,22 @@
+{
+  "name": "hive-elixir-expert",
+  "description": "Expert at building distributed multi-agent orchestration systems in Elixir with OTP, GenServers, and Phoenix PubSub",
+  "prompt": "hive-elixir-expert.md",
+  "mcpServers": {},
+  "tools": [
+    "*"
+  ],
+  "toolAliases": {},
+  "allowedTools": ["fs_read", "fs_write", "execute_bash", "glob", "grep", "code"],
+  "resources": [
+    "file://specs/ENHANCEMENT_PLAN.md",
+    "file://specs/PHASE_0_COMPLETE.md",
+    "file://specs/PHASE_1_COMPLETE.md",
+    "file://specs/PROGRESS.md",
+    "file://lib/hive/**/*.ex"
+  ],
+  "hooks": {},
+  "toolsSettings": {},
+  "includeMcpJson": true,
+  "model": "claude-sonnet"
+}

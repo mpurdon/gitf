@@ -159,12 +159,26 @@ defmodule Hive.Bees do
   end
 
   defp create_bee_record(name, job_id) do
+    # Get job to determine model assignment
+    model =
+      case Hive.Jobs.get(job_id) do
+        {:ok, job} ->
+          job.assigned_model || job.recommended_model || "claude-sonnet"
+
+        _ ->
+          "claude-sonnet"
+      end
+
     record = %{
       name: name,
       status: "starting",
       job_id: job_id,
       cell_path: nil,
-      pid: nil
+      pid: nil,
+      assigned_model: model,
+      context_tokens_used: 0,
+      context_tokens_limit: nil,
+      context_percentage: 0.0
     }
 
     Store.insert(:bees, record)
@@ -233,6 +247,12 @@ defmodule Hive.Bees do
     try do
       case Hive.Jobs.get(job_id) do
         {:ok, job} ->
+          # Council expert installation
+          if Map.get(job, :council_id) && Map.get(job, :council_experts) do
+            Hive.Council.install_experts(job.council_id, job.council_experts, cell.worktree_path)
+          end
+
+          # Standard comb-level agent
           case Store.get(:combs, cell.comb_id) do
             nil ->
               :ok

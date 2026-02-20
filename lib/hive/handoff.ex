@@ -26,6 +26,8 @@ defmodule Hive.Handoff do
 
   Captures the bee's current job state, recent waggles, cell info, and
   stores it as a waggle from the bee to itself with subject "handoff".
+  
+  Also creates a context snapshot for tracking purposes.
 
   Returns `{:ok, waggle}` with the handoff content.
   """
@@ -40,6 +42,9 @@ defmodule Hive.Handoff do
         else
           context
         end
+
+      # Create context snapshot for tracking
+      Hive.Runtime.ContextMonitor.create_snapshot(bee_id)
 
       Hive.Waggle.send(bee_id, bee_id, @handoff_subject, context)
     end

@@ -76,15 +76,17 @@ defmodule Hive.Drone do
   def init(opts) do
     interval = Keyword.get(opts, :poll_interval, @default_poll_interval)
     auto_fix = Keyword.get(opts, :auto_fix, false)
+    verify = Keyword.get(opts, :verify, false)
 
     state = %{
       poll_interval: interval,
       auto_fix: auto_fix,
+      verify: verify,
       last_results: []
     }
 
     schedule_patrol(interval)
-    Logger.info("Drone started (interval: #{interval}ms, auto_fix: #{auto_fix})")
+    Logger.info("Drone started (interval: #{interval}ms, auto_fix: #{auto_fix}, verify: #{verify})")
     {:ok, state}
   end
 
@@ -119,8 +121,10 @@ defmodule Hive.Drone do
     results = Hive.Doctor.run_all(fix: state.auto_fix)
     budget_results = check_budgets()
     conflict_results = check_merge_conflicts()
+    verification_results = check_verifications()
 
-    all_results = results ++ budget_results ++ conflict_results
+    queen_results = check_queen_heartbeat()
+    all_results = results ++ budget_results ++ conflict_results ++ verification_results ++ queen_results
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
     if issues != [] do
@@ -191,6 +195,82 @@ defmodule Hive.Drone do
     _ -> []
   end
 
+  defp check_verifications do
+    unverified_jobs = Hive.Verification.jobs_needing_verification()
+    
+    # Run verification for unverified jobs
+    Enum.flat_map(unverified_jobs, fn job ->
+      case Hive.Verification.verify_job(job.id) do
+        {:ok, :pass, _result} ->
+          []
+        {:ok, :fail, result} ->
+          [
+            %{
+              name: "verification_failed",
+              status: :error,
+              message: "Job #{job.id} verification failed: #{format_verification_result(result)}"
+            }
+          ]
+        {:error, reason} ->
+          [
+            %{
+              name: "verification_error", 
+              status: :warn,
+              message: "Job #{job.id} verification error: #{inspect(reason)}"
+            }
+          ]
+      end
+    end)
+  rescue
+    _ -> []
+  end
+
+  defp check_queen_heartbeat do
+    # Only check if there are active quests that need the Queen
+    active_quests = Hive.Quests.list() |> Enum.filter(&(&1.status == "active"))
+
+    if active_quests != [] do
+      case GenServer.whereis(Hive.Queen) do
+        nil ->
+          [
+            %{
+              name: "queen_heartbeat",
+              status: :error,
+              message: "Queen is not running but #{length(active_quests)} quest(s) are active"
+            }
+          ]
+
+        pid when is_pid(pid) ->
+          try do
+            Hive.Queen.status()
+            []
+          catch
+            :exit, {:timeout, _} ->
+              [
+                %{
+                  name: "queen_heartbeat",
+                  status: :warn,
+                  message: "Queen is unresponsive (timeout)"
+                }
+              ]
+
+            :exit, _ ->
+              [
+                %{
+                  name: "queen_heartbeat",
+                  status: :error,
+                  message: "Queen process is dead"
+                }
+              ]
+          end
+      end
+    else
+      []
+    end
+  rescue
+    _ -> []
+  end
+
   defp notify_queen(issues) do
     summary =
       issues
@@ -200,5 +280,14 @@ defmodule Hive.Drone do
     Hive.Waggle.send("drone", "queen", "health_alert", summary)
   rescue
     _ -> :ok
+  end
+
+  defp format_verification_result(result) do
+    failed_validations = Enum.filter(result.validations, &(&1.status == "fail"))
+    
+    case failed_validations do
+      [] -> "Unknown failure"
+      [validation | _] -> validation.output || "Validation failed"
+    end
   end
 end

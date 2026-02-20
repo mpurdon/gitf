@@ -116,11 +116,694 @@ defmodule Hive.CLI do
 
   # -- Command dispatch -------------------------------------------------------
   #
+  # Handler modules for each domain. New commands should be added to the
+  # appropriate handler module rather than adding more clauses here.
+  # Eventually all dispatch/2 clauses will migrate to handler modules.
+
+  @handlers [
+    Hive.CLI.QuestHandler,
+    Hive.CLI.BeeHandler,
+    Hive.CLI.CouncilHandler
+  ]
+
+  defp handler_helpers do
+    %{
+      result_get: &result_get/3,
+      resolve_comb_id: &resolve_comb_id/1,
+      resolve_comb_name: &resolve_comb_name/1
+    }
+  end
+
+  defp try_handlers(path, result) do
+    helpers = handler_helpers()
+
+    Enum.find_value(@handlers, :not_handled, fn handler ->
+      case handler.dispatch(path, result, helpers) do
+        :not_handled -> nil
+        other -> other
+      end
+    end)
+  end
+
   # All dispatch/2 clauses are grouped together to satisfy Elixir's
   # clause-grouping requirement. Helper functions follow after.
 
-  defp dispatch([:version], _result) do
-    IO.puts("hive #{Hive.version()}")
+  defp dispatch([:onboard], result) do
+    path = result_get(result, :args, :path)
+    name = result_get(result, :options, :name)
+    quick = result_get(result, :options, :quick) || false
+    preview = result_get(result, :options, :preview) || false
+    validation_cmd = result_get(result, :options, :validation_command)
+
+    opts = []
+    opts = if name, do: Keyword.put(opts, :name, name), else: opts
+    opts = if validation_cmd, do: Keyword.put(opts, :validation_command, validation_cmd), else: opts
+
+    cond do
+      preview ->
+        case Hive.Onboarding.preview(path) do
+          {:ok, info} ->
+            Format.info("Project Detection Results:")
+            Format.info("  Language: #{info.project_info.language}")
+            if info.project_info.framework, do: Format.info("  Framework: #{info.project_info.framework}")
+            Format.info("  Build Tool: #{info.project_info.build_tool}")
+            if info.project_info.test_framework, do: Format.info("  Test Framework: #{info.project_info.test_framework}")
+            Format.info("  Project Type: #{info.project_info.project_type}")
+            Format.info("\nSuggested Configuration:")
+            Format.info("  Name: #{info.suggestions.name}")
+            if info.suggestions.validation_command, do: Format.info("  Validation: #{info.suggestions.validation_command}")
+            Format.info("  Merge Strategy: #{info.suggestions.merge_strategy}")
+            Format.info("\nFile Counts:")
+            Enum.each(info.codebase_map.file_count, fn {ext, count} ->
+              Format.info("  #{ext}: #{count} files")
+            end)
+          {:error, reason} ->
+            Format.error("Preview failed: #{reason}")
+        end
+
+      quick ->
+        Hive.CLI.Progress.with_spinner("Onboarding project...", fn ->
+          Hive.Onboarding.quick_onboard(path, opts)
+        end)
+        |> case do
+          {:ok, result} ->
+            Format.success("✓ Quick onboarded: #{result.comb.name}")
+            Format.info("  Language: #{result.project_info.language}")
+            Format.info("  Path: #{result.comb.path}")
+            Hive.CLI.Help.show_tip(:comb_added)
+          {:error, reason} ->
+            Format.error("Onboarding failed: #{reason}")
+        end
+
+      true ->
+        Hive.CLI.Progress.with_spinner("Analyzing project...", fn ->
+          Hive.Onboarding.onboard(path, opts)
+        end)
+        |> case do
+          {:ok, result} ->
+            Format.success("✓ Onboarded: #{result.comb.name}")
+            Format.info("  Language: #{result.project_info.language}")
+            if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
+            Format.info("  Build Tool: #{result.project_info.build_tool}")
+            if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
+            Format.info("  Path: #{result.comb.path}")
+            Hive.CLI.Help.show_tip(:comb_added)
+          {:error, reason} ->
+            Format.error("Onboarding failed: #{reason}")
+        end
+    end
+  end
+
+  defp dispatch([:verify], result) do
+    job_id = result_get(result, :options, :job)
+    quest_id = result_get(result, :options, :quest)
+
+    cond do
+      job_id ->
+        case Hive.Verification.verify_job(job_id) do
+          {:ok, :pass, result} ->
+            Format.success("Job #{job_id} verification passed")
+            if result[:quality_score] do
+              Format.info("  Quality score: #{result.quality_score}/100")
+            end
+            if result[:security_score] do
+              Format.info("  Security score: #{result.security_score}/100")
+            end
+            if result[:performance_score] do
+              Format.info("  Performance score: #{result.performance_score}/100")
+            end
+          {:ok, :fail, result} ->
+            Format.error("Job #{job_id} verification failed")
+            if result[:quality_score] do
+              Format.warn("  Quality score: #{result.quality_score}/100")
+            end
+            if result[:security_score] do
+              Format.warn("  Security score: #{result.security_score}/100")
+            end
+            if result[:performance_score] do
+              Format.warn("  Performance score: #{result.performance_score}/100")
+            end
+            if result[:output] && result.output != "" do
+              Format.error("  #{result.output}")
+            end
+          {:error, reason} ->
+            Format.error("Verification error: #{inspect(reason)}")
+        end
+
+      quest_id ->
+        case Hive.Quests.get(quest_id) do
+          {:ok, _quest} ->
+            jobs = Hive.Jobs.list(quest_id: quest_id)
+            results = Enum.map(jobs, fn job ->
+              if job.status == "done" do
+                case Hive.Verification.verify_job(job.id) do
+                  {:ok, status, _} -> {job.id, status}
+                  {:error, _} -> {job.id, :error}
+                end
+              else
+                {job.id, :skipped}
+              end
+            end)
+            
+            passed = Enum.count(results, fn {_, status} -> status == :pass end)
+            failed = Enum.count(results, fn {_, status} -> status == :fail end)
+            
+            Format.info("Quest #{quest_id} verification: #{passed} passed, #{failed} failed")
+
+          {:error, :not_found} ->
+            Format.error("Quest not found: #{quest_id}")
+        end
+
+      true ->
+        Format.error("Usage: hive verify --job <id> OR --quest <id>")
+    end
+  end
+
+  defp dispatch([:quality], result) do
+    subcommand = result_get(result, :args, :subcommand)
+    
+    case subcommand do
+      "check" ->
+        job_id = result_get(result, :options, :job)
+        if job_id do
+          reports = Hive.Quality.get_reports(job_id)
+          if Enum.empty?(reports) do
+            Format.warn("No quality reports for job #{job_id}")
+          else
+            Enum.each(reports, fn report ->
+              Format.info("#{report.analysis_type}: #{report.score}/100 (#{report.tool})")
+              if report.issues && length(report.issues) > 0 do
+                count = length(report.issues)
+                type = case report.analysis_type do
+                  "security" -> "findings"
+                  "performance" -> "metrics"
+                  _ -> "issues"
+                end
+                Format.warn("  #{count} #{type}")
+                
+                # Show top 3 items
+                report.issues
+                |> Enum.take(3)
+                |> Enum.each(fn issue ->
+                  case report.analysis_type do
+                    "performance" ->
+                      # Show metric name and value
+                      name = Map.get(issue, :name, "")
+                      value = Map.get(issue, :value, "")
+                      unit = Map.get(issue, :unit, "")
+                      Format.info("    • #{name}: #{value} #{unit}")
+                    
+                    _ ->
+                      # Show issue/finding
+                      msg = Map.get(issue, :message, "")
+                      file = Map.get(issue, :file, "")
+                      line = Map.get(issue, :line)
+                      if line do
+                        Format.warn("    • #{msg} (#{file}:#{line})")
+                      else
+                        Format.warn("    • #{msg}")
+                      end
+                  end
+                end)
+              end
+            end)
+          end
+        else
+          Format.error("Usage: hive quality check --job <id>")
+        end
+      
+      "report" ->
+        quest_id = result_get(result, :options, :quest)
+        if quest_id do
+          jobs = Hive.Jobs.list(quest_id: quest_id)
+          scores = Enum.map(jobs, fn job ->
+            score = Hive.Quality.calculate_composite_score(job.id)
+            {job.id, score}
+          end)
+          
+          avg_score = 
+            scores
+            |> Enum.reject(fn {_, s} -> is_nil(s) end)
+            |> Enum.map(fn {_, s} -> s end)
+            |> case do
+              [] -> nil
+              list -> Enum.sum(list) / length(list)
+            end
+          
+          if avg_score do
+            Format.info("Quest #{quest_id} average quality: #{Float.round(avg_score, 1)}/100")
+          else
+            Format.warn("No quality data for quest #{quest_id}")
+          end
+        else
+          Format.error("Usage: hive quality report --quest <id>")
+        end
+      
+      "baseline" ->
+        comb_id = result_get(result, :options, :comb)
+        job_id = result_get(result, :options, :job)
+        
+        cond do
+          comb_id && job_id ->
+            # Set baseline from job's performance report
+            reports = Hive.Quality.get_reports(job_id)
+            perf_report = Enum.find(reports, &(&1.analysis_type == "performance"))
+            
+            if perf_report do
+              {:ok, _} = Hive.Quality.set_performance_baseline(comb_id, perf_report.issues)
+              Format.success("Performance baseline set for comb #{comb_id}")
+            else
+              Format.error("No performance report found for job #{job_id}")
+            end
+          
+          comb_id ->
+            # Show current baseline
+            case Hive.Quality.get_performance_baseline(comb_id) do
+              nil ->
+                Format.warn("No baseline set for comb #{comb_id}")
+              
+              baseline ->
+                Format.info("Performance baseline for comb #{comb_id}:")
+                Enum.each(baseline.metrics, fn metric ->
+                  Format.info("  • #{metric.name}: #{metric.value} #{metric.unit}")
+                end)
+            end
+          
+          true ->
+            Format.error("Usage: hive quality baseline --comb <id> [--job <id>]")
+        end
+      
+      "thresholds" ->
+        comb_id = result_get(result, :options, :comb)
+        
+        if comb_id do
+          thresholds = Hive.Quality.get_thresholds(comb_id)
+          Format.info("Quality thresholds for comb #{comb_id}:")
+          Format.info("  • Composite: #{thresholds.composite}/100")
+          Format.info("  • Static: #{thresholds.static}/100")
+          Format.info("  • Security: #{thresholds.security}/100")
+          Format.info("  • Performance: #{thresholds.performance}/100")
+        else
+          Format.error("Usage: hive quality thresholds --comb <id>")
+        end
+      
+      "trends" ->
+        comb_id = result_get(result, :options, :comb)
+        
+        if comb_id do
+          stats = Hive.Quality.get_quality_stats(comb_id)
+          
+          if stats.total_jobs == 0 do
+            Format.warn("No quality data for comb #{comb_id}")
+          else
+            Format.info("Quality statistics for comb #{comb_id}:")
+            Format.info("  • Average: #{stats.average}/100")
+            Format.info("  • Min: #{stats.min}/100")
+            Format.info("  • Max: #{stats.max}/100")
+            Format.info("  • Trend: #{stats.trend}")
+            Format.info("  • Total jobs: #{stats.total_jobs}")
+            
+            IO.puts("")
+            Format.info("Recent scores:")
+            trends = Hive.Quality.get_quality_trends(comb_id, 5)
+            Enum.each(trends, fn t ->
+              Format.info("  • #{t.job_id}: #{t.score}/100")
+            end)
+          end
+        else
+          Format.error("Usage: hive quality trends --comb <id>")
+        end
+      
+      _ ->
+        Format.error("Usage: hive quality <check|report|baseline|thresholds|trends> [options]")
+    end
+  end
+
+  defp dispatch([:intelligence], result) do
+    subcommand = result_get(result, :args, :subcommand)
+    
+    case subcommand do
+      "analyze" ->
+        job_id = result_get(result, :options, :job)
+        
+        if job_id do
+          case Hive.Intelligence.analyze_and_suggest(job_id) do
+            {:ok, result} ->
+              Format.info("Failure Analysis for job #{job_id}:")
+              Format.info("  Type: #{result.analysis.failure_type}")
+              Format.info("  Cause: #{result.analysis.root_cause}")
+              Format.info("  Similar failures: #{result.analysis.similar_count}")
+              Format.info("  Recommended strategy: #{result.recommended_strategy}")
+              
+              IO.puts("")
+              Format.info("Suggestions:")
+              Enum.each(result.suggestions, fn s ->
+                Format.info("  • #{s}")
+              end)
+            
+            {:error, reason} ->
+              Format.error("Analysis failed: #{inspect(reason)}")
+          end
+        else
+          Format.error("Usage: hive intelligence analyze --job <id>")
+        end
+      
+      "retry" ->
+        job_id = result_get(result, :options, :job)
+        
+        if job_id do
+          case Hive.Intelligence.auto_retry(job_id) do
+            {:ok, new_job} ->
+              Format.success("Created retry job: #{new_job.id}")
+              Format.info("  Strategy: #{new_job.retry_strategy}")
+              if new_job.retry_metadata[:note] do
+                Format.info("  Note: #{new_job.retry_metadata.note}")
+              end
+            
+            {:error, reason} ->
+              Format.error("Retry failed: #{inspect(reason)}")
+          end
+        else
+          Format.error("Usage: hive intelligence retry --job <id>")
+        end
+      
+      "insights" ->
+        comb_id = result_get(result, :options, :comb)
+        
+        if comb_id do
+          insights = Hive.Intelligence.get_insights(comb_id)
+          
+          Format.info("Intelligence Insights for comb #{comb_id}:")
+          Format.info("  Total jobs: #{insights.total_jobs}")
+          Format.info("  Failed jobs: #{insights.failed_jobs}")
+          Format.info("  Success rate: #{insights.success_rate}%")
+          
+          if insights.top_failure_type do
+            Format.info("  Top failure type: #{insights.top_failure_type}")
+          end
+          
+          if length(insights.failure_patterns) > 0 do
+            IO.puts("")
+            Format.info("Failure Patterns:")
+            Enum.each(insights.failure_patterns, fn pattern ->
+              Format.warn("  • #{pattern.type}: #{pattern.count} occurrences (#{Float.round(pattern.frequency * 100, 1)}%)")
+              if length(pattern.common_causes) > 0 do
+                Format.info("    Common causes: #{Enum.join(pattern.common_causes, ", ")}")
+              end
+            end)
+          end
+        else
+          Format.error("Usage: hive intelligence insights --comb <id>")
+        end
+      
+      "learn" ->
+        comb_id = result_get(result, :options, :comb)
+        
+        if comb_id do
+          case Hive.Intelligence.learn(comb_id) do
+            {:ok, learning} ->
+              Format.success("Learned from #{learning.total_failures} failures")
+              Format.info("  Patterns identified: #{length(learning.patterns)}")
+            
+            {:error, reason} ->
+              Format.error("Learning failed: #{inspect(reason)}")
+          end
+        else
+          Format.error("Usage: hive intelligence learn --comb <id>")
+        end
+      
+      "best-practices" ->
+        comb_id = result_get(result, :options, :comb)
+        
+        if comb_id do
+          practices = Hive.Intelligence.get_best_practices(comb_id)
+          
+          if Enum.empty?(practices.common_factors || []) do
+            Format.warn("No success patterns found for comb #{comb_id}")
+          else
+            Format.info("Best Practices for comb #{comb_id}:")
+            
+            if practices.recommended_model do
+              Format.info("  Recommended model: #{practices.recommended_model}")
+            end
+            
+            if practices.average_quality do
+              Format.info("  Average quality: #{practices.average_quality}/100")
+            end
+            
+            if length(practices.common_factors) > 0 do
+              IO.puts("")
+              Format.info("Common Success Factors:")
+              Enum.each(practices.common_factors, fn factor ->
+                freq = Float.round(factor.frequency * 100, 1)
+                Format.info("  • #{factor.factor} (#{freq}%)")
+              end)
+            end
+            
+            if length(practices.high_quality_examples || []) > 0 do
+              IO.puts("")
+              Format.info("High Quality Examples:")
+              Enum.each(practices.high_quality_examples, fn job_id ->
+                Format.info("  • #{job_id}")
+              end)
+            end
+          end
+        else
+          Format.error("Usage: hive intelligence best-practices --comb <id>")
+        end
+      
+      "recommend" ->
+        comb_id = result_get(result, :options, :comb)
+        
+        if comb_id do
+          recommendation = Hive.Intelligence.recommend_approach(comb_id)
+          
+          Format.info("Recommended Approach for comb #{comb_id}:")
+          Format.info("  Model: #{recommendation.model}")
+          Format.info("  Confidence: #{recommendation.confidence}")
+          
+          if recommendation.quality_expectation do
+            Format.info("  Expected quality: #{recommendation.quality_expectation}/100")
+          end
+          
+          IO.puts("")
+          Format.info("Suggestions:")
+          Enum.each(recommendation.suggestions, fn s ->
+            Format.info("  • #{s}")
+          end)
+        else
+          Format.error("Usage: hive intelligence recommend --comb <id>")
+        end
+      
+      _ ->
+        Format.error("Usage: hive intelligence <analyze|retry|insights|learn|best-practices|recommend> [options]")
+    end
+  end
+
+  defp dispatch([:heal], _result) do
+    Format.info("Running self-healing checks...")
+    
+    results = Hive.Autonomy.self_heal()
+    
+    if Enum.empty?(results) do
+      Format.success("System healthy, no repairs needed")
+    else
+      Format.success("Self-healing complete:")
+      Enum.each(results, fn {action, count} ->
+        Format.info("  • #{action}: #{count}")
+      end)
+    end
+  end
+
+  defp dispatch([:optimize], result) do
+    comb_id = result_get(result, :options, :comb)
+    
+    if comb_id do
+      # Predict issues
+      predictions = Hive.Autonomy.predict_issues(comb_id)
+      
+      if Enum.empty?(predictions) do
+        Format.success("No issues predicted for comb #{comb_id}")
+      else
+        Format.warn("Predicted Issues for comb #{comb_id}:")
+        Enum.each(predictions, fn {type, message} ->
+          Format.warn("  • #{type}: #{message}")
+        end)
+      end
+    else
+      # Optimize resources
+      recommendations = Hive.Autonomy.optimize_resources()
+      
+      if Enum.empty?(recommendations) do
+        Format.success("Resource allocation is optimal")
+      else
+        Format.info("Resource Optimization Recommendations:")
+        Enum.each(recommendations, fn {action, message} ->
+          Format.info("  • #{action}: #{message}")
+        end)
+      end
+    end
+  end
+
+  defp dispatch([:deadlock], result) do
+    quest_id = result_get(result, :options, :quest)
+    
+    if quest_id do
+      case Hive.Resilience.detect_deadlock(quest_id) do
+        {:ok, :no_deadlock} ->
+          Format.success("No deadlock detected in quest #{quest_id}")
+        
+        {:error, {:deadlock, cycles}} ->
+          Format.error("Deadlock detected in quest #{quest_id}!")
+          Format.warn("Circular dependencies found:")
+          Enum.each(cycles, fn cycle ->
+            Format.warn("  • #{Enum.join(cycle, " → ")}")
+          end)
+          
+          IO.puts("")
+          Format.info("Attempting to resolve...")
+          
+          case Hive.Resilience.resolve_deadlock(quest_id, cycles) do
+            {:ok, :deadlock_resolved} ->
+              Format.success("Deadlock resolved")
+            
+            {:error, reason} ->
+              Format.error("Failed to resolve: #{inspect(reason)}")
+          end
+      end
+    else
+      Format.error("Usage: hive deadlock --quest <id>")
+    end
+  end
+
+  defp dispatch([:monitor], result) do
+    action = result_get(result, :args, :action)
+    
+    case action do
+      "start" ->
+        interval = result_get(result, :options, :interval) || 60
+        Format.info("Starting monitoring (interval: #{interval}s)...")
+        Hive.Observability.start_monitoring(interval)
+        Format.success("Monitoring started")
+      
+      "status" ->
+        status = Hive.Observability.status()
+        
+        Format.info("System Status:")
+        IO.puts("  Health: #{status.health.status}")
+        IO.puts("  Quests: #{status.metrics.quests.active} active, #{status.metrics.quests.completed} completed")
+        IO.puts("  Bees: #{status.metrics.bees.active} active")
+        IO.puts("  Quality: #{Float.round(status.metrics.quality.average, 1)}")
+        IO.puts("  Cost: $#{Float.round(status.metrics.costs.total, 2)}")
+        
+        if !Enum.empty?(status.alerts) do
+          IO.puts("")
+          Format.warn("Active Alerts:")
+          Enum.each(status.alerts, fn {type, msg} ->
+            Format.warn("  • #{type}: #{msg}")
+          end)
+        end
+      
+      "metrics" ->
+        metrics = Hive.Observability.Metrics.export_prometheus()
+        IO.puts(metrics)
+      
+      "health" ->
+        health = Hive.Observability.Health.check()
+        IO.puts("Status: #{health.status}")
+        Enum.each(health.checks, fn {name, status} ->
+          IO.puts("  #{name}: #{status}")
+        end)
+      
+      _ ->
+        Format.error("Usage: hive monitor <start|status|metrics|health>")
+    end
+  end
+
+  defp dispatch([:accept], result) do
+    job_id = result_get(result, :options, :job)
+    quest_id = result_get(result, :options, :quest)
+    
+    cond do
+      job_id ->
+        Format.info("Testing acceptance criteria for job #{job_id}...")
+        result = Hive.Acceptance.test_acceptance(job_id)
+        
+        IO.puts("\nAcceptance Test Results:")
+        IO.puts("  Goal Met: #{if result.goal_met, do: "✓", else: "✗"}")
+        IO.puts("  In Scope: #{if result.in_scope, do: "✓", else: "✗"}")
+        IO.puts("  Minimal: #{if result.is_minimal, do: "✓", else: "✗"}")
+        IO.puts("  Quality: #{if result.quality_passed, do: "✓", else: "✗"}")
+        IO.puts("")
+        
+        if result.ready_to_merge do
+          Format.success("✓ Ready to merge")
+        else
+          Format.warn("✗ Not ready to merge")
+          IO.puts("\nBlockers:")
+          Enum.each(result.blockers, fn blocker ->
+            Format.warn("  • #{blocker}")
+          end)
+        end
+      
+      quest_id ->
+        Format.info("Testing acceptance criteria for quest #{quest_id}...")
+        result = Hive.Acceptance.test_quest_acceptance(quest_id)
+        
+        IO.puts("\nQuest Acceptance:")
+        IO.puts("  Goal Achieved: #{if result.goal_achieved, do: "✓", else: "✗"}")
+        IO.puts("  Scope Clean: #{if result.scope_clean, do: "✓", else: "✗"}")
+        IO.puts("  Simplicity: #{result.simplicity_score}")
+        IO.puts("")
+        
+        if result.ready_to_complete do
+          Format.success("✓ Quest ready to complete")
+        else
+          Format.warn("Recommendation: #{result.recommendation}")
+        end
+      
+      true ->
+        Format.error("Usage: hive accept --job <id> OR --quest <id>")
+    end
+  end
+
+  defp dispatch([:scope], result) do
+    job_id = result_get(result, :options, :job)
+    quest_id = result_get(result, :options, :quest)
+    
+    cond do
+      job_id ->
+        result = Hive.ScopeGuard.check_scope(job_id)
+        
+        IO.puts("Scope Check for job #{job_id}:")
+        IO.puts("  In Scope: #{if result.in_scope, do: "✓", else: "✗"}")
+        
+        if !Enum.empty?(result.warnings) do
+          IO.puts("\nWarnings:")
+          Enum.each(result.warnings, fn {type, msg} ->
+            Format.warn("  • #{type}: #{msg}")
+          end)
+        end
+        
+        IO.puts("\nRecommendation: #{result.recommendation}")
+      
+      quest_id ->
+        result = Hive.ScopeGuard.check_quest_scope(quest_id)
+        
+        IO.puts("Scope Check for quest #{quest_id}:")
+        IO.puts("  Total Jobs: #{result.total_jobs}")
+        IO.puts("  Status: #{result.overall_status}")
+        
+        if !Enum.empty?(result.scope_warnings) do
+          IO.puts("\nWarnings:")
+          Enum.each(result.scope_warnings, fn {type, msg} ->
+            Format.warn("  • #{type}: #{msg}")
+          end)
+        end
+      
+      true ->
+        Format.error("Usage: hive scope --job <id> OR --quest <id>")
+    end
   end
 
   defp dispatch([:init], result) do
@@ -147,6 +830,7 @@ defmodule Hive.CLI do
 
   defp dispatch([:comb, :add], result) do
     path = result_get(result, :args, :path)
+    auto = result_get(result, :options, :auto) || false
 
     path =
       if path do
@@ -181,33 +865,55 @@ defmodule Hive.CLI do
         end
       end
 
-    name = result_get(result, :options, :name)
-    merge_strategy = result_get(result, :options, :merge_strategy)
-    validation_command = result_get(result, :options, :validation_command)
-    github_owner = result_get(result, :options, :github_owner)
-    github_repo = result_get(result, :options, :github_repo)
+    # If --auto flag is set, use onboarding
+    if auto do
+      name = result_get(result, :options, :name)
+      validation_command = result_get(result, :options, :validation_command)
+      
+      opts = []
+      opts = if name, do: Keyword.put(opts, :name, name), else: opts
+      opts = if validation_command, do: Keyword.put(opts, :validation_command, validation_command), else: opts
+      opts = Keyword.put(opts, :skip_research, true)
 
-    opts = []
-    opts = if name, do: Keyword.put(opts, :name, name), else: opts
-    opts = if merge_strategy, do: Keyword.put(opts, :merge_strategy, merge_strategy), else: opts
+      case Hive.Onboarding.onboard(path, opts) do
+        {:ok, result} ->
+          Format.success("Comb \"#{result.comb.name}\" auto-configured (#{result.comb.id})")
+          Format.info("  Language: #{result.project_info.language}")
+          if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
+          if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
+        {:error, reason} ->
+          Format.error("Auto-configuration failed: #{reason}")
+      end
+    else
+      # Original manual configuration
+      name = result_get(result, :options, :name)
+      merge_strategy = result_get(result, :options, :merge_strategy)
+      validation_command = result_get(result, :options, :validation_command)
+      github_owner = result_get(result, :options, :github_owner)
+      github_repo = result_get(result, :options, :github_repo)
 
-    opts =
-      if validation_command,
-        do: Keyword.put(opts, :validation_command, validation_command),
-        else: opts
+      opts = []
+      opts = if name, do: Keyword.put(opts, :name, name), else: opts
+      opts = if merge_strategy, do: Keyword.put(opts, :merge_strategy, merge_strategy), else: opts
 
-    opts = if github_owner, do: Keyword.put(opts, :github_owner, github_owner), else: opts
-    opts = if github_repo, do: Keyword.put(opts, :github_repo, github_repo), else: opts
+      opts =
+        if validation_command,
+          do: Keyword.put(opts, :validation_command, validation_command),
+          else: opts
 
-    case Hive.Comb.add(path, opts) do
-      {:ok, comb} ->
-        Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
+      opts = if github_owner, do: Keyword.put(opts, :github_owner, github_owner), else: opts
+      opts = if github_repo, do: Keyword.put(opts, :github_repo, github_repo), else: opts
 
-      {:error, :path_not_found} ->
-        Format.error("Path does not exist: #{path}")
+      case Hive.Comb.add(path, opts) do
+        {:ok, comb} ->
+          Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
 
-      {:error, reason} ->
-        Format.error("Failed to add comb: #{inspect(reason)}")
+        {:error, :path_not_found} ->
+          Format.error("Path does not exist: #{path}")
+
+        {:error, reason} ->
+          Format.error("Failed to add comb: #{inspect(reason)}")
+      end
     end
   end
 
@@ -460,11 +1166,17 @@ defmodule Hive.CLI do
         Format.info("No bees. Bees are spawned when the Queen assigns jobs.")
 
       bees ->
-        headers = ["ID", "Name", "Status", "Job ID"]
+        headers = ["ID", "Name", "Status", "Job ID", "Context %"]
 
         rows =
           Enum.map(bees, fn b ->
-            [b.id, b.name, b.status, b.job_id || "-"]
+            context_pct =
+              case b.context_percentage do
+                nil -> "-"
+                pct -> "#{Float.round(pct * 100, 1)}%"
+              end
+
+            [b.id, b.name, b.status, b.job_id || "-", context_pct]
           end)
 
         Format.table(headers, rows)
@@ -579,6 +1291,28 @@ defmodule Hive.CLI do
     else
       {:error, :not_in_hive} ->
         Format.error("Not inside a hive workspace. Run `hive init` first.")
+    end
+  end
+
+  defp dispatch([:bee, :context], result) do
+    bee_id = result_get(result, :args, :bee_id)
+
+    case Hive.Runtime.ContextMonitor.get_usage_stats(bee_id) do
+      {:ok, stats} ->
+        IO.puts("Bee: #{bee_id}")
+        IO.puts("Context Usage:")
+        IO.puts("  Tokens used:  #{stats.tokens_used}")
+        IO.puts("  Tokens limit: #{stats.tokens_limit || "unknown"}")
+        IO.puts("  Percentage:   #{Float.round(stats.percentage * 100, 2)}%")
+        IO.puts("  Status:       #{stats.status}")
+        IO.puts("  Needs handoff: #{stats.needs_handoff}")
+
+        if stats.needs_handoff do
+          Format.error("\n⚠️  This bee needs a handoff - context usage is critical!")
+        end
+
+      {:error, :not_found} ->
+        Format.error("Bee not found: #{bee_id}")
     end
   end
 
@@ -700,6 +1434,16 @@ defmodule Hive.CLI do
         if quest[:comb_id] do
           comb_name = resolve_comb_name(quest.comb_id)
           IO.puts("Comb:   #{comb_name}")
+        end
+
+        if quest[:council_id] do
+          council_label =
+            case Hive.Council.get(quest.council_id) do
+              {:ok, c} -> "#{c.domain} (#{c.id})"
+              _ -> quest.council_id
+            end
+
+          IO.puts("Council: #{council_label}")
         end
 
         if quest[:goal] do
@@ -911,6 +1655,10 @@ defmodule Hive.CLI do
     end
   end
 
+  defp dispatch([:quickref], _result) do
+    IO.puts(Hive.CLI.Help.quick_reference())
+  end
+
   defp dispatch([:handoff, :create], result) do
     bee_id = result_get(result, :options, :bee)
 
@@ -944,10 +1692,12 @@ defmodule Hive.CLI do
 
   defp dispatch([:drone], result) do
     no_fix = result_get(result, :flags, :no_fix) || false
+    verify = result_get(result, :flags, :verify) || false
 
-    case Hive.Drone.start_link(auto_fix: !no_fix) do
+    case Hive.Drone.start_link(auto_fix: !no_fix, verify: verify) do
       {:ok, _pid} ->
-        Format.success("Drone started. Running health patrols...")
+        msg = if verify, do: "Drone started with verification enabled", else: "Drone started"
+        Format.success("#{msg}. Running health patrols...")
         Process.sleep(:infinity)
 
       {:error, {:already_started, _pid}} ->
@@ -1276,9 +2026,200 @@ defmodule Hive.CLI do
     end
   end
 
-  defp dispatch(path, _result) do
-    label = path |> Enum.map(&Atom.to_string/1) |> Enum.join(" ")
-    Format.warn("\"#{label}\" is not yet implemented.")
+  defp dispatch([:quest, :plan], result) do
+    quest_id = result_get(result, :args, :quest_id)
+
+    case Hive.Queen.Planner.generate_plan(quest_id, %{}) do
+      {:ok, plan} ->
+        Format.success("Plan generated for quest #{quest_id}")
+        IO.puts("Tasks: #{length(plan.tasks)}")
+        IO.puts("Estimated duration: #{plan.estimated_duration}")
+
+      {:error, reason} ->
+        Format.error("Failed to generate plan: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:quest, :start], result) do
+    quest_id = result_get(result, :args, :quest_id)
+
+    case Hive.Queen.Orchestrator.start_quest(quest_id) do
+      {:ok, phase} ->
+        Format.success("Quest #{quest_id} started, now in #{phase} phase")
+
+      {:error, reason} ->
+        Format.error("Failed to start quest: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:quest, :status], result) do
+    quest_id = result_get(result, :args, :quest_id)
+
+    case Hive.Queen.Orchestrator.get_quest_status(quest_id) do
+      {:ok, status} ->
+        quest = status.quest
+        Format.info("Quest: #{quest.name} (#{quest.id})")
+        Format.info("Current phase: #{status.current_phase}")
+        Format.info("Research complete: #{status.research_complete}")
+        Format.info("Plan complete: #{status.plan_complete}")
+        Format.info("Jobs created: #{status.jobs_created}")
+        
+        if status.phase_history != [] do
+          Format.info("Phase history:")
+          Enum.each(status.phase_history, fn t ->
+            IO.puts("  #{t.from_phase} → #{t.to_phase} (#{t.reason})")
+          end)
+        end
+
+      {:error, reason} ->
+        Format.error("Failed to get quest status: #{inspect(reason)}")
+    end
+  end
+
+  # -- Council commands --------------------------------------------------------
+
+  defp dispatch([:council, :create], result) do
+    domain = result_get(result, :args, :domain)
+    experts = result_get(result, :options, :experts)
+
+    opts = if experts, do: [experts: experts], else: []
+
+    Format.info("Researching experts for \"#{domain}\"...")
+
+    case Hive.Council.create(domain, opts) do
+      {:ok, council} ->
+        Format.success("Council \"#{council.domain}\" created (#{council.id})")
+
+        Enum.each(council.experts, fn e ->
+          IO.puts("  #{e.key}: #{e.name} — #{e.focus}")
+        end)
+
+      {:error, {:already_exists, id}} ->
+        Format.error("A council for this domain already exists (#{id})")
+
+      {:error, reason} ->
+        Format.error("Failed to create council: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:council, :list], _result) do
+    case Hive.Council.list() do
+      [] ->
+        Format.info("No councils. Use `hive council create <domain>` to create one.")
+
+      councils ->
+        headers = ["ID", "Name", "Domain", "Experts", "Status"]
+
+        rows =
+          Enum.map(councils, fn c ->
+            [c.id, c.name, c.domain, "#{length(c.experts)}", c.status]
+          end)
+
+        Format.table(headers, rows)
+    end
+  end
+
+  defp dispatch([:council, :show], result) do
+    id = result_get(result, :args, :id)
+
+    case Hive.Council.get(id) do
+      {:ok, council} ->
+        IO.puts("ID:      #{council.id}")
+        IO.puts("Name:    #{council.name}")
+        IO.puts("Domain:  #{council.domain}")
+        IO.puts("Status:  #{council.status}")
+        IO.puts("Experts: #{length(council.experts)}")
+        IO.puts("")
+
+        Enum.each(council.experts, fn e ->
+          IO.puts("  #{e.key}")
+          IO.puts("    Name:          #{e.name}")
+          IO.puts("    Focus:         #{e.focus}")
+          IO.puts("    Philosophy:    #{e.philosophy}")
+          IO.puts("    Contributions: #{Enum.join(e.contributions, ", ")}")
+          IO.puts("")
+        end)
+
+      {:error, :not_found} ->
+        Format.error("Council not found: #{id}")
+        Format.info("Hint: use `hive council list` to see all councils.")
+    end
+  end
+
+  defp dispatch([:council, :delete], result) do
+    id = result_get(result, :args, :id)
+
+    case Hive.Council.delete(id) do
+      :ok ->
+        Format.success("Council #{id} deleted.")
+
+      {:error, :not_found} ->
+        Format.error("Council not found: #{id}")
+        Format.info("Hint: use `hive council list` to see all councils.")
+    end
+  end
+
+  defp dispatch([:council, :apply], result) do
+    council_id = result_get(result, :args, :id)
+    quest_id = result_get(result, :options, :quest)
+    wave_size = result_get(result, :options, :wave_size)
+
+    opts = if wave_size, do: [wave_size: wave_size], else: []
+
+    case Hive.Council.apply_to_quest(council_id, quest_id, opts) do
+      {:ok, %{wave_count: waves, jobs_created: jobs}} ->
+        Format.success("Council applied: #{jobs} review jobs in #{waves} wave(s)")
+
+      {:error, :not_found} ->
+        Format.error("Council or quest not found.")
+
+      {:error, {:not_ready, status}} ->
+        Format.error("Council is not ready (status: #{status})")
+
+      {:error, :no_implementation_jobs} ->
+        Format.error("Quest has no implementation jobs to review.")
+
+      {:error, reason} ->
+        Format.error("Failed: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:council, :preview], result) do
+    domain = result_get(result, :args, :domain)
+    experts = result_get(result, :options, :experts)
+
+    opts = if experts, do: [experts: experts], else: []
+
+    Format.info("Discovering experts for \"#{domain}\"...")
+
+    case Hive.Council.preview(domain, opts) do
+      {:ok, experts} ->
+        IO.puts("")
+        IO.puts("Identified #{length(experts)} expert(s):")
+        IO.puts("")
+
+        Enum.each(experts, fn e ->
+          IO.puts("  #{e.key}: #{e.name}")
+          IO.puts("    Focus:         #{e.focus}")
+          IO.puts("    Philosophy:    #{e.philosophy}")
+          IO.puts("    Contributions: #{Enum.join(e.contributions, ", ")}")
+          IO.puts("")
+        end)
+
+      {:error, reason} ->
+        Format.error("Preview failed: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch(path, result) do
+    case try_handlers(path, result) do
+      :not_handled ->
+        label = path |> Enum.map(&Atom.to_string/1) |> Enum.join(" ")
+        Format.warn("\"#{label}\" is not yet implemented.")
+
+      _ ->
+        :ok
+    end
   end
 
   # -- Dispatch helpers (not dispatch/2 clauses) -----------------------------
@@ -1452,6 +2393,10 @@ defmodule Hive.CLI do
             ]
           ]
         ],
+        quickref: [
+          name: "quickref",
+          about: "Show quick reference card with common commands"
+        ],
         comb: [
           name: "comb",
           about: "Manage codebases (combs) tracked by this hive",
@@ -1498,6 +2443,13 @@ defmodule Hive.CLI do
                   help: "GitHub repository name",
                   parser: :string,
                   required: false
+                ]
+              ],
+              flags: [
+                auto: [
+                  short: "-a",
+                  long: "--auto",
+                  help: "Auto-detect project type and configure automatically"
                 ]
               ]
             ],
@@ -1640,6 +2592,18 @@ defmodule Hive.CLI do
                 bee_id: [
                   value_name: "BEE_ID",
                   help: "ID of the dead bee whose worktree to reuse",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            context: [
+              name: "context",
+              about: "Show context usage statistics for a bee",
+              args: [
+                bee_id: [
+                  value_name: "BEE_ID",
+                  help: "Bee ID to check context usage",
                   required: true,
                   parser: :string
                 ]
@@ -1788,6 +2752,42 @@ defmodule Hive.CLI do
                       required: true
                     ]
                   ]
+                ]
+              ]
+            ],
+            plan: [
+              name: "plan",
+              about: "Generate implementation plan for a quest",
+              args: [
+                quest_id: [
+                  value_name: "QUEST_ID",
+                  help: "Quest identifier",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            start: [
+              name: "start",
+              about: "Start quest workflow (research → planning → implementation)",
+              args: [
+                quest_id: [
+                  value_name: "QUEST_ID",
+                  help: "Quest identifier",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            status: [
+              name: "status",
+              about: "Show quest phase status and progress",
+              args: [
+                quest_id: [
+                  value_name: "QUEST_ID",
+                  help: "Quest identifier",
+                  required: true,
+                  parser: :string
                 ]
               ]
             ]
@@ -2046,6 +3046,220 @@ defmodule Hive.CLI do
             no_fix: [
               long: "--no-fix",
               help: "Disable auto-fixing of issues"
+            ],
+            verify: [
+              long: "--verify",
+              help: "Enable automatic job verification"
+            ]
+          ]
+        ],
+        onboard: [
+          name: "onboard",
+          about: "Auto-detect and onboard a project",
+          args: [
+            path: [
+              parser: :string,
+              required: true,
+              help: "Path to project directory"
+            ]
+          ],
+          options: [
+            name: [
+              short: "-n",
+              long: "--name",
+              help: "Comb name (defaults to directory name)",
+              parser: :string,
+              required: false
+            ],
+            validation_command: [
+              short: "-v",
+              long: "--validation-command",
+              help: "Override detected validation command",
+              parser: :string,
+              required: false
+            ]
+          ],
+          flags: [
+            quick: [
+              short: "-q",
+              long: "--quick",
+              help: "Quick onboard without research generation"
+            ],
+            preview: [
+              short: "-p",
+              long: "--preview",
+              help: "Preview detection results without creating comb"
+            ]
+          ]
+        ],
+        verify: [
+          name: "verify",
+          about: "Verify completed job work",
+          options: [
+            job: [
+              short: "-j",
+              long: "--job",
+              help: "Job ID to verify",
+              parser: :string,
+              required: false
+            ],
+            quest: [
+              short: "-q",
+              long: "--quest",
+              help: "Verify all jobs in a quest",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        accept: [
+          name: "accept",
+          about: "Test acceptance criteria for jobs or quests",
+          options: [
+            job: [
+              short: "-j",
+              long: "--job",
+              help: "Job ID to test",
+              parser: :string,
+              required: false
+            ],
+            quest: [
+              short: "-q",
+              long: "--quest",
+              help: "Quest ID to test",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        scope: [
+          name: "scope",
+          about: "Check for scope creep and violations",
+          options: [
+            job: [
+              short: "-j",
+              long: "--job",
+              help: "Job ID to check",
+              parser: :string,
+              required: false
+            ],
+            quest: [
+              short: "-q",
+              long: "--quest",
+              help: "Quest ID to check",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        quality: [
+          name: "quality",
+          about: "Quality analysis and reporting",
+          args: [
+            subcommand: [
+              help: "Subcommand: check, report, baseline, thresholds, trends",
+              parser: :string,
+              required: true
+            ]
+          ],
+          options: [
+            job: [
+              short: "-j",
+              long: "--job",
+              help: "Job ID for quality check or baseline source",
+              parser: :string,
+              required: false
+            ],
+            quest: [
+              short: "-q",
+              long: "--quest",
+              help: "Quest ID for quality report",
+              parser: :string,
+              required: false
+            ],
+            comb: [
+              short: "-c",
+              long: "--comb",
+              help: "Comb ID for baseline management",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        intelligence: [
+          name: "intelligence",
+          about: "Adaptive intelligence and failure analysis",
+          args: [
+            subcommand: [
+              help: "Subcommand: analyze, retry, insights, learn, best-practices, recommend",
+              parser: :string,
+              required: true
+            ]
+          ],
+          options: [
+            job: [
+              short: "-j",
+              long: "--job",
+              help: "Job ID for analysis or retry",
+              parser: :string,
+              required: false
+            ],
+            comb: [
+              short: "-c",
+              long: "--comb",
+              help: "Comb ID for insights or learning",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        heal: [
+          name: "heal",
+          about: "Run self-healing checks and repairs"
+        ],
+        monitor: [
+          name: "monitor",
+          about: "Production monitoring and observability",
+          args: [
+            action: [
+              help: "Action: start, status, metrics, health",
+              parser: :string,
+              required: true
+            ]
+          ],
+          options: [
+            interval: [
+              short: "-i",
+              long: "--interval",
+              help: "Monitoring interval in seconds (default: 60)",
+              parser: :integer,
+              required: false
+            ]
+          ]
+        ],
+        optimize: [
+          name: "optimize",
+          about: "Optimize resources and predict issues",
+          options: [
+            comb: [
+              short: "-c",
+              long: "--comb",
+              help: "Comb ID for issue prediction",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        deadlock: [
+          name: "deadlock",
+          about: "Detect and resolve dependency deadlocks",
+          options: [
+            quest: [
+              short: "-q",
+              long: "--quest",
+              help: "Quest ID to check for deadlocks",
+              parser: :string,
+              required: true
             ]
           ]
         ],
@@ -2201,6 +3415,130 @@ defmodule Hive.CLI do
         version: [
           name: "version",
           about: "Print the Hive version"
+        ],
+        verify: [
+          name: "verify",
+          about: "Verify completed jobs",
+          options: [
+            job: [
+              short: "-j",
+              long: "--job",
+              help: "Job ID to verify",
+              parser: :string,
+              required: false
+            ],
+            quest: [
+              short: "-q",
+              long: "--quest",
+              help: "Quest ID to verify all jobs",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        council: [
+          name: "council",
+          about: "Manage expert councils for code review waves",
+          subcommands: [
+            create: [
+              name: "create",
+              about: "Research experts and create a council for a domain",
+              args: [
+                domain: [
+                  value_name: "DOMAIN",
+                  help: "The domain to research experts for (e.g., \"Web UI Design\")",
+                  required: true,
+                  parser: :string
+                ]
+              ],
+              options: [
+                experts: [
+                  short: "-n",
+                  long: "--experts",
+                  help: "Number of experts to discover (default: 5)",
+                  parser: :integer,
+                  required: false
+                ]
+              ]
+            ],
+            list: [
+              name: "list",
+              about: "List all councils"
+            ],
+            show: [
+              name: "show",
+              about: "Show council details with experts",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Council identifier",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            delete: [
+              name: "delete",
+              about: "Delete a council and its agent files",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Council ID to delete",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            apply: [
+              name: "apply",
+              about: "Apply a council to a quest as review waves",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Council ID to apply",
+                  required: true,
+                  parser: :string
+                ]
+              ],
+              options: [
+                quest: [
+                  short: "-q",
+                  long: "--quest",
+                  help: "Quest ID to apply council to",
+                  parser: :string,
+                  required: true
+                ],
+                wave_size: [
+                  short: "-w",
+                  long: "--wave-size",
+                  help: "Experts per wave (default: 2)",
+                  parser: :integer,
+                  required: false
+                ]
+              ]
+            ],
+            preview: [
+              name: "preview",
+              about: "Dry-run: show what experts would be identified for a domain",
+              args: [
+                domain: [
+                  value_name: "DOMAIN",
+                  help: "The domain to preview experts for",
+                  required: true,
+                  parser: :string
+                ]
+              ],
+              options: [
+                experts: [
+                  short: "-n",
+                  long: "--experts",
+                  help: "Number of experts (default: 5)",
+                  parser: :integer,
+                  required: false
+                ]
+              ]
+            ]
+          ]
         ]
       ]
     )

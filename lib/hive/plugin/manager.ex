@@ -22,7 +22,8 @@ defmodule Hive.Plugin.Manager do
     Hive.Plugin.Builtin.Commands.Quit,
     Hive.Plugin.Builtin.Commands.Quest,
     Hive.Plugin.Builtin.Commands.Bee,
-    Hive.Plugin.Builtin.Commands.PluginCmd
+    Hive.Plugin.Builtin.Commands.PluginCmd,
+    Hive.Plugin.Builtin.Commands.Council
   ]
 
   # -- Public API ------------------------------------------------------------

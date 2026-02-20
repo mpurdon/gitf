@@ -27,7 +27,14 @@ defmodule Hive.Progress do
     Phoenix.PubSub.broadcast(Hive.PubSub, @pubsub_topic, {:bee_progress, bee_id, entry})
     :ok
   rescue
-    _ -> :ok
+    e in ArgumentError ->
+      _ = e
+      :ok
+
+    e ->
+      require Logger
+      Logger.error("Progress broadcast failed for #{bee_id}: #{Exception.message(e)}")
+      :ok
   end
 
   @doc "Returns current progress for a bee, or nil."

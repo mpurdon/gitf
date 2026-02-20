@@ -54,6 +54,9 @@ defmodule Hive.Plugin.Model do
               %{tool: String.t() | nil, file: String.t() | nil, message: String.t()}
             ]
   @callback detached_command(prompt :: String.t(), opts :: keyword()) :: String.t()
+  @callback list_available_models() :: [String.t()]
+  @callback get_model_info(model :: String.t()) :: {:ok, map()} | {:error, term()}
+  @callback get_context_limit(model :: String.t()) :: {:ok, integer()} | {:error, term()}
 
   @optional_callbacks [
     find_executable: 0,
@@ -63,6 +66,9 @@ defmodule Hive.Plugin.Model do
     extract_costs: 1,
     extract_session_id: 1,
     progress_from_events: 1,
-    detached_command: 2
+    detached_command: 2,
+    list_available_models: 0,
+    get_model_info: 1,
+    get_context_limit: 1
   ]
 end

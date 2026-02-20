@@ -87,6 +87,7 @@ defmodule Hive.Dashboard.QuestsLive do
                 <th>ID</th>
                 <th>Name</th>
                 <th>Status</th>
+                <th>Phase</th>
                 <th>Jobs</th>
               </tr>
             </thead>
@@ -97,11 +98,14 @@ defmodule Hive.Dashboard.QuestsLive do
                   <td style="font-family:monospace; font-size:0.8rem">{quest.id}</td>
                   <td>{quest.name}</td>
                   <td><span class={"badge #{status_badge(quest.status)}"}>{quest.status}</span></td>
+                  <td><span class={"badge #{phase_badge(Map.get(quest, :current_phase, "pending"))}"}>
+                    {Map.get(quest, :current_phase, "pending")}
+                  </span></td>
                   <td>{job_count(quest)}</td>
                 </tr>
                 <%= if MapSet.member?(@expanded, quest.id) do %>
                   <tr>
-                    <td colspan="5" style="padding:0">
+                    <td colspan="6" style="padding:0">
                       <div class="detail-content">
                         <%= if has_jobs?(quest) do %>
                           <table>
@@ -110,6 +114,7 @@ defmodule Hive.Dashboard.QuestsLive do
                                 <th>Job ID</th>
                                 <th>Title</th>
                                 <th>Status</th>
+                                <th>Verification</th>
                                 <th>Bee ID</th>
                               </tr>
                             </thead>
@@ -119,6 +124,15 @@ defmodule Hive.Dashboard.QuestsLive do
                                   <td style="font-family:monospace; font-size:0.8rem">{job.id}</td>
                                   <td>{job.title}</td>
                                   <td><span class={"badge #{status_badge(job.status)}"}>{job.status}</span></td>
+                                  <td>
+                                    <%= if Map.get(job, :verification_status) do %>
+                                      <span class={"badge #{verification_badge(job.verification_status)}"}>
+                                        {job.verification_status}
+                                      </span>
+                                    <% else %>
+                                      <span class="badge badge-grey">-</span>
+                                    <% end %>
+                                  </td>
                                   <td style="font-family:monospace; font-size:0.8rem">{job.bee_id || "-"}</td>
                                 </tr>
                               <% end %>
@@ -149,6 +163,17 @@ defmodule Hive.Dashboard.QuestsLive do
   defp status_badge("blocked"), do: "badge-yellow"
   defp status_badge("pending"), do: "badge-grey"
   defp status_badge(_), do: "badge-grey"
+  
+  defp phase_badge("research"), do: "badge-blue"
+  defp phase_badge("planning"), do: "badge-yellow"
+  defp phase_badge("implementation"), do: "badge-purple"
+  defp phase_badge("completed"), do: "badge-green"
+  defp phase_badge(_), do: "badge-grey"
+  
+  defp verification_badge("passed"), do: "badge-green"
+  defp verification_badge("failed"), do: "badge-red"
+  defp verification_badge("pending"), do: "badge-yellow"
+  defp verification_badge(_), do: "badge-grey"
 
   defp has_jobs?(%{jobs: jobs}) when is_list(jobs), do: jobs != []
   defp has_jobs?(_), do: false

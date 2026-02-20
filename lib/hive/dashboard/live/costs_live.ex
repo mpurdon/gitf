@@ -150,6 +150,6 @@ defmodule Hive.Dashboard.CostsLive do
   defp format_tokens(count) when count >= 1_000, do: "#{Float.round(count / 1_000, 1)}K"
   defp format_tokens(count), do: "#{count}"
 
-  defp cost_percentage(total, _part) when total == 0 or total == 0.0, do: 0
-  defp cost_percentage(total, part), do: Float.round(part / total * 100, 1)
+  defp cost_percentage(total, _part) when total == 0 or total == 0.0, do: 0.0
+  defp cost_percentage(total, part), do: Float.round(part / total * 100.0, 1)
 end

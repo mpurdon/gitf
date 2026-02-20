@@ -15,6 +15,8 @@ defmodule Hive.Store do
 
   @name __MODULE__
   @lock_stale_seconds 5
+  @lock_steal_attempts 500
+  @cache_table :hive_store_cache
 
   # -- Client API ------------------------------------------------------------
 
@@ -112,6 +114,28 @@ defmodule Hive.Store do
     filter(collection, fun) |> length()
   end
 
+  @doc """
+  Executes multiple mutations in a single lock/read/write cycle.
+
+  The function receives the full store data and must return the modified data.
+  This prevents orphaned records from crashes between separate lock cycles.
+
+  ## Example
+
+      Store.transact(fn data ->
+        job = get_in(data, [:jobs, job_id])
+        dep = %{id: Hive.ID.generate(:jdp), job_id: job_id, depends_on_id: other_id}
+        data
+        |> put_in([:jobs, job_id], %{job | status: "blocked"})
+        |> put_in([:job_dependencies, dep.id], dep)
+      end)
+  """
+  @spec transact((map() -> map())) :: :ok
+  def transact(fun) when is_function(fun, 1) do
+    with_lock(fun)
+    :ok
+  end
+
   @doc "Updates all matching records with an update function. Returns count updated."
   @spec update_matching(atom(), (map() -> boolean()), (map() -> map())) :: non_neg_integer()
   def update_matching(collection, filter_fun, update_fun) do
@@ -151,6 +175,12 @@ defmodule Hive.Store do
     :persistent_term.put({__MODULE__, :data_path}, data_path)
     :persistent_term.put({__MODULE__, :lock_path}, lock_path)
 
+    # Create ETS read cache
+    init_cache()
+
+    # Run migrations after store is initialized
+    Hive.Migrations.migrate!()
+
     {:ok, %{data_dir: data_dir, data_path: data_path, lock_path: lock_path}}
   end
 
@@ -160,6 +190,18 @@ defmodule Hive.Store do
   defp lock_path, do: :persistent_term.get({__MODULE__, :lock_path})
 
   defp read_data do
+    case cache_get() do
+      {:ok, data} ->
+        data
+
+      :miss ->
+        data = read_data_from_disk()
+        cache_put(data)
+        data
+    end
+  end
+
+  defp read_data_from_disk do
     case File.read(data_path()) do
       {:ok, binary} -> :erlang.binary_to_term(binary)
       {:error, :enoent} -> %{}
@@ -172,6 +214,33 @@ defmodule Hive.Store do
     binary = :erlang.term_to_binary(data)
     File.write!(tmp_path, binary)
     File.rename!(tmp_path, path)
+    cache_put(data)
+  end
+
+  # -- ETS cache ---------------------------------------------------------------
+
+  defp init_cache do
+    :ets.new(@cache_table, [:named_table, :public, :set, read_concurrency: true])
+    # Warm cache from disk
+    data = read_data_from_disk()
+    cache_put(data)
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp cache_get do
+    case :ets.lookup(@cache_table, :data) do
+      [{:data, data}] -> {:ok, data}
+      [] -> :miss
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
+  defp cache_put(data) do
+    :ets.insert(@cache_table, {:data, data})
+  rescue
+    ArgumentError -> :ok
   end
 
   defp with_lock(mutate_fn) do
@@ -193,28 +262,67 @@ defmodule Hive.Store do
 
     case File.mkdir(lock) do
       :ok ->
+        write_pid_file(lock)
         :ok
 
       {:error, :eexist} ->
-        if lock_stale?(lock) do
-          # Stale lock from a crashed process — steal it
-          File.rmdir(lock)
-          acquire_lock(attempts)
-        else
-          if attempts >= 200 do
-            # ~2s of waiting (200 * 10ms) — force steal
-            File.rmdir(lock)
+        cond do
+          lock_owner_dead?(lock) ->
+            # Dead process fast-path — steal immediately
+            steal_lock(lock)
             acquire_lock(0)
-          else
+
+          lock_stale?(lock) ->
+            # Stale lock from a crashed process — steal it
+            steal_lock(lock)
+            acquire_lock(0)
+
+          attempts >= @lock_steal_attempts ->
+            # ~5s of waiting (500 * 10ms) — force steal
+            steal_lock(lock)
+            acquire_lock(0)
+
+          true ->
             Process.sleep(10)
             acquire_lock(attempts + 1)
-          end
         end
     end
   end
 
   defp release_lock do
-    File.rmdir(lock_path())
+    lock = lock_path()
+    pid_file = Path.join(lock, "pid")
+    File.rm(pid_file)
+    File.rmdir(lock)
+  end
+
+  defp write_pid_file(lock_dir) do
+    pid_file = Path.join(lock_dir, "pid")
+    File.write(pid_file, :erlang.pid_to_list(self()))
+  end
+
+  defp lock_owner_dead?(lock_dir) do
+    pid_file = Path.join(lock_dir, "pid")
+
+    case File.read(pid_file) do
+      {:ok, pid_str} ->
+        try do
+          pid = :erlang.list_to_pid(String.to_charlist(pid_str))
+          not Process.alive?(pid)
+        rescue
+          _ -> false
+        end
+
+      {:error, _} ->
+        # No PID file — can't determine, fall through to stale check
+        false
+    end
+  end
+
+  defp steal_lock(lock_dir) do
+    pid_file = Path.join(lock_dir, "pid")
+    File.rm(pid_file)
+    File.rmdir(lock_dir)
   end
 
   defp lock_stale?(lock_path) do
@@ -249,6 +357,12 @@ defmodule Hive.Store do
   defp collection_prefix(:costs), do: :cst
   defp collection_prefix(:cells), do: :cel
   defp collection_prefix(:job_dependencies), do: :jdp
+  defp collection_prefix(:councils), do: :cnl
+  defp collection_prefix(:quest_phase_transitions), do: :qpt
+  defp collection_prefix(:comb_research_cache), do: :crc
+  defp collection_prefix(:research_file_index), do: :rfi
+  defp collection_prefix(:verification_results), do: :vrf
+  defp collection_prefix(:context_snapshots), do: :ctx
   defp collection_prefix(_), do: :hiv
 
   defp ensure_timestamps(record) do

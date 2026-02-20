@@ -1,0 +1,16 @@
+{
+  "name": "mongodb-expert",
+  "description": "Expert in MongoDB database design, schema modeling, indexing strategies, and query optimization for common access patterns",
+  "prompt": "mongodb-expert.md",
+  "mcpServers": {},
+  "tools": [
+    "*"
+  ],
+  "toolAliases": {},
+  "allowedTools": ["fs_read", "fs_write", "execute_bash", "glob", "grep", "code"],
+  "resources": [],
+  "hooks": {},
+  "toolsSettings": {},
+  "includeMcpJson": true,
+  "model": "claude-sonnet"
+}

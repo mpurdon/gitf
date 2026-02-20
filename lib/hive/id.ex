@@ -1,7 +1,7 @@
 defmodule Hive.ID do
   @moduledoc "Generates short, human-friendly identifiers for Hive entities."
 
-  @prefixes ~w(bee job qst cmb cel wag cst jdp)a
+  @prefixes ~w(bee job qst cmb cel wag cst jdp cnl qpt crc rfi vrf)a
 
   @doc """
   Generates a prefixed identifier like `"bee-a1b2c3"`.

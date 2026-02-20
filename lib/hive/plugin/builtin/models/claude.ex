@@ -43,6 +43,25 @@ defmodule Hive.Plugin.Builtin.Models.Claude do
   @impl true
   def pricing do
     %{
+      "claude-opus" => %{
+        input: 15.0,
+        output: 75.0,
+        cache_read: 1.50,
+        cache_write: 18.75
+      },
+      "claude-sonnet" => %{
+        input: 3.0,
+        output: 15.0,
+        cache_read: 0.30,
+        cache_write: 3.75
+      },
+      "claude-haiku" => %{
+        input: 0.80,
+        output: 4.0,
+        cache_read: 0.08,
+        cache_write: 1.0
+      },
+      # Legacy full model names
       "claude-sonnet-4-20250514" => %{
         input: 3.0,
         output: 15.0,
@@ -56,6 +75,57 @@ defmodule Hive.Plugin.Builtin.Models.Claude do
         cache_write: 18.75
       }
     }
+  end
+
+  @impl true
+  def list_available_models do
+    ["claude-opus", "claude-sonnet", "claude-haiku"]
+  end
+
+  @impl true
+  def get_model_info(model) do
+    case model do
+      "claude-opus" ->
+        {:ok,
+         %{
+           name: "claude-opus",
+           full_name: "claude-opus-4-20250514",
+           context_limit: 200_000,
+           capabilities: [:planning, :complex_implementation, :architecture],
+           cost_tier: :high
+         }}
+
+      "claude-sonnet" ->
+        {:ok,
+         %{
+           name: "claude-sonnet",
+           full_name: "claude-sonnet-4-20250514",
+           context_limit: 200_000,
+           capabilities: [:implementation, :refactoring, :debugging],
+           cost_tier: :medium
+         }}
+
+      "claude-haiku" ->
+        {:ok,
+         %{
+           name: "claude-haiku",
+           full_name: "claude-haiku-3-20250219",
+           context_limit: 200_000,
+           capabilities: [:research, :summarization, :verification],
+           cost_tier: :low
+         }}
+
+      _ ->
+        {:error, :unknown_model}
+    end
+  end
+
+  @impl true
+  def get_context_limit(model) do
+    case get_model_info(model) do
+      {:ok, info} -> {:ok, info.context_limit}
+      error -> error
+    end
   end
 
   @impl true

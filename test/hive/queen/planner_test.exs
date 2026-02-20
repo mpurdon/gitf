@@ -1,0 +1,187 @@
+defmodule Hive.Queen.PlannerTest do
+  use ExUnit.Case, async: false
+
+  alias Hive.Queen.Planner
+  alias Hive.Store
+
+  setup do
+    # Stop any previously running Store to avoid stale data
+    try do
+      if pid = Process.whereis(Hive.Store), do: GenServer.stop(pid, :normal)
+    catch
+      :exit, _ -> :ok
+    end
+
+    # Start store for tests with unique directory
+    tmp_dir = System.tmp_dir!() |> Path.join("planner_test_#{:rand.uniform(1_000_000)}")
+    File.mkdir_p!(tmp_dir)
+    start_supervised!({Hive.Store, data_dir: tmp_dir})
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
+    
+    # Create test quest and comb
+    {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
+    {:ok, quest} = Store.insert(:quests, %{
+      name: "test-quest", 
+      goal: "Build a test feature",
+      comb_id: comb.id
+    })
+    
+    research_summary = %{
+      structure: %{
+        main_language: "elixir",
+        total_files: 50,
+        file_types: %{".ex" => 30, ".exs" => 10}
+      }
+    }
+    
+    %{quest: quest, comb: comb, research_summary: research_summary}
+  end
+
+  describe "generate_plan/2" do
+    test "creates implementation plan from research summary", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      
+      assert plan.quest_id == quest.id
+      assert plan.goal == quest.goal
+      assert plan.research_input == research
+      assert is_list(plan.tasks)
+      assert length(plan.tasks) >= 2
+      assert plan.verification_strategy == "automated_testing"
+      assert %DateTime{} = plan.created_at
+    end
+
+    test "stores plan in quest record", %{quest: quest, research_summary: research} do
+      {:ok, _plan} = Planner.generate_plan(quest.id, research)
+      
+      updated_quest = Store.get(:quests, quest.id)
+      assert updated_quest.implementation_plan != nil
+      assert updated_quest.implementation_plan.quest_id == quest.id
+    end
+
+    test "generates language-specific tasks for elixir", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      
+      task_titles = Enum.map(plan.tasks, & &1.title)
+      assert "Add tests" in task_titles
+    end
+
+    test "generates language-specific tasks for javascript", %{quest: quest} do
+      research = %{structure: %{main_language: "javascript"}}
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      
+      task_titles = Enum.map(plan.tasks, & &1.title)
+      assert "Add tests" in task_titles
+    end
+
+    test "generates generic tasks for unknown language", %{quest: quest} do
+      research = %{structure: %{main_language: "unknown"}}
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      
+      task_titles = Enum.map(plan.tasks, & &1.title)
+      assert "Add validation" in task_titles
+    end
+
+    test "returns error for non-existent quest" do
+      {:error, :not_found} = Planner.generate_plan("non-existent", %{})
+    end
+  end
+
+  describe "create_jobs_from_plan/2" do
+    test "creates job records from plan tasks", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+      
+      assert length(jobs) == length(plan.tasks)
+      
+      Enum.each(jobs, fn job ->
+        assert job.quest_id == quest.id
+        assert job.comb_id == quest.comb_id
+        assert job.job_type != nil
+        assert job.complexity != nil
+        assert job.recommended_model != nil
+        assert is_list(job.verification_criteria)
+        assert is_integer(job.estimated_context_tokens)
+      end)
+    end
+
+    test "assigns correct job types based on task type", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+      
+      # Jobs are classified by the Classifier based on title keywords
+      setup_job = Enum.find(jobs, &(&1.title == "Setup and preparation"))
+      assert setup_job.job_type in [:implementation, :simple_fix]  # Could be either based on classification
+      
+      # Find the "Add tests" job which should be verification
+      test_job = Enum.find(jobs, &String.contains?(&1.title, "tests"))
+      if test_job do
+        assert test_job.job_type == :verification
+      end
+    end
+
+    test "creates jobs with verification criteria", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+      
+      Enum.each(jobs, fn job ->
+        assert is_list(job.verification_criteria)
+        assert length(job.verification_criteria) > 0
+      end)
+    end
+
+    test "creates sequential dependencies between jobs", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+      
+      # Check that jobs have dependencies (except the first one)
+      [first_job | rest_jobs] = jobs
+      
+      # First job should have no dependencies
+      assert Hive.Jobs.dependencies(first_job.id) == []
+      
+      # Each subsequent job should depend on the previous one
+      Enum.reduce(jobs, nil, fn job, prev_job ->
+        if prev_job do
+          deps = Hive.Jobs.dependencies(job.id)
+          assert length(deps) >= 1
+          assert Enum.any?(deps, &(&1.id == prev_job.id))
+        end
+        job
+      end)
+    end
+
+    test "returns error for non-existent quest" do
+      plan = %{tasks: []}
+      {:error, :not_found} = Planner.create_jobs_from_plan("non-existent", plan)
+    end
+  end
+
+  describe "task generation" do
+    test "always includes setup and core implementation tasks", %{quest: quest} do
+      research = %{structure: %{main_language: "unknown"}}
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      
+      task_titles = Enum.map(plan.tasks, & &1.title)
+      assert "Setup and preparation" in task_titles
+      assert "Core implementation" in task_titles
+    end
+
+    test "includes verification criteria for all tasks", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      
+      Enum.each(plan.tasks, fn task ->
+        assert is_list(task.verification_criteria)
+        assert length(task.verification_criteria) > 0
+      end)
+    end
+
+    test "includes token estimates for all tasks", %{quest: quest, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      
+      Enum.each(plan.tasks, fn task ->
+        assert is_integer(task.estimated_tokens)
+        assert task.estimated_tokens > 0
+      end)
+    end
+  end
+end
