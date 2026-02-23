@@ -90,4 +90,35 @@ defmodule Hive.MergeTest do
       assert {:ok, "manual"} = Merge.merge_back(ctx.cell.id)
     end
   end
+
+  describe "auto_merge rollback" do
+    test "auto_merge with invalid repo path returns error", ctx do
+      # Create a comb with auto_merge strategy but no valid git repo
+      {:ok, auto_comb} =
+        Store.insert(:combs, %{
+          name: "auto-comb-#{:erlang.unique_integer([:positive])}",
+          merge_strategy: "auto_merge",
+          path: "/tmp/nonexistent-repo"
+        })
+
+      {:ok, auto_cell} =
+        Store.insert(:cells, %{
+          bee_id: ctx.bee.id,
+          comb_id: auto_comb.id,
+          worktree_path: "/tmp/nonexistent-worktree",
+          branch: "bee/auto-test",
+          status: "active"
+        })
+
+      # Should fail gracefully with merge_conflict error, not crash
+      result = Merge.merge_back(auto_cell.id)
+      assert match?({:error, _}, result)
+    end
+  end
+
+  describe "merge_back_with_rebase/1" do
+    test "returns error for non-existent cell" do
+      assert {:error, :cell_not_found} = Merge.merge_back_with_rebase("cel-nonexistent")
+    end
+  end
 end

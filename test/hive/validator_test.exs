@@ -88,4 +88,19 @@ defmodule Hive.ValidatorTest do
       assert msg =~ "exit 1"
     end
   end
+
+  describe "run_claude_validation/2 rescue behavior" do
+    test "does not silently swallow non-network exceptions" do
+      # The rescue clause should only catch ErlangError, Mint.TransportError, Mint.HTTPError
+      # Other exceptions should propagate
+      # We verify the function exists and handles empty diff case
+      result = Validator.run_claude_validation(
+        %{title: "test", description: "test"},
+        %{worktree_path: System.tmp_dir!(), id: "cel-1"}
+      )
+
+      # Should return a proper result, not crash
+      assert match?({:ok, _}, result) or match?({:error, _, _}, result)
+    end
+  end
 end

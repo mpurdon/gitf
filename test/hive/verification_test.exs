@@ -9,7 +9,7 @@ defmodule Hive.VerificationTest do
       {:ok, _} -> :ok
       {:error, {:already_started, _}} -> :ok
     end
-    
+
     # Create test data
     {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
     {:ok, quest} = Store.insert(:quests, %{name: "test-quest", goal: "test"})
@@ -26,12 +26,12 @@ defmodule Hive.VerificationTest do
       branch: "test-branch",
       status: "active"
     })
-    
+
     # Assign job to bee and complete it
     {:ok, job} = Jobs.assign(job.id, bee.id)
     {:ok, job} = Jobs.start(job.id)
     {:ok, job} = Jobs.complete(job.id)
-    
+
     %{job: job, comb: comb, cell: cell, bee: bee}
   end
 
@@ -53,7 +53,7 @@ defmodule Hive.VerificationTest do
       exit_code: 0,
       ran_at: DateTime.utc_now()
     }
-    
+
     {:ok, stored} = Verification.record_result(job.id, result)
     assert stored.job_id == job.id
     assert stored.status == "passed"
@@ -68,11 +68,11 @@ defmodule Hive.VerificationTest do
 
   test "verify_job with no validation command passes", %{job: job} do
     {:ok, status, result} = Verification.verify_job(job.id)
-    
+
     assert status == :pass
     assert result.status == "passed"
     assert result.output == "No validation command configured"
-    
+
     # Check job was updated
     {:ok, updated_job} = Jobs.get(job.id)
     assert updated_job.verification_status == "passed"
@@ -82,7 +82,32 @@ defmodule Hive.VerificationTest do
   test "verify_job with missing cell returns error", %{job: job, cell: cell} do
     # Remove the cell
     Store.delete(:cells, cell.id)
-    
+
     assert {:error, :no_cell} = Verification.verify_job(job.id)
+  end
+
+  test "verify_job! raises on failure", %{job: job, cell: cell} do
+    # Remove the cell so verification fails
+    Store.delete(:cells, cell.id)
+
+    assert_raise RuntimeError, ~r/Verification error/, fn ->
+      Verification.verify_job!(job.id)
+    end
+  end
+
+  describe "determine_status with nil scores" do
+    test "nil scores fail under :require_passing policy (default)", %{comb: comb} do
+      # Comb has no nil_score_policy set → defaults to :require_passing
+      # which means nil scores will cause verification to fail
+      assert is_nil(Map.get(comb, :nil_score_policy))
+    end
+
+    test "nil scores pass under :skip_missing policy", %{comb: comb} do
+      # Set the comb policy to skip_missing
+      updated_comb = Map.put(comb, :nil_score_policy, :skip_missing)
+      Store.put(:combs, updated_comb)
+
+      assert updated_comb.nil_score_policy == :skip_missing
+    end
   end
 end

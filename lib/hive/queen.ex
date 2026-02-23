@@ -100,11 +100,16 @@ defmodule Hive.Queen do
       max_retries: 3
     }
 
-    # Best-effort: start Drone alongside Queen
-    case Hive.Drone.start_link() do
-      {:ok, _pid} -> Logger.info("Drone started alongside Queen")
-      {:error, {:already_started, _pid}} -> :ok
-      {:error, reason} -> Logger.warning("Could not start Drone: #{inspect(reason)}")
+    # Best-effort: start Drone alongside Queen (unlinked so it doesn't crash the Queen)
+    try do
+      name = {:via, Registry, {Hive.Registry, :drone}}
+      case GenServer.start(Hive.Drone, [], name: name) do
+        {:ok, _pid} -> Logger.info("Drone started alongside Queen")
+        {:error, {:already_started, _pid}} -> :ok
+        {:error, reason} -> Logger.warning("Could not start Drone: #{inspect(reason)}")
+      end
+    rescue
+      _ -> :ok
     end
 
     Logger.info("Queen initialized at #{hive_root}")
@@ -112,6 +117,9 @@ defmodule Hive.Queen do
     # Recover any missed waggles from before we started
     send(self(), :recover_missed_waggles)
     schedule_waggle_recovery()
+
+    # Periodically check for pending jobs that need bees
+    schedule_job_spawner()
 
     {:ok, state}
   end
@@ -161,6 +169,39 @@ defmodule Hive.Queen do
     {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
+  # API mode: Task completion
+  def handle_info({ref, {:ok, _result}}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    Logger.info("Queen's API session completed")
+
+    if state[:awaiter] do
+      GenServer.reply(state.awaiter, :ok)
+    end
+
+    {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
+  end
+
+  def handle_info({ref, {:error, reason}}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    Logger.warning("Queen's API session failed: #{inspect(reason)}")
+
+    if state[:awaiter] do
+      GenServer.reply(state.awaiter, :ok)
+    end
+
+    {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) when is_reference(ref) do
+    Logger.warning("Queen's API session process died: #{inspect(reason)}")
+
+    if state[:awaiter] do
+      GenServer.reply(state.awaiter, :ok)
+    end
+
+    {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
+  end
+
   def handle_info(:recover_missed_waggles, state) do
     state = recover_missed_waggles(state)
     {:noreply, state}
@@ -169,6 +210,12 @@ defmodule Hive.Queen do
   def handle_info(:schedule_waggle_recovery, state) do
     state = recover_missed_waggles(state)
     schedule_waggle_recovery()
+    {:noreply, state}
+  end
+
+  def handle_info(:spawn_ready_jobs, state) do
+    state = spawn_all_ready_jobs(state)
+    schedule_job_spawner()
     {:noreply, state}
   end
 
@@ -198,6 +245,54 @@ defmodule Hive.Queen do
     Logger.warning("Bee #{waggle.from} reports validation failed: #{waggle.body}")
     state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
     maybe_retry_job(waggle, state)
+  end
+
+  defp handle_waggle(%{subject: "merge_conflict_warning"} = waggle, state) do
+    Logger.warning("Merge conflict detected from bee #{waggle.from}: #{waggle.body}")
+
+    # Extract cell_id from the bee record
+    cell_id =
+      case Hive.Bees.get(waggle.from) do
+        {:ok, bee} ->
+          case Hive.Store.find_one(:cells, fn c -> c.bee_id == bee.id end) do
+            nil -> nil
+            cell -> cell.id
+          end
+
+        _ ->
+          nil
+      end
+
+    if cell_id do
+      # Attempt rebase-based resolution
+      case Hive.Conflict.resolve(cell_id, :rebase) do
+        {:ok, :resolved} ->
+          Logger.info("Conflict resolved via rebase for cell #{cell_id}")
+
+          # Re-attempt merge after successful rebase
+          case Hive.Merge.merge_back(cell_id) do
+            {:ok, strategy} ->
+              Logger.info("Post-rebase merge succeeded (#{strategy}) for cell #{cell_id}")
+
+            {:error, reason} ->
+              Logger.warning("Post-rebase merge failed for cell #{cell_id}: #{inspect(reason)}")
+              mark_needs_manual_merge(cell_id, waggle)
+          end
+
+        {:error, reason} ->
+          Logger.warning("Conflict resolution failed for cell #{cell_id}: #{inspect(reason)}")
+          mark_needs_manual_merge(cell_id, waggle)
+      end
+    else
+      Logger.warning("Could not find cell for bee #{waggle.from}, conflict unresolved")
+    end
+
+    state
+  end
+
+  defp handle_waggle(%{subject: "merge_failed"} = waggle, state) do
+    Logger.warning("Merge failed from bee #{waggle.from}: #{waggle.body}")
+    state
   end
 
   defp handle_waggle(%{subject: "quest_advance"} = waggle, state) do
@@ -373,7 +468,7 @@ defmodule Hive.Queen do
         pending_jobs
         |> Enum.take(available_slots)
         |> Enum.reduce(state, fn job, acc ->
-          case Hive.Bees.spawn(job.id, job.comb_id, acc.hive_root) do
+          case Hive.Bees.spawn_detached(job.id, job.comb_id, acc.hive_root) do
             {:ok, bee} ->
               Logger.info("Auto-spawned bee #{bee.id} for job #{job.id} (#{job.title})")
               acc
@@ -393,6 +488,34 @@ defmodule Hive.Queen do
     end
   rescue
     _ -> :ok
+  end
+
+  # -- Private: periodic job spawning ------------------------------------------
+
+  @job_spawn_interval :timer.seconds(15)
+
+  defp schedule_job_spawner do
+    Process.send_after(self(), :spawn_ready_jobs, @job_spawn_interval)
+  end
+
+  defp spawn_all_ready_jobs(state) do
+    quests = Hive.Store.all(:quests)
+    all_jobs = Hive.Store.all(:jobs)
+
+    Enum.reduce(quests, state, fn quest, acc ->
+      if quest.status in ["active", "pending", "planning", "research", "implementation"] do
+        # Attach jobs to quest (they're stored separately)
+        quest_jobs = Enum.filter(all_jobs, fn j -> j.quest_id == quest.id end)
+        quest_with_jobs = Map.put(quest, :jobs, quest_jobs)
+        spawn_ready_jobs(quest_with_jobs, acc)
+      else
+        acc
+      end
+    end)
+  rescue
+    e ->
+      Logger.warning("Job spawner error: #{Exception.message(e)}")
+      state
   end
 
   # -- Private: waggle recovery ------------------------------------------------
@@ -424,6 +547,14 @@ defmodule Hive.Queen do
   # -- Private: Claude session management ------------------------------------
 
   defp launch_claude_session(state) do
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      launch_api_session(state)
+    else
+      launch_cli_session(state)
+    end
+  end
+
+  defp launch_cli_session(state) do
     queen_workspace = queen_workspace_path(state.hive_root)
 
     with :ok <- File.mkdir_p(queen_workspace),
@@ -431,6 +562,25 @@ defmodule Hive.Queen do
          :ok <- maybe_generate_settings(:queen, state.hive_root, queen_workspace) do
       Hive.Runtime.Models.spawn_interactive(queen_workspace)
     end
+  end
+
+  defp launch_api_session(state) do
+    queen_workspace = queen_workspace_path(state.hive_root)
+    File.mkdir_p!(queen_workspace)
+
+    # In API mode, start an agent loop task with queen tools
+    task = Task.async(fn ->
+      Hive.Runtime.AgentLoop.run(
+        "You are the Queen orchestrator for a Hive of AI coding agents. " <>
+          "Monitor active quests, manage bee workers, and coordinate work.",
+        queen_workspace,
+        tool_set: :queen,
+        max_iterations: 200,
+        model: Hive.Runtime.ModelResolver.resolve("opus")
+      )
+    end)
+
+    {:ok, task}
   end
 
   defp setup_sparse_checkout(queen_workspace, hive_root) do
@@ -474,6 +624,23 @@ defmodule Hive.Queen do
           :ok
         end
     end
+  end
+
+  defp mark_needs_manual_merge(cell_id, waggle) do
+    case Hive.Store.get(:cells, cell_id) do
+      nil -> :ok
+      cell ->
+        Hive.Store.put(:cells, Map.put(cell, :needs_manual_merge, true))
+    end
+
+    Hive.Waggle.send(
+      "queen",
+      "queen",
+      "manual_merge_needed",
+      "Cell #{cell_id} from bee #{waggle.from} needs manual merge: #{waggle.body}"
+    )
+  rescue
+    _ -> :ok
   end
 
   defp read_max_bees(hive_root) do

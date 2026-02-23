@@ -71,7 +71,7 @@ defmodule Hive.Validator do
     e -> {:error, "Validation command error: #{Exception.message(e)}"}
   end
 
-  @doc "Runs headless Claude to assess whether the diff solves the job."
+  @doc "Runs model validation to assess whether the diff solves the job."
   @spec run_claude_validation(map(), map()) ::
           {:ok, :pass} | {:ok, :skip} | {:error, term(), term()}
   def run_claude_validation(job, cell) do
@@ -82,20 +82,30 @@ defmodule Hive.Validator do
       {:ok, diff} ->
         prompt = build_validation_prompt(job, diff)
 
-        case Hive.Runtime.Models.spawn_headless(prompt, cell.worktree_path) do
-          {:ok, port} ->
-            collect_validation_result(port)
+        if Hive.Runtime.ModelResolver.api_mode?() do
+          # API mode: use generate_text (no tools needed for validation)
+          case Hive.Runtime.Models.generate_text(prompt, model: "haiku") do
+            {:ok, output} -> parse_verdict(output)
+            {:error, _} -> {:ok, :skip}
+          end
+        else
+          # CLI mode: spawn headless and collect
+          case Hive.Runtime.Models.spawn_headless(prompt, cell.worktree_path) do
+            {:ok, port} ->
+              collect_validation_result(port)
 
-          {:error, _reason} ->
-            # If Claude is not available, skip validation rather than blocking
-            {:ok, :skip}
+            {:error, _reason} ->
+              {:ok, :skip}
+          end
         end
 
       {:error, _} ->
         {:ok, :skip}
     end
   rescue
-    _ -> {:ok, :skip}
+    e in [ErlangError, Mint.TransportError, Mint.HTTPError] ->
+      Logger.debug("Validation network error (non-fatal): #{inspect(e)}")
+      {:ok, :skip}
   end
 
   @doc "Builds the validation prompt for Claude."
@@ -152,7 +162,9 @@ defmodule Hive.Validator do
         end
     end
   rescue
-    _ -> {:error, :diff_failed}
+    e in [ErlangError] ->
+      Logger.debug("Git diff failed (git not available): #{inspect(e)}")
+      {:error, :diff_failed}
   end
 
   defp collect_validation_result(port) do

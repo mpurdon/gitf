@@ -72,4 +72,129 @@ defmodule Hive.ConflictTest do
       assert Conflict.check_all_active() == []
     end
   end
+
+  describe "resolve/2" do
+    test "returns error for non-existent cell" do
+      assert {:error, :cell_not_found} = Conflict.resolve("cel-nonexistent", :rebase)
+    end
+
+    test "defer strategy marks cell for manual merge", %{comb: comb, bee: bee, tmp_dir: tmp_dir} do
+      {:ok, cell} =
+        Store.insert(:cells, %{
+          comb_id: comb.id,
+          bee_id: bee.id,
+          branch: "test-branch",
+          worktree_path: tmp_dir,
+          status: "active"
+        })
+
+      assert {:ok, :resolved} = Conflict.resolve(cell.id, :defer)
+
+      # Verify cell was marked for manual merge
+      updated_cell = Store.get(:cells, cell.id)
+      assert updated_cell.needs_manual_merge == true
+    end
+
+    test "rebase strategy on clean branch succeeds", %{comb: comb, bee: bee, tmp_dir: tmp_dir} do
+      # Create a feature branch
+      System.cmd("git", ["checkout", "-b", "feature-branch"], cd: tmp_dir)
+      File.write!(Path.join(tmp_dir, "feature.txt"), "feature content")
+      System.cmd("git", ["add", "."], cd: tmp_dir)
+      System.cmd("git", ["commit", "-m", "add feature"], cd: tmp_dir)
+
+      {:ok, cell} =
+        Store.insert(:cells, %{
+          comb_id: comb.id,
+          bee_id: bee.id,
+          branch: "feature-branch",
+          worktree_path: tmp_dir,
+          status: "active"
+        })
+
+      assert {:ok, :resolved} = Conflict.resolve(cell.id, :rebase)
+    end
+  end
+
+  describe "check_between_cells/2" do
+    test "returns clean when cells touch different files", %{comb: comb, tmp_dir: tmp_dir} do
+      # Create two branches with different files
+      System.cmd("git", ["checkout", "-b", "branch-a"], cd: tmp_dir)
+      File.write!(Path.join(tmp_dir, "file_a.txt"), "content a")
+      System.cmd("git", ["add", "."], cd: tmp_dir)
+      System.cmd("git", ["commit", "-m", "add file_a"], cd: tmp_dir)
+      System.cmd("git", ["checkout", "main"], cd: tmp_dir)
+
+      System.cmd("git", ["checkout", "-b", "branch-b"], cd: tmp_dir)
+      File.write!(Path.join(tmp_dir, "file_b.txt"), "content b")
+      System.cmd("git", ["add", "."], cd: tmp_dir)
+      System.cmd("git", ["commit", "-m", "add file_b"], cd: tmp_dir)
+      System.cmd("git", ["checkout", "main"], cd: tmp_dir)
+
+      {:ok, bee_a} = Store.insert(:bees, %{name: "bee-a", status: "working"})
+      {:ok, bee_b} = Store.insert(:bees, %{name: "bee-b", status: "working"})
+
+      {:ok, cell_a} =
+        Store.insert(:cells, %{
+          comb_id: comb.id,
+          bee_id: bee_a.id,
+          branch: "branch-a",
+          worktree_path: tmp_dir,
+          status: "active"
+        })
+
+      {:ok, cell_b} =
+        Store.insert(:cells, %{
+          comb_id: comb.id,
+          bee_id: bee_b.id,
+          branch: "branch-b",
+          worktree_path: tmp_dir,
+          status: "active"
+        })
+
+      assert {:ok, :clean} = Conflict.check_between_cells(cell_a.id, cell_b.id)
+    end
+
+    test "returns conflicts when cells touch same files", %{comb: comb, tmp_dir: tmp_dir} do
+      # Create two branches modifying the same file
+      System.cmd("git", ["checkout", "-b", "branch-c"], cd: tmp_dir)
+      File.write!(Path.join(tmp_dir, "README.md"), "# Modified by branch C")
+      System.cmd("git", ["add", "."], cd: tmp_dir)
+      System.cmd("git", ["commit", "-m", "modify readme c"], cd: tmp_dir)
+      System.cmd("git", ["checkout", "main"], cd: tmp_dir)
+
+      System.cmd("git", ["checkout", "-b", "branch-d"], cd: tmp_dir)
+      File.write!(Path.join(tmp_dir, "README.md"), "# Modified by branch D")
+      System.cmd("git", ["add", "."], cd: tmp_dir)
+      System.cmd("git", ["commit", "-m", "modify readme d"], cd: tmp_dir)
+      System.cmd("git", ["checkout", "main"], cd: tmp_dir)
+
+      {:ok, bee_c} = Store.insert(:bees, %{name: "bee-c", status: "working"})
+      {:ok, bee_d} = Store.insert(:bees, %{name: "bee-d", status: "working"})
+
+      {:ok, cell_c} =
+        Store.insert(:cells, %{
+          comb_id: comb.id,
+          bee_id: bee_c.id,
+          branch: "branch-c",
+          worktree_path: tmp_dir,
+          status: "active"
+        })
+
+      {:ok, cell_d} =
+        Store.insert(:cells, %{
+          comb_id: comb.id,
+          bee_id: bee_d.id,
+          branch: "branch-d",
+          worktree_path: tmp_dir,
+          status: "active"
+        })
+
+      assert {:error, :conflicts, files} = Conflict.check_between_cells(cell_c.id, cell_d.id)
+      assert "README.md" in files
+    end
+
+    test "returns error for non-existent cell" do
+      assert {:error, :cell_not_found} = Conflict.check_between_cells("cel-nonexistent", "cel-other")
+    end
+  end
 end

@@ -61,6 +61,13 @@ defmodule Hive.Merge do
   defp apply_strategy("auto_merge", cell, comb) do
     repo_path = comb.path
 
+    # Save HEAD before any checkout/merge so we can always roll back
+    original_head =
+      case get_head(repo_path) do
+        {:ok, head} -> head
+        _ -> nil
+      end
+
     with {:ok, main_branch} <- detect_main_branch(repo_path),
          :ok <- Hive.Git.checkout(repo_path, main_branch),
          :ok <- Hive.Git.merge(repo_path, cell.branch, no_ff: true) do
@@ -68,8 +75,8 @@ defmodule Hive.Merge do
       {:ok, "auto_merge"}
     else
       {:error, reason} ->
-        Logger.warning("Auto-merge failed for #{cell.branch}: #{inspect(reason)}")
-        # Fall back to manual on conflict
+        Logger.warning("Auto-merge failed for #{cell.branch}: #{inspect(reason)}, rolling back")
+        rollback_merge(repo_path, original_head)
         {:error, {:merge_conflict, reason}}
     end
   end
@@ -82,6 +89,29 @@ defmodule Hive.Merge do
 
   defp apply_strategy(unknown, _cell, _comb) do
     {:error, {:unknown_strategy, unknown}}
+  end
+
+  @doc """
+  Merges a bee branch using rebase-then-merge strategy.
+
+  Rebases the bee branch onto main first, then does a fast-forward merge.
+  Returns `{:ok, "rebase_merge"}` or `{:error, reason}`.
+  """
+  @spec merge_back_with_rebase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def merge_back_with_rebase(cell_id, _opts \\ []) do
+    with {:ok, cell} <- fetch_cell(cell_id),
+         {:ok, comb} <- fetch_comb(cell.comb_id),
+         {:ok, main_branch} <- detect_main_branch(comb.path),
+         :ok <- rebase_branch(cell.worktree_path, main_branch),
+         :ok <- Hive.Git.checkout(comb.path, main_branch),
+         :ok <- Hive.Git.merge(comb.path, cell.branch, []) do
+      Logger.info("Rebase-merged #{cell.branch} into #{main_branch}")
+      {:ok, "rebase_merge"}
+    else
+      {:error, reason} ->
+        Logger.warning("Rebase-merge failed: #{inspect(reason)}")
+        {:error, reason}
+    end
   end
 
   # -- Private: data fetching --------------------------------------------------
@@ -158,6 +188,9 @@ defmodule Hive.Merge do
   end
 
   defp merge_cells_into_quest_branch(repo_path, quest_branch, cells) do
+    # Save starting point for rollback
+    {:ok, savepoint} = get_head(repo_path)
+
     results =
       Enum.map(cells, fn cell ->
         case Hive.Git.merge(repo_path, cell.branch, no_ff: true) do
@@ -179,8 +212,51 @@ defmodule Hive.Merge do
       Logger.info("All bee branches merged into #{quest_branch}")
       {:ok, quest_branch}
     else
+      # Roll back to savepoint — none of the merges should persist if any failed
+      Logger.warning("Rolling back quest branch #{quest_branch} to savepoint due to merge failures")
+      System.cmd("git", ["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
       failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
       {:error, {:merge_conflicts, quest_branch, failed_branches}}
+    end
+  end
+
+  # -- Private: git helpers ----------------------------------------------------
+
+  defp get_head(repo_path) do
+    case System.cmd("git", ["rev-parse", "HEAD"],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} -> {:ok, String.trim(output)}
+      {output, _} -> {:error, {:git_error, String.trim(output)}}
+    end
+  end
+
+  defp rollback_merge(repo_path, original_head) do
+    # First try to abort any in-progress merge
+    System.cmd("git", ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+
+    # Then restore the original HEAD
+    if original_head do
+      System.cmd("git", ["checkout", original_head], cd: repo_path, stderr_to_stdout: true)
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp rebase_branch(worktree_path, main_branch) do
+    case System.cmd("git", ["rebase", main_branch],
+           cd: worktree_path,
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} ->
+        :ok
+
+      {output, _code} ->
+        System.cmd("git", ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
+        {:error, {:rebase_failed, String.slice(output, 0, 200)}}
     end
   end
 end

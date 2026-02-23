@@ -158,17 +158,13 @@ defmodule Hive.Verification do
     language = detect_language(comb)
     
     # Run static analysis
-    static_result = case Quality.analyze_static(job_id, cell.worktree_path, language) do
-      {:ok, report} -> %{static_score: report.score, static_issues: length(report.issues)}
-      {:error, _} -> %{static_score: nil, static_issues: 0}
-    end
-    
+    {:ok, static_report} = Quality.analyze_static(job_id, cell.worktree_path, language)
+    static_result = %{static_score: static_report.score, static_issues: length(static_report.issues)}
+
     # Run security scan
-    security_result = case Quality.analyze_security(job_id, cell.worktree_path, language) do
-      {:ok, report} -> %{security_score: report.score, security_findings: length(report.issues)}
-      {:error, _} -> %{security_score: nil, security_findings: 0}
-    end
-    
+    {:ok, security_report} = Quality.analyze_security(job_id, cell.worktree_path, language)
+    security_result = %{security_score: security_report.score, security_findings: length(security_report.issues)}
+
     # Run performance benchmarks (if configured)
     performance_result = case Quality.analyze_performance(job_id, cell.worktree_path, comb) do
       {:ok, report} -> %{performance_score: report.score, performance_metrics: length(report.issues)}
@@ -183,12 +179,15 @@ defmodule Hive.Verification do
     |> Map.put(:quality_score, composite)
   end
 
+  @known_languages ~w(elixir javascript typescript python rust go ruby java)a
+
   defp detect_language(comb) do
     # Use metadata if available
     case Map.get(comb, :metadata) do
       %{language: lang} when is_binary(lang) ->
-        String.to_atom(lang)
-      
+        atom = String.to_existing_atom(lang)
+        if atom in @known_languages, do: atom, else: :unknown
+
       _ ->
         # Fallback: detect from path
         cond do
@@ -199,17 +198,54 @@ defmodule Hive.Verification do
           true -> :unknown
         end
     end
+  rescue
+    ArgumentError -> :unknown
+  end
+
+  @doc """
+  Raises on verification failure. Useful in pipeline contexts where
+  failure should halt processing.
+  """
+  @spec verify_job!(String.t()) :: map()
+  def verify_job!(job_id) do
+    case verify_job(job_id) do
+      {:ok, :pass, result} -> result
+      {:ok, :fail, result} -> raise "Verification failed for job #{job_id}: #{inspect(result[:output])}"
+      {:error, reason} -> raise "Verification error for job #{job_id}: #{inspect(reason)}"
+    end
   end
 
   defp determine_status(result, comb) do
     thresholds = Quality.get_thresholds(comb.id)
-    
+    nil_policy = Map.get(comb, :nil_score_policy, :require_passing)
+
     cond do
-      result.status == "failed" -> "failed"
-      result[:security_score] && result.security_score < thresholds.security -> "failed"
-      result[:performance_score] && result.performance_score < thresholds.performance -> "failed"
-      result[:quality_score] && result.quality_score < thresholds.composite -> "failed"
-      true -> "passed"
+      result.status == "failed" ->
+        "failed"
+
+      # Security: nil means no data — check policy
+      is_nil(result[:security_score]) and nil_policy == :require_passing ->
+        "failed"
+
+      not is_nil(result[:security_score]) and result.security_score < thresholds.security ->
+        "failed"
+
+      # Performance: nil means no data — check policy
+      is_nil(result[:performance_score]) and nil_policy == :require_passing ->
+        "failed"
+
+      not is_nil(result[:performance_score]) and result.performance_score < thresholds.performance ->
+        "failed"
+
+      # Composite quality: nil means no data — check policy
+      is_nil(result[:quality_score]) and nil_policy == :require_passing ->
+        "failed"
+
+      not is_nil(result[:quality_score]) and result.quality_score < thresholds.composite ->
+        "failed"
+
+      true ->
+        "passed"
     end
   end
 end
