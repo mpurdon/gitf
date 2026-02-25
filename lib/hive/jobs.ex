@@ -138,14 +138,24 @@ defmodule Hive.Jobs do
   Transitions: failed -> pending. Also stops the assigned bee,
   cleans up its cell/worktree, and clears the bee_id assignment
   so the job can be assigned to a fresh bee.
+  
+  Optionally appends feedback to the job description.
   """
-  @spec reset(String.t()) :: {:ok, map()} | {:error, atom()}
-  def reset(job_id) do
+  @spec reset(String.t(), String.t() | nil) :: {:ok, map()} | {:error, atom()}
+  def reset(job_id, feedback \\ nil) do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, :reset) do
       cleanup_bee_and_cell(job.bee_id)
+      
+      new_description = 
+        if feedback do
+          (job.description || "") <> "\n\n## Feedback from previous attempt:\n\n" <> feedback
+        else
+          job.description
+        end
+
       retry_count = Map.get(job, :retry_count, 0) + 1
-      updated = %{job | status: next_status, bee_id: nil, retry_count: retry_count}
+      updated = %{job | status: next_status, bee_id: nil, retry_count: retry_count, description: new_description}
       Store.put(:jobs, updated)
     end
   end

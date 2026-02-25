@@ -17,11 +17,12 @@ defmodule Hive.Application do
       # PubSub MUST be first — everything else depends on it
       {Phoenix.PubSub, name: Hive.PubSub},
       {Hive.Store, data_dir: Application.get_env(:hive, :store_dir, Path.join(File.cwd!, ".hive/store"))},
+      {Registry, keys: :unique, name: Hive.Registry},
       # The Queen is the brain of the factory - starts automatically now
       {Hive.Queen, hive_root: Application.get_env(:hive, :store_dir, File.cwd!)},
+      {Hive.Ingestion.Watchdog, hive_root: File.cwd!()},
       {Hive.PubSubBridge, []},
       {Hive.Web.Endpoint, []},
-      {Registry, keys: :unique, name: Hive.Registry},
       {Hive.CombSupervisor, []},
       {Hive.Budget.Watchdog, []},
       {Hive.Plugin.MCPSupervisor, []},

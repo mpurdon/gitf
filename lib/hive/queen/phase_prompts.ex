@@ -121,10 +121,21 @@ defmodule Hive.Queen.PhasePrompts do
 
   Maps requirements to implementation approach with specific file changes.
   """
-  @spec design_prompt(map(), map(), map()) :: String.t()
-  def design_prompt(quest, requirements, research) do
+  @spec design_prompt(map(), map(), map(), String.t()) :: String.t()
+  def design_prompt(quest, requirements, research, extra_instructions \\ "") do
     requirements_json = Jason.encode!(requirements, pretty: true)
     research_json = Jason.encode!(research, pretty: true)
+
+    instructions = """
+    1. Map each requirement to a specific implementation approach
+    2. List exact files to create or modify
+    3. Define API contracts and interfaces
+    4. Identify component dependencies
+    5. Note implementation risks
+    """
+
+    final_instructions =
+      if extra_instructions != "", do: instructions <> "#{extra_instructions}\n", else: instructions
 
     """
     # Technical Design Phase
@@ -148,12 +159,7 @@ defmodule Hive.Queen.PhasePrompts do
 
     ## Instructions
 
-    1. Map each requirement to a specific implementation approach
-    2. List exact files to create or modify
-    3. Define API contracts and interfaces
-    4. Identify component dependencies
-    5. Note implementation risks
-
+    #{final_instructions}
     ## Output Format
 
     Output ONLY a JSON object in a ```json fence:
@@ -190,9 +196,9 @@ defmodule Hive.Queen.PhasePrompts do
   @doc """
   Builds the design prompt with review feedback for redesign iterations.
   """
-  @spec design_prompt_with_feedback(map(), map(), map(), map()) :: String.t()
-  def design_prompt_with_feedback(quest, requirements, research, review) do
-    base = design_prompt(quest, requirements, research)
+  @spec design_prompt_with_feedback(map(), map(), map(), map(), String.t()) :: String.t()
+  def design_prompt_with_feedback(quest, requirements, research, review, extra_instructions \\ "") do
+    base = design_prompt(quest, requirements, research, extra_instructions)
     review_json = Jason.encode!(review, pretty: true)
 
     base <>

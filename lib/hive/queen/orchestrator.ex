@@ -145,11 +145,18 @@ defmodule Hive.Queen.Orchestrator do
       # Check if this is a redesign iteration with review feedback
       review = Hive.Quests.get_artifact(quest.id, "review")
 
+      extra_instructions =
+        if is_client_facing?(quest) do
+          "6. ACT AS A BEHAVIORAL SCIENTIST: This is a client-facing project. Evaluate the plan for how people might think about it and what would make it exceptionally useful. Incorporate behavioral insights into the component design."
+        else
+          ""
+        end
+
       prompt =
         if review && review["approved"] == false do
-          PhasePrompts.design_prompt_with_feedback(quest, requirements, research, review)
+          PhasePrompts.design_prompt_with_feedback(quest, requirements, research, review, extra_instructions)
         else
-          PhasePrompts.design_prompt(quest, requirements, research)
+          PhasePrompts.design_prompt(quest, requirements, research, extra_instructions)
         end
 
       # Generate expert agents for design phase
@@ -435,6 +442,15 @@ defmodule Hive.Queen.Orchestrator do
   defp infer_domain(goal, tech_stack) do
     stack_str = if is_list(tech_stack), do: Enum.join(tech_stack, ", "), else: ""
     "#{goal} (#{stack_str})"
+  end
+
+  defp is_client_facing?(quest) do
+    text = String.downcase(quest.goal)
+
+    Enum.any?(
+      ["ui", "client", "frontend", "web", "user interface", "ux", "dashboard", "app"],
+      &String.contains?(text, &1)
+    )
   end
 
   # -- Helpers -----------------------------------------------------------------

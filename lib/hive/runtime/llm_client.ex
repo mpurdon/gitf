@@ -88,8 +88,26 @@ defmodule Hive.Runtime.LLMClient.Default do
     
     case Req.post(url, json: body) do
       {:ok, %{status: 200, body: resp}} ->
-        # Convert Gemini response to ReqLLM.Response struct
-        {:ok, parse_gemini_response(resp, model)}
+        response = parse_gemini_response(resp, model)
+        
+        # Append assistant response to context so AgentLoop can continue history
+        assistant_msg = %{
+          role: :assistant,
+          content: response.message.content,
+          tool_calls: response.message.tool_calls
+        }
+        
+        # Use ReqLLM.Context.append if available, or just append if it's a list/struct
+        updated_context = 
+          if function_exported?(ReqLLM.Context, :append, 2) do
+            ReqLLM.Context.append(messages, assistant_msg)
+          else
+            # Fallback if Context struct/module behaves differently
+            # But AgentLoop uses it, so it must exist.
+            ReqLLM.Context.append(messages, assistant_msg)
+          end
+        
+        {:ok, %{response | context: updated_context}}
         
       {:ok, %{status: status, body: body}} ->
         {:error, "Gemini API #{status}: #{inspect(body)}"}
@@ -152,10 +170,14 @@ defmodule Hive.Runtime.LLMClient.Default do
     usage = resp["usageMetadata"] || %{}
 
     %ReqLLM.Response{
+       id: nil,
+       context: nil,
        model: model,
-       role: :assistant,
-       content: text_parts,
-       tool_calls: tool_calls,
+       message: %{
+         role: :assistant,
+         content: text_parts,
+         tool_calls: tool_calls
+       },
        usage: %{
          input_tokens: usage["promptTokenCount"],
          output_tokens: usage["candidatesTokenCount"],

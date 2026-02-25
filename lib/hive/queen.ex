@@ -199,6 +199,42 @@ defmodule Hive.Queen do
     {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
+  def handle_info({ref, {:verification_passed, bee_id, job_id}}, state) do
+    # Flush task monitor
+    Process.demonitor(ref, [:flush])
+    Logger.info("Verification passed for job #{job_id} (bee #{bee_id})")
+    state = advance_quest(bee_id, state)
+    {:noreply, state}
+  end
+
+  def handle_info({ref, {:verification_failed, bee_id, job_id, result}}, state) do
+    Process.demonitor(ref, [:flush])
+    Logger.warning("Verification failed for job #{job_id}: #{inspect(result[:output])}")
+    
+    # Treat as job failure -> trigger retry logic
+    waggle = %{
+      from: bee_id, 
+      subject: "verification_failed", 
+      body: "Verification failed: #{result[:output]}"
+    }
+    state = maybe_retry_job(waggle, state)
+    {:noreply, state}
+  end
+
+  def handle_info({ref, {:verification_error, bee_id, job_id, reason}}, state) do
+    Process.demonitor(ref, [:flush])
+    Logger.error("Verification system error for job #{job_id}: #{inspect(reason)}")
+    
+    # Fail safe: retry
+    waggle = %{
+      from: bee_id, 
+      subject: "verification_error", 
+      body: "System error during verification: #{inspect(reason)}"
+    }
+    state = maybe_retry_job(waggle, state)
+    {:noreply, state}
+  end
+
   def handle_info(:recover_missed_waggles, state) do
     state = recover_missed_waggles(state)
     {:noreply, state}
@@ -254,9 +290,30 @@ defmodule Hive.Queen do
   # will move to dedicated context modules as the system grows.
 
   defp handle_waggle(%{subject: "job_complete"} = waggle, state) do
-    Logger.info("Bee #{waggle.from} reports job complete: #{waggle.body}")
+    Logger.info("Bee #{waggle.from} reports job complete. Initiating verification...")
+    
+    # We remove from active_bees immediately so Queen doesn't think it's still "working"
+    # but we don't advance quest yet.
     state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
-    advance_quest(waggle.from, state)
+
+    job_id = find_job_for_bee(waggle.from)
+
+    if job_id do
+      # Async verification prevents blocking the Queen
+      Task.async(fn ->
+        case Hive.Verification.verify_job(job_id) do
+          {:ok, :pass, _result} -> {:verification_passed, waggle.from, job_id}
+          {:ok, :fail, result} -> {:verification_failed, waggle.from, job_id, result}
+          {:error, reason} -> {:verification_error, waggle.from, job_id, reason}
+        end
+      end)
+    else
+      Logger.warning("Could not find job for bee #{waggle.from}, skipping verification")
+      # Fallback: try to advance anyway if we can't verify (orphan bee?)
+      advance_quest(waggle.from, state)
+    end
+
+    state
   end
 
   defp handle_waggle(%{subject: "job_failed"} = waggle, state) do
@@ -360,6 +417,7 @@ defmodule Hive.Queen do
     case Hive.Bees.get(waggle.from) do
       {:ok, bee} when not is_nil(bee.job_id) ->
         job_id = bee.job_id
+        feedback = waggle.body
 
         # Read persisted retry count from job record (survives Queen restarts)
         attempts =
@@ -372,9 +430,10 @@ defmodule Hive.Queen do
           Logger.info("Retrying job #{job_id} (attempt #{attempts + 1}/#{state.max_retries})")
 
           # Try intelligent retry first, fall back to simple retry
+          # TODO: Pass feedback to intelligent retry
           case try_intelligent_retry(job_id, state) do
             {:ok, _} -> state
-            {:error, _} -> simple_retry(job_id, state)
+            {:error, _} -> simple_retry(job_id, feedback, state)
           end
         else
           Logger.warning("Job #{job_id} exhausted #{state.max_retries} retries")
@@ -411,8 +470,8 @@ defmodule Hive.Queen do
       {:error, :intelligent_retry_failed}
   end
 
-  defp simple_retry(job_id, state) do
-    case Hive.Jobs.reset(job_id) do
+  defp simple_retry(job_id, feedback, state) do
+    case Hive.Jobs.reset(job_id, feedback) do
       {:ok, job} ->
         case check_quest_budget(job.quest_id) do
           :ok ->

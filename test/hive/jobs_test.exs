@@ -185,6 +185,20 @@ defmodule Hive.JobsTest do
       assert reset.status == "pending"
       assert reset.bee_id == nil
     end
+
+    test "reset/2 appends feedback to description", %{quest: quest, comb: comb} do
+      bee = create_bee()
+      {:ok, job} = create_job(quest, comb, %{description: "Original task"})
+      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.start(job.id)
+      {:ok, _} = Jobs.fail(job.id)
+
+      assert {:ok, reset} = Jobs.reset(job.id, "Validation failed: X is missing")
+      assert reset.status == "pending"
+      assert String.contains?(reset.description, "Original task")
+      assert String.contains?(reset.description, "## Feedback from previous attempt:")
+      assert String.contains?(reset.description, "Validation failed: X is missing")
+    end
   end
 
   describe "invalid transitions" do

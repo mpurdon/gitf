@@ -1,13 +1,27 @@
 defmodule Hive.Queen.OrchestratorTest do
   use ExUnit.Case, async: false
+  import Mox
 
   alias Hive.Queen.Orchestrator
   alias Hive.Store
 
+  setup :set_mox_from_context
+  setup :verify_on_exit!
+
   setup do
+    # Force API mode for mocking
+    original_config = Application.get_env(:hive, :llm, [])
+    Application.put_env(:hive, :llm, Keyword.merge(original_config, [execution_mode: :api]))
+
+    # Use Mock LLM Client
+    Application.put_env(:hive, :llm_client, Hive.Runtime.LLMClient.Mock)
+
     # Stop any previously running Store to avoid stale data
     try do
-      if pid = Process.whereis(Hive.Store), do: GenServer.stop(pid, :normal)
+      if pid = Process.whereis(Hive.Store) do
+        Supervisor.terminate_child(Hive.Supervisor, Hive.Store)
+        Supervisor.delete_child(Hive.Supervisor, Hive.Store)
+      end
     catch
       :exit, _ -> :ok
     end
@@ -16,7 +30,12 @@ defmodule Hive.Queen.OrchestratorTest do
     tmp_dir = System.tmp_dir!() |> Path.join("orchestrator_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     start_supervised!({Hive.Store, data_dir: tmp_dir})
-    on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+    on_exit(fn -> 
+      File.rm_rf!(tmp_dir)
+      Application.put_env(:hive, :llm, original_config)
+      Application.put_env(:hive, :llm_client, Hive.Runtime.LLMClient.Default)
+    end)
 
     # Create test comb and quest
     {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
@@ -190,6 +209,17 @@ defmodule Hive.Queen.OrchestratorTest do
     end
 
     test "handles review rejection with redesign", %{quest: quest} do
+      # Expect call for expert discovery
+      stub(Hive.Runtime.LLMClient.Mock, :generate_text, fn _model, _messages, _opts ->
+        {:ok, %ReqLLM.Response{
+           message: %{content: "[]", role: :assistant},
+           usage: %{},
+           model: "mock-model",
+           context: [],
+           id: "mock-id"
+        }}
+      end)
+
       quest_record = Store.get(:quests, quest.id)
       updated = Map.put(quest_record, :current_phase, "review")
       Store.put(:quests, updated)

@@ -96,7 +96,7 @@ defmodule Hive.CLI.PlanHandler do
     end
   end
 
-  defp run_interactive_api_loop(system_prompt, workspace, quest) do
+  defp run_interactive_api_loop(_system_prompt, _workspace, _quest) do
     # We need a REPL that feeds user input to AgentLoop
     # This is complex because AgentLoop is designed for autonomous execution.
     # We need a `ChatLoop` module or similar.

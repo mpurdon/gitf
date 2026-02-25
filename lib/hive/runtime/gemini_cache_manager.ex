@@ -35,7 +35,7 @@ defmodule Hive.Runtime.GeminiCacheManager do
   @doc """
   Gets an existing cache name or creates a new one for the given content.
   """
-  def get_or_create(content, model, opts \ []) do
+  def get_or_create(content, model, opts \\ []) do
     hash = :crypto.hash(:sha256, content) |> Base.encode16()
     GenServer.call(__MODULE__, {:get_or_create, hash, content, model, opts})
   end
@@ -93,7 +93,7 @@ defmodule Hive.Runtime.GeminiCacheManager do
     body = %{
       "model" => model,
       "systemInstruction" => %{
-        "parts" => [{"text" => system_instruction}]
+        "parts" => [%{"text" => system_instruction}]
       },
       "ttl" => "#{ttl_seconds}s"
     }
