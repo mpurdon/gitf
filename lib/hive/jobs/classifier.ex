@@ -27,11 +27,13 @@ defmodule Hive.Jobs.Classifier do
     job_type = classify_type(text)
     complexity = classify_complexity(text, job_type)
     model = ModelSelector.select_model_for_job(job_type, complexity)
+    risk_level = classify_risk(title, description)
 
     %{
       job_type: job_type,
       complexity: complexity,
       recommended_model: model,
+      risk_level: risk_level,
       reason: build_reason(job_type, complexity, text)
     }
   end
@@ -93,6 +95,57 @@ defmodule Hive.Jobs.Classifier do
           :moderate
       end
     end
+  end
+
+  @high_risk_keywords ~w(migration security auth deploy credential database secret password token)
+  @high_risk_files ["**/config/**", "**/migrations/**", "**/auth/**", "Dockerfile", ".env",
+                     "**/secrets/**", "**/credentials/**"]
+
+  @doc """
+  Classify risk level based on title, description, and target files.
+
+  Returns `:low`, `:medium`, `:high`, or `:critical`.
+
+  Risk signals:
+  - Keywords: migration, security, auth, deploy, credential, etc.
+  - File paths: config/, migrations/, auth/, Dockerfile, .env
+  - Multiple high signals → critical
+  """
+  @spec classify_risk(String.t(), String.t() | nil, list() | nil) ::
+          :low | :medium | :high | :critical
+  def classify_risk(title, description \\ nil, target_files \\ nil) do
+    text = "#{title} #{description || ""}" |> String.downcase()
+    files = target_files || []
+
+    keyword_hits = Enum.count(@high_risk_keywords, &String.contains?(text, &1))
+    file_hits = count_risky_files(files)
+    total_hits = keyword_hits + file_hits
+
+    cond do
+      total_hits >= 3 -> :critical
+      total_hits == 2 -> :high
+      total_hits == 1 -> :medium
+      true -> :low
+    end
+  end
+
+  defp count_risky_files(files) do
+    Enum.count(files, fn file ->
+      file_lower = String.downcase(file)
+
+      Enum.any?(@high_risk_files, fn pattern ->
+        cond do
+          String.starts_with?(pattern, "**/") ->
+            # Match directory anywhere in path
+            dir = String.trim_leading(pattern, "**/") |> String.trim_trailing("/**")
+            String.contains?(file_lower, "/#{dir}/") or String.starts_with?(file_lower, "#{dir}/")
+
+          true ->
+            # Exact filename match
+            Path.basename(file_lower) == String.downcase(pattern) or file_lower == String.downcase(pattern)
+        end
+      end)
+    end)
   end
 
   # Private helpers

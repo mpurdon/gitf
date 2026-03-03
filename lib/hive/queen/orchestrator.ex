@@ -14,8 +14,7 @@ defmodule Hive.Queen.Orchestrator do
   require Logger
 
   alias Hive.Store
-  alias Hive.Queen.PhasePrompts
-  alias Hive.Queen.Planner
+  alias Hive.Queen.{FastPath, PhasePrompts, Planner}
 
   @phases ~w(research requirements design review planning implementation validation merge)
   @max_redesign_iterations 2
@@ -31,14 +30,20 @@ defmodule Hive.Queen.Orchestrator do
   def start_quest(quest_id) do
     with {:ok, quest} <- Hive.Quests.get(quest_id),
          :ok <- validate_quest_ready(quest) do
-      # If a confirmed plan (planning artifact) already exists, skip to implementation
-      planning_artifact = Hive.Quests.get_artifact(quest_id, "planning")
-
-      if planning_artifact && is_list(planning_artifact) && planning_artifact != [] do
-        Logger.info("Quest #{quest_id} has pre-confirmed plan, skipping to implementation")
-        start_implementation(quest)
+      # Fast path: skip all phases for trivial quests
+      if FastPath.eligible?(quest) do
+        Logger.info("Quest #{quest_id} eligible for fast path, skipping phase pipeline")
+        FastPath.execute(quest_id)
       else
-        start_research(quest)
+        # If a confirmed plan (planning artifact) already exists, skip to implementation
+        planning_artifact = Hive.Quests.get_artifact(quest_id, "planning")
+
+        if planning_artifact && is_list(planning_artifact) && planning_artifact != [] do
+          Logger.info("Quest #{quest_id} has pre-confirmed plan, skipping to implementation")
+          start_implementation(quest)
+        else
+          start_research(quest)
+        end
       end
     end
   end
@@ -322,12 +327,99 @@ defmodule Hive.Queen.Orchestrator do
           complete_quest(quest.id)
         end
 
+      majority_failed?(impl_jobs) ->
+        # >50% failed: attempt fallback plan
+        attempt_fallback_plan(quest)
+
       Enum.any?(impl_jobs, &(&1.status == "failed")) ->
         # Let the Queen's retry logic handle failures
         {:ok, "implementation"}
 
       true ->
         {:ok, "implementation"}
+    end
+  end
+
+  defp majority_failed?(impl_jobs) do
+    terminal_jobs = Enum.filter(impl_jobs, &(&1.status in ["done", "failed"]))
+    failed = Enum.count(terminal_jobs, &(&1.status == "failed"))
+    total = length(terminal_jobs)
+
+    total > 0 and failed / total > 0.5
+  end
+
+  defp attempt_fallback_plan(quest) do
+    case Planner.select_fallback_plan(quest.id) do
+      {:ok, fallback} ->
+        Logger.warning(
+          "Quest #{quest.id}: >50% impl jobs failed, switching to fallback plan (#{fallback.strategy})"
+        )
+
+        # Record tried plan
+        quest_record = Store.get(:quests, quest.id)
+
+        if quest_record do
+          tried = Map.get(quest_record, :tried_plans, [])
+          current_plan = Map.get(quest_record, :draft_plan, %{})
+          updated = Map.put(quest_record, :tried_plans, [current_plan | tried])
+          Store.put(:quests, updated)
+        end
+
+        # Re-enter implementation with fallback plan
+        specs = fallback.tasks
+
+        case specs do
+          tasks when is_list(tasks) and tasks != [] ->
+            Planner.create_jobs_from_specs(quest.id, tasks)
+
+            {:ok, quest} = Hive.Quests.get(quest.id)
+            spawn_implementation_jobs(quest)
+            {:ok, "implementation"}
+
+          _ ->
+            Logger.warning("Fallback plan has no tasks, staying in implementation")
+            {:ok, "implementation"}
+        end
+
+      {:error, :no_fallback} ->
+        # Adaptive re-decomposition: replan from failure context
+        replan_count = Map.get(quest, :replan_count, 0)
+
+        if replan_count < 2 do
+          Logger.info("Quest #{quest.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)")
+
+          # Increment replan count
+          quest_record = Store.get(:quests, quest.id)
+
+          if quest_record do
+            updated = Map.put(quest_record, :replan_count, replan_count + 1)
+            Store.put(:quests, updated)
+          end
+
+          case Planner.replan_from_failures(quest.id) do
+            {:ok, replan} ->
+              specs = replan.tasks
+
+              case specs do
+                tasks when is_list(tasks) and tasks != [] ->
+                  Planner.create_jobs_from_specs(quest.id, tasks)
+                  {:ok, quest} = Hive.Quests.get(quest.id)
+                  spawn_implementation_jobs(quest)
+                  {:ok, "implementation"}
+
+                _ ->
+                  Logger.warning("Replan produced no tasks for quest #{quest.id}")
+                  {:ok, "implementation"}
+              end
+
+            {:error, reason} ->
+              Logger.warning("Replan failed for quest #{quest.id}: #{inspect(reason)}")
+              {:ok, "implementation"}
+          end
+        else
+          Logger.warning("Quest #{quest.id}: replan limit reached (#{replan_count}), staying in implementation")
+          {:ok, "implementation"}
+        end
     end
   end
 

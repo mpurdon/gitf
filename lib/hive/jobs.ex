@@ -90,6 +90,8 @@ defmodule Hive.Jobs do
         verification_status: "pending",
         verification_result: nil,
         verified_at: nil,
+        # Risk level for adaptive permissions
+        risk_level: classification[:risk_level] || attrs[:risk_level] || :low,
         # Retry tracking (persisted, survives Queen restarts)
         retry_count: attrs[:retry_count] || 0
       }

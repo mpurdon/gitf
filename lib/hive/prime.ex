@@ -214,7 +214,8 @@ defmodule Hive.Prime do
       "- Complete your assigned job and nothing else.",
       "- When done, send a waggle to the queen: `hive waggle send --to queen --subject \"job_complete\" --body \"<summary>\"`",
       "- If you are blocked, send: `hive waggle send --to queen --subject \"job_blocked\" --body \"<reason>\"`",
-      "- Do NOT modify files outside your worktree."
+      "- Do NOT modify files outside your worktree.",
+      friction_rules(job)
     ]
 
     sections
@@ -259,6 +260,13 @@ defmodule Hive.Prime do
       "Branch: `#{cell.branch}`"
     ]
     |> Enum.join("\n")
+  end
+
+  defp friction_rules(nil), do: ""
+
+  defp friction_rules(job) do
+    risk_level = Map.get(job, :risk_level, :low)
+    Hive.Bee.CognitiveFriction.friction_instructions(risk_level)
   end
 
   # -- Private: Quest Context ------------------------------------------------

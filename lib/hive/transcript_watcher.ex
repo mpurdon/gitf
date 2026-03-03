@@ -147,10 +147,53 @@ defmodule Hive.TranscriptWatcher do
         |> Hive.Transcript.extract_costs()
         |> Enum.each(&record_cost(bee_id, &1))
 
+        maybe_emit_checkpoint(bee_id, new_entries)
+
         %{entry | offset: new_offset}
 
       _ ->
         entry
+    end
+  end
+
+  @doc false
+  def maybe_emit_checkpoint(_bee_id, entries) when entries == [], do: :ok
+
+  def maybe_emit_checkpoint(bee_id, entries) do
+    # Infer phase from tool usage patterns in transcript entries
+    phase = infer_phase(entries)
+
+    if phase do
+      Hive.Waggle.send_checkpoint(bee_id, %{
+        phase: phase,
+        synthetic: true,
+        entries_count: length(entries)
+      })
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp infer_phase(entries) do
+    text =
+      entries
+      |> Enum.map(fn entry ->
+        cond do
+          is_map(entry) -> Map.get(entry, :content, Map.get(entry, "content", ""))
+          is_binary(entry) -> entry
+          true -> ""
+        end
+      end)
+      |> Enum.join(" ")
+      |> String.downcase()
+
+    cond do
+      String.contains?(text, "test") or String.contains?(text, "assert") -> "testing"
+      String.contains?(text, "write") or String.contains?(text, "edit") -> "coding"
+      String.contains?(text, "read") or String.contains?(text, "grep") -> "analyzing"
+      true -> nil
     end
   end
 

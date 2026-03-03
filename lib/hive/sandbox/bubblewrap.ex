@@ -8,18 +8,23 @@ defmodule Hive.Sandbox.Bubblewrap do
   @behaviour Hive.Sandbox
 
   def wrap_command(cmd, args, opts) do
-    # Basic bubblewrap configuration:
-    # - Unshare all namespaces (user, ipc, pid, net, uts, cgroup)
-    # - Mount / as read-only
-    # - Bind mount /tmp for scratch space
-    # - Bind mount the working directory as read-write
-    # - Share network (for now, bees need it)
-    
     cwd = Keyword.get(opts, :cd, File.cwd!())
-    
-    bwrap_args = [
+    risk_level = Keyword.get(opts, :risk_level, :low)
+
+    bwrap_args = base_args() ++ cwd_bind_args(cwd, risk_level) ++ [
+      "--die-with-parent",
+      "--new-session",
+      "--",
+      cmd
+    ] ++ args
+
+    {"bwrap", bwrap_args, opts}
+  end
+
+  defp base_args do
+    [
       "--unshare-all",
-      "--share-net",      # Allow network access
+      "--share-net",
       "--dev", "/dev",
       "--proc", "/proc",
       "--tmpfs", "/tmp",
@@ -27,17 +32,15 @@ defmodule Hive.Sandbox.Bubblewrap do
       "--ro-bind", "/bin", "/bin",
       "--ro-bind", "/lib", "/lib",
       "--ro-bind", "/lib64", "/lib64",
-      "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", # DNS
-      "--ro-bind", "/etc/ssl/certs", "/etc/ssl/certs",     # SSL certs
-      "--bind", cwd, cwd, # Allow RW access to current working dir
-      "--die-with-parent",
-      "--new-session",
-      "--",
-      cmd 
-    ] ++ args
-
-    {"bwrap", bwrap_args, opts}
+      "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf",
+      "--ro-bind", "/etc/ssl/certs", "/etc/ssl/certs"
+    ]
   end
+
+  # Critical risk: read-only worktree
+  defp cwd_bind_args(cwd, :critical), do: ["--ro-bind", cwd, cwd]
+  # All other risk levels: read-write worktree
+  defp cwd_bind_args(cwd, _risk_level), do: ["--bind", cwd, cwd]
   
   def available? do
     System.find_executable("bwrap") != nil

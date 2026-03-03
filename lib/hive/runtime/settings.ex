@@ -44,14 +44,15 @@ defmodule Hive.Runtime.Settings do
 
   Useful for testing or inspection.
   """
-  @spec build_settings(String.t(), String.t()) :: map()
-  def build_settings(bee_id, hive_root) do
+  @spec build_settings(String.t(), String.t(), keyword()) :: map()
+  def build_settings(bee_id, hive_root, opts \\ []) do
     hive_bin = hive_binary_path(hive_root)
     env_prefix = server_env_prefix()
+    risk_level = Keyword.get(opts, :risk_level, :low)
 
     %{
       "permissions" => %{
-        "allow" => allowed_tools(hive_bin)
+        "allow" => allowed_tools(hive_bin, risk_level)
       },
       "hooks" => %{
         "SessionStart" => [
@@ -167,7 +168,7 @@ defmodule Hive.Runtime.Settings do
     ]
   end
 
-  defp allowed_tools(hive_bin) do
+  defp allowed_tools(hive_bin, :low) do
     [
       "Bash(git:*)",
       "Bash(npm:*)",
@@ -187,6 +188,61 @@ defmodule Hive.Runtime.Settings do
       "Bash(cp:*)",
       "Bash(mv:*)",
       "Bash(rm:*)",
+      "Bash(cat:*)",
+      "Bash(#{hive_bin}:*)"
+    ]
+  end
+
+  defp allowed_tools(hive_bin, :medium) do
+    # No rm
+    [
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(mix:*)",
+      "Bash(cargo:*)",
+      "Bash(python:*)",
+      "Bash(pip:*)",
+      "Bash(make:*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(cat:*)",
+      "Bash(#{hive_bin}:*)"
+    ]
+  end
+
+  defp allowed_tools(hive_bin, :high) do
+    # No rm, mv, cp, limited Bash
+    [
+      "Bash(git:*)",
+      "Bash(mix:*)",
+      "Bash(npm:*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cat:*)",
+      "Bash(#{hive_bin}:*)"
+    ]
+  end
+
+  defp allowed_tools(hive_bin, :critical) do
+    # Read-only + hive CLI only
+    [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(#{hive_bin}:*)"
     ]

@@ -107,6 +107,41 @@ defmodule Hive.Waggle do
     end
   end
 
+  @doc """
+  Sends a checkpoint waggle from a bee, reporting progress.
+
+  The body contains checkpoint data: phase, files_changed, progress_pct.
+  """
+  @spec send_checkpoint(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def send_checkpoint(bee_id, %{} = data) do
+    body = Jason.encode!(data)
+    __MODULE__.send(bee_id, "queen", "checkpoint", body)
+  end
+
+  @doc """
+  Sends a resource warning waggle from a bee.
+
+  The body contains: type (e.g. :context_tokens, :time), current value, limit.
+  """
+  @spec send_resource_warning(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def send_resource_warning(bee_id, %{} = data) do
+    body = Jason.encode!(data)
+    __MODULE__.send(bee_id, "queen", "resource_warning", body)
+  end
+
+  @doc """
+  Sends a clarification request waggle from a bee to the queen.
+
+  Used by bees operating under high cognitive friction that encounter
+  ambiguous instructions.
+  """
+  @spec send_clarification(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def send_clarification(bee_id, %{question: question} = data) do
+    context = Map.get(data, :context, "")
+    body = Jason.encode!(%{question: question, context: context})
+    __MODULE__.send(bee_id, "queen", "clarification_needed", body)
+  end
+
   @doc "Subscribes the calling process to a PubSub topic."
   @spec subscribe(String.t()) :: :ok | {:error, term()}
   def subscribe(topic_string) do

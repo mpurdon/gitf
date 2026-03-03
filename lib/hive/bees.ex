@@ -313,13 +313,17 @@ defmodule Hive.Bees do
          {:ok, plugin} <- Hive.Runtime.Models.resolve_plugin() do
       cmd_line = build_detached_command(plugin, model_path, prompt)
 
+      # Read risk_level from job for sandbox configuration
+      risk_level = job_risk_level(job_id)
+
       # Apply sandbox if available
       # We wrap the command execution in a shell inside the sandbox
-      sandboxed_cmd_line = 
+      sandboxed_cmd_line =
         if Hive.Sandbox.available?() and Hive.Sandbox.name() != "local" do
-          {sandbox_cmd, sandbox_args, _opts} = 
-            Hive.Sandbox.wrap_command("sh", ["-c", cmd_line], cd: cell.worktree_path)
-          
+          {sandbox_cmd, sandbox_args, _opts} =
+            Hive.Sandbox.wrap_command("sh", ["-c", cmd_line],
+              cd: cell.worktree_path, risk_level: risk_level)
+
           Hive.Sandbox.to_shell_string(sandbox_cmd, sandbox_args)
         else
           cmd_line
@@ -392,6 +396,13 @@ defmodule Hive.Bees do
       plugin.detached_command(prompt, [])
     else
       ~s("#{model_path}" #{escape_shell(prompt)})
+    end
+  end
+
+  defp job_risk_level(job_id) do
+    case Hive.Jobs.get(job_id) do
+      {:ok, job} -> Map.get(job, :risk_level, :low)
+      _ -> :low
     end
   end
 

@@ -97,7 +97,9 @@ defmodule Hive.Queen do
       hive_root: hive_root,
       port: nil,
       max_bees: max_bees,
-      max_retries: 3
+      max_retries: 3,
+      last_checkpoint: %{},
+      stall_timeout: :timer.minutes(10)
     }
 
     # Drone is now supervised by Application — just verify it's running
@@ -117,6 +119,9 @@ defmodule Hive.Queen do
 
     # Periodically check for pending jobs that need bees
     schedule_job_spawner()
+
+    # Periodically check for stalled bees
+    schedule_stall_check()
 
     {:ok, state}
   end
@@ -203,6 +208,7 @@ defmodule Hive.Queen do
     # Flush task monitor
     Process.demonitor(ref, [:flush])
     Logger.info("Verification passed for job #{job_id} (bee #{bee_id})")
+    Hive.Reputation.update_after_job(job_id)
     state = advance_quest(bee_id, state)
     {:noreply, state}
   end
@@ -210,6 +216,7 @@ defmodule Hive.Queen do
   def handle_info({ref, {:verification_failed, bee_id, job_id, result}}, state) do
     Process.demonitor(ref, [:flush])
     Logger.warning("Verification failed for job #{job_id}: #{inspect(result[:output])}")
+    Hive.Reputation.update_after_job(job_id)
     
     # Treat as job failure -> trigger retry logic
     waggle = %{
@@ -249,6 +256,12 @@ defmodule Hive.Queen do
   def handle_info(:spawn_ready_jobs, state) do
     state = spawn_all_ready_jobs(state)
     schedule_job_spawner()
+    {:noreply, state}
+  end
+
+  def handle_info(:check_stalls, state) do
+    detect_stalled_bees(state)
+    schedule_stall_check()
     {:noreply, state}
   end
 
@@ -404,6 +417,50 @@ defmodule Hive.Queen do
     state
   end
 
+  defp handle_waggle(%{subject: "checkpoint"} = waggle, state) do
+    bee_id = waggle.from
+    Logger.debug("Checkpoint from bee #{bee_id}: #{waggle.body}")
+
+    checkpoint_data =
+      case Jason.decode(waggle.body) do
+        {:ok, data} -> data
+        _ -> %{}
+      end
+
+    last_checkpoint =
+      Map.put(state.last_checkpoint, bee_id, %{
+        at: DateTime.utc_now(),
+        data: checkpoint_data
+      })
+
+    # Broadcast progress update
+    Phoenix.PubSub.broadcast(
+      Hive.PubSub,
+      "hive:progress",
+      {:bee_checkpoint, bee_id, checkpoint_data}
+    )
+
+    %{state | last_checkpoint: last_checkpoint}
+  rescue
+    _ -> state
+  end
+
+  defp handle_waggle(%{subject: "resource_warning"} = waggle, state) do
+    bee_id = waggle.from
+    Logger.warning("Resource warning from bee #{bee_id}: #{waggle.body}")
+
+    # Broadcast alert
+    Phoenix.PubSub.broadcast(
+      Hive.PubSub,
+      "hive:alerts",
+      {:resource_warning, bee_id, waggle.body}
+    )
+
+    state
+  rescue
+    _ -> state
+  end
+
   defp handle_waggle(%{subject: "quest_advance"} = waggle, state) do
     # Handle quest phase advancement requests
     quest_id = waggle.body
@@ -414,6 +471,20 @@ defmodule Hive.Queen do
         Logger.warning("Failed to advance quest #{quest_id}: #{inspect(reason)}")
     end
     state
+  end
+
+  defp handle_waggle(%{subject: "clarification_needed"} = waggle, state) do
+    Logger.warning("Clarification request from bee #{waggle.from}: #{waggle.body}")
+
+    Phoenix.PubSub.broadcast(
+      Hive.PubSub,
+      "hive:alerts",
+      {:clarification_needed, waggle.from, waggle.body}
+    )
+
+    state
+  rescue
+    _ -> state
   end
 
   defp handle_waggle(waggle, state) do
@@ -638,6 +709,47 @@ defmodule Hive.Queen do
       {:ok, _remaining} -> :ok
       {:error, :budget_exceeded, _spent} -> {:error, :budget_exceeded}
     end
+  rescue
+    _ -> :ok
+  end
+
+  # -- Private: stall detection ------------------------------------------------
+
+  @stall_check_interval :timer.minutes(2)
+
+  defp schedule_stall_check do
+    Process.send_after(self(), :check_stalls, @stall_check_interval)
+  end
+
+  @doc false
+  def detect_stalled_bees(state) do
+    now = DateTime.utc_now()
+    stall_seconds = div(state.stall_timeout, 1000)
+
+    working_bees = Hive.Bees.list(status: "working")
+
+    Enum.each(working_bees, fn bee ->
+      last_cp = Map.get(state.last_checkpoint, bee.id)
+
+      # Use checkpoint time if available, otherwise use bee's inserted_at
+      reference_time =
+        if last_cp, do: last_cp.at, else: bee.inserted_at
+
+      seconds_since = DateTime.diff(now, reference_time, :second)
+
+      if seconds_since > stall_seconds do
+        Logger.warning(
+          "Stall detected: bee #{bee.id} has not reported in #{seconds_since}s " <>
+            "(threshold: #{stall_seconds}s)"
+        )
+
+        Phoenix.PubSub.broadcast(
+          Hive.PubSub,
+          "hive:alerts",
+          {:stall_warning, bee.id, seconds_since}
+        )
+      end
+    end)
   rescue
     _ -> :ok
   end

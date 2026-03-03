@@ -109,11 +109,36 @@ defmodule Hive.Runtime.ModelSelector do
   """
   @spec recommend_for_job(map()) :: String.t()
   def recommend_for_job(%{} = job) do
+    quest_id = job[:quest_id] || job["quest_id"]
+
+    # When quest context exists, use multi-objective selector
+    if quest_id do
+      try do
+        {model, _breakdown} = Hive.Runtime.MultiObjectiveSelector.select_optimal(job)
+        model
+      rescue
+        _ -> fallback_recommend(job, quest_id)
+      end
+    else
+      fallback_recommend(job, nil)
+    end
+  end
+
+  defp fallback_recommend(job, quest_id) do
     job_type = parse_job_type(job[:job_type] || job["job_type"])
     complexity = parse_complexity(job[:complexity] || job["complexity"])
-    base_model = select_model_for_job(job_type, complexity)
+    static_model = select_model_for_job(job_type, complexity)
 
-    quest_id = job[:quest_id] || job["quest_id"]
+    base_model =
+      try do
+        case Hive.Reputation.recommend_model(job_type, complexity) do
+          model when is_binary(model) and model != "" -> model
+          _ -> static_model
+        end
+      rescue
+        _ -> static_model
+      end
+
     maybe_downgrade_for_budget(base_model, quest_id)
   end
 

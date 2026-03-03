@@ -22,48 +22,66 @@ defmodule Hive.Verification do
          {:ok, cell} <- get_job_cell(job),
          {:ok, comb} <- Store.fetch(:combs, job.comb_id) do
 
-      result = %{
-        job_id: job_id,
-        status: "running",
-        output: "",
-        exit_code: nil,
-        quality_score: nil,
-        ran_at: DateTime.utc_now()
-      }
+      # Check graduated authority — auto-approve eligible jobs
+      authority_level = Hive.Authority.verification_level(job)
 
-      skip_validation = Keyword.get(opts, :skip_validation_command, false)
+      if authority_level == :auto_approve and Hive.Authority.should_auto_merge?(job) do
+        auto_result = %{
+          job_id: job_id,
+          status: "auto_approved",
+          output: "Auto-approved via graduated authority (model reputation)",
+          exit_code: 0,
+          quality_score: nil,
+          ran_at: DateTime.utc_now()
+        }
 
-      # Run validation command if configured (skip if already run by Validator)
-      validation_result =
-        if not skip_validation and Map.get(comb, :validation_command) do
-          case run_validation_command(cell, comb.validation_command) do
-            {:ok, output} ->
-              %{result | status: "passed", output: output, exit_code: 0}
-            {:error, {output, exit_code}} ->
-              %{result | status: "failed", output: output, exit_code: exit_code}
+        {:ok, _} = record_result(job_id, auto_result)
+        update_job_verification(job_id, :pass, auto_result)
+        {:ok, :pass, auto_result}
+      else
+        result = %{
+          job_id: job_id,
+          status: "running",
+          output: "",
+          exit_code: nil,
+          quality_score: nil,
+          ran_at: DateTime.utc_now()
+        }
+
+        skip_validation = Keyword.get(opts, :skip_validation_command, false)
+
+        # Run validation command if configured (skip if already run by Validator)
+        validation_result =
+          if not skip_validation and Map.get(comb, :validation_command) do
+            case run_validation_command(cell, comb.validation_command) do
+              {:ok, output} ->
+                %{result | status: "passed", output: output, exit_code: 0}
+              {:error, {output, exit_code}} ->
+                %{result | status: "failed", output: output, exit_code: exit_code}
+            end
+          else
+            %{result | status: "passed", output: "No validation command configured"}
           end
-        else
-          %{result | status: "passed", output: "No validation command configured"}
-        end
-      
-      # Run quality checks
-      quality_result = run_quality_checks(job_id, cell, comb)
-      
-      # Combine results
-      final_result = Map.merge(validation_result, quality_result)
-      
-      # Determine overall status
-      final_status = determine_status(final_result, comb)
-      final_result = %{final_result | status: final_status}
-      
-      # Store result
-      {:ok, _} = record_result(job_id, final_result)
-      
-      # Update job
-      status = if final_status == "passed", do: :pass, else: :fail
-      update_job_verification(job_id, status, final_result)
-      
-      {:ok, status, final_result}
+
+        # Run quality checks
+        quality_result = run_quality_checks(job_id, cell, comb)
+
+        # Combine results
+        final_result = Map.merge(validation_result, quality_result)
+
+        # Determine overall status with authority-adjusted thresholds
+        final_status = determine_status(final_result, comb, authority_level)
+        final_result = %{final_result | status: final_status}
+
+        # Store result
+        {:ok, _} = record_result(job_id, final_result)
+
+        # Update job
+        status = if final_status == "passed", do: :pass, else: :fail
+        update_job_verification(job_id, status, final_result)
+
+        {:ok, status, final_result}
+      end
     end
   end
 
@@ -217,8 +235,9 @@ defmodule Hive.Verification do
     end
   end
 
-  defp determine_status(result, comb) do
-    thresholds = Quality.get_thresholds(comb.id)
+  defp determine_status(result, comb, authority_level) do
+    base_thresholds = Quality.get_thresholds(comb.id)
+    thresholds = Hive.Authority.adjusted_thresholds(base_thresholds, authority_level)
     nil_policy = Map.get(comb, :nil_score_policy, :require_passing)
 
     cond do

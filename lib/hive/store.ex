@@ -372,6 +372,9 @@ defmodule Hive.Store do
   defp collection_prefix(:research_file_index), do: :rfi
   defp collection_prefix(:verification_results), do: :vrf
   defp collection_prefix(:context_snapshots), do: :ctx
+  defp collection_prefix(:model_reputation), do: :mrp
+  defp collection_prefix(:council_reputation), do: :crp
+  defp collection_prefix(:expert_reputation), do: :erp
   defp collection_prefix(_), do: :hiv
 
   defp ensure_timestamps(record) do

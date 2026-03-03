@@ -402,6 +402,295 @@ defmodule Hive.Queen.Planner do
   defp resolve_model(nil), do: nil
   defp resolve_model(other), do: other
 
+  # -- Multi-Plan Evaluation ---------------------------------------------------
+
+  @doc """
+  Generates 3 candidate plans (minimal, balanced, thorough), scores each,
+  stores all as `:plan_candidates` artifact, and returns the best one.
+
+  Falls back to `generate_llm_plan/1` single plan on failure.
+  """
+  @spec generate_candidate_plans(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def generate_candidate_plans(quest_id, opts \\ %{}) do
+    with {:ok, _quest} <- Hive.Quests.get(quest_id) do
+      strategies = ["minimal", "balanced", "thorough"]
+
+      candidates =
+        strategies
+        |> Enum.map(fn strategy ->
+          case generate_llm_plan(quest_id, Map.put(opts, :strategy, strategy)) do
+            {:ok, plan} ->
+              scored = Map.put(plan, :score, score_plan(plan))
+              Map.put(scored, :strategy, strategy)
+
+            {:error, _} ->
+              nil
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      if candidates == [] do
+        # Fall back to single plan
+        generate_llm_plan(quest_id, opts)
+      else
+        # Store all candidates
+        Hive.Quests.store_artifact(quest_id, "plan_candidates", %{
+          "candidates" => Enum.map(candidates, fn c ->
+            %{
+              "strategy" => c.strategy,
+              "score" => c.score,
+              "task_count" => length(c.tasks),
+              "estimated_duration" => c.estimated_duration
+            }
+          end),
+          "generated_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+        })
+
+        # Select best by score
+        best = Enum.max_by(candidates, & &1.score)
+
+        # Store best plan as draft
+        quest_record = Store.get(:quests, quest_id)
+
+        if quest_record do
+          updated =
+            quest_record
+            |> Map.put(:draft_plan, best)
+            |> Map.put(:plan_candidates, candidates)
+
+          Store.put(:quests, updated)
+        end
+
+        {:ok, best}
+      end
+    end
+  end
+
+  @doc """
+  Scores a plan using a composite formula.
+
+  Components (weights):
+  - Task count efficiency (20%): fewer tasks = better (diminishing returns)
+  - Parallelism potential (25%): tasks without deps / total tasks
+  - Complexity distribution (20%): balanced mix of simple/moderate/complex
+  - Estimated cost (15%): lower is better
+  - Reputation-based model confidence (20%): avg model reputation for task types
+  """
+  @spec score_plan(map()) :: float()
+  def score_plan(plan) do
+    tasks = Map.get(plan, :tasks, [])
+
+    if tasks == [] do
+      0.0
+    else
+      task_score = score_task_count(length(tasks))
+      parallel_score = score_parallelism(tasks)
+      complexity_score = score_complexity_distribution(tasks)
+      cost_score = score_estimated_cost(tasks)
+      reputation_score = score_model_confidence(tasks)
+
+      task_score * 0.20 +
+        parallel_score * 0.25 +
+        complexity_score * 0.20 +
+        cost_score * 0.15 +
+        reputation_score * 0.20
+    end
+  end
+
+  @doc """
+  Returns the next untried candidate plan for a quest.
+
+  Reads `:tried_plans` from quest, returns next candidate not yet tried.
+  """
+  @spec select_fallback_plan(String.t()) :: {:ok, map()} | {:error, :no_fallback}
+  def select_fallback_plan(quest_id) do
+    quest = Store.get(:quests, quest_id)
+    candidates = Map.get(quest || %{}, :plan_candidates, [])
+    tried = Map.get(quest || %{}, :tried_plans, [])
+    tried_strategies = Enum.map(tried, & &1[:strategy])
+
+    untried =
+      candidates
+      |> Enum.reject(fn c -> c.strategy in tried_strategies end)
+      |> Enum.sort_by(& &1.score, :desc)
+
+    case untried do
+      [next | _] -> {:ok, next}
+      [] -> {:error, :no_fallback}
+    end
+  end
+
+  # -- Plan Scoring Helpers --------------------------------------------------
+
+  defp score_task_count(count) do
+    # Sweet spot: 2-5 tasks
+    cond do
+      count <= 1 -> 0.5
+      count <= 5 -> 1.0
+      count <= 10 -> 0.7
+      true -> 0.4
+    end
+  end
+
+  defp score_parallelism(tasks) do
+    no_deps =
+      Enum.count(tasks, fn t ->
+        deps = t["depends_on_indices"] || []
+        deps == []
+      end)
+
+    total = length(tasks)
+    if total > 0, do: no_deps / total, else: 0.0
+  end
+
+  defp score_complexity_distribution(tasks) do
+    models =
+      Enum.map(tasks, fn t ->
+        t["model_recommendation"] || "sonnet"
+      end)
+
+    unique = Enum.uniq(models) |> length()
+    # More variety in model selection = better distribution
+    min(unique / 3.0, 1.0)
+  end
+
+  defp score_estimated_cost(tasks) do
+    # Estimate based on model tiers
+    total_cost =
+      Enum.reduce(tasks, 0, fn t, acc ->
+        model = t["model_recommendation"] || "sonnet"
+
+        cost =
+          case model do
+            "haiku" -> 1
+            "sonnet" -> 3
+            "opus" -> 10
+            _ -> 3
+          end
+
+        acc + cost
+      end)
+
+    # Invert: lower cost = higher score
+    max_cost = length(tasks) * 10
+    if max_cost > 0, do: 1.0 - total_cost / max_cost, else: 1.0
+  end
+
+  defp score_model_confidence(tasks) do
+    scores =
+      Enum.map(tasks, fn t ->
+        model = t["model_recommendation"] || "sonnet"
+        job_type = infer_job_type(t)
+        rep = Hive.Reputation.model_reputation(model, job_type)
+        if rep, do: rep.success_rate, else: 0.5
+      end)
+
+    if scores == [],
+      do: 0.5,
+      else: Enum.sum(scores) / length(scores)
+  rescue
+    _ -> 0.5
+  end
+
+  defp infer_job_type(task) do
+    title = (task["title"] || "") |> String.downcase()
+
+    cond do
+      String.contains?(title, "test") -> :verification
+      String.contains?(title, "research") -> :research
+      String.contains?(title, "plan") -> :planning
+      true -> :implementation
+    end
+  end
+
+  # -- Adaptive Re-decomposition -----------------------------------------------
+
+  @doc """
+  Re-plan a quest from failure context.
+
+  When all fallback plans are exhausted, analyzes what went wrong and
+  generates a new plan that avoids the failed approaches.
+
+  1. Collects failed job IDs from quest
+  2. Runs FailureAnalysis on each
+  3. Builds replan prompt with failure summaries
+  4. Generates a new LLM plan with failure avoidance context
+
+  Returns `{:ok, replan}` or `{:error, :replan_failed}`.
+  """
+  @spec replan_from_failures(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def replan_from_failures(quest_id, opts \\ %{}) do
+    with {:ok, _quest} <- Hive.Quests.get(quest_id) do
+      # Collect failed jobs
+      failed_jobs =
+        Hive.Jobs.list(quest_id: quest_id, status: "failed")
+
+      if failed_jobs == [] do
+        {:error, :no_failures}
+      else
+        # Analyze each failure
+        analyses =
+          failed_jobs
+          |> Enum.map(fn job ->
+            case Hive.Intelligence.FailureAnalysis.analyze_failure(job.id) do
+              {:ok, analysis} -> analysis
+              {:error, _} -> nil
+            end
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        # Build failure context for the replan prompt
+        failure_context = build_failure_context(failed_jobs, analyses)
+
+        # Generate new plan with failure avoidance
+        replan_opts =
+          opts
+          |> Map.put(:failure_context, failure_context)
+          |> Map.put(:feedback, failure_context)
+
+        case generate_llm_plan(quest_id, replan_opts) do
+          {:ok, plan} ->
+            plan = Map.put(plan, :replan, true)
+            {:ok, plan}
+
+          {:error, _reason} ->
+            {:error, :replan_failed}
+        end
+      end
+    end
+  rescue
+    e ->
+      require Logger
+      Logger.warning("Replan failed for quest: #{inspect(e)}")
+      {:error, :replan_failed}
+  end
+
+  defp build_failure_context(failed_jobs, analyses) do
+    job_summaries =
+      failed_jobs
+      |> Enum.map(fn job ->
+        analysis = Enum.find(analyses, fn a -> a.job_id == job.id end)
+
+        failure_type = if analysis, do: analysis.failure_type, else: :unknown
+        root_cause = if analysis, do: analysis.root_cause, else: "Unknown"
+        suggestions = if analysis, do: Enum.join(analysis.suggestions, "; "), else: ""
+
+        "- Job \"#{job.title}\" failed (#{failure_type}): #{root_cause}. Suggestions: #{suggestions}"
+      end)
+      |> Enum.join("\n")
+
+    """
+    ## Previous Failures (AVOID THESE APPROACHES)
+
+    The following jobs failed in previous attempts. Your new plan MUST take
+    a different approach and avoid the patterns that caused these failures:
+
+    #{job_summaries}
+
+    Design a plan that works around these known issues.
+    """
+  end
+
   # Goal-focused planning helpers
   
   defp define_acceptance_criteria(quest) do
