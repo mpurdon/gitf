@@ -9,15 +9,15 @@ defmodule Hive.Intelligence.FailureAnalysis do
   Analyze a failed job and classify the failure.
   Returns failure analysis with type, cause, and suggestions.
   """
-  def analyze_failure(job_id) do
+  def analyze_failure(job_id, feedback \\ nil) do
     with {:ok, job} <- Hive.Jobs.get(job_id),
          true <- job.status == "failed" do
-      
-      failure_type = classify_failure(job)
+
+      failure_type = classify_failure(job, feedback)
       root_cause = identify_root_cause(job, failure_type)
       similar = find_similar_failures(job, failure_type)
       suggestions = generate_suggestions(failure_type, root_cause, similar)
-      
+
       analysis = %{
         id: generate_id("fa"),
         job_id: job_id,
@@ -25,6 +25,7 @@ defmodule Hive.Intelligence.FailureAnalysis do
         root_cause: root_cause,
         similar_count: length(similar),
         suggestions: suggestions,
+        feedback: feedback,
         analyzed_at: DateTime.utc_now()
       }
       
@@ -81,19 +82,20 @@ defmodule Hive.Intelligence.FailureAnalysis do
 
   # Private functions
 
-  defp classify_failure(job) do
+  defp classify_failure(job, feedback) do
     error_msg = Map.get(job, :error_message, "")
     output = Map.get(job, :verification_result, "")
-    
+    combined = Enum.join([error_msg, output, feedback || ""], " ")
+
     cond do
-      String.contains?(error_msg, "timeout") -> :timeout
-      String.contains?(error_msg, "compilation") -> :compilation_error
-      String.contains?(output, "test") && String.contains?(output, "failed") -> :test_failure
-      String.contains?(error_msg, "context") -> :context_overflow
-      String.contains?(error_msg, "validation") -> :validation_failure
-      String.contains?(error_msg, "quality") -> :quality_gate_failure
-      String.contains?(error_msg, "security") -> :security_gate_failure
-      String.contains?(error_msg, "merge") -> :merge_conflict
+      String.contains?(combined, "timeout") -> :timeout
+      String.contains?(combined, "compilation") -> :compilation_error
+      String.contains?(combined, "test") && String.contains?(combined, "failed") -> :test_failure
+      String.contains?(combined, "context") -> :context_overflow
+      String.contains?(combined, "validation") -> :validation_failure
+      String.contains?(combined, "quality") -> :quality_gate_failure
+      String.contains?(combined, "security") -> :security_gate_failure
+      String.contains?(combined, "merge") -> :merge_conflict
       true -> :unknown
     end
   end
@@ -139,7 +141,7 @@ defmodule Hive.Intelligence.FailureAnalysis do
       j.id != job.id
     end)
     |> Enum.filter(fn j ->
-      classify_failure(j) == failure_type
+      classify_failure(j, nil) == failure_type
     end)
     |> Enum.take(5)
   end

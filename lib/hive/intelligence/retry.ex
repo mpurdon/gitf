@@ -10,10 +10,10 @@ defmodule Hive.Intelligence.Retry do
   Retry a failed job with an intelligent strategy.
   Returns {:ok, new_job} or {:error, reason}.
   """
-  def retry_with_strategy(job_id) do
+  def retry_with_strategy(job_id, feedback \\ nil) do
     with {:ok, job} <- Hive.Jobs.get(job_id),
-         {:ok, analysis} <- FailureAnalysis.analyze_failure(job_id) do
-      
+         {:ok, analysis} <- FailureAnalysis.analyze_failure(job_id, feedback) do
+
       strategy = select_strategy(analysis)
       execute_retry(job, strategy, analysis)
     end
@@ -51,72 +51,72 @@ defmodule Hive.Intelligence.Retry do
   defp execute_retry(job, strategy, analysis) do
     case strategy do
       :different_model ->
-        retry_with_different_model(job)
-      
+        retry_with_different_model(job, analysis)
+
       :simplify_scope ->
-        retry_with_simplified_scope(job)
-      
+        retry_with_simplified_scope(job, analysis)
+
       :more_context ->
-        retry_with_more_context(job)
-      
+        retry_with_more_context(job, analysis)
+
       :create_handoff ->
-        create_handoff_and_retry(job)
-      
+        create_handoff_and_retry(job, analysis)
+
       :different_approach ->
-        retry_with_alternative_approach(job)
-      
+        retry_with_alternative_approach(job, analysis)
+
       :fresh_worktree ->
-        retry_with_fresh_worktree(job)
-      
+        retry_with_fresh_worktree(job, analysis)
+
       _ ->
         # Default: just retry with same settings
         retry_job(job, strategy, analysis)
     end
   end
 
-  defp retry_with_different_model(job) do
+  defp retry_with_different_model(job, analysis) do
     # Switch to a more capable model
     new_model = case Map.get(job, :model) do
       "claude-haiku" -> "claude-sonnet"
       "claude-sonnet" -> "claude-opus"
       _ -> "claude-opus"
     end
-    
-    retry_job(job, :different_model, %{model: new_model})
+
+    retry_job(job, :different_model, %{model: new_model, feedback: analysis[:feedback]})
   end
 
-  defp retry_with_simplified_scope(job) do
-    # Add note to simplify the task
+  defp retry_with_simplified_scope(job, analysis) do
     retry_job(job, :simplify_scope, %{
-      note: "Previous attempt timed out. Please simplify the implementation."
+      note: "Previous attempt timed out. Please simplify the implementation.",
+      feedback: analysis[:feedback]
     })
   end
 
-  defp retry_with_more_context(job) do
-    # Retry with request for more context
+  defp retry_with_more_context(job, analysis) do
     retry_job(job, :more_context, %{
-      note: "Previous attempt had test failures. Please review test requirements carefully."
+      note: "Previous attempt had test failures. Please review test requirements carefully.",
+      feedback: analysis[:feedback]
     })
   end
 
-  defp create_handoff_and_retry(job) do
-    # This would create a handoff, but for now just note it
+  defp create_handoff_and_retry(job, analysis) do
     retry_job(job, :create_handoff, %{
-      note: "Context overflow detected. Consider breaking into smaller tasks."
+      note: "Context overflow detected. Consider breaking into smaller tasks.",
+      feedback: analysis[:feedback]
     })
   end
 
-  defp retry_with_alternative_approach(job) do
-    # Suggest trying a different approach
+  defp retry_with_alternative_approach(job, analysis) do
     retry_job(job, :different_approach, %{
-      note: "This is a recurring failure. Please try a different implementation approach."
+      note: "This is a recurring failure. Please try a different implementation approach.",
+      feedback: analysis[:feedback]
     })
   end
 
-  defp retry_with_fresh_worktree(job) do
-    # Clean up and retry
+  defp retry_with_fresh_worktree(job, analysis) do
     retry_job(job, :fresh_worktree, %{
-      note: "Merge conflict detected. Starting with fresh worktree."
+      note: "Merge conflict detected. Starting with fresh worktree.",
+      feedback: analysis[:feedback]
     })
   end
 
