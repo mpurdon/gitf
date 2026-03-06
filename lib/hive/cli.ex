@@ -212,8 +212,7 @@ defmodule Hive.CLI do
   @handlers [
     Hive.CLI.QuestHandler,
     Hive.CLI.BeeHandler,
-    Hive.CLI.CouncilHandler,
-    Hive.CLI.PlanHandler
+    Hive.CLI.CouncilHandler
   ]
 
   defp handler_helpers do
@@ -1581,30 +1580,39 @@ defmodule Hive.CLI do
       attrs = if comb_opt, do: %{goal: goal, comb_id: comb_opt}, else: %{goal: goal}
 
       case Hive.Client.create_quest(attrs) do
-        {:ok, quest} -> Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
-        {:error, reason} -> Format.error("Failed to create quest: #{inspect(reason)}")
+        {:ok, quest} ->
+          Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+          Format.info("Starting quest execution on remote server...")
+
+          case Hive.Client.start_quest(quest.id) do
+            {:ok, data} ->
+              phase = if is_map(data), do: data[:phase], else: data
+              Format.success("Quest #{quest.id} is now in #{phase} phase.")
+
+            {:error, reason} ->
+              Format.warn("Could not auto-start: #{inspect(reason)}")
+          end
+
+        {:error, reason} ->
+          Format.error("Failed to create quest: #{inspect(reason)}")
       end
     else
-      case resolve_comb_id(result_get(result, :options, :comb)) do
-        {:ok, comb_id} ->
-          attrs = %{goal: goal, comb_id: comb_id}
+      discovery? = goal == nil or goal == ""
 
-          case Hive.Quests.create(attrs) do
-            {:ok, quest} ->
-              Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+      quest_result =
+        case resolve_comb_id(result_get(result, :options, :comb)) do
+          {:ok, cid} -> Hive.Quests.create(%{goal: goal || "New quest", comb_id: cid})
+          {:error, :no_comb} -> Hive.Quests.create(%{goal: goal || "New quest"})
+        end
 
-            {:error, reason} ->
-              Format.error("Failed to create quest: #{inspect(reason)}")
-          end
+      case quest_result do
+        {:ok, quest} ->
+          Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+          opts = if discovery?, do: [interactive_goal: true], else: []
+          Hive.CLI.PlanHandler.start_interactive_planning(quest, opts)
 
-        {:error, :no_comb} ->
-          case Hive.Quests.create(%{goal: goal}) do
-            {:ok, quest} ->
-              Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
-
-            {:error, reason} ->
-              Format.error("Failed to create quest: #{inspect(reason)}")
-          end
+        {:error, reason} ->
+          Format.error("Failed to create quest: #{inspect(reason)}")
       end
     end
   end
@@ -1872,6 +1880,26 @@ defmodule Hive.CLI do
       IO.puts("")
     end
 
+    by_category = summary[:by_category] || %{}
+    if map_size(by_category) > 0 do
+      IO.puts("By category:")
+      headers = ["Category", "Cost", "Input Tokens", "Output Tokens"]
+
+      rows =
+        Enum.map(by_category, fn {category, data} ->
+          cost = (data[:cost] || 0.0) / 1
+          [
+            category,
+            "$#{:erlang.float_to_binary(cost, decimals: 4)}",
+            "#{data[:input_tokens] || 0}",
+            "#{data[:output_tokens] || 0}"
+          ]
+        end)
+
+      Format.table(headers, rows)
+      IO.puts("")
+    end
+
     by_bee = summary[:by_bee] || %{}
     if map_size(by_bee) > 0 do
       IO.puts("By bee:")
@@ -1894,8 +1922,24 @@ defmodule Hive.CLI do
 
   defp dispatch([:costs, :record], result) do
     if Hive.Client.remote?() do
-      # In remote mode, cost recording is a no-op for now
-      :ok
+      bee_id = result_get(result, :options, :bee)
+      input = result_get(result, :options, :input)
+      output = result_get(result, :options, :output)
+      model = result_get(result, :options, :model)
+
+      if is_nil(bee_id) or is_nil(input) or is_nil(output) do
+        Format.error("--bee, --input, and --output are required (or use --queen)")
+      else
+        attrs = %{input_tokens: input, output_tokens: output, model: model}
+
+        case Hive.Client.record_cost(bee_id, attrs) do
+          {:ok, cost} ->
+            Format.success("Cost recorded: $#{cost[:cost_usd]} (#{cost[:id]})")
+
+          {:error, reason} ->
+            Format.error("Failed to record cost: #{reason}")
+        end
+      end
     else
       queen? = result_get(result, :flags, :queen) || false
 
@@ -2354,78 +2398,6 @@ defmodule Hive.CLI do
         {:error, {:invalid_phase, p}} ->
           Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(Hive.Specs.phases(), ", ")}")
       end
-    end
-  end
-
-  defp dispatch([:quest, :plan], result) do
-    quest_id = result_get(result, :args, :quest_id)
-
-    plan_result =
-      if Hive.Client.remote?(),
-        do: Hive.Client.plan_quest(quest_id),
-        else: Hive.Queen.Planner.generate_llm_plan(quest_id)
-
-    case plan_result do
-      {:ok, plan} ->
-        tasks = plan[:tasks] || plan.tasks || []
-        Format.success("Plan generated for quest #{quest_id}")
-        IO.puts("")
-        IO.puts("Goal:     #{plan[:goal] || "-"}")
-        IO.puts("Duration: #{plan[:estimated_duration] || "-"}")
-        IO.puts("")
-
-        tasks
-        |> Enum.with_index(1)
-        |> Enum.each(fn {task, i} ->
-          title = task["title"] || task[:title] || "Untitled"
-          desc = task["description"] || task[:description] || ""
-          files = task["target_files"] || task[:target_files] || []
-          criteria = task["acceptance_criteria"] || task[:acceptance_criteria] || []
-          deps = task["depends_on_indices"] || task[:depends_on_indices] || []
-          model = task["model_recommendation"] || task[:model_recommendation] || "-"
-
-          IO.puts("  #{i}. #{title}")
-          IO.puts("     #{String.slice(to_string(desc), 0, 120)}")
-
-          if files != [] do
-            IO.puts("     Files: #{Enum.join(files, ", ")}")
-          end
-
-          if deps != [] do
-            IO.puts("     Depends on: #{Enum.map_join(deps, ", ", &"##{&1 + 1}")}")
-          end
-
-          IO.puts("     Model: #{model}")
-
-          if criteria != [] do
-            IO.puts("     Criteria: #{Enum.join(criteria, "; ")}")
-          end
-
-          IO.puts("")
-        end)
-
-      {:error, reason} ->
-        Format.error("Failed to generate plan: #{format_error(reason)}")
-    end
-  end
-
-  defp dispatch([:quest, :start], result) do
-    quest_id = result_get(result, :args, :quest_id)
-
-    start_result =
-      if Hive.Client.remote?(),
-        do: Hive.Client.start_quest(quest_id),
-        else: Hive.Queen.Orchestrator.start_quest(quest_id)
-
-    case start_result do
-      {:ok, data} when is_map(data) ->
-        Format.success("Quest #{quest_id} started, now in #{data.phase} phase")
-
-      {:ok, phase} ->
-        Format.success("Quest #{quest_id} started, now in #{phase} phase")
-
-      {:error, reason} ->
-        Format.error("Failed to start quest: #{inspect(reason)}")
     end
   end
 
@@ -3077,12 +3049,12 @@ defmodule Hive.CLI do
           subcommands: [
             new: [
               name: "new",
-              about: "Create a new quest",
+              about: "Create a new quest with interactive planning session",
               args: [
                 goal: [
                   value_name: "GOAL",
-                  help: "The goal for this quest (a short name is auto-generated)",
-                  required: true,
+                  help: "The goal for this quest (omit for discovery mode)",
+                  required: false,
                   parser: :string
                 ]
               ],
@@ -3215,30 +3187,6 @@ defmodule Hive.CLI do
                 ]
               ]
             ],
-            plan: [
-              name: "plan",
-              about: "Generate implementation plan for a quest",
-              args: [
-                quest_id: [
-                  value_name: "QUEST_ID",
-                  help: "Quest identifier",
-                  required: true,
-                  parser: :string
-                ]
-              ]
-            ],
-            start: [
-              name: "start",
-              about: "Start quest workflow (research → planning → implementation)",
-              args: [
-                quest_id: [
-                  value_name: "QUEST_ID",
-                  help: "Quest identifier",
-                  required: true,
-                  parser: :string
-                ]
-              ]
-            ],
             status: [
               name: "status",
               about: "Show quest phase status and progress",
@@ -3250,34 +3198,6 @@ defmodule Hive.CLI do
                   parser: :string
                 ]
               ]
-            ]
-          ]
-        ],
-        plan: [
-          name: "plan",
-          about: "Start an interactive planning session",
-          args: [
-            goal: [
-              value_name: "GOAL",
-              help: "Goal or Quest ID to plan",
-              required: false,
-              parser: :string
-            ]
-          ],
-          options: [
-            quest: [
-              short: "-q",
-              long: "--quest",
-              help: "Quest ID (alternative to goal arg)",
-              parser: :string,
-              required: false
-            ],
-            comb: [
-              short: "-c",
-              long: "--comb",
-              help: "Comb ID (repository) for the quest",
-              parser: :string,
-              required: false
             ]
           ]
         ],

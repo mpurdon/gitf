@@ -16,22 +16,39 @@ defmodule Hive.CLI.QuestHandler do
       attrs = if comb_opt, do: %{goal: goal, comb_id: comb_opt}, else: %{goal: goal}
 
       case Hive.Client.create_quest(attrs) do
-        {:ok, quest} -> Format.success("Quest created: #{quest.name} (#{quest.id})")
-        {:error, reason} -> Format.error("Failed to create quest: #{inspect(reason)}")
-      end
-    else
-      case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
-        {:ok, comb_id} ->
-          case Hive.Quests.create(%{goal: goal, comb_id: comb_id}) do
-            {:ok, quest} ->
-              Format.success("Quest created: #{quest.name} (#{quest.id})")
+        {:ok, quest} ->
+          Format.success("Quest created: #{quest.name} (#{quest.id})")
+          Format.info("Starting quest execution on remote server...")
+
+          case Hive.Client.start_quest(quest.id) do
+            {:ok, data} ->
+              phase = if is_map(data), do: data[:phase], else: data
+              Format.success("Quest #{quest.id} is now in #{phase} phase.")
 
             {:error, reason} ->
-              Format.error("Failed to create quest: #{inspect(reason)}")
+              Format.warn("Could not auto-start: #{inspect(reason)}")
           end
 
-        {:error, :no_comb} ->
-          Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
+        {:error, reason} ->
+          Format.error("Failed to create quest: #{inspect(reason)}")
+      end
+    else
+      discovery? = goal == nil or goal == ""
+
+      {quest_result, _comb_id} =
+        case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
+          {:ok, cid} -> {Hive.Quests.create(%{goal: goal || "New quest", comb_id: cid}), cid}
+          {:error, :no_comb} -> {Hive.Quests.create(%{goal: goal || "New quest"}), nil}
+        end
+
+      case quest_result do
+        {:ok, quest} ->
+          Format.success("Quest created: #{quest.name} (#{quest.id})")
+          opts = if discovery?, do: [interactive_goal: true], else: []
+          Hive.CLI.PlanHandler.start_interactive_planning(quest, opts)
+
+        {:error, reason} ->
+          Format.error("Failed to create quest: #{inspect(reason)}")
       end
     end
   end
