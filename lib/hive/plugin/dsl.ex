@@ -30,4 +30,5 @@ defmodule Hive.Plugin do
   def behaviour_for(:lsp), do: Hive.Plugin.LSP
   def behaviour_for(:mcp), do: Hive.Plugin.MCP
   def behaviour_for(:channel), do: Hive.Plugin.Channel
+  def behaviour_for(:tool_provider), do: Hive.Plugin.ToolProvider
 end

@@ -31,11 +31,19 @@ defmodule Hive.Runtime.ToolBox do
   def tools(opts \\ []) do
     working_dir = Keyword.fetch!(opts, :working_dir)
     tool_set = Keyword.get(opts, :tool_set, :standard)
+    include_dynamic = Keyword.get(opts, :include_dynamic, false)
 
-    case tool_set do
-      :readonly -> readonly_tools(working_dir)
-      :queen -> standard_tools(working_dir) ++ queen_tools()
-      _ -> standard_tools(working_dir)
+    static =
+      case tool_set do
+        :readonly -> readonly_tools(working_dir)
+        :queen -> standard_tools(working_dir) ++ queen_tools()
+        _ -> standard_tools(working_dir)
+      end
+
+    if include_dynamic do
+      static ++ Hive.Runtime.ToolBox.DynamicTools.discover(opts)
+    else
+      static
     end
   end
 

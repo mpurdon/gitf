@@ -26,6 +26,10 @@ defmodule Hive.Plugin.Manager do
     Hive.Plugin.Builtin.Commands.PluginCmd,
     Hive.Plugin.Builtin.Commands.Council
   ]
+  @builtin_tool_providers [
+    Hive.Plugin.Builtin.ToolProviders.ProjectContext,
+    Hive.Plugin.Builtin.ToolProviders.Workspace
+  ]
 
   # -- Public API ------------------------------------------------------------
 
@@ -136,6 +140,57 @@ defmodule Hive.Plugin.Manager do
     for module <- @builtin_models, do: do_load(module)
     for module <- @builtin_themes, do: do_load(module)
     for module <- @builtin_commands, do: do_load(module)
+    for module <- @builtin_tool_providers, do: do_load(module)
+    load_external_mcp_servers()
+  end
+
+  defp load_external_mcp_servers do
+    mcp_config = Hive.Config.Provider.get([:plugins, :mcp]) || %{}
+
+    Enum.each(mcp_config, fn {name, config} when is_map(config) ->
+      name_str = to_string(name)
+      command = config[:command] || config["command"]
+      args = config[:args] || config["args"] || []
+      env = config[:env] || config["env"] || %{}
+
+      if command do
+        module_name = Module.concat(Hive.Plugin.External.MCP, Macro.camelize(name_str))
+
+        {:module, module, _, _} =
+          Module.create(
+            module_name,
+            quote do
+              @behaviour Hive.Plugin.MCP
+
+              def __plugin_type__, do: :mcp
+              def name, do: unquote(name_str)
+              def description, do: "External MCP server: #{unquote(name_str)}"
+              def command, do: {unquote(command), unquote(Macro.escape(args))}
+
+              def env do
+                unquote(Macro.escape(env))
+                |> Enum.into(%{}, fn {k, v} ->
+                  {to_string(k), interpolate_env(to_string(v))}
+                end)
+              end
+
+              defp interpolate_env(value) do
+                Regex.replace(~r/\$\{(\w+)\}/, value, fn _, var ->
+                  System.get_env(var) || ""
+                end)
+              end
+            end,
+            Macro.Env.location(__ENV__)
+          )
+
+        do_load(module)
+      else
+        Logger.warning("External MCP #{name_str}: missing 'command' in config")
+      end
+    end)
+  rescue
+    e ->
+      Logger.warning("Failed to load external MCP servers: #{Exception.message(e)}")
   end
 
   defp do_load(module) do
@@ -151,6 +206,9 @@ defmodule Hive.Plugin.Manager do
         :channel ->
           config = Hive.Config.Provider.get([:plugins, :channels, String.to_atom(name)]) || %{}
           Hive.Plugin.ChannelSupervisor.start_child(module, config)
+
+        :tool_provider ->
+          :ok
 
         _ ->
           :ok
@@ -204,6 +262,7 @@ defmodule Hive.Plugin.Manager do
         implements?(module, Hive.Plugin.LSP) -> {:ok, :lsp}
         implements?(module, Hive.Plugin.MCP) -> {:ok, :mcp}
         implements?(module, Hive.Plugin.Channel) -> {:ok, :channel}
+        implements?(module, Hive.Plugin.ToolProvider) -> {:ok, :tool_provider}
         true -> {:error, :unknown_plugin_type}
       end
     end
