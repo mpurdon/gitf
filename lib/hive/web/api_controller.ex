@@ -88,14 +88,20 @@ defmodule Hive.Web.ApiController do
   end
 
   def plan_quest(conn, %{"id" => id}) do
-    case Hive.Queen.Planner.generate_llm_plan(id) do
+    case Hive.Queen.Planner.generate_candidate_plans(id) do
       {:ok, plan} ->
         tasks = plan[:tasks] || plan.tasks || []
+
+        # Read candidate count from quest record
+        quest_record = Hive.Store.get(:quests, id)
+        candidates = if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
 
         json(conn, %{
           data: %{
             quest_id: id,
             goal: plan[:goal],
+            selected_strategy: plan[:strategy],
+            candidates_count: length(candidates),
             tasks: Enum.map(tasks, fn t ->
               %{
                 title: t["title"] || t[:title],
@@ -115,6 +121,73 @@ defmodule Hive.Web.ApiController do
 
       {:error, reason} ->
         error(conn, 422, reason)
+    end
+  end
+
+  def list_plan_candidates(conn, %{"id" => id}) do
+    quest_record = Hive.Store.get(:quests, id)
+
+    if quest_record do
+      candidates = Map.get(quest_record, :plan_candidates, [])
+
+      summary =
+        Enum.map(candidates, fn c ->
+          %{
+            strategy: c[:strategy] || c.strategy,
+            score: c[:score] || c.score,
+            task_count: length(c[:tasks] || c.tasks || [])
+          }
+        end)
+
+      json(conn, %{data: summary})
+    else
+      error(conn, 404, :not_found)
+    end
+  end
+
+  def select_plan_candidate(conn, %{"id" => id} = params) do
+    strategy = params["strategy"]
+    quest_record = Hive.Store.get(:quests, id)
+
+    cond do
+      is_nil(quest_record) ->
+        error(conn, 404, :not_found)
+
+      is_nil(strategy) ->
+        error(conn, 422, "strategy is required")
+
+      true ->
+        candidates = Map.get(quest_record, :plan_candidates, [])
+
+        case Enum.find(candidates, fn c -> (c[:strategy] || c.strategy) == strategy end) do
+          nil ->
+            error(conn, 404, "candidate not found for strategy: #{strategy}")
+
+          candidate ->
+            updated = Map.put(quest_record, :draft_plan, candidate)
+            Hive.Store.put(:quests, updated)
+
+            tasks = candidate[:tasks] || candidate.tasks || []
+
+            json(conn, %{
+              data: %{
+                quest_id: id,
+                strategy: strategy,
+                score: candidate[:score] || candidate.score,
+                tasks: Enum.map(tasks, fn t ->
+                  %{
+                    title: t["title"] || t[:title],
+                    description: t["description"] || t[:description],
+                    target_files: t["target_files"] || t[:target_files] || [],
+                    acceptance_criteria: t["acceptance_criteria"] || t[:acceptance_criteria] || [],
+                    depends_on_indices: t["depends_on_indices"] || t[:depends_on_indices] || [],
+                    model_recommendation: t["model_recommendation"] || t[:model_recommendation]
+                  }
+                end),
+                estimated_duration: candidate[:estimated_duration]
+              }
+            })
+        end
     end
   end
 
@@ -420,9 +493,49 @@ defmodule Hive.Web.ApiController do
         total_input_tokens: summary.total_input_tokens,
         total_output_tokens: summary.total_output_tokens,
         by_model: summary.by_model,
-        by_bee: summary.by_bee
+        by_bee: summary.by_bee,
+        by_category: summary.by_category
       }
     })
+  end
+
+  def record_cost(conn, params) do
+    bee_id = params["bee_id"]
+
+    if is_nil(bee_id) do
+      error(conn, 422, "bee_id is required")
+    else
+      attrs =
+        %{
+          input_tokens: params["input_tokens"] || 0,
+          output_tokens: params["output_tokens"] || 0,
+          cache_read_tokens: params["cache_read_tokens"] || 0,
+          cache_write_tokens: params["cache_write_tokens"] || 0,
+          model: params["model"],
+          cost_usd: params["cost_usd"]
+        }
+        |> then(fn a ->
+          if params["category"], do: Map.put(a, :category, params["category"]), else: a
+        end)
+
+      case Hive.Costs.record(bee_id, attrs) do
+        {:ok, cost} ->
+          json(conn, %{
+            data: %{
+              id: cost.id,
+              bee_id: cost.bee_id,
+              cost_usd: cost.cost_usd,
+              input_tokens: cost.input_tokens,
+              output_tokens: cost.output_tokens,
+              model: cost.model,
+              category: cost.category
+            }
+          })
+
+        {:error, reason} ->
+          error(conn, 422, reason)
+      end
+    end
   end
 
   # -- Helpers -----------------------------------------------------------------

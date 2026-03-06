@@ -42,6 +42,8 @@ defmodule Hive.Web.Router do
     post "/quests/:id/plan/confirm", ApiController, :confirm_plan
     post "/quests/:id/plan/reject", ApiController, :reject_plan
     post "/quests/:id/plan/revise", ApiController, :revise_plan
+    get "/quests/:id/plan/candidates", ApiController, :list_plan_candidates
+    post "/quests/:id/plan/select", ApiController, :select_plan_candidate
 
     # Jobs
     get "/jobs", ApiController, :list_jobs
@@ -63,5 +65,6 @@ defmodule Hive.Web.Router do
 
     # Costs
     get "/costs/summary", ApiController, :costs_summary
+    post "/costs/record", ApiController, :record_cost
   end
 end

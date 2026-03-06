@@ -92,9 +92,12 @@ defmodule Hive.Client do
   def confirm_plan(quest_id, specs), do: post("/api/v1/quests/#{quest_id}/plan/confirm", %{specs: specs}) |> unwrap_data()
   def reject_plan(quest_id), do: post("/api/v1/quests/#{quest_id}/plan/reject") |> unwrap_ok()
   def revise_plan(quest_id, feedback), do: post("/api/v1/quests/#{quest_id}/plan/revise", %{feedback: feedback}) |> unwrap_data()
+  def list_plan_candidates(quest_id), do: get("/api/v1/quests/#{quest_id}/plan/candidates") |> unwrap_data()
+  def select_plan_candidate(quest_id, strategy), do: post("/api/v1/quests/#{quest_id}/plan/select", %{strategy: strategy}) |> unwrap_data()
 
   # Costs
   def costs_summary, do: get("/api/v1/costs/summary") |> unwrap_data()
+  def record_cost(bee_id, attrs), do: post("/api/v1/costs/record", Map.put(attrs, :bee_id, bee_id)) |> unwrap_data()
 
   # Health check
   def ping do
