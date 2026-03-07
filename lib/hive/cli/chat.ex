@@ -301,21 +301,31 @@ defmodule Hive.CLI.Chat do
 
   defp do_ask_choice(%{"question" => question, "options" => options, "multi" => true})
        when is_list(options) do
-    case Select.multi_select(question, options) do
+    case Select.multi_select(question, normalize_options(options)) do
       nil -> "No preference, please decide for me."
-      items -> Enum.join(items, ", ")
+      labels -> Enum.join(labels, ", ")
     end
   end
 
   defp do_ask_choice(%{"question" => question, "options" => options}) when is_list(options) do
-    case Select.select(question, options) do
+    case Select.select(question, normalize_options(options)) do
       nil -> "No preference, please decide for me."
-      chosen -> chosen
+      label -> label
     end
   end
 
   defp do_ask_choice(_bad_args) do
     "No preference, please decide for me."
+  end
+
+  # Pass structured options through (maps with label/description/recommended)
+  # or wrap plain strings for backward compat
+  defp normalize_options(options) do
+    Enum.map(options, fn
+      opt when is_binary(opt) -> opt
+      %{"label" => _} = opt -> opt
+      other -> inspect(other)
+    end)
   end
 
   defp do_submit_plan(state, args) do
@@ -470,7 +480,7 @@ defmodule Hive.CLI.Chat do
     5. After gathering enough context (aim for 3-5 exchanges), call `submit_plan` with the structured plan.
 
     ## Tool Usage
-    - `ask_choice`: Present numbered options the user picks from. Good for: tech choices, scope decisions, feature priorities.
+    - `ask_choice`: Present options the user selects with arrow keys. Each option should have a `label`, a `description` (brief explanation), and optionally `recommended: true` for your top pick. Good for: tech choices, scope decisions, feature priorities. Use `multi: true` when the user should pick multiple items.
     - `submit_plan`: Submit the final plan with jobs. Each job should be a focused unit of work (1-3 hours) that an AI coding agent can execute independently.
 
     ## Plan Guidelines
@@ -500,7 +510,21 @@ defmodule Hive.CLI.Chat do
             "question" => %{"type" => "string", "description" => "The question to ask"},
             "options" => %{
               "type" => "array",
-              "items" => %{"type" => "string"},
+              "items" => %{
+                "type" => "object",
+                "properties" => %{
+                  "label" => %{"type" => "string", "description" => "The option text"},
+                  "description" => %{
+                    "type" => "string",
+                    "description" => "Brief explanation shown when this option is focused"
+                  },
+                  "recommended" => %{
+                    "type" => "boolean",
+                    "description" => "Mark as true for the recommended choice"
+                  }
+                },
+                "required" => ["label"]
+              },
               "description" => "2-6 options to choose from"
             },
             "multi" => %{

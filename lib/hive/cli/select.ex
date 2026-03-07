@@ -2,43 +2,48 @@ defmodule Hive.CLI.Select do
   @moduledoc """
   Arrow-key driven selection prompts for the CLI.
 
-  Supports single-select (enter to pick) and multi-select (space to toggle,
-  enter to confirm). Uses raw terminal mode via stty and reads directly
-  from /dev/tty for reliable keypress detection.
+  Options can be plain strings or structured maps with `:label`, `:description`,
+  and `:recommended` keys. Structured options get a description panel below the
+  list that updates as you navigate, and a ★ badge on recommended choices.
   """
 
-  # Palette — each option gets a color cycling through these
   @colors [:cyan, :green, :magenta, :yellow, :light_blue, :light_green]
+  @panel_lines 3
 
   @doc """
   Single-select: arrow keys to navigate, enter to confirm.
-  Returns the selected option string, or nil if cancelled.
+
+  Options can be strings or maps: `%{"label" => "...", "description" => "...", "recommended" => true}`
+
+  Returns the selected label string, or nil if cancelled.
   """
   def select(prompt, options) when is_list(options) and options != [] do
-    count = length(options)
+    opts = normalize(options)
+    count = length(opts)
+    lines = total_lines(opts)
 
     IO.puts("")
     IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
     IO.puts(hint("↑/↓ navigate · enter select · esc cancel"))
     IO.puts("")
-    for _ <- 1..count, do: IO.write("\n")
+    for _ <- 1..lines, do: IO.write("\n")
 
     result =
       with_raw_mode(fn tty ->
         IO.write("\e[?25l")
-        result = select_loop(tty, options, 0, count)
+        result = select_loop(tty, opts, 0, count, lines)
         IO.write("\e[?25h")
         result
       end)
 
-    clear_menu(count)
+    clear_menu(lines)
 
     case result do
       {:ok, idx} ->
-        selected = Enum.at(options, idx)
+        selected = Enum.at(opts, idx)
         color = color_for(idx)
-        IO.puts("  " <> color <> "→ " <> selected <> IO.ANSI.reset())
-        selected
+        IO.puts("  " <> color <> "→ " <> selected.label <> IO.ANSI.reset())
+        selected.label
 
       :cancelled ->
         nil
@@ -49,26 +54,31 @@ defmodule Hive.CLI.Select do
 
   @doc """
   Multi-select: arrow keys to navigate, space to toggle, enter to confirm.
-  Returns list of selected option strings, or nil if cancelled.
+
+  Options can be strings or maps (same as `select/2`).
+
+  Returns list of selected label strings, or nil if cancelled.
   """
   def multi_select(prompt, options) when is_list(options) and options != [] do
-    count = length(options)
+    opts = normalize(options)
+    count = length(opts)
+    lines = total_lines(opts)
 
     IO.puts("")
     IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
     IO.puts(hint("↑/↓ navigate · space toggle · enter confirm · esc cancel"))
     IO.puts("")
-    for _ <- 1..count, do: IO.write("\n")
+    for _ <- 1..lines, do: IO.write("\n")
 
     result =
       with_raw_mode(fn tty ->
         IO.write("\e[?25l")
-        result = multi_loop(tty, options, 0, MapSet.new(), count)
+        result = multi_loop(tty, opts, 0, MapSet.new(), count, lines)
         IO.write("\e[?25h")
         result
       end)
 
-    clear_menu(count)
+    clear_menu(lines)
 
     case result do
       {:ok, selected_set} ->
@@ -76,15 +86,15 @@ defmodule Hive.CLI.Select do
           selected_set
           |> MapSet.to_list()
           |> Enum.sort()
-          |> Enum.map(fn idx -> {idx, Enum.at(options, idx)} end)
+          |> Enum.map(fn idx -> {idx, Enum.at(opts, idx)} end)
 
         Enum.each(items, fn {idx, item} ->
           color = color_for(idx)
-          IO.puts("  " <> color <> "→ " <> item <> IO.ANSI.reset())
+          IO.puts("  " <> color <> "→ " <> item.label <> IO.ANSI.reset())
         end)
 
-        result_items = Enum.map(items, &elem(&1, 1))
-        if result_items == [], do: nil, else: result_items
+        labels = Enum.map(items, fn {_, item} -> item.label end)
+        if labels == [], do: nil, else: labels
 
       :cancelled ->
         nil
@@ -93,31 +103,63 @@ defmodule Hive.CLI.Select do
 
   def multi_select(_prompt, _options), do: nil
 
+  # -- Option normalization ----------------------------------------------------
+
+  defp normalize(options) do
+    Enum.map(options, fn
+      opt when is_binary(opt) ->
+        %{label: opt, description: nil, recommended: false}
+
+      %{"label" => label} = opt ->
+        %{
+          label: label,
+          description: opt["description"],
+          recommended: opt["recommended"] == true
+        }
+
+      %{label: label} = opt ->
+        %{
+          label: label,
+          description: opt[:description],
+          recommended: opt[:recommended] == true
+        }
+    end)
+  end
+
+  defp has_details?(opts) do
+    Enum.any?(opts, fn o -> o.description != nil or o.recommended end)
+  end
+
+  defp total_lines(opts) do
+    count = length(opts)
+    if has_details?(opts), do: count + 1 + @panel_lines, else: count
+  end
+
   # -- Single select loop ------------------------------------------------------
 
-  defp select_loop(tty, options, cursor, count) do
-    render_single(options, cursor, count)
+  defp select_loop(tty, opts, cursor, count, lines) do
+    render_single(opts, cursor, lines)
 
     case read_key(tty) do
-      :up -> select_loop(tty, options, max(cursor - 1, 0), count)
-      :down -> select_loop(tty, options, min(cursor + 1, count - 1), count)
+      :up -> select_loop(tty, opts, max(cursor - 1, 0), count, lines)
+      :down -> select_loop(tty, opts, min(cursor + 1, count - 1), count, lines)
       :enter -> {:ok, cursor}
       :escape -> :cancelled
-      _ -> select_loop(tty, options, cursor, count)
+      _ -> select_loop(tty, opts, cursor, count, lines)
     end
   end
 
   # -- Multi select loop -------------------------------------------------------
 
-  defp multi_loop(tty, options, cursor, selected, count) do
-    render_multi(options, cursor, selected, count)
+  defp multi_loop(tty, opts, cursor, selected, count, lines) do
+    render_multi(opts, cursor, selected, lines)
 
     case read_key(tty) do
       :up ->
-        multi_loop(tty, options, max(cursor - 1, 0), selected, count)
+        multi_loop(tty, opts, max(cursor - 1, 0), selected, count, lines)
 
       :down ->
-        multi_loop(tty, options, min(cursor + 1, count - 1), selected, count)
+        multi_loop(tty, opts, min(cursor + 1, count - 1), selected, count, lines)
 
       :space ->
         toggled =
@@ -125,7 +167,7 @@ defmodule Hive.CLI.Select do
             do: MapSet.delete(selected, cursor),
             else: MapSet.put(selected, cursor)
 
-        multi_loop(tty, options, cursor, toggled, count)
+        multi_loop(tty, opts, cursor, toggled, count, lines)
 
       :enter ->
         {:ok, selected}
@@ -134,33 +176,30 @@ defmodule Hive.CLI.Select do
         :cancelled
 
       _ ->
-        multi_loop(tty, options, cursor, selected, count)
+        multi_loop(tty, opts, cursor, selected, count, lines)
     end
   end
 
   # -- Rendering ---------------------------------------------------------------
 
-  defp render_single(options, cursor, count) do
-    IO.write("\e[#{count}A")
+  defp render_single(opts, cursor, lines) do
+    IO.write("\e[#{lines}A")
+    has_panel = has_details?(opts)
 
-    Enum.with_index(options, fn opt, idx ->
-      color = color_for(idx)
-
-      if idx == cursor do
-        IO.write(
-          "\r\e[2K  " <>
-            IO.ANSI.bright() <> color <> "❯ " <> opt <> IO.ANSI.reset() <> "\r\n"
-        )
-      else
-        IO.write("\r\e[2K    " <> IO.ANSI.faint() <> opt <> IO.ANSI.reset() <> "\r\n")
-      end
+    Enum.with_index(opts, fn opt, idx ->
+      render_option_line(opt, idx, idx == cursor)
     end)
+
+    if has_panel do
+      render_panel(Enum.at(opts, cursor), cursor)
+    end
   end
 
-  defp render_multi(options, cursor, selected, count) do
-    IO.write("\e[#{count}A")
+  defp render_multi(opts, cursor, selected, lines) do
+    IO.write("\e[#{lines}A")
+    has_panel = has_details?(opts)
 
-    Enum.with_index(options, fn opt, idx ->
+    Enum.with_index(opts, fn opt, idx ->
       active = idx == cursor
       checked = MapSet.member?(selected, idx)
       color = color_for(idx)
@@ -172,13 +211,88 @@ defmodule Hive.CLI.Select do
           do: color <> "◉ " <> IO.ANSI.reset(),
           else: IO.ANSI.faint() <> "◯ " <> IO.ANSI.reset()
 
-      txt =
+      label =
         if active,
-          do: IO.ANSI.bright() <> color <> opt <> IO.ANSI.reset(),
-          else: IO.ANSI.faint() <> opt <> IO.ANSI.reset()
+          do: IO.ANSI.bright() <> color <> opt.label,
+          else: IO.ANSI.faint() <> opt.label
 
-      IO.write("\r\e[2K  " <> ptr <> IO.ANSI.reset() <> box <> txt <> "\r\n")
+      star =
+        if opt.recommended,
+          do: " " <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(),
+          else: ""
+
+      IO.write(
+        "\r\e[2K  " <> ptr <> IO.ANSI.reset() <> box <> label <> star <> IO.ANSI.reset() <> "\r\n"
+      )
     end)
+
+    if has_panel do
+      render_panel(Enum.at(opts, cursor), cursor)
+    end
+  end
+
+  defp render_option_line(opt, idx, active) do
+    color = color_for(idx)
+
+    ptr = if active, do: IO.ANSI.bright() <> color <> "❯ ", else: "  "
+
+    label =
+      if active,
+        do: IO.ANSI.bright() <> color <> opt.label,
+        else: IO.ANSI.faint() <> opt.label
+
+    star =
+      if opt.recommended,
+        do: " " <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(),
+        else: ""
+
+    IO.write(
+      "\r\e[2K  " <> ptr <> IO.ANSI.reset() <> label <> star <> IO.ANSI.reset() <> "\r\n"
+    )
+  end
+
+  defp render_panel(opt, cursor_idx) do
+    color = color_for(cursor_idx)
+    width = max(term_width() - 8, 40)
+
+    # Separator
+    sep = String.duplicate("─", min(width, 50))
+    IO.write("\r\e[2K    " <> IO.ANSI.faint() <> sep <> IO.ANSI.reset() <> "\r\n")
+
+    # Build content lines
+    content =
+      build_panel_content(opt, color, width)
+      |> Enum.take(@panel_lines)
+
+    # Render exactly @panel_lines lines
+    Enum.each(0..(@panel_lines - 1), fn i ->
+      line = Enum.at(content, i, "")
+      IO.write("\r\e[2K" <> line <> "\r\n")
+    end)
+  end
+
+  defp build_panel_content(opt, color, width) do
+    badge =
+      if opt.recommended,
+        do: [
+          "    " <>
+            IO.ANSI.yellow() <>
+            IO.ANSI.bright() <> "★ Recommended" <> IO.ANSI.reset()
+        ],
+        else: []
+
+    desc =
+      if opt.description do
+        opt.description
+        |> wrap_text(width)
+        |> Enum.map(fn line ->
+          "    " <> color <> line <> IO.ANSI.reset()
+        end)
+      else
+        []
+      end
+
+    badge ++ desc
   end
 
   # -- Helpers -----------------------------------------------------------------
@@ -190,6 +304,30 @@ defmodule Hive.CLI.Select do
 
   defp hint(text) do
     "  " <> IO.ANSI.faint() <> IO.ANSI.italic() <> text <> IO.ANSI.reset()
+  end
+
+  defp wrap_text(text, width) do
+    text
+    |> String.split(" ")
+    |> Enum.reduce([""], fn word, [current | rest] ->
+      if current == "" do
+        [word | rest]
+      else
+        if String.length(current) + 1 + String.length(word) > width do
+          [word, current | rest]
+        else
+          [current <> " " <> word | rest]
+        end
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp term_width do
+    case :io.columns() do
+      {:ok, cols} -> cols
+      _ -> 80
+    end
   end
 
   # -- Terminal control --------------------------------------------------------
