@@ -344,21 +344,20 @@ defmodule Hive.CLI.Select do
   end
 
   defp with_raw_mode(fun) do
-    case System.cmd("stty", ["-g"], stderr_to_stdout: true) do
-      {settings, 0} ->
-        settings = String.trim(settings)
-        System.cmd("stty", ["raw", "-echo"], stderr_to_stdout: true)
-        {:ok, tty} = :file.open(~c"/dev/tty", [:read, :raw, :binary])
+    saved = :os.cmd(~c"stty -g < /dev/tty") |> List.to_string() |> String.trim()
 
-        try do
-          fun.(tty)
-        after
-          :file.close(tty)
-          System.cmd("stty", [settings], stderr_to_stdout: true)
-        end
+    if saved != "" do
+      :os.cmd(~c"stty raw -echo < /dev/tty")
+      {:ok, tty} = :file.open(~c"/dev/tty", [:read, :raw, :binary])
 
-      _ ->
-        fun.(nil)
+      try do
+        fun.(tty)
+      after
+        :file.close(tty)
+        :os.cmd(String.to_charlist("stty #{saved} < /dev/tty"))
+      end
+    else
+      fun.(nil)
     end
   end
 
