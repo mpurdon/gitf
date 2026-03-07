@@ -7,6 +7,9 @@ defmodule Hive.CLI.Select do
   from /dev/tty for reliable keypress detection.
   """
 
+  # Palette — each option gets a color cycling through these
+  @colors [:cyan, :green, :magenta, :yellow, :light_blue, :light_green]
+
   @doc """
   Single-select: arrow keys to navigate, enter to confirm.
   Returns the selected option string, or nil if cancelled.
@@ -15,8 +18,8 @@ defmodule Hive.CLI.Select do
     count = length(options)
 
     IO.puts("")
-    IO.puts("  " <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
-    IO.puts("  " <> IO.ANSI.faint() <> "↑/↓ navigate · enter select · esc cancel" <> IO.ANSI.reset())
+    IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
+    IO.puts(hint("↑/↓ navigate · enter select · esc cancel"))
     IO.puts("")
     for _ <- 1..count, do: IO.write("\n")
 
@@ -33,7 +36,8 @@ defmodule Hive.CLI.Select do
     case result do
       {:ok, idx} ->
         selected = Enum.at(options, idx)
-        IO.puts("  " <> IO.ANSI.faint() <> "→ " <> selected <> IO.ANSI.reset())
+        color = color_for(idx)
+        IO.puts("  " <> color <> "→ " <> selected <> IO.ANSI.reset())
         selected
 
       :cancelled ->
@@ -51,13 +55,8 @@ defmodule Hive.CLI.Select do
     count = length(options)
 
     IO.puts("")
-    IO.puts("  " <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
-    IO.puts(
-      "  " <>
-        IO.ANSI.faint() <>
-        "↑/↓ navigate · space toggle · enter confirm · esc cancel" <> IO.ANSI.reset()
-    )
-
+    IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
+    IO.puts(hint("↑/↓ navigate · space toggle · enter confirm · esc cancel"))
     IO.puts("")
     for _ <- 1..count, do: IO.write("\n")
 
@@ -77,13 +76,15 @@ defmodule Hive.CLI.Select do
           selected_set
           |> MapSet.to_list()
           |> Enum.sort()
-          |> Enum.map(&Enum.at(options, &1))
+          |> Enum.map(fn idx -> {idx, Enum.at(options, idx)} end)
 
-        Enum.each(items, fn item ->
-          IO.puts("  " <> IO.ANSI.faint() <> "→ " <> item <> IO.ANSI.reset())
+        Enum.each(items, fn {idx, item} ->
+          color = color_for(idx)
+          IO.puts("  " <> color <> "→ " <> item <> IO.ANSI.reset())
         end)
 
-        if items == [], do: nil, else: items
+        result_items = Enum.map(items, &elem(&1, 1))
+        if result_items == [], do: nil, else: result_items
 
       :cancelled ->
         nil
@@ -143,13 +144,15 @@ defmodule Hive.CLI.Select do
     IO.write("\e[#{count}A")
 
     Enum.with_index(options, fn opt, idx ->
+      color = color_for(idx)
+
       if idx == cursor do
         IO.write(
           "\r\e[2K  " <>
-            IO.ANSI.cyan() <> "❯ " <> IO.ANSI.bright() <> opt <> IO.ANSI.reset() <> "\r\n"
+            IO.ANSI.bright() <> color <> "❯ " <> opt <> IO.ANSI.reset() <> "\r\n"
         )
       else
-        IO.write("\r\e[2K    " <> opt <> "\r\n")
+        IO.write("\r\e[2K    " <> IO.ANSI.faint() <> opt <> IO.ANSI.reset() <> "\r\n")
       end
     end)
   end
@@ -160,18 +163,33 @@ defmodule Hive.CLI.Select do
     Enum.with_index(options, fn opt, idx ->
       active = idx == cursor
       checked = MapSet.member?(selected, idx)
+      color = color_for(idx)
 
-      ptr = if active, do: IO.ANSI.cyan() <> "❯ ", else: "  "
+      ptr = if active, do: IO.ANSI.bright() <> color <> "❯ ", else: "  "
 
       box =
         if checked,
-          do: IO.ANSI.green() <> "◉ " <> IO.ANSI.reset(),
+          do: color <> "◉ " <> IO.ANSI.reset(),
           else: IO.ANSI.faint() <> "◯ " <> IO.ANSI.reset()
 
-      txt = if active, do: IO.ANSI.bright() <> opt <> IO.ANSI.reset(), else: opt
+      txt =
+        if active,
+          do: IO.ANSI.bright() <> color <> opt <> IO.ANSI.reset(),
+          else: IO.ANSI.faint() <> opt <> IO.ANSI.reset()
 
-      IO.write("\r\e[2K  " <> ptr <> box <> txt <> IO.ANSI.reset() <> "\r\n")
+      IO.write("\r\e[2K  " <> ptr <> IO.ANSI.reset() <> box <> txt <> "\r\n")
     end)
+  end
+
+  # -- Helpers -----------------------------------------------------------------
+
+  defp color_for(idx) do
+    color_name = Enum.at(@colors, rem(idx, length(@colors)))
+    apply(IO.ANSI, color_name, [])
+  end
+
+  defp hint(text) do
+    "  " <> IO.ANSI.faint() <> IO.ANSI.italic() <> text <> IO.ANSI.reset()
   end
 
   # -- Terminal control --------------------------------------------------------
@@ -197,7 +215,6 @@ defmodule Hive.CLI.Select do
         end
 
       _ ->
-        # Cannot use raw mode — fall back with nil tty (reads will return :unknown)
         fun.(nil)
     end
   end
