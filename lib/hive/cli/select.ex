@@ -204,26 +204,28 @@ defmodule Hive.CLI.Select do
       checked = MapSet.member?(selected, idx)
       color = color_for(idx)
 
-      ptr = if active, do: IO.ANSI.bright() <> color <> "❯ ", else: "  "
+      {box, label, star} =
+        if active do
+          bx =
+            if checked,
+              do: IO.ANSI.reverse() <> color <> " ✓ " <> IO.ANSI.reset() <> " ",
+              else: IO.ANSI.reverse() <> IO.ANSI.faint() <> "   " <> IO.ANSI.reset() <> " "
 
-      box =
-        if checked,
-          do: color <> "[" <> IO.ANSI.bright() <> "✓" <> IO.ANSI.reset() <> color <> "] " <> IO.ANSI.reset(),
-          else: IO.ANSI.faint() <> "[ ] " <> IO.ANSI.reset()
+          lb = IO.ANSI.bright() <> color <> opt.label
+          st = if opt.recommended, do: " " <> IO.ANSI.yellow() <> "★", else: ""
+          {bx, lb, st}
+        else
+          bx =
+            if checked,
+              do: color <> "[" <> IO.ANSI.bright() <> "✓" <> IO.ANSI.reset() <> color <> "]" <> IO.ANSI.reset() <> " ",
+              else: IO.ANSI.faint() <> "[ ]" <> IO.ANSI.reset() <> " "
 
-      label =
-        if active,
-          do: IO.ANSI.bright() <> color <> opt.label,
-          else: IO.ANSI.faint() <> opt.label
+          lb = IO.ANSI.faint() <> opt.label
+          st = if opt.recommended, do: " " <> IO.ANSI.faint() <> IO.ANSI.yellow() <> "★", else: ""
+          {bx, lb, st}
+        end
 
-      star =
-        if opt.recommended,
-          do: " " <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(),
-          else: ""
-
-      IO.write(
-        "\r\e[2K  " <> ptr <> IO.ANSI.reset() <> box <> label <> star <> IO.ANSI.reset() <> "\r\n"
-      )
+      IO.write("\r\e[2K    " <> box <> label <> star <> IO.ANSI.reset() <> "\r\n")
     end)
 
     if has_panel do
@@ -234,21 +236,24 @@ defmodule Hive.CLI.Select do
   defp render_option_line(opt, idx, active) do
     color = color_for(idx)
 
-    ptr = if active, do: IO.ANSI.bright() <> color <> "❯ ", else: "  "
+    if active do
+      star = if opt.recommended, do: " " <> IO.ANSI.yellow() <> "★", else: ""
 
-    label =
-      if active,
-        do: IO.ANSI.bright() <> color <> opt.label,
-        else: IO.ANSI.faint() <> opt.label
+      IO.write(
+        "\r\e[2K  " <>
+          IO.ANSI.reverse() <> color <> " " <> opt.label <> " " <> IO.ANSI.reset() <>
+          star <> IO.ANSI.reset() <> "\r\n"
+      )
+    else
+      star =
+        if opt.recommended,
+          do: " " <> IO.ANSI.faint() <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(),
+          else: ""
 
-    star =
-      if opt.recommended,
-        do: " " <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(),
-        else: ""
-
-    IO.write(
-      "\r\e[2K  " <> ptr <> IO.ANSI.reset() <> label <> star <> IO.ANSI.reset() <> "\r\n"
-    )
+      IO.write(
+        "\r\e[2K    " <> IO.ANSI.faint() <> opt.label <> IO.ANSI.reset() <> star <> "\r\n"
+      )
+    end
   end
 
   defp render_panel(opt, cursor_idx) do
