@@ -1614,6 +1614,18 @@ defmodule Hive.CLI do
     end
   end
 
+  defp dispatch([:quest, :plan], result) do
+    id = result_get(result, :args, :id)
+
+    case Hive.Quests.get(id) do
+      {:ok, quest} ->
+        Hive.CLI.PlanHandler.start_interactive_planning(quest)
+
+      {:error, :not_found} ->
+        Format.error("Quest not found: #{id}")
+    end
+  end
+
   defp dispatch([:quest, :remove], result) do
     id = result_get(result, :args, :id)
 
@@ -3074,6 +3086,18 @@ defmodule Hive.CLI do
                 id: [
                   value_name: "ID",
                   help: "Quest ID to close",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            plan: [
+              name: "plan",
+              about: "Start or resume interactive planning for a quest",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Quest ID to plan",
                   required: true,
                   parser: :string
                 ]
