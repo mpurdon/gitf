@@ -208,8 +208,8 @@ defmodule Hive.CLI.Select do
 
       box =
         if checked,
-          do: color <> "◉ " <> IO.ANSI.reset(),
-          else: IO.ANSI.faint() <> "◯ " <> IO.ANSI.reset()
+          do: color <> "[" <> IO.ANSI.bright() <> "✓" <> IO.ANSI.reset() <> color <> "] " <> IO.ANSI.reset(),
+          else: IO.ANSI.faint() <> "[ ] " <> IO.ANSI.reset()
 
       label =
         if active,
