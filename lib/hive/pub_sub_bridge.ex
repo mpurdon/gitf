@@ -8,7 +8,6 @@ defmodule Hive.PubSubBridge do
   - Job progress
   - Quest updates
   - Token usage
-  - Council actions
   """
 
   use GenServer
@@ -65,11 +64,15 @@ defmodule Hive.PubSubBridge do
       timestamp: DateTime.utc_now()
     }
     
-    # Broadcast to the monitor topic
-    Phoenix.PubSub.broadcast(
-      Hive.PubSub, 
-      @topic, 
-      {:hive_event, payload}
-    )
+    # Broadcast to the monitor topic (best-effort — must not crash telemetry handler)
+    try do
+      Phoenix.PubSub.broadcast(
+        Hive.PubSub,
+        @topic,
+        {:hive_event, payload}
+      )
+    rescue
+      _ -> :ok
+    end
   end
 end

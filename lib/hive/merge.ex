@@ -65,7 +65,7 @@ defmodule Hive.Merge do
   # -- Private: per-comb merge lock --------------------------------------------
 
   @doc false
-  defp with_comb_lock(comb_id, fun) do
+  def with_comb_lock(comb_id, fun) do
     lock_key = {:merge_lock, comb_id}
     acquire_lock(lock_key, @lock_timeout, fun)
   end
@@ -99,6 +99,9 @@ defmodule Hive.Merge do
 
   defp apply_strategy("auto_merge", cell, comb) do
     repo_path = comb.path
+
+    # Clean up any stale merge state from interrupted previous merge
+    cleanup_stale_merge_state(repo_path)
 
     # Save HEAD before any checkout/merge so we can always roll back
     original_head =
@@ -194,7 +197,8 @@ defmodule Hive.Merge do
     e -> Logger.warning("GitHub PR error: #{Exception.message(e)}")
   end
 
-  defp detect_main_branch(repo_path) do
+  @doc false
+  def detect_main_branch(repo_path) do
     # Try common main branch names
     cond do
       Hive.Git.branch_exists?(repo_path, "main") -> {:ok, "main"}
@@ -243,7 +247,7 @@ defmodule Hive.Merge do
           {:error, reason} ->
             Logger.warning("Failed to merge #{cell.branch}: #{inspect(reason)}")
             # Abort the failed merge so subsequent merges can proceed
-            System.cmd("git", ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+            Hive.Git.safe_cmd( ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
             {:error, cell.branch, reason}
         end
       end)
@@ -256,7 +260,7 @@ defmodule Hive.Merge do
     else
       # Roll back to savepoint — none of the merges should persist if any failed
       Logger.warning("Rolling back quest branch #{quest_branch} to savepoint due to merge failures")
-      System.cmd("git", ["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
+      Hive.Git.safe_cmd( ["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
       failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
       {:error, {:merge_conflicts, quest_branch, failed_branches}}
     end
@@ -265,7 +269,7 @@ defmodule Hive.Merge do
   # -- Private: git helpers ----------------------------------------------------
 
   defp get_head(repo_path) do
-    case System.cmd("git", ["rev-parse", "HEAD"],
+    case Hive.Git.safe_cmd( ["rev-parse", "HEAD"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -274,13 +278,39 @@ defmodule Hive.Merge do
     end
   end
 
+  defp cleanup_stale_merge_state(repo_path) do
+    merge_head = Path.join([repo_path, ".git", "MERGE_HEAD"])
+    if File.exists?(merge_head) do
+      Logger.warning("Stale MERGE_HEAD found in #{repo_path}, aborting interrupted merge")
+      Hive.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+    end
+  rescue
+    _ -> :ok
+  end
+
   defp rollback_merge(repo_path, original_head) do
     # First try to abort any in-progress merge
-    System.cmd("git", ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+    Hive.Git.safe_cmd( ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
 
     # Then restore the original HEAD
     if original_head do
-      System.cmd("git", ["checkout", original_head], cd: repo_path, stderr_to_stdout: true)
+      Hive.Git.safe_cmd( ["reset", "--hard", original_head], cd: repo_path, stderr_to_stdout: true)
+    end
+
+    # Verify the repo is in a clean state
+    case Hive.Git.safe_cmd( ["status", "--porcelain"], cd: repo_path, stderr_to_stdout: true) do
+      {output, 0} ->
+        if String.contains?(output, "UU") or String.contains?(output, "AA") do
+          # Still has unresolved conflicts — force clean
+          Logger.warning("Repo still dirty after rollback, force-cleaning #{repo_path}")
+          Hive.Git.safe_cmd( ["checkout", "--", "."], cd: repo_path, stderr_to_stdout: true)
+          Hive.Git.safe_cmd( ["clean", "-fd"], cd: repo_path, stderr_to_stdout: true)
+        end
+
+      {_, _code} ->
+        # git status itself failed — repo might be corrupted
+        Logger.error("Git status failed in #{repo_path}, attempting repair")
+        repair_repo(repo_path)
     end
 
     :ok
@@ -288,8 +318,29 @@ defmodule Hive.Merge do
     _ -> :ok
   end
 
+  defp repair_repo(repo_path) do
+    # Try fsck first
+    case Hive.Git.safe_cmd( ["fsck", "--no-dangling"],
+           cd: repo_path, stderr_to_stdout: true, env: [{"GIT_DIR", ".git"}]) do
+      {_, 0} ->
+        Logger.info("Git fsck passed for #{repo_path}")
+
+      {output, _} ->
+        Logger.warning("Git fsck found issues in #{repo_path}: #{String.slice(output, 0, 200)}")
+        # Force checkout to recover
+        case detect_main_branch(repo_path) do
+          {:ok, main} ->
+            Hive.Git.safe_cmd( ["checkout", "-f", main], cd: repo_path, stderr_to_stdout: true)
+          _ ->
+            :ok
+        end
+    end
+  rescue
+    _ -> :ok
+  end
+
   defp rebase_branch(worktree_path, main_branch) do
-    case System.cmd("git", ["rebase", main_branch],
+    case Hive.Git.safe_cmd( ["rebase", main_branch],
            cd: worktree_path,
            stderr_to_stdout: true
          ) do
@@ -297,7 +348,7 @@ defmodule Hive.Merge do
         :ok
 
       {output, _code} ->
-        System.cmd("git", ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
+        Hive.Git.safe_cmd( ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
         {:error, {:rebase_failed, String.slice(output, 0, 200)}}
     end
   end

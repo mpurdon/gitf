@@ -57,10 +57,19 @@ defmodule Hive.Observability do
   defp run_checks do
     alerts = Alerts.check_alerts()
 
+    # Check for zombie state (active quests but no progress)
+    alerts =
+      if Health.alive?() do
+        alerts
+      else
+        Hive.Telemetry.emit([:hive, :alert, :raised], %{}, %{type: :zombie_detected})
+        [{:zombie_detected, "Hive appears unproductive: active quests but no job activity for 30+ minutes"} | alerts]
+      end
+
     if alerts != [] do
       Alerts.notify(alerts)
     end
-    
+
     # Run Doctor checks and emit health status (with auto-fix enabled)
     health_results = Hive.Doctor.run_all(fix: true)
     overall_status = 

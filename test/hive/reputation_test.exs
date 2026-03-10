@@ -89,37 +89,6 @@ defmodule Hive.ReputationTest do
     end
   end
 
-  describe "council_reputation/1" do
-    test "returns nil when no quests exist for council" do
-      assert Reputation.council_reputation("cnl-nonexistent") == nil
-    end
-  end
-
-  describe "expert_reputation/1" do
-    test "returns nil when no jobs exist for expert" do
-      assert Reputation.expert_reputation("unknown-expert") == nil
-    end
-
-    test "computes reputation from jobs with expert", %{quest: quest, comb: comb} do
-      {:ok, _} =
-        Hive.Jobs.create(%{
-          title: "Expert task",
-          quest_id: quest.id,
-          comb_id: comb.id,
-          job_type: :implementation,
-          recommended_model: "sonnet",
-          assigned_model: "sonnet",
-          council_experts: ["elixir-expert"],
-          status: "done"
-        })
-
-      rep = Reputation.expert_reputation("elixir-expert")
-      assert rep != nil
-      assert rep.success_rate == 1.0
-      assert rep.total_jobs == 1
-    end
-  end
-
   describe "recommend_model/2" do
     test "falls back to ModelSelector when no reputation data" do
       model = Reputation.recommend_model(:implementation, :complex)
@@ -144,59 +113,6 @@ defmodule Hive.ReputationTest do
 
       model = Reputation.recommend_model(:research, :simple)
       assert model == "haiku"
-    end
-  end
-
-  describe "rank_experts/1" do
-    test "returns empty list when no experts" do
-      assert Reputation.rank_experts() == []
-    end
-
-    test "ranks experts by success rate", %{quest: quest, comb: comb} do
-      # Good expert: 2 successes
-      for _ <- 1..2 do
-        {:ok, _} =
-          Hive.Jobs.create(%{
-            title: "Good expert task",
-            quest_id: quest.id,
-            comb_id: comb.id,
-            job_type: :implementation,
-            recommended_model: "sonnet",
-            assigned_model: "sonnet",
-            council_experts: ["good-expert"],
-            status: "done"
-          })
-      end
-
-      # Poor expert: 1 success, 1 failure
-      {:ok, _} =
-        Hive.Jobs.create(%{
-          title: "Poor expert success",
-          quest_id: quest.id,
-          comb_id: comb.id,
-          job_type: :implementation,
-          recommended_model: "sonnet",
-          assigned_model: "sonnet",
-          council_experts: ["poor-expert"],
-          status: "done"
-        })
-
-      {:ok, _} =
-        Hive.Jobs.create(%{
-          title: "Poor expert failure",
-          quest_id: quest.id,
-          comb_id: comb.id,
-          job_type: :implementation,
-          recommended_model: "sonnet",
-          assigned_model: "sonnet",
-          council_experts: ["poor-expert"],
-          status: "failed"
-        })
-
-      ranked = Reputation.rank_experts()
-      assert length(ranked) == 2
-      assert hd(ranked).expert_key == "good-expert"
-      assert hd(ranked).score == 1.0
     end
   end
 

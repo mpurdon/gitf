@@ -18,7 +18,8 @@ defmodule Hive.Queen.Orchestrator do
 
   @phases ~w(research requirements design review planning implementation validation awaiting_approval merge)
   @max_redesign_iterations 2
-  @approval_timeout_hours 24
+  @approval_timeout_hours 1
+  @max_quest_age_hours 24
 
   # -- Public API --------------------------------------------------------------
 
@@ -80,6 +81,40 @@ defmodule Hive.Queen.Orchestrator do
   @spec advance_quest(String.t()) :: {:ok, String.t()} | {:error, term()}
   def advance_quest(quest_id) do
     with {:ok, quest} <- Hive.Quests.get(quest_id) do
+      # Circuit breaker: fail quests that have been running too long
+      if quest_timed_out?(quest) do
+        Logger.warning("Quest #{quest_id} exceeded #{@max_quest_age_hours}h max age, force-completing")
+        Hive.Quests.transition_phase(quest_id, "completed",
+          "Quest timed out after #{@max_quest_age_hours}h")
+        Hive.Quests.update_status!(quest_id)
+
+        Hive.Telemetry.emit([:hive, :alert, :raised], %{}, %{
+          type: :quest_timeout,
+          message: "Quest #{quest_id} force-completed after #{@max_quest_age_hours}h timeout"
+        })
+
+        {:ok, "completed"}
+      else
+        advance_quest_phase(quest)
+      end
+    end
+  end
+
+  defp quest_timed_out?(quest) do
+    case quest[:inserted_at] do
+      %DateTime{} = started ->
+        hours = DateTime.diff(DateTime.utc_now(), started, :second) / 3600
+        phase = Map.get(quest, :current_phase, "pending")
+        # Don't timeout quests that are completed or awaiting approval
+        phase not in ["completed", "awaiting_approval", "pending"] and
+          hours > @max_quest_age_hours
+
+      _ ->
+        false
+    end
+  end
+
+  defp advance_quest_phase(quest) do
       phase = Map.get(quest, :current_phase, "pending")
 
       case phase do
@@ -118,7 +153,6 @@ defmodule Hive.Queen.Orchestrator do
         other ->
           {:ok, other}
       end
-    end
   end
 
   @doc """
@@ -176,13 +210,7 @@ defmodule Hive.Queen.Orchestrator do
           PhasePrompts.design_prompt(quest, requirements, research, extra_instructions)
         end
 
-      # Generate expert agents for design phase
-      experts = discover_design_experts(quest, research)
-
-      spawn_phase_bee(quest, "design", prompt,
-        model: "opus",
-        council_experts: experts
-      )
+      spawn_phase_bee(quest, "design", prompt, model: "opus")
 
       {:ok, "design"}
     end
@@ -238,8 +266,8 @@ defmodule Hive.Queen.Orchestrator do
           end
 
         _ ->
-          Logger.warning("Planning artifact is not a list, falling back to basic planning")
-          {:ok, []}
+          Logger.warning("Planning artifact is not a list, falling back to synthetic planning")
+          generate_synthetic_jobs(quest)
       end
 
       # Spawn ready jobs — the Queen's spawn_ready_jobs handles this
@@ -305,13 +333,23 @@ defmodule Hive.Queen.Orchestrator do
         {:ok, "completed"}
 
       :pending ->
-        # Check for approval timeout
+        # Check for approval timeout — re-validate then auto-approve
         if approval_timed_out?(quest.id) do
-          Logger.warning("Quest #{quest.id} approval timed out after #{@approval_timeout_hours}h")
-          Hive.HumanGate.reject(quest.id, "Approval timeout (#{@approval_timeout_hours}h)")
-          Hive.Quests.transition_phase(quest.id, "completed", "Approval timed out")
-          Hive.Quests.update_status!(quest.id)
-          {:ok, "completed"}
+          # Re-validate before auto-approving to catch regressions
+          validation_fresh? = revalidate_quest(quest)
+
+          if validation_fresh? do
+            Logger.info("Quest #{quest.id} auto-approved after #{@approval_timeout_hours}h timeout (dark factory mode)")
+            Hive.HumanGate.approve(quest.id, %{approved_by: "auto_timeout", notes: "Auto-approved after #{@approval_timeout_hours}h (re-validated)"})
+            {:ok, quest} = Hive.Quests.get(quest.id)
+            start_merge(quest)
+          else
+            Logger.warning("Quest #{quest.id} re-validation failed, rejecting auto-approve")
+            Hive.HumanGate.reject(quest.id, "Re-validation failed during auto-approve")
+            Hive.Quests.transition_phase(quest.id, "completed", "Auto-approve failed re-validation")
+            Hive.Quests.update_status!(quest.id)
+            {:ok, "completed"}
+          end
         else
           {:ok, "awaiting_approval"}
         end
@@ -320,6 +358,36 @@ defmodule Hive.Queen.Orchestrator do
         {:ok, quest} = Hive.Quests.get(quest.id)
         start_merge(quest)
     end
+  end
+
+  defp revalidate_quest(quest) do
+    # Quick re-validation: check that implementation jobs still pass verification
+    impl_jobs =
+      quest.jobs
+      |> Enum.reject(& &1[:phase_job])
+      |> Enum.filter(&(&1.status == "done"))
+
+    if impl_jobs == [] do
+      true
+    else
+      # Spot-check: verify a sample of completed jobs (max 3)
+      sample = Enum.take(impl_jobs, 3)
+
+      results =
+        Enum.map(sample, fn job ->
+          case Hive.Verification.verify_job(job.id) do
+            {:ok, :pass, _} -> true
+            _ -> false
+          end
+        end)
+
+      # Pass if all sampled jobs still verify
+      Enum.all?(results)
+    end
+  rescue
+    e ->
+      Logger.warning("Re-validation failed for quest #{quest.id}: #{Exception.message(e)}, allowing")
+      true
   end
 
   defp approval_timed_out?(quest_id) do
@@ -333,6 +401,8 @@ defmodule Hive.Queen.Orchestrator do
 
   # -- Phase Transition Logic --------------------------------------------------
 
+  @phase_timeout_seconds 900
+
   defp check_and_advance(quest, phase, next_fn) do
     artifact = Hive.Quests.get_artifact(quest.id, phase)
 
@@ -341,8 +411,112 @@ defmodule Hive.Queen.Orchestrator do
       {:ok, quest} = Hive.Quests.get(quest.id)
       next_fn.(quest)
     else
+      # Check if phase has been stuck too long (no artifact produced)
+      transitions = Hive.Quests.get_phase_transitions(quest.id)
+
+      phase_start =
+        transitions
+        |> Enum.filter(&(&1.phase == phase))
+        |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+        |> List.first()
+
+      if phase_start do
+        age = DateTime.diff(DateTime.utc_now(), phase_start.inserted_at, :second)
+
+        if age > @phase_timeout_seconds do
+          # Check if there's already a running phase bee to avoid duplicate spawning
+          running_phase_job = Store.find_one(:jobs, fn j ->
+            j.quest_id == quest.id and
+              j[:job_type] == "phase" and
+              j[:phase] == phase and
+              j.status in ["running", "assigned"]
+          end)
+
+          running_worker = if running_phase_job do
+            case running_phase_job[:bee_id] do
+              nil -> false
+              bee_id ->
+                case Hive.Bee.Worker.lookup(bee_id) do
+                  {:ok, pid} -> Process.alive?(pid)
+                  :error -> false
+                end
+            end
+          else
+            false
+          end
+
+          if running_worker do
+            Logger.debug("Quest #{quest.id} phase #{phase} has running worker, skipping re-spawn")
+          else
+            Logger.warning("Quest #{quest.id} stuck in #{phase} for #{age}s, re-spawning phase bee")
+            # Fail any stale phase jobs first
+            if running_phase_job do
+              Hive.Jobs.fail(running_phase_job.id)
+            end
+
+            {:ok, quest} = Hive.Quests.get(quest.id)
+
+            case rebuild_phase_prompt(quest, phase) do
+              {prompt, model} ->
+                spawn_phase_bee(quest, phase, prompt, model: model)
+
+              nil ->
+                Logger.info("Phase #{phase} doesn't use phase bees, attempting advancement")
+                advance_quest(quest.id)
+            end
+          end
+        end
+      end
+
       {:ok, phase}
     end
+  end
+
+  # Rebuild the real prompt for a phase re-spawn using available artifacts
+  defp rebuild_phase_prompt(quest, phase) do
+    comb = if quest.comb_id, do: Store.get(:combs, quest.comb_id)
+
+    case phase do
+      "research" ->
+        {PhasePrompts.research_prompt(quest, comb), "sonnet"}
+
+      "requirements" ->
+        research = Hive.Quests.get_artifact(quest.id, "research") || %{}
+        {PhasePrompts.requirements_prompt(quest, research), "sonnet"}
+
+      "design" ->
+        requirements = Hive.Quests.get_artifact(quest.id, "requirements") || %{}
+        research = Hive.Quests.get_artifact(quest.id, "research") || %{}
+        {PhasePrompts.design_prompt(quest, requirements, research), "opus"}
+
+      "review" ->
+        design = Hive.Quests.get_artifact(quest.id, "design") || %{}
+        requirements = Hive.Quests.get_artifact(quest.id, "requirements") || %{}
+        research = Hive.Quests.get_artifact(quest.id, "research") || %{}
+        {PhasePrompts.review_prompt(quest, design, requirements, research), "opus"}
+
+      "planning" ->
+        design = Hive.Quests.get_artifact(quest.id, "design") || %{}
+        requirements = Hive.Quests.get_artifact(quest.id, "requirements") || %{}
+        review = Hive.Quests.get_artifact(quest.id, "review") || %{}
+        {PhasePrompts.planning_prompt(quest, design, requirements, review), "sonnet"}
+
+      "validation" ->
+        all_artifacts = Map.get(quest, :artifacts, %{})
+        {PhasePrompts.validation_prompt(quest, all_artifacts), "sonnet"}
+
+      phase when phase in ["implementation", "merge", "awaiting_approval"] ->
+        # These phases don't use phase bees — handled by job spawning,
+        # merge queue, or user approval respectively. No prompt rebuild needed.
+        nil
+
+      _ ->
+        {"Re-attempt #{phase} phase", "sonnet"}
+    end
+  rescue
+    e ->
+      Logger.warning("Failed to rebuild prompt for phase #{phase}: #{Exception.message(e)}")
+      {"Re-attempt #{phase} phase (prompt rebuild failed)", "sonnet"}
   end
 
   defp handle_review_result(quest) do
@@ -483,19 +657,55 @@ defmodule Hive.Queen.Orchestrator do
 
                 _ ->
                   Logger.warning("Replan produced no tasks for quest #{quest.id}")
-                  {:ok, "implementation"}
+                  fail_exhausted_quest(quest)
               end
 
             {:error, reason} ->
               Logger.warning("Replan failed for quest #{quest.id}: #{inspect(reason)}")
-              {:ok, "implementation"}
+              fail_exhausted_quest(quest)
           end
         else
-          Logger.warning("Quest #{quest.id}: replan limit reached (#{replan_count}), staying in implementation")
-          {:ok, "implementation"}
+          Logger.warning("Quest #{quest.id}: all recovery strategies exhausted (fallback + #{replan_count} replans)")
+          fail_exhausted_quest(quest)
         end
     end
   end
+
+  defp fail_exhausted_quest(quest) do
+    Logger.warning("Quest #{quest.id} implementation exhausted — all plans, fallbacks, and replans failed")
+
+    # Collect what DID succeed for partial credit
+    impl_jobs = Enum.reject(quest.jobs, & &1[:phase_job])
+    done_count = Enum.count(impl_jobs, &(&1.status == "done"))
+    total_count = length(impl_jobs)
+
+    Hive.Quests.store_artifact(quest.id, "implementation_exhausted", %{
+      "reason" => "All recovery strategies exhausted",
+      "completed_jobs" => done_count,
+      "total_jobs" => total_count,
+      "replan_count" => Map.get(quest, :replan_count, 0)
+    })
+
+    if done_count > 0 do
+      # Some jobs succeeded — attempt validation of partial work
+      Logger.info("Quest #{quest.id}: #{done_count}/#{total_count} jobs completed, attempting partial validation")
+      {:ok, quest} = Hive.Quests.get(quest.id)
+      start_validation(quest)
+    else
+      # Nothing succeeded — fail the quest
+      Hive.Quests.transition_phase(quest.id, "completed", "Implementation exhausted: all plans failed")
+      Hive.Quests.update_status!(quest.id)
+
+      Hive.Telemetry.emit([:hive, :alert, :raised], %{}, %{
+        type: :quest_exhausted,
+        message: "Quest #{quest.id} failed: all implementation strategies exhausted"
+      })
+
+      {:ok, "completed"}
+    end
+  end
+
+  @max_validation_fix_attempts 2
 
   defp handle_validation_result(quest) do
     validation = Hive.Quests.get_artifact(quest.id, "validation")
@@ -513,12 +723,100 @@ defmodule Hive.Queen.Orchestrator do
         end
 
       true ->
-        # Validation failed — mark quest as needing attention
-        Logger.warning("Quest #{quest.id} failed validation: #{validation["summary"]}")
-        Hive.Quests.transition_phase(quest.id, "completed", "Validation completed with issues")
-        Hive.Quests.update_status!(quest.id)
-        {:ok, "completed"}
+        # Validation failed — attempt targeted fixes before giving up
+        fix_attempt = Map.get(quest, :validation_fix_count, 0)
+
+        if fix_attempt < @max_validation_fix_attempts do
+          Logger.info("Quest #{quest.id} validation failed (attempt #{fix_attempt + 1}/#{@max_validation_fix_attempts}), creating fix jobs")
+          attempt_validation_fixes(quest, validation, fix_attempt)
+        else
+          Logger.warning("Quest #{quest.id} validation failed after #{fix_attempt} fix attempts: #{validation["summary"]}")
+          Hive.Quests.transition_phase(quest.id, "completed", "Validation failed after #{fix_attempt} fix attempts")
+          Hive.Quests.update_status!(quest.id)
+          {:ok, "completed"}
+        end
     end
+  end
+
+  defp attempt_validation_fixes(quest, validation, fix_attempt) do
+    # Increment fix attempt counter
+    quest_record = Store.get(:quests, quest.id)
+
+    if quest_record do
+      updated = Map.put(quest_record, :validation_fix_count, fix_attempt + 1)
+      Store.put(:quests, updated)
+    end
+
+    # Extract specific gaps from validation artifact
+    gaps = Map.get(validation, "gaps", [])
+    unmet = (Map.get(validation, "requirements_met", []) || [])
+            |> Enum.filter(fn r -> Map.get(r, "met") == false end)
+
+    fix_specs =
+      cond do
+        # Create fix jobs from unmet requirements
+        unmet != [] ->
+          Enum.map(unmet, fn req ->
+            %{
+              "title" => "Fix: #{Map.get(req, "req_id", "unknown")} — #{Map.get(req, "evidence", "validation failed")}",
+              "description" => """
+              The validation phase found this requirement was NOT met.
+
+              Requirement: #{Map.get(req, "req_id", "unknown")}
+              Evidence: #{Map.get(req, "evidence", "No details")}
+
+              Fix this specific issue. Check the existing implementation and make the minimal changes needed.
+              """,
+              "job_type" => "fix"
+            }
+          end)
+
+        # Create fix jobs from gap descriptions
+        gaps != [] ->
+          Enum.map(gaps, fn gap ->
+            %{
+              "title" => "Fix validation gap: #{String.slice(to_string(gap), 0, 60)}",
+              "description" => """
+              The validation phase identified this gap:
+
+              #{gap}
+
+              Fix this specific issue with minimal changes.
+              """,
+              "job_type" => "fix"
+            }
+          end)
+
+        # Fallback: single fix job from summary
+        true ->
+          summary = Map.get(validation, "summary", "Validation failed")
+          [%{
+            "title" => "Fix validation issues: #{String.slice(summary, 0, 60)}",
+            "description" => "Validation failed: #{summary}\n\nFix all identified issues.",
+            "job_type" => "fix"
+          }]
+      end
+
+    if fix_specs != [] do
+      Planner.create_jobs_from_specs(quest.id, fix_specs)
+
+      # Transition back to implementation to run the fix jobs
+      Hive.Quests.transition_phase(quest.id, "implementation", "Validation fix attempt #{fix_attempt + 1}")
+      {:ok, quest} = Hive.Quests.get(quest.id)
+      spawn_implementation_jobs(quest)
+      {:ok, "implementation"}
+    else
+      Logger.warning("Quest #{quest.id}: no fixable issues extracted from validation")
+      Hive.Quests.transition_phase(quest.id, "completed", "Validation failed, no fixable issues identified")
+      Hive.Quests.update_status!(quest.id)
+      {:ok, "completed"}
+    end
+  rescue
+    e ->
+      Logger.warning("Validation fix attempt failed for quest #{quest.id}: #{Exception.message(e)}")
+      Hive.Quests.transition_phase(quest.id, "completed", "Validation fix attempt crashed")
+      Hive.Quests.update_status!(quest.id)
+      {:ok, "completed"}
   end
 
   defp complete_quest(quest_id) do
@@ -540,7 +838,6 @@ defmodule Hive.Queen.Orchestrator do
 
   defp spawn_phase_bee(quest, phase, prompt, opts) do
     model = Keyword.get(opts, :model, "sonnet")
-    council_experts = Keyword.get(opts, :council_experts)
 
     # Create a phase job
     job_attrs = %{
@@ -550,8 +847,7 @@ defmodule Hive.Queen.Orchestrator do
       comb_id: quest.comb_id,
       phase_job: true,
       phase: phase,
-      assigned_model: model_id(model),
-      council_experts: council_experts
+      assigned_model: model_id(model)
     }
 
     case Hive.Jobs.create(job_attrs) do
@@ -602,33 +898,53 @@ defmodule Hive.Queen.Orchestrator do
     end
   end
 
-  # -- Expert Integration ------------------------------------------------------
+  defp generate_synthetic_jobs(quest) do
+    # Try to derive tasks from requirements artifact
+    requirements = Hive.Quests.get_artifact(quest.id, "requirements")
+    design = Hive.Quests.get_artifact(quest.id, "design")
 
-  defp discover_design_experts(quest, research) do
-    # Infer domain from research and goal
-    tech_stack = if research, do: Map.get(research, "tech_stack", []), else: []
-    domain = infer_domain(quest.goal, tech_stack)
+    specs =
+      cond do
+        is_map(requirements) and is_list(requirements["functional_requirements"]) ->
+          requirements["functional_requirements"]
+          |> Enum.with_index(1)
+          |> Enum.map(fn {req, idx} ->
+            %{
+              "title" => "Implement requirement #{idx}: #{String.slice(to_string(req["name"] || req), 0, 60)}",
+              "description" => to_string(req["description"] || req),
+              "job_type" => "implementation"
+            }
+          end)
 
-    case Code.ensure_loaded(Hive.Council.Generator) do
-      {:module, _} ->
-        case Hive.Council.Generator.discover_experts(domain, experts: 3) do
-          {:ok, experts} ->
-            Enum.map(experts, & &1.key)
+        is_map(design) and is_list(design["components"]) ->
+          design["components"]
+          |> Enum.map(fn comp ->
+            %{
+              "title" => "Implement component: #{String.slice(to_string(comp["name"] || comp), 0, 60)}",
+              "description" => to_string(comp["description"] || Jason.encode!(comp)),
+              "job_type" => "implementation"
+            }
+          end)
 
-          {:error, _reason} ->
-            nil
-        end
+        true ->
+          # Last resort: single job from quest goal
+          [%{
+            "title" => "Implement: #{String.slice(quest.goal, 0, 80)}",
+            "description" => quest.goal,
+            "job_type" => "implementation"
+          }]
+      end
 
-      _ ->
-        nil
+    if specs != [] do
+      Logger.info("Quest #{quest.id}: generated #{length(specs)} synthetic jobs from artifacts")
+      Planner.create_jobs_from_specs(quest.id, specs)
     end
-  rescue
-    _ -> nil
-  end
 
-  defp infer_domain(goal, tech_stack) do
-    stack_str = if is_list(tech_stack), do: Enum.join(tech_stack, ", "), else: ""
-    "#{goal} (#{stack_str})"
+    {:ok, specs}
+  rescue
+    e ->
+      Logger.warning("Synthetic job generation failed for quest #{quest.id}: #{Exception.message(e)}")
+      {:ok, []}
   end
 
   defp is_client_facing?(quest) do

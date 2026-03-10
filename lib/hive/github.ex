@@ -182,7 +182,7 @@ defmodule Hive.GitHub do
     path = Map.get(comb, :path)
 
     if path && File.dir?(path) do
-      case System.cmd("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+      case Hive.Git.safe_cmd( ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
              cd: path,
              stderr_to_stdout: true
            ) do

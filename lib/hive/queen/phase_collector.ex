@@ -6,7 +6,7 @@ defmodule Hive.Queen.PhaseCollector do
   extracts the assistant's response text, finds the JSON block, validates
   required keys per phase, and returns a structured artifact map.
 
-  Reuses the JSON extraction pattern from `Council.Generator`.
+  Reuses common JSON extraction patterns.
   """
 
   require Logger

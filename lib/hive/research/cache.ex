@@ -119,7 +119,7 @@ defmodule Hive.Research.Cache do
   # Private helpers
 
   defp get_git_hash(repo_path) do
-    case System.cmd("git", ["rev-parse", "HEAD"], cd: repo_path, stderr_to_stdout: true) do
+    case Hive.Git.safe_cmd( ["rev-parse", "HEAD"], cd: repo_path, stderr_to_stdout: true) do
       {hash, 0} -> {:ok, String.trim(hash)}
       _ -> {:error, :git_failed}
     end

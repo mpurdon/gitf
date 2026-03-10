@@ -160,10 +160,15 @@ defmodule Hive.Runtime.ToolBox do
     grep_args = if glob, do: grep_args ++ ["--include=#{glob}"], else: grep_args
     grep_args = grep_args ++ [pattern, path]
 
-    case System.cmd("grep", grep_args, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, String.slice(output, 0, 10_000)}
-      {output, 1} -> {:ok, "No matches found.\n#{output}"}
-      {output, _} -> {:ok, "Search error: #{String.slice(output, 0, 2_000)}"}
+    task = Task.async(fn ->
+      System.cmd("grep", grep_args, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do
+      {:ok, {output, 0}} -> {:ok, String.slice(output, 0, 10_000)}
+      {:ok, {output, 1}} -> {:ok, "No matches found.\n#{output}"}
+      {:ok, {output, _}} -> {:ok, "Search error: #{String.slice(output, 0, 2_000)}"}
+      nil -> {:ok, "Search timed out after 30s"}
     end
   rescue
     e -> {:ok, "Search error: #{Exception.message(e)}"}
@@ -206,7 +211,7 @@ defmodule Hive.Runtime.ToolBox do
   defp git_diff(args, working_dir) do
     ref = args["ref"] || args[:ref] || "HEAD"
 
-    case System.cmd("git", ["diff", ref], cd: working_dir, stderr_to_stdout: true) do
+    case Hive.Git.safe_cmd( ["diff", ref], cd: working_dir, stderr_to_stdout: true) do
       {output, 0} -> {:ok, String.slice(output, 0, 15_000)}
       {output, _} -> {:ok, "git diff error: #{String.slice(output, 0, 2_000)}"}
     end
@@ -215,7 +220,7 @@ defmodule Hive.Runtime.ToolBox do
   end
 
   defp git_status(_args, working_dir) do
-    case System.cmd("git", ["status", "--short"], cd: working_dir, stderr_to_stdout: true) do
+    case Hive.Git.safe_cmd( ["status", "--short"], cd: working_dir, stderr_to_stdout: true) do
       {output, 0} -> {:ok, output}
       {output, _} -> {:ok, "git status error: #{output}"}
     end
@@ -226,7 +231,7 @@ defmodule Hive.Runtime.ToolBox do
   defp git_add(args, working_dir) do
     paths = String.split(args["paths"] || args[:paths] || "", " ", trim: true)
 
-    case System.cmd("git", ["add" | paths], cd: working_dir, stderr_to_stdout: true) do
+    case Hive.Git.safe_cmd( ["add" | paths], cd: working_dir, stderr_to_stdout: true) do
       {_, 0} -> {:ok, "Files staged: #{Enum.join(paths, ", ")}"}
       {output, _} -> {:ok, "git add error: #{output}"}
     end
@@ -237,7 +242,7 @@ defmodule Hive.Runtime.ToolBox do
   defp git_commit(args, working_dir) do
     message = args["message"] || args[:message]
 
-    case System.cmd("git", ["commit", "-m", message], cd: working_dir, stderr_to_stdout: true) do
+    case Hive.Git.safe_cmd( ["commit", "-m", message], cd: working_dir, stderr_to_stdout: true) do
       {output, 0} -> {:ok, output}
       {output, _} -> {:ok, "git commit error: #{output}"}
     end

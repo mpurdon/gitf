@@ -34,7 +34,9 @@ defmodule Hive.Bees do
   def spawn(job_id, comb_id, hive_root, opts \\ []) do
     name = Keyword.get(opts, :name, generate_bee_name())
 
-    with :ok <- check_job_ready(job_id),
+    # Atomic check: reject if job already has a bee assigned (prevents duplicate spawning)
+    with :ok <- check_not_already_assigned(job_id),
+         :ok <- check_job_ready(job_id),
          {:ok, bee} <- create_bee_record(name, job_id),
          :ok <- assign_job(job_id, bee.id),
          {:ok, _pid} <- start_worker(bee.id, job_id, comb_id, hive_root, opts) do
@@ -87,6 +89,7 @@ defmodule Hive.Bees do
          :ok <- update_bee_working(bee.id, cell),
          :ok <- maybe_transition_job(job_id),
          :ok <- maybe_ensure_agent(job_id, comb_id, cell),
+         :ok <- write_pre_dispatch(cell.worktree_path, job_id),
          {:ok, _os_pid} <- spawn_model_detached(bee.id, job_id, cell, hive_root) do
       {:ok, bee}
     else
@@ -168,6 +171,16 @@ defmodule Hive.Bees do
   end
 
   # -- Private helpers ---------------------------------------------------------
+
+  defp check_not_already_assigned(job_id) do
+    case Hive.Jobs.get(job_id) do
+      {:ok, %{bee_id: bee_id}} when is_binary(bee_id) and bee_id != "" ->
+        {:error, :already_assigned}
+
+      _ ->
+        :ok
+    end
+  end
 
   defp check_job_ready(job_id) do
     if Hive.Jobs.ready?(job_id), do: :ok, else: {:error, :blocked}
@@ -262,17 +275,6 @@ defmodule Hive.Bees do
     try do
       case Hive.Jobs.get(job_id) do
         {:ok, job} ->
-          # Council expert installation: check council_experts alone
-          council_experts = Map.get(job, :council_experts)
-
-          if is_list(council_experts) and council_experts != [] do
-            council_id = Map.get(job, :council_id)
-
-            if council_id do
-              Hive.Council.install_experts(council_id, council_experts, cell.worktree_path)
-            end
-          end
-
           # Standard comb-level agent
           case Store.get(:combs, cell.comb_id) do
             nil ->
@@ -470,5 +472,67 @@ defmodule Hive.Bees do
 
     Do NOT start the work over from scratch. Finalize what's already here.
     """
+  end
+
+  # -- Pre-dispatch helpers ----------------------------------------------------
+
+  defp write_pre_dispatch(worktree_path, job_id) do
+    case Hive.Jobs.get(job_id) do
+      {:ok, job} ->
+        content = build_instructions_content(job)
+        instructions_path = Path.join([worktree_path, ".claude", "instructions.md"])
+        File.mkdir_p!(Path.dirname(instructions_path))
+        File.write!(instructions_path, content)
+        :ok
+
+      {:error, _} ->
+        :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp build_instructions_content(job) do
+    sections = [
+      "# Job Instructions\n",
+      "## #{job.title}\n"
+    ]
+
+    sections =
+      if job.description && job.description != "" do
+        sections ++ ["### Description\n\n#{job.description}\n"]
+      else
+        sections
+      end
+
+    sections =
+      case Map.get(job, :scout_findings) do
+        findings when is_binary(findings) and findings != "" ->
+          sections ++ ["### Scout Findings\n\n#{findings}\n"]
+
+        _ ->
+          sections
+      end
+
+    sections =
+      case Map.get(job, :acceptance_criteria) do
+        criteria when is_binary(criteria) and criteria != "" ->
+          sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
+
+        _ ->
+          sections
+      end
+
+    sections =
+      case Map.get(job, :target_files) do
+        files when is_list(files) and files != [] ->
+          file_list = Enum.map_join(files, "\n", &"- `#{&1}`")
+          sections ++ ["### Target Files\n\n#{file_list}\n"]
+
+        _ ->
+          sections
+      end
+
+    Enum.join(sections, "\n")
   end
 end

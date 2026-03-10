@@ -144,9 +144,6 @@ defmodule Hive.Costs do
          job_id when is_binary(job_id) <- Map.get(bee, :job_id),
          {:ok, job} <- Hive.Jobs.get(job_id) do
       cond do
-        is_list(job[:council_experts]) and job[:council_experts] != [] ->
-          "council"
-
         Map.get(job, :phase_job, false) and job[:phase] in @planning_phases ->
           "planning"
 

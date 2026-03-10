@@ -84,11 +84,11 @@ defmodule Hive.Runtime.CrossModelAudit do
   end
 
   defp get_diff(cell) do
-    case System.cmd("git", ["diff", "HEAD~1"], cd: cell.worktree_path, stderr_to_stdout: true) do
+    case Hive.Git.safe_cmd( ["diff", "HEAD~1"], cd: cell.worktree_path, stderr_to_stdout: true) do
       {output, 0} -> {:ok, output}
       {_, _} ->
         # Fallback: diff against main
-        case System.cmd("git", ["diff", "main"], cd: cell.worktree_path, stderr_to_stdout: true) do
+        case Hive.Git.safe_cmd( ["diff", "main"], cd: cell.worktree_path, stderr_to_stdout: true) do
           {output, 0} -> {:ok, output}
           {output, _} -> {:error, {:diff_failed, output}}
         end

@@ -87,8 +87,8 @@ defmodule Hive.Observability.Alerts do
     if length(costs) < 10 do
       :ok
     else
-      recent = Enum.take(costs, -5) |> Enum.map(& &1.total_cost_usd)
-      older = Enum.slice(costs, -15..-6) |> Enum.map(& &1.total_cost_usd)
+      recent = Enum.take(costs, -5) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
+      older = Enum.slice(costs, -15..-6) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
       
       recent_avg = Enum.sum(recent) / length(recent)
       older_avg = Enum.sum(older) / length(older)

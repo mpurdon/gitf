@@ -14,9 +14,11 @@ defmodule Hive.Store do
   use GenServer
 
   @name __MODULE__
-  @lock_stale_seconds 5
+  @lock_stale_seconds 120
   @lock_steal_attempts 500
   @cache_table :hive_store_cache
+  @backup_interval_seconds 300
+  @backup_generations 3
 
   # -- Client API ------------------------------------------------------------
 
@@ -212,10 +214,65 @@ defmodule Hive.Store do
           :erlang.binary_to_term(binary, [:safe])
         rescue
           ArgumentError ->
-            # Existing data may contain atoms not yet loaded — fall back to unsafe
-            :erlang.binary_to_term(binary)
+            try do
+              # Existing data may contain atoms not yet loaded — fall back to unsafe
+              :erlang.binary_to_term(binary)
+            rescue
+              _ ->
+                # Fully corrupted — try backup
+                recover_from_backup()
+            end
+        catch
+          _, _ ->
+            recover_from_backup()
         end
-      {:error, :enoent} -> %{}
+
+      {:error, :enoent} ->
+        %{}
+
+      {:error, reason} ->
+        require Logger
+        Logger.error("Store read failed: #{inspect(reason)}, trying backup")
+        recover_from_backup()
+    end
+  end
+
+  defp recover_from_backup do
+    require Logger
+    # Try each backup generation in order: .bak, .bak.2, .bak.3
+    backup_paths =
+      [data_path() <> ".bak"] ++
+        Enum.map(2..@backup_generations, fn gen -> data_path() <> ".bak.#{gen}" end)
+
+    Enum.reduce_while(backup_paths, %{}, fn backup, _acc ->
+      case File.read(backup) do
+        {:ok, binary} ->
+          try do
+            data = :erlang.binary_to_term(binary)
+            Logger.warning("Store corrupted — recovered from #{Path.basename(backup)}")
+            File.write!(data_path(), binary)
+            {:halt, data}
+          rescue
+            _ ->
+              Logger.warning("Backup #{Path.basename(backup)} also corrupted, trying next")
+              {:cont, %{}}
+          end
+
+        {:error, _} ->
+          {:cont, %{}}
+      end
+    end)
+    |> case do
+      data when data == %{} ->
+        Logger.error("All backups exhausted, starting with empty store")
+        Hive.Telemetry.emit([:hive, :store, :data_loss], %{}, %{reason: "all_backups_exhausted"})
+        try do
+          Phoenix.PubSub.broadcast(Hive.PubSub, "hive:alerts", {:store_data_loss, "all_backups_exhausted"})
+        rescue
+          _ -> :ok
+        end
+        %{}
+      data -> data
     end
   end
 
@@ -226,6 +283,43 @@ defmodule Hive.Store do
     File.write!(tmp_path, binary)
     File.rename!(tmp_path, path)
     cache_put(data)
+    maybe_backup(path, binary)
+  end
+
+  defp maybe_backup(path, binary) do
+    backup_path = path <> ".bak"
+
+    should_backup =
+      case File.stat(backup_path) do
+        {:ok, %{mtime: mtime}} ->
+          mtime_seconds =
+            :calendar.datetime_to_gregorian_seconds(mtime) -
+              :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
+
+          System.os_time(:second) - mtime_seconds > @backup_interval_seconds
+
+        {:error, _} ->
+          true
+      end
+
+    if should_backup do
+      rotate_backups(path)
+      File.write(backup_path, binary)
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # Rotate backups: .bak -> .bak.2, .bak.2 -> .bak.3, etc.
+  defp rotate_backups(path) do
+    (@backup_generations - 1)..1//-1
+    |> Enum.each(fn gen ->
+      src = if gen == 1, do: path <> ".bak", else: path <> ".bak.#{gen}"
+      dst = path <> ".bak.#{gen + 1}"
+      if File.exists?(src), do: File.rename(src, dst)
+    end)
+  rescue
+    _ -> :ok
   end
 
   # -- ETS cache ---------------------------------------------------------------
@@ -366,17 +460,19 @@ defmodule Hive.Store do
   defp collection_prefix(:costs), do: :cst
   defp collection_prefix(:cells), do: :cel
   defp collection_prefix(:job_dependencies), do: :jdp
-  defp collection_prefix(:councils), do: :cnl
   defp collection_prefix(:quest_phase_transitions), do: :qpt
   defp collection_prefix(:comb_research_cache), do: :crc
   defp collection_prefix(:research_file_index), do: :rfi
   defp collection_prefix(:verification_results), do: :vrf
   defp collection_prefix(:context_snapshots), do: :ctx
   defp collection_prefix(:model_reputation), do: :mrp
-  defp collection_prefix(:council_reputation), do: :crp
-  defp collection_prefix(:expert_reputation), do: :erp
   defp collection_prefix(:approval_requests), do: :apr
   defp collection_prefix(:post_reviews), do: :prv
+  defp collection_prefix(:checkpoints), do: :ckp
+  defp collection_prefix(:model_scores), do: :msc
+  defp collection_prefix(:events), do: :evt
+  defp collection_prefix(:agent_identities), do: :agi
+  defp collection_prefix(:runs), do: :run
   defp collection_prefix(_), do: :hiv
 
   defp ensure_timestamps(record) do

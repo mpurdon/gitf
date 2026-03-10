@@ -64,14 +64,20 @@ defmodule Hive.PostReview do
       if is_nil(validation_command) do
         {:ok, :clean}
       else
-        case System.cmd("sh", ["-c", validation_command],
-               cd: comb.path,
-               stderr_to_stdout: true) do
-          {_output, 0} ->
+        task = Task.async(fn ->
+          System.cmd("sh", ["-c", validation_command],
+            cd: comb.path, stderr_to_stdout: true)
+        end)
+
+        case Task.yield(task, 120_000) || Task.shutdown(task, 5_000) do
+          {:ok, {_output, 0}} ->
             {:ok, :clean}
 
-          {output, _exit_code} ->
+          {:ok, {output, _exit_code}} ->
             {:ok, :regression, output}
+
+          nil ->
+            {:ok, :regression, "validation command timed out"}
         end
       end
     end

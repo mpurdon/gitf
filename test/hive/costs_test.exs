@@ -282,33 +282,6 @@ defmodule Hive.CostsTest do
       assert cost.category == "verification"
     end
 
-    test "job with council_experts maps to council", %{bee: bee} do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
-
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
-          status: "pending"
-        })
-
-      {:ok, job} =
-        Hive.Jobs.create(%{
-          title: "Council design task",
-          quest_id: quest.id,
-          comb_id: comb.id,
-          bee_id: bee.id,
-          phase_job: true,
-          phase: "design",
-          council_experts: ["security", "performance"]
-        })
-
-      Store.put(:bees, Map.put(bee, :job_id, job.id))
-
-      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
-      assert cost.category == "council"
-    end
-
     test "non-phase job maps to implementation", %{bee: bee} do
       {:ok, comb} =
         Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})

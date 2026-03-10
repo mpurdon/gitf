@@ -11,6 +11,8 @@ defmodule Hive.AgentProfile do
   are cached (the file persists) and reused by all bees on that comb.
   """
 
+  alias Hive.AgentProfile.FailureModes
+
   require Logger
 
   @agents_dir ".claude/agents"
@@ -274,9 +276,11 @@ defmodule Hive.AgentProfile do
 
     prompt = build_generation_prompt(agent_key, agent_name, title, description)
 
+    anti_patterns = FailureModes.format_for_agent(:all)
+
     case generate_via_model(comb_path, prompt) do
       {:ok, content} ->
-        File.write!(agent_path, content)
+        File.write!(agent_path, content <> "\n\n" <> anti_patterns)
         Logger.info("Agent profile generated: #{agent_path}")
         {:ok, agent_path}
 
@@ -284,7 +288,7 @@ defmodule Hive.AgentProfile do
         Logger.warning("Failed to generate agent #{agent_name}: #{inspect(reason)}")
         # Write a fallback agent file with job context
         fallback = build_fallback_agent(agent_key, agent_name, title, description)
-        File.write!(agent_path, fallback)
+        File.write!(agent_path, fallback <> "\n\n" <> anti_patterns)
         {:ok, agent_path}
     end
   end

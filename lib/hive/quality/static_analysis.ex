@@ -18,46 +18,59 @@ defmodule Hive.Quality.StaticAnalysis do
     end
   end
 
+  @analysis_timeout_ms 120_000
+
   defp run_credo(path) do
-    case System.cmd("mix", ["credo", "--format", "json", "--strict"],
-           cd: path,
-           stderr_to_stdout: true
-         ) do
-      {output, 0} -> parse_credo(output)
-      {output, _} -> parse_credo(output)
+    task = Task.async(fn ->
+      System.cmd("mix", ["credo", "--format", "json", "--strict"],
+        cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, _}} -> parse_credo(output)
+      nil -> {:ok, %{issues: [], score: 100, tool: "credo", available: false}}
     end
   rescue
     _ -> {:ok, %{issues: [], score: 100, tool: "credo", available: false}}
   end
 
   defp run_eslint(path) do
-    case System.cmd("npx", ["eslint", ".", "--format", "json"],
-           cd: path,
-           stderr_to_stdout: true
-         ) do
-      {output, _} -> parse_eslint(output)
+    task = Task.async(fn ->
+      System.cmd("npx", ["eslint", ".", "--format", "json"],
+        cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, _}} -> parse_eslint(output)
+      nil -> {:ok, %{issues: [], score: 100, tool: "eslint", available: false}}
     end
   rescue
     _ -> {:ok, %{issues: [], score: 100, tool: "eslint", available: false}}
   end
 
   defp run_clippy(path) do
-    case System.cmd("cargo", ["clippy", "--message-format", "json"],
-           cd: path,
-           stderr_to_stdout: true
-         ) do
-      {output, _} -> parse_clippy(output)
+    task = Task.async(fn ->
+      System.cmd("cargo", ["clippy", "--message-format", "json"],
+        cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, _}} -> parse_clippy(output)
+      nil -> {:ok, %{issues: [], score: 100, tool: "clippy", available: false}}
     end
   rescue
     _ -> {:ok, %{issues: [], score: 100, tool: "clippy", available: false}}
   end
 
   defp run_pylint(path) do
-    case System.cmd("pylint", [".", "--output-format", "json"],
-           cd: path,
-           stderr_to_stdout: true
-         ) do
-      {output, _} -> parse_pylint(output)
+    task = Task.async(fn ->
+      System.cmd("pylint", [".", "--output-format", "json"],
+        cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, _}} -> parse_pylint(output)
+      nil -> {:ok, %{issues: [], score: 100, tool: "pylint", available: false}}
     end
   rescue
     _ -> {:ok, %{issues: [], score: 100, tool: "pylint", available: false}}

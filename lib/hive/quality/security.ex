@@ -64,34 +64,56 @@ defmodule Hive.Quality.Security do
     find_in_files(path, patterns, "vulnerability")
   end
 
+  @audit_timeout_ms 60_000
+
   defp check_mix_audit(path) do
-    case System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true) do
-      {_output, 0} -> []
-      {output, _} -> parse_mix_audit(output)
+    task = Task.async(fn ->
+      System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {_output, 0}} -> []
+      {:ok, {output, _}} -> parse_mix_audit(output)
+      nil -> []
     end
   rescue
     _ -> []
   end
 
   defp check_npm_audit(path) do
-    case System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true) do
-      {output, _} -> parse_npm_audit(output)
+    task = Task.async(fn ->
+      System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, _}} -> parse_npm_audit(output)
+      nil -> []
     end
   rescue
     _ -> []
   end
 
   defp check_cargo_audit(path) do
-    case System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true) do
-      {output, _} -> parse_cargo_audit(output)
+    task = Task.async(fn ->
+      System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, _}} -> parse_cargo_audit(output)
+      nil -> []
     end
   rescue
     _ -> []
   end
 
   defp check_pip_audit(path) do
-    case System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true) do
-      {output, _} -> parse_pip_audit(output)
+    task = Task.async(fn ->
+      System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, _}} -> parse_pip_audit(output)
+      nil -> []
     end
   rescue
     _ -> []

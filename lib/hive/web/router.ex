@@ -11,8 +11,13 @@ defmodule Hive.Web.Router do
     plug :put_secure_browser_headers
   end
 
+  pipeline :api_public do
+    plug :accepts, ["json"]
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
+    plug :require_local_or_api_key
   end
 
   scope "/", Hive.Web do
@@ -21,16 +26,21 @@ defmodule Hive.Web.Router do
     live "/", Live.Dashboard
   end
 
+  # Health endpoint — no auth required (monitoring)
+  scope "/api/v1", Hive.Web do
+    pipe_through :api_public
+    get "/health", ApiController, :health
+  end
+
   scope "/api/v1", Hive.Web do
     pipe_through :api
-
-    get "/health", ApiController, :health
 
     # Quests
     post "/quests", ApiController, :create_quest
     get "/quests", ApiController, :list_quests
     get "/quests/:id", ApiController, :show_quest
     delete "/quests/:id", ApiController, :delete_quest
+    post "/quests/:id/kill", ApiController, :kill_quest
     post "/quests/:id/close", ApiController, :close_quest
     post "/quests/:id/start", ApiController, :start_quest
     get "/quests/:id/status", ApiController, :quest_status
@@ -49,6 +59,7 @@ defmodule Hive.Web.Router do
     get "/jobs", ApiController, :list_jobs
     get "/jobs/:id", ApiController, :show_job
     post "/jobs/:id/reset", ApiController, :reset_job
+    delete "/jobs/:id", ApiController, :kill_job
 
     # Bees
     get "/bees", ApiController, :list_bees
@@ -66,5 +77,44 @@ defmodule Hive.Web.Router do
     # Costs
     get "/costs/summary", ApiController, :costs_summary
     post "/costs/record", ApiController, :record_cost
+  end
+
+  # Restrict API to localhost unless a valid API key is provided.
+  # The API key is read from the hive config file (api_key field).
+  defp require_local_or_api_key(conn, _opts) do
+    remote_ip = conn.remote_ip
+
+    if local_ip?(remote_ip) do
+      conn
+    else
+      case Plug.Conn.get_req_header(conn, "x-api-key") do
+        [key] when byte_size(key) > 0 ->
+          if valid_api_key?(key) do
+            conn
+          else
+            conn
+            |> Plug.Conn.put_status(401)
+            |> Phoenix.Controller.json(%{error: "invalid API key"})
+            |> Plug.Conn.halt()
+          end
+
+        _ ->
+          conn
+          |> Plug.Conn.put_status(401)
+          |> Phoenix.Controller.json(%{error: "API key required for non-local requests"})
+          |> Plug.Conn.halt()
+      end
+    end
+  end
+
+  defp local_ip?({127, 0, 0, 1}), do: true
+  defp local_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp local_ip?(_), do: false
+
+  defp valid_api_key?(key) do
+    case Hive.Config.get(:api_key) do
+      nil -> false
+      configured_key -> Plug.Crypto.secure_compare(key, configured_key)
+    end
   end
 end

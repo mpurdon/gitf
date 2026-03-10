@@ -115,10 +115,13 @@ defmodule Hive.Handoff do
       cell = fetch_cell(bee_id)
       sent_waggles = Hive.Waggle.list(from: bee_id, limit: 10)
       received_waggles = Hive.Waggle.list(to: bee_id, limit: 10)
+      checkpoint_section = build_checkpoint_section(bee_id)
+
+      error_section = build_error_section(bee_id)
 
       markdown =
         [
-          "# Handoff Context for #{bee.name} (#{bee.id})",
+          "# Handoff Context for #{Map.get(bee, :name, bee.id)} (#{bee.id})",
           "",
           "## Bee Status",
           "- Status: #{bee.status}",
@@ -130,6 +133,8 @@ defmodule Hive.Handoff do
           "## Workspace",
           format_cell_section(cell),
           "",
+          checkpoint_section,
+          error_section,
           "## Recent Messages Sent (#{length(sent_waggles)})",
           format_waggles_section(sent_waggles),
           "",
@@ -139,8 +144,10 @@ defmodule Hive.Handoff do
           "## Instructions for Continuation",
           "- Review the job description above and continue where the previous bee left off.",
           "- Check the workspace path for any work in progress.",
+          "- Avoid the error patterns listed above if present.",
           "- Send a waggle to the queen when you have completed the job or if you are blocked."
         ]
+        |> Enum.reject(&(&1 == ""))
         |> Enum.join("\n")
 
       {:ok, markdown}
@@ -212,6 +219,40 @@ defmodule Hive.Handoff do
       "- #{read_marker} #{w.from} -> #{w.to}: #{subject}"
     end)
     |> Enum.join("\n")
+  end
+
+  defp build_error_section(bee_id) do
+    # Gather recent error waggles for this bee
+    error_waggles =
+      Store.filter(:waggles, fn w ->
+        w.from == bee_id and
+          w.subject in ["job_failed", "verification_failed", "validation_failed", "merge_conflict"]
+      end)
+      |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+      |> Enum.take(5)
+
+    if error_waggles == [] do
+      ""
+    else
+      lines =
+        Enum.map(error_waggles, fn w ->
+          "- [#{w.subject}] #{String.slice(w.body || "", 0, 200)}"
+        end)
+
+      "## Previous Errors (avoid these patterns)\n\n" <> Enum.join(lines, "\n") <> "\n\n"
+    end
+  rescue
+    _ -> ""
+  end
+
+  defp build_checkpoint_section(bee_id) do
+    case Hive.Checkpoint.load(bee_id) do
+      {:ok, checkpoint} ->
+        Hive.Checkpoint.build_resume_prompt(checkpoint) <> "\n\n"
+
+      {:error, :not_found} ->
+        ""
+    end
   end
 
   defp format_resume_briefing(waggle) do

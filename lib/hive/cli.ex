@@ -74,6 +74,7 @@ defmodule Hive.CLI do
   end
 
   defp run_cli(argv) do
+    argv = extract_mode_flag(argv)
     argv = expand_defaults(argv)
     optimus = build_optimus!()
 
@@ -127,6 +128,34 @@ defmodule Hive.CLI do
   defp result_get(%Optimus.ParseResult{} = r, section, key) do
     Map.get(Map.get(r, section, %{}), key)
   end
+
+  # Extract --mode <mode> from anywhere in argv, set HIVE_EXECUTION_MODE, and strip it.
+  # This allows `hive --mode bedrock quest new "..."` or `hive quest new "..." --mode cli`.
+  @valid_modes ~w(api cli ollama bedrock)
+  defp extract_mode_flag(argv) do
+    case find_mode_flag(argv, [], nil) do
+      {cleaned, nil} -> cleaned
+      {cleaned, mode} when mode in @valid_modes ->
+        System.put_env("HIVE_EXECUTION_MODE", mode)
+        cleaned
+      {cleaned, bad_mode} ->
+        Format.warn("Unknown mode '#{bad_mode}', ignoring. Valid: #{Enum.join(@valid_modes, ", ")}")
+        cleaned
+    end
+  end
+
+  defp find_mode_flag([], acc, mode), do: {Enum.reverse(acc), mode}
+  defp find_mode_flag(["--mode", value | rest], acc, _mode), do: find_mode_flag(rest, acc, value)
+
+  defp find_mode_flag(["-m", value | rest], acc, prev_mode) do
+    if String.starts_with?(value, "-") do
+      find_mode_flag(rest, [value | ["-m" | acc]], prev_mode)
+    else
+      find_mode_flag(rest, acc, value)
+    end
+  end
+
+  defp find_mode_flag([head | rest], acc, mode), do: find_mode_flag(rest, [head | acc], mode)
 
   @quest_subcommands ~w(new list show remove merge report close spec plan start status)
 
@@ -231,8 +260,7 @@ defmodule Hive.CLI do
 
   @handlers [
     Hive.CLI.QuestHandler,
-    Hive.CLI.BeeHandler,
-    Hive.CLI.CouncilHandler
+    Hive.CLI.BeeHandler
   ]
 
   defp handler_helpers do
@@ -1632,7 +1660,7 @@ defmodule Hive.CLI do
     del_result =
       if Hive.Client.remote?(),
         do: Hive.Client.delete_quest(id),
-        else: Hive.Quests.delete(id)
+        else: Hive.Quests.kill(id)
 
     case del_result do
       :ok ->
@@ -1666,7 +1694,7 @@ defmodule Hive.CLI do
             comb_name =
               if Hive.Client.remote?(), do: q[:comb_id] || "-", else: resolve_comb_name(q[:comb_id])
             phase = q[:current_phase] || "-"
-            [q.id, q.name, phase, q.status, comb_name]
+            [q[:id], q[:name] || q[:goal] || "-", phase, q[:status] || "pending", comb_name]
           end)
 
         Format.table(headers, rows)
@@ -1683,26 +1711,14 @@ defmodule Hive.CLI do
 
     case quest_result do
       {:ok, quest} ->
-        IO.puts("ID:     #{quest.id}")
-        IO.puts("Name:   #{quest.name}")
-        IO.puts("Status: #{quest.status}")
+        IO.puts("ID:     #{quest[:id]}")
+        IO.puts("Name:   #{quest[:name] || quest[:goal] || "-"}")
+        IO.puts("Status: #{quest[:status] || "pending"}")
 
         if quest[:comb_id] do
           comb_name =
-            if Hive.Client.remote?(), do: quest.comb_id, else: resolve_comb_name(quest.comb_id)
+            if Hive.Client.remote?(), do: quest[:comb_id], else: resolve_comb_name(quest[:comb_id])
           IO.puts("Comb:   #{comb_name}")
-        end
-
-        unless Hive.Client.remote?() do
-          if quest[:council_id] do
-            council_label =
-              case Hive.Council.get(quest.council_id) do
-                {:ok, c} -> "#{c.domain} (#{c.id})"
-                _ -> quest.council_id
-              end
-
-            IO.puts("Council: #{council_label}")
-          end
         end
 
         if quest[:goal] do
@@ -2064,7 +2080,14 @@ defmodule Hive.CLI do
     Format.success("Hive server v#{Hive.version()} running at #{url}")
     Format.info("API available at #{url}/api/v1/health")
     Format.info("Press Ctrl+C to stop.")
-    Process.sleep(:infinity)
+
+    # Block the main process. The BEAM's shutdown handler (Ctrl+C -> 'a')
+    # will stop the supervision tree which releases the port.
+    ref = Process.monitor(Process.whereis(Hive.Supervisor))
+
+    receive do
+      {:DOWN, ^ref, :process, _, _} -> :ok
+    end
   end
 
   defp dispatch([:dashboard], _result) do
@@ -2440,138 +2463,15 @@ defmodule Hive.CLI do
     end
   end
 
-  # -- Council commands --------------------------------------------------------
+  defp dispatch([:completions], result) do
+    shell = result_get(result, :args, :shell) || "bash"
 
-  defp dispatch([:council, :create], result) do
-    domain = result_get(result, :args, :domain)
-    experts = result_get(result, :options, :experts)
+    case shell do
+      s when s in ["bash", "zsh", "fish"] ->
+        IO.puts(Hive.CLI.Completions.generate(String.to_atom(s)))
 
-    opts = if experts, do: [experts: experts], else: []
-
-    Format.info("Researching experts for \"#{domain}\"...")
-
-    case Hive.Council.create(domain, opts) do
-      {:ok, council} ->
-        Format.success("Council \"#{council.domain}\" created (#{council.id})")
-
-        Enum.each(council.experts, fn e ->
-          IO.puts("  #{e.key}: #{e.name} — #{e.focus}")
-        end)
-
-      {:error, {:already_exists, id}} ->
-        Format.error("A council for this domain already exists (#{id})")
-
-      {:error, reason} ->
-        Format.error("Failed to create council: #{inspect(reason)}")
-    end
-  end
-
-  defp dispatch([:council, :list], _result) do
-    case Hive.Council.list() do
-      [] ->
-        Format.info("No councils. Use `hive council create <domain>` to create one.")
-
-      councils ->
-        headers = ["ID", "Name", "Domain", "Experts", "Status"]
-
-        rows =
-          Enum.map(councils, fn c ->
-            [c.id, c.name, c.domain, "#{length(c.experts)}", c.status]
-          end)
-
-        Format.table(headers, rows)
-    end
-  end
-
-  defp dispatch([:council, :show], result) do
-    id = result_get(result, :args, :id)
-
-    case Hive.Council.get(id) do
-      {:ok, council} ->
-        IO.puts("ID:      #{council.id}")
-        IO.puts("Name:    #{council.name}")
-        IO.puts("Domain:  #{council.domain}")
-        IO.puts("Status:  #{council.status}")
-        IO.puts("Experts: #{length(council.experts)}")
-        IO.puts("")
-
-        Enum.each(council.experts, fn e ->
-          IO.puts("  #{e.key}")
-          IO.puts("    Name:          #{e.name}")
-          IO.puts("    Focus:         #{e.focus}")
-          IO.puts("    Philosophy:    #{e.philosophy}")
-          IO.puts("    Contributions: #{Enum.join(e.contributions, ", ")}")
-          IO.puts("")
-        end)
-
-      {:error, :not_found} ->
-        Format.error("Council not found: #{id}")
-        Format.info("Hint: use `hive council list` to see all councils.")
-    end
-  end
-
-  defp dispatch([:council, :remove], result) do
-    id = result_get(result, :args, :id)
-
-    case Hive.Council.delete(id) do
-      :ok ->
-        Format.success("Council #{id} removed.")
-
-      {:error, :not_found} ->
-        Format.error("Council not found: #{id}")
-        Format.info("Hint: use `hive council list` to see all councils.")
-    end
-  end
-
-  defp dispatch([:council, :apply], result) do
-    council_id = result_get(result, :args, :id)
-    quest_id = result_get(result, :options, :quest)
-    wave_size = result_get(result, :options, :wave_size)
-
-    opts = if wave_size, do: [wave_size: wave_size], else: []
-
-    case Hive.Council.apply_to_quest(council_id, quest_id, opts) do
-      {:ok, %{wave_count: waves, jobs_created: jobs}} ->
-        Format.success("Council applied: #{jobs} review jobs in #{waves} wave(s)")
-
-      {:error, :not_found} ->
-        Format.error("Council or quest not found.")
-
-      {:error, {:not_ready, status}} ->
-        Format.error("Council is not ready (status: #{status})")
-
-      {:error, :no_implementation_jobs} ->
-        Format.error("Quest has no implementation jobs to review.")
-
-      {:error, reason} ->
-        Format.error("Failed: #{inspect(reason)}")
-    end
-  end
-
-  defp dispatch([:council, :preview], result) do
-    domain = result_get(result, :args, :domain)
-    experts = result_get(result, :options, :experts)
-
-    opts = if experts, do: [experts: experts], else: []
-
-    Format.info("Discovering experts for \"#{domain}\"...")
-
-    case Hive.Council.preview(domain, opts) do
-      {:ok, experts} ->
-        IO.puts("")
-        IO.puts("Identified #{length(experts)} expert(s):")
-        IO.puts("")
-
-        Enum.each(experts, fn e ->
-          IO.puts("  #{e.key}: #{e.name}")
-          IO.puts("    Focus:         #{e.focus}")
-          IO.puts("    Philosophy:    #{e.philosophy}")
-          IO.puts("    Contributions: #{Enum.join(e.contributions, ", ")}")
-          IO.puts("")
-        end)
-
-      {:error, reason} ->
-        Format.error("Preview failed: #{inspect(reason)}")
+      other ->
+        Format.error("Unknown shell: #{other}. Supported: bash, zsh, fish")
     end
   end
 
@@ -2787,6 +2687,18 @@ defmodule Hive.CLI do
         quickref: [
           name: "quickref",
           about: "Show quick reference card with common commands"
+        ],
+        completions: [
+          name: "completions",
+          about: "Generate shell completion scripts (bash, zsh, fish)",
+          args: [
+            shell: [
+              value_name: "SHELL",
+              help: "Shell type: bash, zsh, or fish",
+              required: false,
+              parser: :string
+            ]
+          ]
         ],
         comb: [
           name: "comb",
@@ -3831,110 +3743,6 @@ defmodule Hive.CLI do
               help: "Quest ID to verify all jobs",
               parser: :string,
               required: false
-            ]
-          ]
-        ],
-        council: [
-          name: "council",
-          about: "Manage expert councils for code review waves",
-          subcommands: [
-            create: [
-              name: "create",
-              about: "Research experts and create a council for a domain",
-              args: [
-                domain: [
-                  value_name: "DOMAIN",
-                  help: "The domain to research experts for (e.g., \"Web UI Design\")",
-                  required: true,
-                  parser: :string
-                ]
-              ],
-              options: [
-                experts: [
-                  short: "-n",
-                  long: "--experts",
-                  help: "Number of experts to discover (default: 5)",
-                  parser: :integer,
-                  required: false
-                ]
-              ]
-            ],
-            list: [
-              name: "list",
-              about: "List all councils"
-            ],
-            show: [
-              name: "show",
-              about: "Show council details with experts",
-              args: [
-                id: [
-                  value_name: "ID",
-                  help: "Council identifier",
-                  required: true,
-                  parser: :string
-                ]
-              ]
-            ],
-            remove: [
-              name: "remove",
-              about: "Remove a council and its agent files",
-              args: [
-                id: [
-                  value_name: "ID",
-                  help: "Council ID to remove",
-                  required: true,
-                  parser: :string
-                ]
-              ]
-            ],
-            apply: [
-              name: "apply",
-              about: "Apply a council to a quest as review waves",
-              args: [
-                id: [
-                  value_name: "ID",
-                  help: "Council ID to apply",
-                  required: true,
-                  parser: :string
-                ]
-              ],
-              options: [
-                quest: [
-                  short: "-q",
-                  long: "--quest",
-                  help: "Quest ID to apply council to",
-                  parser: :string,
-                  required: true
-                ],
-                wave_size: [
-                  short: "-w",
-                  long: "--wave-size",
-                  help: "Experts per wave (default: 2)",
-                  parser: :integer,
-                  required: false
-                ]
-              ]
-            ],
-            preview: [
-              name: "preview",
-              about: "Dry-run: show what experts would be identified for a domain",
-              args: [
-                domain: [
-                  value_name: "DOMAIN",
-                  help: "The domain to preview experts for",
-                  required: true,
-                  parser: :string
-                ]
-              ],
-              options: [
-                experts: [
-                  short: "-n",
-                  long: "--experts",
-                  help: "Number of experts (default: 5)",
-                  parser: :integer,
-                  required: false
-                ]
-              ]
             ]
           ]
         ]

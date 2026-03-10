@@ -62,10 +62,10 @@ defmodule Hive.Conflict do
       worktree_path = cell.worktree_path
 
       # Fetch latest from origin (best-effort, may not have remote)
-      System.cmd("git", ["fetch", "origin"], cd: worktree_path, stderr_to_stdout: true)
+      Hive.Git.safe_cmd( ["fetch", "origin"], cd: worktree_path, stderr_to_stdout: true)
 
       # Attempt rebase onto main
-      case System.cmd("git", ["rebase", main_branch],
+      case Hive.Git.safe_cmd( ["rebase", main_branch],
              cd: worktree_path,
              stderr_to_stdout: true
            ) do
@@ -86,7 +86,7 @@ defmodule Hive.Conflict do
 
         {output, _code} ->
           # Rebase failed — abort to restore clean state
-          System.cmd("git", ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
+          Hive.Git.safe_cmd( ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
           Logger.warning("Rebase failed for cell #{cell_id}: #{String.slice(output, 0, 200)}")
           {:error, :rebase_failed}
       end
@@ -141,7 +141,7 @@ defmodule Hive.Conflict do
   # -- Private -----------------------------------------------------------------
 
   defp changed_files(repo_path, branch, main_branch) do
-    case System.cmd("git", ["diff", "--name-only", "#{main_branch}...#{branch}"],
+    case Hive.Git.safe_cmd( ["diff", "--name-only", "#{main_branch}...#{branch}"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -154,7 +154,7 @@ defmodule Hive.Conflict do
 
   defp check_conflicts(repo_path, branch, main_branch) do
     # Use git diff to find files that differ and may conflict
-    case System.cmd("git", ["diff", "--name-only", "#{main_branch}...#{branch}"],
+    case Hive.Git.safe_cmd( ["diff", "--name-only", "#{main_branch}...#{branch}"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -182,7 +182,7 @@ defmodule Hive.Conflict do
 
     case merge_base do
       {:ok, base} ->
-        case System.cmd("git", ["diff", "--name-only", "#{base}..#{main_branch}"],
+        case Hive.Git.safe_cmd( ["diff", "--name-only", "#{base}..#{main_branch}"],
                cd: repo_path,
                stderr_to_stdout: true
              ) do
@@ -207,7 +207,7 @@ defmodule Hive.Conflict do
   end
 
   defp get_merge_base(repo_path, main_branch) do
-    case System.cmd("git", ["merge-base", "HEAD", main_branch],
+    case Hive.Git.safe_cmd( ["merge-base", "HEAD", main_branch],
            cd: repo_path,
            stderr_to_stdout: true
          ) do

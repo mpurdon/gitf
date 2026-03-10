@@ -95,7 +95,7 @@ defmodule Hive.Plugin.Builtin.ToolProviders.ProjectContext do
   defp detect_git_info(path) do
     if File.dir?(Path.join(path, ".git")) do
       branch =
-        case System.cmd("git", ["branch", "--show-current"], cd: path, stderr_to_stdout: true) do
+        case Hive.Git.safe_cmd( ["branch", "--show-current"], cd: path, stderr_to_stdout: true) do
           {output, 0} -> String.trim(output)
           _ -> "unknown"
         end

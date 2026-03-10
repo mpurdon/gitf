@@ -166,12 +166,19 @@ defmodule Hive.Verification do
     end
   end
 
+  @validation_timeout_ms 120_000
+
   defp run_validation_command(cell, command) do
-    case System.cmd("sh", ["-c", command], 
-           cd: cell.worktree_path, 
-           stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output}
-      {output, exit_code} -> {:error, {output, exit_code}}
+    task = Task.async(fn ->
+      System.cmd("sh", ["-c", command],
+        cd: cell.worktree_path,
+        stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, 0}} -> {:ok, output}
+      {:ok, {output, exit_code}} -> {:error, {output, exit_code}}
+      nil -> {:error, {"Validation command timed out after #{div(@validation_timeout_ms, 1000)}s", 1}}
     end
   rescue
     e -> {:error, {Exception.message(e), 1}}

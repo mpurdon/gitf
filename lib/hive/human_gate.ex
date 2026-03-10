@@ -31,15 +31,15 @@ defmodule Hive.HumanGate do
 
     jobs = Map.get(quest, :jobs, [])
 
-    high_risk_jobs? =
+    critical_risk_jobs? =
       jobs
       |> Enum.reject(& &1[:phase_job])
       |> Enum.any?(fn job ->
         risk = Map.get(job, :risk_level)
-        risk in [:high, :critical] or risk in ["high", "critical"]
+        risk in [:critical] or risk in ["critical"]
       end)
 
-    comb_requires? or high_risk_jobs?
+    comb_requires? or critical_risk_jobs?
   end
 
   @doc """

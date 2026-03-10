@@ -111,6 +111,27 @@ defmodule Hive.Quests do
   end
 
   @doc """
+  Kills a quest: kills all its jobs (stopping bees, removing cells),
+  removes all job dependencies, deletes all jobs, then deletes the quest.
+
+  Returns `:ok` or `{:error, :not_found}`.
+  """
+  @spec kill(String.t()) :: :ok | {:error, :not_found}
+  def kill(quest_id) do
+    case Store.get(:quests, quest_id) do
+      nil ->
+        {:error, :not_found}
+
+      _quest ->
+        Hive.Jobs.list(quest_id: quest_id)
+        |> Enum.each(fn job -> Hive.Jobs.kill(job[:id] || job.id) end)
+
+        Store.delete(:quests, quest_id)
+        :ok
+    end
+  end
+
+  @doc """
   Closes a quest: removes all associated bee cells/worktrees, then marks status as "closed".
 
   Returns `{:ok, quest}` or `{:error, :not_found}`.

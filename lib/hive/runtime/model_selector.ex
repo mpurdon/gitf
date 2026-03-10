@@ -87,8 +87,8 @@ defmodule Hive.Runtime.ModelSelector do
   def select_model_for_job(:refactoring, :complex), do: "opus"
   def select_model_for_job(:refactoring, _complexity), do: "sonnet"
 
-  # Default to sonnet for unknown types
-  def select_model_for_job(_job_type, _complexity), do: "sonnet"
+  # Default to haiku for unknown types (cost-effective)
+  def select_model_for_job(_job_type, _complexity), do: "haiku"
 
   @doc """
   Get model information from the registry.
@@ -139,7 +139,22 @@ defmodule Hive.Runtime.ModelSelector do
         _ -> static_model
       end
 
-    maybe_downgrade_for_budget(base_model, quest_id)
+    # Prefer identity-based recommendation when available
+    identity_model = identity_recommend(job_type, base_model)
+
+    maybe_downgrade_for_budget(identity_model, quest_id)
+  end
+
+  defp identity_recommend(job_type, fallback) do
+    job_type_str = to_string(job_type)
+    available = list_models()
+
+    case Hive.AgentIdentity.recommend_model_for(job_type_str, available) do
+      {:ok, model} -> model
+      {:error, :no_data} -> fallback
+    end
+  rescue
+    _ -> fallback
   end
 
   @doc """
@@ -181,11 +196,19 @@ defmodule Hive.Runtime.ModelSelector do
 
   defp parse_job_type(nil), do: :implementation
   defp parse_job_type(type) when is_atom(type), do: type
-  defp parse_job_type(type) when is_binary(type), do: String.to_existing_atom(type)
+  defp parse_job_type(type) when is_binary(type) do
+    String.to_existing_atom(type)
+  rescue
+    ArgumentError -> :implementation
+  end
 
   defp parse_complexity(nil), do: :moderate
   defp parse_complexity(complexity) when is_atom(complexity), do: complexity
-  defp parse_complexity(complexity) when is_binary(complexity), do: String.to_existing_atom(complexity)
+  defp parse_complexity(complexity) when is_binary(complexity) do
+    String.to_existing_atom(complexity)
+  rescue
+    ArgumentError -> :moderate
+  end
 
   defp job_type_to_capability(:planning), do: :planning
   defp job_type_to_capability(:implementation), do: :implementation
@@ -209,10 +232,32 @@ defmodule Hive.Runtime.ModelSelector do
     remaining = Hive.Budget.remaining(quest_id)
     total = Hive.Budget.budget_for(quest_id)
 
-    if total > 0 and remaining / total < budget_pct do
-      downgrade(model)
-    else
-      model
+    cond do
+      total <= 0 ->
+        model
+
+      remaining / total < 0.05 ->
+        # Emergency: <5% budget — force haiku for everything
+        Hive.Telemetry.emit([:hive, :alert, :raised], %{}, %{
+          type: :budget_emergency,
+          message: "Quest #{quest_id} at #{Float.round(remaining / total * 100, 1)}% budget — forcing haiku"
+        })
+        "haiku"
+
+      remaining / total < budget_pct ->
+        downgraded = downgrade(model)
+        if downgraded != model do
+          Hive.Telemetry.emit([:hive, :model, :downgraded], %{}, %{
+            quest_id: quest_id,
+            from: model,
+            to: downgraded,
+            budget_remaining_pct: Float.round(remaining / total * 100, 1)
+          })
+        end
+        downgraded
+
+      true ->
+        model
     end
   rescue
     _ -> model

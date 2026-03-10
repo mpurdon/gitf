@@ -2,9 +2,8 @@ defmodule Hive.AgentProfile.Generation do
   @moduledoc """
   Shared generation helpers for model-based content generation.
 
-  Used by both `Hive.AgentProfile` (comb-level technology agents) and
-  `Hive.Council.Generator` (council expert agents) to spawn headless
-  model sessions and collect their output.
+  Used by `Hive.AgentProfile` (comb-level technology agents) to spawn
+  headless model sessions and collect their output.
   """
 
   @doc """

@@ -347,86 +347,53 @@ defmodule Hive.CLI.Select do
     saved = :os.cmd(~c"stty -g </dev/tty") |> List.to_string() |> String.trim()
 
     if saved != "" do
-      # Set raw mode and start a byte reader in one port command.
-      # Using a port (cat /dev/tty) avoids competing with the BEAM's own
-      # terminal driver (prim_tty) which would override stty settings and
-      # race for input on the same fd.
-      port =
-        Port.open(
-          {:spawn, "stty raw -echo </dev/tty; exec cat /dev/tty"},
-          [:binary, :stream, :exit_status]
-        )
+      :os.cmd(~c"stty raw -echo </dev/tty")
 
-      # Wait for cat to start, then drain any buffered input
-      # (e.g. trailing newline from the previous IO.gets)
-      Process.sleep(30)
-      drain(port)
+      case :file.open(~c"/dev/tty", [:read, :raw, :binary]) do
+        {:ok, tty} ->
+          try do
+            fun.(tty)
+          after
+            :file.close(tty)
+            :os.cmd(String.to_charlist("stty #{saved} </dev/tty"))
+          end
 
-      try do
-        fun.(port)
-      after
-        try do
-          Port.close(port)
-        catch
-          _, _ -> :ok
-        end
-
-        :os.cmd(String.to_charlist("stty #{saved} </dev/tty"))
+        {:error, _} ->
+          :os.cmd(String.to_charlist("stty #{saved} </dev/tty"))
+          fun.(nil)
       end
     else
       fun.(nil)
     end
   end
 
-  defp drain(port) do
-    receive do
-      {^port, {:data, _}} -> drain(port)
-    after
-      0 -> :ok
-    end
-  end
-
   defp read_key(nil), do: :unknown
 
-  defp read_key(port) when is_port(port) do
-    data = recv(port)
+  defp read_key(tty) do
+    case :file.read(tty, 1) do
+      {:ok, <<27>>} ->
+        # Arrow keys send ESC [ X almost instantly in raw mode
+        case :file.read(tty, 1) do
+          {:ok, <<?[>>} ->
+            case :file.read(tty, 1) do
+              {:ok, <<?A>>} -> :up
+              {:ok, <<?B>>} -> :down
+              _ -> :unknown
+            end
 
-    case data do
-      <<27, ?[, ?A, _::binary>> -> :up
-      <<27, ?[, ?B, _::binary>> -> :down
-      <<27>> -> parse_esc(recv_short(port))
-      <<27, _::binary>> -> :escape
-      <<13, _::binary>> -> :enter
-      <<10, _::binary>> -> :enter
-      <<32, _::binary>> -> :space
-      <<3, _::binary>> -> :escape
-      <<"j", _::binary>> -> :down
-      <<"k", _::binary>> -> :up
-      <<>> -> :escape
-      _ -> :unknown
-    end
-  end
+          _ ->
+            :escape
+        end
 
-  # Bare ESC arrived alone — wait briefly for the rest of an escape sequence
-  defp parse_esc(<<?[, ?A, _::binary>>), do: :up
-  defp parse_esc(<<?[, ?B, _::binary>>), do: :down
-  defp parse_esc(_), do: :escape
-
-  defp recv(port) do
-    receive do
-      {^port, {:data, data}} -> data
-      {^port, {:exit_status, _}} -> <<>>
-    after
-      10_000 -> <<>>
-    end
-  end
-
-  defp recv_short(port) do
-    receive do
-      {^port, {:data, data}} -> data
-      {^port, {:exit_status, _}} -> <<>>
-    after
-      50 -> <<>>
+      {:ok, <<13>>} -> :enter
+      {:ok, <<10>>} -> :enter
+      {:ok, <<32>>} -> :space
+      {:ok, <<3>>} -> :escape
+      {:ok, <<"j">>} -> :down
+      {:ok, <<"k">>} -> :up
+      {:ok, _} -> :unknown
+      :eof -> :escape
+      {:error, _} -> :escape
     end
   end
 end

@@ -94,17 +94,22 @@ defmodule Hive.Queen.Research do
   # Private helpers
 
   defp list_source_files(path) do
-    case System.cmd("find", [path, "-type", "f", "-not", "-path", "*/.*"], stderr_to_stdout: true) do
-      {output, 0} ->
-        files = 
+    task = Task.async(fn ->
+      System.cmd("find", [path, "-type", "f", "-not", "-path", "*/.*"], stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do
+      {:ok, {output, 0}} ->
+        files =
           output
           |> String.split("\n", trim: true)
           |> Enum.map(&String.replace_prefix(&1, path <> "/", ""))
           |> Enum.reject(&String.starts_with?(&1, "."))
-        
+
         {:ok, files}
-      
-      _ -> {:error, :find_failed}
+
+      {:ok, _} -> {:error, :find_failed}
+      nil -> {:error, :find_timeout}
     end
   end
 

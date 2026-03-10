@@ -45,7 +45,7 @@ defmodule Hive.Bee.Worker do
           cell_id: String.t() | nil,
           port: port() | nil,
           task: Task.t() | nil,
-          execution_mode: :api | :cli,
+          execution_mode: :api | :cli | :ollama | :bedrock,
           status: :provisioning | :running | :done | :failed,
           hive_root: String.t(),
           output: iodata(),
@@ -140,7 +140,8 @@ defmodule Hive.Bee.Worker do
       hive_root: hive_root,
       output: [],
       parsed_events: [],
-      opts: opts
+      opts: opts,
+      checkpoint_timer: schedule_checkpoint()
     }
 
     {:ok, state, {:continue, :provision}}
@@ -224,11 +225,21 @@ defmodule Hive.Bee.Worker do
   end
 
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
-    # Task failed — treat like non-zero exit
     Process.demonitor(ref, [:flush])
     Logger.warning("Bee #{state.bee_id} API task failed: #{inspect(reason)}")
-    mark_failed(state, "API error: #{inspect(reason)}")
-    {:stop, :normal, %{state | status: :failed, task: nil}}
+
+    # Try model fallback before giving up
+    case maybe_fallback_model(state) do
+      {:ok, new_task, fallback_model} ->
+        Logger.info("Bee #{state.bee_id} falling back to model #{fallback_model}")
+        {:noreply, %{state | task: new_task, fallback_attempted: true}}
+
+      :no_fallback ->
+        # Record API failure in circuit breaker so global outage is detected
+        Hive.CircuitBreaker.call("api:llm", fn -> {:error, reason} end)
+        mark_failed(state, "API error: #{inspect(reason)}")
+        {:stop, :normal, %{state | status: :failed, task: nil}}
+    end
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
@@ -244,6 +255,80 @@ defmodule Hive.Bee.Worker do
     {:noreply, state}
   end
 
+  def handle_info(:checkpoint, state) do
+    if state.status == :running do
+      checkpoint_data = build_checkpoint_data(state)
+      Hive.Checkpoint.save(state.bee_id, checkpoint_data)
+    end
+
+    {:noreply, %{state | checkpoint_timer: schedule_checkpoint()}}
+  end
+
+  def handle_info(:context_handoff, %{status: :running} = state) do
+    Logger.info("Bee #{state.bee_id} initiating proactive context handoff")
+
+    # Create handoff with current state
+    Hive.Handoff.create(state.bee_id)
+
+    # Stop the current process (port/task)
+    state = do_stop(state)
+
+    # Reset the job to pending so it can be re-spawned with handoff context
+    case Hive.Jobs.get(state.job_id) do
+      {:ok, job} ->
+        Store.put(:jobs, %{job | status: "pending"})
+      _ ->
+        :ok
+    end
+
+    # Notify Queen that bee handed off — Queen's job spawner will pick it up
+    Hive.Waggle.send(
+      state.bee_id,
+      "queen",
+      "context_handoff",
+      "Bee #{state.bee_id} handed off job #{state.job_id} due to context exhaustion"
+    )
+
+    {:stop, :normal, %{state | status: :done}}
+  end
+
+  def handle_info(:context_handoff, state) do
+    # Not running, ignore
+    {:noreply, state}
+  end
+
+  def handle_info(:verify_beacon, %{status: :running} = state) do
+    alive? =
+      cond do
+        state.task != nil -> Process.alive?(state.task.pid)
+        state.port != nil -> port_alive?(state.port)
+        true -> false
+      end
+
+    has_output? = state.parsed_events != []
+
+    cond do
+      not alive? ->
+        Logger.warning("Beacon check failed: bee #{state.bee_id} process is dead after 10s")
+        mark_failed(state, "Process died within 10 seconds of spawning")
+        {:stop, :normal, %{state | status: :failed}}
+
+      not has_output? ->
+        Logger.warning("Beacon check: bee #{state.bee_id} alive but no output after 10s")
+        # Process is alive but silent -- not fatal, just log a warning
+        {:noreply, state}
+
+      true ->
+        Logger.debug("Beacon check passed for bee #{state.bee_id}")
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(:verify_beacon, state) do
+    # Bee is no longer running (already completed or failed), ignore
+    {:noreply, state}
+  end
+
   def handle_info(msg, state) do
     Logger.debug("Bee #{state.bee_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -251,24 +336,44 @@ defmodule Hive.Bee.Worker do
 
   @impl true
   def terminate(_reason, state) do
+    # If bee was actively running, preserve context via checkpoint + handoff
+    if state.status == :running do
+      try do
+        # Save final checkpoint so handoff has latest progress
+        checkpoint_data = build_checkpoint_data(state)
+        Hive.Checkpoint.save(state.bee_id, checkpoint_data)
+
+        # Create handoff so replacement bee has context
+        Hive.Handoff.create(state.bee_id)
+        Logger.info("Bee #{state.bee_id} crash handoff saved")
+      rescue
+        e ->
+          Logger.debug("Crash handoff failed for bee #{state.bee_id}: #{inspect(e)}")
+      end
+    end
+
     # Mark bee as crashed if still in an active state
     if state.status in [:provisioning, :running] do
       update_bee_status(state.bee_id, "crashed")
     end
 
-    # Shutdown API task if running
+    # Shutdown API task if running (allow 2s for graceful cleanup)
     if state.task != nil do
-      Task.shutdown(state.task, :brutal_kill)
+      Task.shutdown(state.task, 2_000)
     end
 
     # Close CLI port if running
-    if state.port != nil and port_alive?(state.port) do
-      Port.close(state.port)
+    try do
+      if state.port != nil and port_alive?(state.port) do
+        Port.close(state.port)
+      end
+    rescue
+      _ -> :ok
     end
 
     :ok
   rescue
-    ArgumentError -> :ok
+    _ -> :ok
   end
 
   # -- Private: agent progress formatting --------------------------------------
@@ -337,13 +442,23 @@ defmodule Hive.Bee.Worker do
          :ok <- update_bee_working(state, cell),
          :ok <- maybe_transition_job(state),
          :ok <- maybe_ensure_agent(state, cell) do
+      # Apply role-based tool restrictions via settings.local.json
+      role = role_for_job(state.job_id)
+      Hive.Runtime.Settings.generate_role_settings(role, cell.worktree_path)
+
+      # Pre-dispatch: write job instructions so Claude Code has context at boot
+      write_pre_dispatch(cell.worktree_path, state.job_id)
+
       # Build task-specific skill for non-phase jobs (works for both API and CLI)
       unless is_phase_job do
         maybe_build_task_skill(build_prompt(state), cell.worktree_path, state.job_id)
       end
 
-      case spawn_process(state, cell) do
+      case spawn_process_with_timeout(state, cell) do
         {:ok, handle} ->
+          # Schedule beacon verification to confirm the process actually started
+          Process.send_after(self(), :verify_beacon, 10_000)
+
           if is_struct(handle, Task) do
             {:ok, %{state | cell_id: cell.id, task: handle, status: :running}}
           else
@@ -351,8 +466,19 @@ defmodule Hive.Bee.Worker do
           end
 
         {:error, reason} ->
+          # Rollback: clean up the cell/worktree on spawn failure
+          Logger.warning("Spawn failed for bee #{state.bee_id}, rolling back cell #{cell.id}")
+          rollback_cell(cell.id)
           {:error, reason}
       end
+    else
+      {:error, _reason} = err ->
+        # If cell was created but a later step failed, attempt cleanup.
+        # We check whether cell_id is set by looking at state -- if create_cell
+        # succeeded but a subsequent step failed, the cell variable is not in scope
+        # here, so we look it up by bee_id.
+        rollback_cell_for_bee(state.bee_id)
+        err
     end
   end
 
@@ -372,6 +498,13 @@ defmodule Hive.Bee.Worker do
 
   defp create_cell(state) do
     Hive.Cell.create(state.comb_id, state.bee_id, hive_root: state.hive_root)
+  end
+
+  defp role_for_job(job_id) do
+    case Hive.Jobs.get(job_id) do
+      {:ok, %{scout: true}} -> :scout
+      _ -> :builder
+    end
   end
 
   defp update_bee_working(state, cell) do
@@ -404,6 +537,19 @@ defmodule Hive.Bee.Worker do
     end
   end
 
+  @spawn_timeout_ms 30_000
+
+  defp spawn_process_with_timeout(state, cell) do
+    task = Task.async(fn -> spawn_process(state, cell) end)
+
+    case Task.yield(task, @spawn_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      nil ->
+        Logger.error("Bee #{state.bee_id} spawn timed out after #{@spawn_timeout_ms}ms")
+        {:error, :spawn_timeout}
+    end
+  end
+
   defp spawn_process(state, cell) do
     prompt = build_prompt(state)
     executable = Keyword.get(state.opts, :claude_executable)
@@ -424,7 +570,7 @@ defmodule Hive.Bee.Worker do
       end
 
     case executable do
-      nil when state.execution_mode == :api ->
+      nil when state.execution_mode in [:api, :ollama, :bedrock] ->
         # API mode: run agent loop in a Task
         spawn_api_task(prompt, cell.worktree_path, spawn_opts, state)
 
@@ -617,42 +763,44 @@ defmodule Hive.Bee.Worker do
       record_files_changed(state)
     end
 
-    # Validation pipeline (skip for phase jobs)
-    if is_phase_job do
-      session_id = Hive.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
-      body = "Job #{state.job_id} completed successfully (phase: #{job.phase})"
-      body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
-      Hive.Waggle.send(state.bee_id, "queen", "job_complete", body)
-    else
-      case maybe_validate(state) do
-        :ok ->
-          # Check for conflicts before merging
-          case maybe_check_conflicts(state) do
-            {:ok, :clean} ->
-              maybe_merge_back(state)
+    is_scout = job && Map.get(job, :scout, false)
+    skip_verification = job && Map.get(job, :skip_verification, false)
 
-            {:error, :conflicts, _files} ->
-              # Work is done, but skip merge — Queen will handle resolution
-              Logger.info("Skipping merge for bee #{state.bee_id} due to conflicts")
-          end
+    cond do
+      is_scout ->
+        # Scout jobs: waggle Queen with scout_complete and the raw output
+        output = IO.iodata_to_binary(state.output)
+        parent_job_id = Map.get(job, :scout_for)
 
-          session_id = Hive.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
-          body = "Job #{state.job_id} completed successfully"
-          body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
+        body = Jason.encode!(%{
+          scout_job_id: state.job_id,
+          parent_job_id: parent_job_id,
+          output: output
+        })
 
-          Hive.Waggle.send(state.bee_id, "queen", "job_complete", body)
+        Hive.Waggle.send(state.bee_id, "queen", "scout_complete", body)
 
-        {:error, reason} ->
-          Logger.warning("Validation failed for bee #{state.bee_id}: #{inspect(reason)}")
-          Hive.Jobs.fail(state.job_id)
+      is_phase_job ->
+        # Phase jobs waggle Queen directly — no verification/merge needed
+        session_id = Hive.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
+        body = "Job #{state.job_id} completed successfully (phase: #{job.phase})"
+        body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
+        Hive.Waggle.send(state.bee_id, "queen", "job_complete", body)
 
-          Hive.Waggle.send(
-            state.bee_id,
-            "queen",
-            "validation_failed",
-            "Job #{state.job_id} failed validation: #{inspect(reason)}"
-          )
-      end
+      skip_verification ->
+        # Simple jobs skip drone verification, go straight to Queen
+        Hive.Waggle.send(state.bee_id, "queen", "job_complete",
+          "Job #{state.job_id} completed (skip_verification)")
+
+      true ->
+        # Standard jobs: broadcast to Drone for independent verification.
+        # The Drone verifies, then forwards to MergeQueue on pass.
+        # Do NOT waggle Queen here — the MergeQueue will waggle "job_merged" after merge.
+        Phoenix.PubSub.broadcast(
+          Hive.PubSub,
+          "drone:review",
+          {:review_job, state.job_id, state.bee_id, state.cell_id}
+        )
     end
 
     Hive.Progress.clear(state.bee_id)
@@ -690,7 +838,7 @@ defmodule Hive.Bee.Worker do
   defp record_files_changed(state) do
     case Store.get(:cells, state.cell_id) do
       %{worktree_path: path} when is_binary(path) ->
-        case System.cmd("git", ["diff", "--name-only", "HEAD~1..HEAD"],
+        case Hive.Git.safe_cmd( ["diff", "--name-only", "HEAD~1..HEAD"],
                cd: path, stderr_to_stdout: true) do
           {output, 0} ->
             files = String.split(output, "\n", trim: true)
@@ -751,20 +899,6 @@ defmodule Hive.Bee.Worker do
   defp maybe_ensure_agent(state, cell) do
     case Hive.Jobs.get(state.job_id) do
       {:ok, job} ->
-        # Council expert installation: if the job has council_experts, install those
-        council_experts = Map.get(job, :council_experts)
-
-        if is_list(council_experts) and council_experts != [] do
-          council_id = Map.get(job, :council_id)
-
-          if council_id do
-            Hive.Council.install_experts(council_id, council_experts, cell.worktree_path)
-          else
-            # No council_id — search hive-wide councils directory for matching expert files
-            install_experts_from_disk(council_experts, cell.worktree_path)
-          end
-        end
-
         # Standard comb-level agent
         case Store.get(:combs, cell.comb_id) do
           nil ->
@@ -786,52 +920,6 @@ defmodule Hive.Bee.Worker do
       {:error, _} ->
         :ok
     end
-  end
-
-  defp install_experts_from_disk(expert_keys, worktree_path) do
-    case Hive.hive_dir() do
-      {:ok, root} ->
-        councils_dir = Path.join([root, ".hive", "councils"])
-        dst_dir = Path.join(worktree_path, ".claude/agents")
-        File.mkdir_p!(dst_dir)
-
-        Enum.each(expert_keys, fn key ->
-          # Search all council directories for matching expert file
-          pattern = Path.join([councils_dir, "*", "#{key}-expert.md"])
-
-          case Path.wildcard(pattern) do
-            [src | _] -> File.cp!(src, Path.join(dst_dir, "#{key}-expert.md"))
-            [] -> :ok
-          end
-        end)
-
-      _ ->
-        :ok
-    end
-  rescue
-    _ -> :ok
-  end
-
-  defp maybe_merge_back(state) do
-    if state.cell_id do
-      case Hive.Merge.merge_back(state.cell_id) do
-        {:ok, strategy} ->
-          Logger.info("Merge strategy #{strategy} applied for bee #{state.bee_id}")
-
-        {:error, reason} ->
-          Logger.warning("Merge-back failed for bee #{state.bee_id}: #{inspect(reason)}")
-
-          Hive.Waggle.send(
-            state.bee_id,
-            "queen",
-            "merge_failed",
-            "Merge failed for #{state.cell_id}: #{inspect(reason)}"
-          )
-      end
-    end
-  rescue
-    e ->
-      Logger.warning("Merge-back error: #{inspect(e)}")
   end
 
   defp update_progress(bee_id, events) do
@@ -856,10 +944,12 @@ defmodule Hive.Bee.Worker do
       if input > 0 or output > 0 do
         case Hive.Runtime.ContextMonitor.record_usage(bee_id, input, output) do
           {:ok, :handoff_needed} ->
-            Logger.warning("Bee #{bee_id} needs handoff - context at critical level")
+            Logger.warning("Bee #{bee_id} needs handoff - context at critical level, triggering")
+            send(self(), :context_handoff)
 
           {:ok, :critical} ->
-            Logger.warning("Bee #{bee_id} context usage critical")
+            Logger.warning("Bee #{bee_id} context usage critical, triggering handoff")
+            send(self(), :context_handoff)
 
           {:ok, :warning} ->
             Logger.info("Bee #{bee_id} context usage warning")
@@ -875,113 +965,55 @@ defmodule Hive.Bee.Worker do
       :ok
   end
 
-  defp maybe_validate(state) do
-    case {state.cell_id, Hive.Jobs.get(state.job_id)} do
-      {cell_id, {:ok, job}} when not is_nil(cell_id) ->
-        # Step 1: Run basic validation (custom command + model assessment)
-        case Hive.Validator.validate(state.bee_id, job, cell_id) do
-          {:ok, _verdict} ->
-            # Step 2: Run quality gate via Verification
-            case run_quality_gate(state) do
-              :ok ->
-                # Step 3: Run acceptance gate
-                run_acceptance_gate(state)
-
-              error ->
-                error
-            end
-
-          {:error, reason, _details} ->
-            {:error, reason}
-
-          {:error, reason} ->
-            {:error, reason}
+  defp maybe_fallback_model(state) do
+    # Only try fallback once (check if we already fell back)
+    if Map.get(state, :fallback_attempted) do
+      :no_fallback
+    else
+      current_model =
+        case Store.get(:bees, state.bee_id) do
+          %{assigned_model: m} when is_binary(m) -> m
+          _ -> nil
         end
 
-      # No cell or no job — nothing to validate
-      {nil, _} ->
-        :ok
+      fallback = if current_model, do: Hive.Runtime.ModelResolver.fallback(current_model)
 
-      {_, {:error, :not_found}} ->
-        :ok
-    end
-  rescue
-    e in [MatchError, FunctionClauseError] ->
-      # Cell or comb was deleted between check and validate — non-fatal
-      Logger.debug("Validation skipped for bee #{state.bee_id} (data unavailable): #{inspect(e)}")
-      :ok
-  end
+      if fallback do
+        # Update bee record with fallback model
+        case Store.get(:bees, state.bee_id) do
+          nil -> :no_fallback
+          bee -> Store.put(:bees, %{bee | assigned_model: fallback})
+        end
 
-  defp run_acceptance_gate(state) do
-    result = Hive.Acceptance.test_acceptance(state.job_id)
+        # Re-spawn the API task with fallback model
+        case Store.get(:cells, state.cell_id) do
+          %{worktree_path: path} ->
+            prompt = build_prompt(state)
+            task = Task.async(fn ->
+              Hive.Runtime.AgentLoop.run(prompt, path,
+                model: fallback,
+                tool_set: :standard,
+                include_dynamic: true
+              )
+            end)
+            {:ok, task, fallback}
 
-    if result.ready_to_merge do
-      :ok
-    else
-      Logger.warning("Acceptance gate failed for job #{state.job_id}: #{inspect(result.blockers)}")
-      {:error, :acceptance_failed}
-    end
-  rescue
-    e ->
-      # Acceptance crash = let it pass (non-blocking)
-      Logger.debug("Acceptance gate crashed for job #{state.job_id}: #{inspect(e)}")
-      :ok
-  end
-
-  defp run_quality_gate(state) do
-    # Skip validation command since Validator already ran it
-    case Hive.Verification.verify_job(state.job_id, skip_validation_command: true) do
-      {:ok, :pass, _result} ->
-        :ok
-
-      {:ok, :fail, result} ->
-        Logger.warning("Quality gate failed for job #{state.job_id}: #{inspect(result[:output])}")
-        {:error, :quality_gate_failed}
-
-      {:error, reason} ->
-        Logger.warning("Quality gate error for job #{state.job_id}: #{inspect(reason)}")
-        {:error, :quality_gate_failed}
-    end
-  rescue
-    e ->
-      Logger.warning("Quality gate crashed for job #{state.job_id}: #{inspect(e)}")
-      {:error, :quality_gate_failed}
-  end
-
-  defp maybe_check_conflicts(state) do
-    if state.cell_id do
-      case Hive.Conflict.check(state.cell_id) do
-        {:ok, :clean} ->
-          {:ok, :clean}
-
-        {:error, :conflicts, files} ->
-          Logger.warning("Conflicts detected for bee #{state.bee_id}: #{inspect(files)}")
-
-          Hive.Waggle.send(
-            state.bee_id,
-            "queen",
-            "merge_conflict_warning",
-            "Conflicts in: #{Enum.join(files, ", ")}"
-          )
-
-          {:error, :conflicts, files}
-
-        {:error, reason} ->
-          Logger.debug("Conflict check inconclusive for bee #{state.bee_id}: #{inspect(reason)}")
-          {:ok, :clean}
+          _ ->
+            :no_fallback
+        end
+      else
+        :no_fallback
       end
-    else
-      {:ok, :clean}
     end
   rescue
-    e in [MatchError, FunctionClauseError] ->
-      Logger.debug("Conflict check skipped for bee #{state.bee_id} (data unavailable): #{inspect(e)}")
-      {:ok, :clean}
+    e ->
+      Logger.debug("Model fallback failed: #{inspect(e)}")
+      :no_fallback
   end
 
   defp do_stop(state) do
     if state.task != nil do
-      Task.shutdown(state.task, :brutal_kill)
+      Task.shutdown(state.task, 5_000)
     end
 
     if state.port != nil and port_alive?(state.port) do
@@ -1007,7 +1039,137 @@ defmodule Hive.Bee.Worker do
     ArgumentError -> false
   end
 
+  defp schedule_checkpoint do
+    Process.send_after(self(), :checkpoint, 30_000)
+  end
+
+  defp build_checkpoint_data(state) do
+    events = Enum.reverse(state.parsed_events)
+
+    tool_calls =
+      Enum.count(events, fn e ->
+        Map.get(e, :type) in [:tool_call, "tool_call", :tool_use, "tool_use"]
+      end)
+
+    files_modified =
+      events
+      |> Enum.flat_map(fn e ->
+        args = Map.get(e, :args, %{})
+        [Map.get(args, "file_path"), Map.get(args, "path")]
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    iteration =
+      events
+      |> Enum.count(&(Map.get(&1, :type) in [:iteration, "iteration"]))
+
+    error_count =
+      events
+      |> Enum.count(&(Map.get(&1, :type) in [:error, "error"]))
+
+    phase =
+      case Hive.Jobs.get(state.job_id) do
+        {:ok, %{phase: p}} when is_binary(p) -> p
+        _ -> "working"
+      end
+
+    %{
+      phase: phase,
+      tool_calls: tool_calls,
+      files_modified: files_modified,
+      iteration: iteration,
+      error_count: error_count,
+      progress_summary: "Bee running: #{tool_calls} tool calls, #{iteration} iterations",
+      pending_work: "Continuing job #{state.job_id}"
+    }
+  end
+
   defp via(bee_id) do
     {:via, Registry, {@registry, {:bee, bee_id}}}
+  end
+
+  # -- Private: pre-dispatch instructions -------------------------------------
+
+  @doc false
+  defp write_pre_dispatch(worktree_path, job_id) do
+    case Hive.Jobs.get(job_id) do
+      {:ok, job} ->
+        content = build_instructions_content(job)
+        instructions_path = Path.join([worktree_path, ".claude", "instructions.md"])
+        File.mkdir_p!(Path.dirname(instructions_path))
+        File.write!(instructions_path, content)
+        Logger.debug("Pre-dispatch instructions written for job #{job_id}")
+
+      {:error, _} ->
+        :ok
+    end
+  rescue
+    e ->
+      Logger.debug("Pre-dispatch write failed (non-fatal): #{inspect(e)}")
+      :ok
+  end
+
+  defp build_instructions_content(job) do
+    sections = [
+      "# Job Instructions\n",
+      "## #{job.title}\n"
+    ]
+
+    sections =
+      if job.description && job.description != "" do
+        sections ++ ["### Description\n\n#{job.description}\n"]
+      else
+        sections
+      end
+
+    sections =
+      case Map.get(job, :scout_findings) do
+        findings when is_binary(findings) and findings != "" ->
+          sections ++ ["### Scout Findings\n\n#{findings}\n"]
+
+        _ ->
+          sections
+      end
+
+    sections =
+      case Map.get(job, :acceptance_criteria) do
+        criteria when is_binary(criteria) and criteria != "" ->
+          sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
+
+        _ ->
+          sections
+      end
+
+    sections =
+      case Map.get(job, :target_files) do
+        files when is_list(files) and files != [] ->
+          file_list = Enum.map_join(files, "\n", &"- `#{&1}`")
+          sections ++ ["### Target Files\n\n#{file_list}\n"]
+
+        _ ->
+          sections
+      end
+
+    Enum.join(sections, "\n")
+  end
+
+  # -- Private: spawn rollback ------------------------------------------------
+
+  defp rollback_cell(cell_id) do
+    Hive.Cell.remove(cell_id, force: true)
+  rescue
+    e ->
+      Logger.debug("Cell rollback failed for #{cell_id}: #{inspect(e)}")
+      :ok
+  end
+
+  defp rollback_cell_for_bee(bee_id) do
+    case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+      nil -> :ok
+      cell -> rollback_cell(cell.id)
+    end
+  rescue
+    _ -> :ok
   end
 end

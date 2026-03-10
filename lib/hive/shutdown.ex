@@ -68,13 +68,19 @@ defmodule Hive.Shutdown do
     # 1. Notify channels
     notify_channels()
 
-    # 2. Drain waggles (wait for in-flight to complete)
+    # 2. Mark running jobs as stopped (preserves state for resume)
+    mark_jobs_stopped()
+
+    # 3. Save checkpoints for active bees
+    save_active_checkpoints()
+
+    # 4. Drain waggles (wait for in-flight to complete)
     drain_waggles(drain_timeout)
 
-    # 3. Stop bees
+    # 5. Stop bees
     stop_bees(drain_timeout)
 
-    # 4. Stop Queen
+    # 6. Stop Queen
     stop_queen()
   end
 
@@ -84,8 +90,31 @@ defmodule Hive.Shutdown do
     _ -> :ok
   end
 
+  defp mark_jobs_stopped do
+    Hive.Store.filter(:jobs, fn j -> j.status in ["running", "assigned"] end)
+    |> Enum.each(fn job ->
+      Hive.Store.put(:jobs, %{job | status: "pending"})
+    end)
+  rescue
+    _ -> :ok
+  end
+
+  defp save_active_checkpoints do
+    Hive.Store.filter(:bees, fn b -> b.status == "working" end)
+    |> Enum.each(fn bee ->
+      try do
+        Hive.Handoff.create(bee.id)
+      rescue
+        _ -> :ok
+      end
+    end)
+  rescue
+    _ -> :ok
+  end
+
   defp drain_waggles(timeout) do
-    Process.sleep(min(timeout, 1_000))
+    # Wait for the full drain timeout to allow in-flight waggles to complete
+    Process.sleep(timeout)
   end
 
   defp stop_bees(timeout) do

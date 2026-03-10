@@ -15,7 +15,9 @@ defmodule Hive.Observability.Health do
       {:memory, check_memory()},
       {:quests, check_quests()},
       {:model_api, check_model_api()},
-      {:git, check_git()}
+      {:git, check_git()},
+      {:queen, check_queen()},
+      {:merge_queue, check_merge_queue()}
     ]
 
     status = if Enum.all?(checks, fn {_, s} -> s == :ok end), do: :healthy, else: :degraded
@@ -32,9 +34,35 @@ defmodule Hive.Observability.Health do
     check_store() == :ok
   end
 
-  @doc "Get liveness status"
+  @doc "Get liveness status — detects zombie state (alive but unproductive)"
   def alive? do
-    true
+    # Check critical processes exist
+    queen_alive = Process.whereis(Hive.Queen) != nil
+    store_ok = check_store() == :ok
+
+    if not queen_alive or not store_ok do
+      false
+    else
+      # Check for zombie: active quests exist but no job activity for 30+ minutes
+      active_quests = Store.filter(:quests, fn q ->
+        q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
+      end)
+
+      if active_quests == [] do
+        true
+      else
+        # Any job activity in last 30 minutes?
+        thirty_min_ago = DateTime.add(DateTime.utc_now(), -1800, :second)
+        recent_activity = Store.filter(:jobs, fn j ->
+          updated = j[:updated_at] || j[:created_at]
+          updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
+        end)
+
+        recent_activity != []
+      end
+    end
+  rescue
+    _ -> true
   end
 
   defp check_store do
@@ -51,15 +79,20 @@ defmodule Hive.Observability.Health do
         path -> Path.dirname(path)
       end
 
-    case System.cmd("df", ["-k", hive_dir], stderr_to_stdout: true) do
+    task = Task.async(fn -> System.cmd("df", ["-k", hive_dir], stderr_to_stdout: true) end)
+
+    df_result = case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
+      {:ok, result} -> result
+      nil -> {"", 1}
+    end
+
+    case df_result do
       {output, 0} ->
-        # Parse df output: second line, 4th field is available KB
         lines = String.split(output, "\n", trim: true)
 
         case lines do
           [_header, data_line | _] ->
             fields = String.split(data_line, ~r/\s+/, trim: true)
-            # fields: [filesystem, 1K-blocks, used, available, use%, mounted]
             case Enum.at(fields, 3) do
               nil ->
                 :ok
@@ -112,6 +145,36 @@ defmodule Hive.Observability.Health do
       nil -> :error
       _path -> :ok
     end
+  end
+
+  defp check_queen do
+    case Process.whereis(Hive.Queen) do
+      nil -> :warning
+      pid ->
+        if Process.alive?(pid) do
+          try do
+            GenServer.call(pid, :status, 2_000)
+            :ok
+          catch
+            :exit, _ -> :error
+          end
+        else
+          :error
+        end
+    end
+  rescue
+    _ -> :warning
+  end
+
+  defp check_merge_queue do
+    case Hive.Merge.Queue.lookup() do
+      {:ok, pid} ->
+        if Process.alive?(pid), do: :ok, else: :error
+      :error ->
+        :warning
+    end
+  rescue
+    _ -> :warning
   end
 
   defp check_pubsub do

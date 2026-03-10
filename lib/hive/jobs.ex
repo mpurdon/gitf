@@ -26,7 +26,9 @@ defmodule Hive.Jobs do
     {"assigned", :start} => "running",
     {"running", :complete} => "done",
     {"running", :fail} => "failed",
+    {"done", :reject} => "rejected",
     {"failed", :reset} => "pending",
+    {"rejected", :reset} => "pending",
     {"failed", :revive} => "running",
     {"pending", :block} => "blocked",
     {"running", :block} => "blocked",
@@ -69,10 +71,6 @@ defmodule Hive.Jobs do
         quest_id: attrs[:quest_id] || attrs["quest_id"],
         comb_id: attrs[:comb_id] || attrs["comb_id"],
         bee_id: attrs[:bee_id] || attrs["bee_id"],
-        council_id: attrs[:council_id],
-        council_wave: attrs[:council_wave],
-        council_experts: attrs[:council_experts],
-        review_of_job_id: attrs[:review_of_job_id],
         # Multi-model support fields
         job_type: classification.job_type,
         complexity: classification.complexity,
@@ -95,7 +93,15 @@ defmodule Hive.Jobs do
         # Retry tracking (persisted, survives Queen restarts)
         retry_count: attrs[:retry_count] || 0,
         # Per-job verification contract
-        verification_contract: attrs[:verification_contract]
+        verification_contract: attrs[:verification_contract],
+        # Scout fields
+        scout: attrs[:scout] || false,
+        scout_for: attrs[:scout_for],
+        scout_findings: attrs[:scout_findings],
+        # Triage result
+        triage_result: attrs[:triage_result],
+        # Skip verification (simple jobs, scout jobs)
+        skip_verification: attrs[:skip_verification] || false
       }
 
       Store.insert(:jobs, record)
@@ -135,6 +141,59 @@ defmodule Hive.Jobs do
   @doc "Unblocks a job. Transitions: blocked -> pending."
   @spec unblock(String.t()) :: {:ok, map()} | {:error, atom()}
   def unblock(job_id), do: transition(job_id, :unblock)
+
+  @doc "Rejects a completed job that failed verification. Transitions: done -> rejected."
+  @spec reject(String.t()) :: {:ok, map()} | {:error, atom()}
+  def reject(job_id), do: transition(job_id, :reject)
+
+  @doc """
+  Creates a retry job copying attrs from the original, with `retry_of` linkage.
+
+  Increments retry_count. Appends failure feedback to the description so the
+  next bee has context on what went wrong. Returns `{:ok, new_job}` or
+  `{:error, reason}`.
+
+  ## Options
+
+    * `:max_retries` — maximum allowed retries (default: 3)
+    * `:feedback` — failure context to append to description
+  """
+  @spec create_retry(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def create_retry(job_id, opts \\ []) do
+    with {:ok, job} <- get(job_id) do
+      retry_count = Map.get(job, :retry_count, 0) + 1
+      max_retries = Keyword.get(opts, :max_retries, 3)
+
+      if retry_count > max_retries do
+        {:error, :max_retries_exceeded}
+      else
+        feedback = Keyword.get(opts, :feedback)
+
+        description =
+          if feedback do
+            (job.description || "") <>
+              "\n\n## Feedback from attempt #{retry_count}:\n" <> feedback
+          else
+            job.description
+          end
+
+        attrs = %{
+          title: job.title,
+          description: description,
+          quest_id: job.quest_id,
+          comb_id: job.comb_id,
+          retry_count: retry_count,
+          retry_of: job.id,
+          acceptance_criteria: Map.get(job, :acceptance_criteria, []),
+          target_files: Map.get(job, :target_files, []),
+          verification_criteria: Map.get(job, :verification_criteria, []),
+          verification_contract: job[:verification_contract]
+        }
+
+        create(attrs)
+      end
+    end
+  end
 
   @doc """
   Resets a failed job back to pending so it can be retried.
@@ -198,6 +257,32 @@ defmodule Hive.Jobs do
     end
 
     :ok
+  end
+
+  @doc """
+  Kills a job: stops its bee, removes its cell/worktree, deletes all
+  dependencies, and removes the job record from the store.
+
+  Returns `:ok` or `{:error, :not_found}`.
+  """
+  @spec kill(String.t()) :: :ok | {:error, :not_found}
+  def kill(job_id) do
+    case get(job_id) do
+      {:ok, job} ->
+        cleanup_bee_and_cell(job[:bee_id])
+
+        # Remove dependencies in both directions
+        Store.filter(:job_dependencies, fn d ->
+          d.job_id == job_id or d.depends_on_id == job_id
+        end)
+        |> Enum.each(fn d -> Store.delete(:job_dependencies, d.id) end)
+
+        Store.delete(:jobs, job_id)
+        :ok
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
   end
 
   @doc """
@@ -358,7 +443,14 @@ defmodule Hive.Jobs do
     end)
   end
 
-  @doc "Returns true if all dependencies of `job_id` are done."
+  @doc """
+  Returns true if all dependencies of `job_id` are resolved.
+
+  A dependency is resolved if:
+  - The job is "done"
+  - The job is "failed" (permanently — all retries exhausted or no retry created)
+  - The job record no longer exists
+  """
   @spec ready?(String.t()) :: boolean()
   def ready?(job_id) do
     deps = Store.filter(:job_dependencies, fn d -> d.job_id == job_id end)
@@ -366,14 +458,17 @@ defmodule Hive.Jobs do
     Enum.all?(deps, fn dep ->
       case Store.get(:jobs, dep.depends_on_id) do
         nil -> true
-        job -> job.status == "done"
+        job -> job.status in ["done", "failed", "rejected"]
       end
     end)
   end
 
   @doc """
-  After a job completes, transitions blocked dependents to pending
-  if all their dependencies are now done.
+  After a job completes or permanently fails, transitions blocked dependents
+  to pending if all their dependencies are resolved (done or failed).
+
+  If a dependency failed, appends failure context to the dependent's description
+  so the bee knows a prerequisite didn't complete.
   """
   @spec unblock_dependents(String.t()) :: :ok
   def unblock_dependents(job_id) do
@@ -381,11 +476,29 @@ defmodule Hive.Jobs do
       Store.filter(:job_dependencies, fn d -> d.depends_on_id == job_id end)
       |> Enum.map(& &1.job_id)
 
+    # Check if this dependency failed (so we can warn dependents)
+    dep_failed? =
+      case get(job_id) do
+        {:ok, %{status: s}} when s in ["failed", "rejected"] -> true
+        _ -> false
+      end
+
     Enum.each(dependent_ids, fn dep_job_id ->
       if ready?(dep_job_id) do
         case get(dep_job_id) do
-          {:ok, %{status: "blocked"}} -> unblock(dep_job_id)
-          _ -> :ok
+          {:ok, %{status: "blocked"} = dep_job} ->
+            # Inject failure context if a dependency failed
+            if dep_failed? do
+              warning = "\n\n## Warning: Dependency failed\n\nDependency job #{job_id} failed. " <>
+                "Proceed with available context; the prerequisite work was not completed."
+              updated = %{dep_job | description: (dep_job.description || "") <> warning}
+              Store.put(:jobs, updated)
+            end
+
+            unblock(dep_job_id)
+
+          _ ->
+            :ok
         end
       end
     end)

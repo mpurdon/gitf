@@ -53,19 +53,28 @@ defmodule Hive.Validator do
     end
   end
 
+  @validation_timeout_ms 120_000
+
   @doc "Runs a custom shell command in the cell worktree."
   @spec run_custom_validation(map(), String.t()) :: :ok | {:error, String.t()}
   def run_custom_validation(cell, command) do
-    case System.cmd("sh", ["-c", command],
-           cd: cell.worktree_path,
-           stderr_to_stdout: true,
-           env: [{"MIX_ENV", "test"}]
-         ) do
-      {_output, 0} ->
+    task = Task.async(fn ->
+      System.cmd("sh", ["-c", command],
+        cd: cell.worktree_path,
+        stderr_to_stdout: true,
+        env: [{"MIX_ENV", "test"}]
+      )
+    end)
+
+    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {_output, 0}} ->
         :ok
 
-      {output, exit_code} ->
+      {:ok, {output, exit_code}} ->
         {:error, "Command failed (exit #{exit_code}): #{String.slice(output, 0, 500)}"}
+
+      nil ->
+        {:error, "Validation command timed out after #{div(@validation_timeout_ms, 1000)}s"}
     end
   rescue
     e -> {:error, "Validation command error: #{Exception.message(e)}"}
@@ -147,7 +156,7 @@ defmodule Hive.Validator do
   end
 
   defp get_diff(cell) do
-    case System.cmd("git", ["diff", "HEAD~1..HEAD"],
+    case Hive.Git.safe_cmd( ["diff", "HEAD~1..HEAD"],
            cd: cell.worktree_path,
            stderr_to_stdout: true
          ) do
@@ -156,7 +165,7 @@ defmodule Hive.Validator do
 
       {_, _} ->
         # Fallback: diff against the working tree
-        case System.cmd("git", ["diff"], cd: cell.worktree_path, stderr_to_stdout: true) do
+        case Hive.Git.safe_cmd( ["diff"], cd: cell.worktree_path, stderr_to_stdout: true) do
           {output, 0} -> {:ok, output}
           {output, _} -> {:error, output}
         end

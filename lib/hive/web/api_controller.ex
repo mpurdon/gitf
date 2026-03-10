@@ -51,7 +51,7 @@ defmodule Hive.Web.ApiController do
         quests
       else
         case params["status"] do
-          nil -> Enum.reject(quests, &(&1.status in ["completed", "closed"]))
+          nil -> Enum.reject(quests, &(&1[:status] in ["completed", "closed"]))
           _ -> quests
         end
       end
@@ -70,6 +70,13 @@ defmodule Hive.Web.ApiController do
     case Hive.Quests.delete(id) do
       :ok -> json(conn, %{data: %{deleted: true}})
       {:error, reason} -> error(conn, 422, reason)
+    end
+  end
+
+  def kill_quest(conn, %{"id" => id}) do
+    case Hive.Quests.kill(id) do
+      :ok -> json(conn, %{data: %{id: id, status: "killed"}})
+      {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
@@ -357,6 +364,13 @@ defmodule Hive.Web.ApiController do
     end
   end
 
+  def kill_job(conn, %{"id" => id}) do
+    case Hive.Jobs.kill(id) do
+      :ok -> json(conn, %{data: %{id: id, status: "killed"}})
+      {:error, :not_found} -> error(conn, 404, :not_found)
+    end
+  end
+
   # -- Bees --------------------------------------------------------------------
 
   def list_bees(conn, params) do
@@ -387,18 +401,18 @@ defmodule Hive.Web.ApiController do
       {:ok, bee} ->
         Hive.Store.put(:bees, %{bee | status: "stopped"})
 
-        if bee.job_id do
+        if bee[:job_id] do
           # For phase jobs, extract artifact from the bee's log before completing
-          maybe_collect_phase_artifact(bee_id, bee.job_id)
+          maybe_collect_phase_artifact(bee_id, bee[:job_id])
 
-          Hive.Jobs.complete(bee.job_id)
-          Hive.Jobs.unblock_dependents(bee.job_id)
+          Hive.Jobs.complete(bee[:job_id])
+          Hive.Jobs.unblock_dependents(bee[:job_id])
 
           Hive.Waggle.send(
             bee_id,
             "queen",
             "job_complete",
-            "Job #{bee.job_id} completed successfully"
+            "Job #{bee[:job_id]} completed successfully"
           )
         end
 
@@ -416,9 +430,9 @@ defmodule Hive.Web.ApiController do
       {:ok, bee} ->
         Hive.Store.put(:bees, %{bee | status: "crashed"})
 
-        if bee.job_id do
-          Hive.Jobs.fail(bee.job_id)
-          Hive.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee.job_id} failed: #{reason}")
+        if bee[:job_id] do
+          Hive.Jobs.fail(bee[:job_id])
+          Hive.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
         end
 
         json(conn, %{data: %{failed: true}})
@@ -611,9 +625,9 @@ defmodule Hive.Web.ApiController do
 
   defp serialize_quest(q) do
     %{
-      id: q.id,
-      name: q.name,
-      status: q.status,
+      id: q[:id],
+      name: q[:name],
+      status: q[:status] || "pending",
       goal: q[:goal],
       comb_id: q[:comb_id],
       current_phase: q[:current_phase],

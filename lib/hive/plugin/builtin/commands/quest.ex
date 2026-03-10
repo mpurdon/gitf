@@ -58,22 +58,12 @@ defmodule Hive.Plugin.Builtin.Commands.Quest do
   defp do_show(id, ctx) do
     case Hive.Quests.get(id) do
       {:ok, quest} ->
-        council_line =
-          if quest[:council_id] do
-            case Hive.Council.get(quest.council_id) do
-              {:ok, c} -> "Council: #{c.domain} (#{c.id})"
-              _ -> "Council: #{quest.council_id}"
-            end
-          end
-
         lines =
           [
             "Quest: #{quest.name} (#{quest.id})",
             "Status: #{quest.status}",
-            council_line,
             "Goal: #{quest[:goal] || "-"}"
           ]
-          |> Enum.reject(&is_nil/1)
 
         jobs_lines =
           case quest.jobs do

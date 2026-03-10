@@ -15,12 +15,13 @@ defmodule Hive.Telemetry do
     [:hive, :token, :consumed]    - measurements: %{input, output, cost}, metadata: %{model, bee_id}
     [:hive, :plugin, :loaded]     - measurements: %{}, metadata: %{type, name, module}
     [:hive, :plugin, :unloaded]   - measurements: %{}, metadata: %{type, name}
-    [:hive, :council, :applied]   - measurements: %{}, metadata: %{council_id, quest_id, wave_count, expert_count}
-    [:hive, :council, :wave_start] - measurements: %{}, metadata: %{council_id, wave, experts, job_id}
 
   Channels subscribe to telemetry events (not PubSub) for notifications.
   This decouples notification routing from internal messaging. Any plugin
   can attach a telemetry handler to observe any system event.
+
+  Each handled event is also persisted to `Hive.EventStore` for replay
+  and audit trail support.
   """
 
   require Logger
@@ -36,9 +37,7 @@ defmodule Hive.Telemetry do
     [:hive, :waggle, :sent],
     [:hive, :token, :consumed],
     [:hive, :plugin, :loaded],
-    [:hive, :plugin, :unloaded],
-    [:hive, :council, :applied],
-    [:hive, :council, :wave_start]
+    [:hive, :plugin, :unloaded]
   ]
 
   @doc "Returns all defined telemetry event names."
@@ -67,5 +66,63 @@ defmodule Hive.Telemetry do
     event_name = Enum.join(event, ".")
 
     Logger.debug("#{event_name} #{inspect(measurements)} #{inspect(metadata)}")
+
+    persist_to_event_store(event, measurements, metadata)
   end
+
+  # -- EventStore persistence ------------------------------------------------
+  #
+  # Maps telemetry events to EventStore event types and persists them.
+  # Wrapped in try/rescue so event store failures never crash the handler.
+
+  defp persist_to_event_store(event, measurements, metadata) do
+    try do
+      case map_event(event, measurements, metadata) do
+        nil -> :ok
+        {type, entity_id, data, meta} -> Hive.EventStore.record(type, entity_id, data, meta)
+      end
+    rescue
+      _ -> :ok
+    end
+  end
+
+  defp map_event([:hive, :bee, :spawned], measurements, meta) do
+    {:bee_spawned, Map.get(meta, :bee_id, "unknown"), measurements,
+     %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
+  end
+
+  defp map_event([:hive, :bee, :completed], measurements, meta) do
+    {:bee_completed, Map.get(meta, :bee_id, "unknown"), measurements,
+     %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
+  end
+
+  defp map_event([:hive, :bee, :failed], measurements, meta) do
+    {:bee_failed, Map.get(meta, :bee_id, "unknown"),
+     Map.merge(measurements, %{error: meta[:error]}),
+     %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
+  end
+
+  defp map_event([:hive, :job, :started], measurements, meta) do
+    {:job_transition, Map.get(meta, :job_id, "unknown"),
+     Map.merge(measurements, %{action: :start}),
+     %{quest_id: meta[:quest_id]}}
+  end
+
+  defp map_event([:hive, :job, :completed], measurements, meta) do
+    {:job_transition, Map.get(meta, :job_id, "unknown"),
+     Map.merge(measurements, %{action: :complete}),
+     %{quest_id: meta[:quest_id]}}
+  end
+
+  defp map_event([:hive, :quest, :created], measurements, meta) do
+    {:quest_created, Map.get(meta, :quest_id, "unknown"),
+     Map.merge(measurements, %{name: meta[:name]}), %{}}
+  end
+
+  defp map_event([:hive, :quest, :completed], measurements, meta) do
+    {:quest_completed, Map.get(meta, :quest_id, "unknown"),
+     Map.merge(measurements, %{name: meta[:name]}), %{}}
+  end
+
+  defp map_event(_, _, _), do: nil
 end

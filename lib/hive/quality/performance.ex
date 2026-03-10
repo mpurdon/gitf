@@ -40,26 +40,35 @@ defmodule Hive.Quality.Performance do
   
   def compare_baseline(current, nil), do: {:ok, %{regressions: [], score: current.score}}
 
+  @benchmark_timeout_ms 120_000
+
   defp run_benchmark(path, command) do
     start_time = System.monotonic_time(:millisecond)
-    
-    case System.cmd("sh", ["-c", command], cd: path, stderr_to_stdout: true) do
-      {output, 0} ->
+
+    task = Task.async(fn ->
+      System.cmd("sh", ["-c", command], cd: path, stderr_to_stdout: true)
+    end)
+
+    case Task.yield(task, @benchmark_timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, {output, 0}} ->
         end_time = System.monotonic_time(:millisecond)
         duration = end_time - start_time
-        
+
         metrics = parse_benchmark_output(output, duration)
-        
+
         {:ok, %{
           metrics: metrics,
-          score: 100,  # No baseline = perfect score
+          score: 100,
           tool: "custom",
           available: true,
           output: output
         }}
-      
-      {output, _exit_code} ->
+
+      {:ok, {output, _exit_code}} ->
         {:error, {:benchmark_failed, output}}
+
+      nil ->
+        {:error, {:benchmark_timeout, "Benchmark timed out after #{div(@benchmark_timeout_ms, 1000)}s"}}
     end
   rescue
     e -> {:error, {:benchmark_error, Exception.message(e)}}

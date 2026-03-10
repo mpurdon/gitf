@@ -17,8 +17,25 @@ defmodule Hive.Application do
     # Ensure global storage directories exist
     File.mkdir_p!(Path.join(System.user_home!(), ".hive/llm_db"))
 
+    # Determine hive root for config loading
+    hive_root = case Hive.hive_dir() do
+      {:ok, root} -> root
+      _ -> File.cwd!()
+    end
+
     setup_file_logging()
+
+    # Start Config.Provider early so all subsequent code can read config.toml
+    Hive.Config.Provider.start_link(hive_root: hive_root)
+
     Hive.Runtime.Keys.load()
+
+    if Hive.Runtime.ModelResolver.ollama_mode?() do
+      Hive.Runtime.ModelResolver.setup_ollama_env()
+    end
+
+    validate_config(hive_root)
+
     Hive.Progress.init()
     Hive.CircuitBreaker.init()
     Hive.Observability.Metrics.init()
@@ -87,9 +104,62 @@ defmodule Hive.Application do
     else
       [
         {Hive.Observability, []},
-        {Hive.Drone, []}
+        {Hive.Drone, []},
+        {Hive.Merge.Queue, []}
       ]
     end
+  end
+
+  defp validate_config(hive_root) do
+    config_path = Path.join([hive_root, ".hive", "config.toml"])
+
+    case Hive.Config.read_config(config_path) do
+      {:ok, config} ->
+        # Warn about missing critical config sections
+        warnings = []
+
+        warnings =
+          if get_in(config, ["costs", "budget_usd"]) == nil do
+            ["costs.budget_usd not set (defaulting to $10)" | warnings]
+          else
+            warnings
+          end
+
+        warnings =
+          if get_in(config, ["queen", "max_bees"]) == nil do
+            ["queen.max_bees not set (defaulting to 5)" | warnings]
+          else
+            warnings
+          end
+
+        # Check for API keys if in API mode
+        warnings =
+          if Hive.Runtime.ModelResolver.api_mode?() do
+            has_google = (get_in(config, ["llm", "keys", "google"]) || "") != ""
+            has_anthropic = (get_in(config, ["llm", "keys", "anthropic"]) || "") != ""
+            env_google = System.get_env("GOOGLE_API_KEY") || System.get_env("GEMINI_API_KEY")
+            env_anthropic = System.get_env("ANTHROPIC_API_KEY")
+
+            if not has_google and not has_anthropic and env_google == nil and env_anthropic == nil do
+              ["No API keys found in config or environment — API calls will fail" | warnings]
+            else
+              warnings
+            end
+          else
+            warnings
+          end
+
+        if warnings != [] do
+          require Logger
+          Enum.each(warnings, fn w -> Logger.warning("Config: #{w}") end)
+        end
+
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Config: cannot read #{config_path}: #{inspect(reason)}, using defaults")
+    end
+  rescue
+    _ -> :ok
   end
 
   defp setup_file_logging do
@@ -98,7 +168,7 @@ defmodule Hive.Application do
     :logger.add_handler(:hive_file, :logger_std_h, %{
       config: %{file: String.to_charlist(log_file)},
       formatter:
-        {:logger_formatter,
+        {Hive.LogFormatter,
          %{
            template: [
              :time, ~c" ", :level, ~c" ",

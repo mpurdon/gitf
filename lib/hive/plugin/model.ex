@@ -63,7 +63,7 @@ defmodule Hive.Plugin.Model do
               {:ok, map()} | {:error, term()}
   @callback generate_text(prompt :: String.t(), opts :: keyword()) ::
               {:ok, String.t()} | {:error, term()}
-  @callback execution_mode() :: :api | :cli
+  @callback execution_mode() :: :api | :cli | :ollama | :bedrock
 
   @optional_callbacks [
     find_executable: 0,

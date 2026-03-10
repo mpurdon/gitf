@@ -1,26 +1,49 @@
 defmodule Hive.CLI.Chat do
   @moduledoc """
-  Interactive API-driven chat for quest planning.
+  Interactive chat for quest planning.
 
-  Runs a multi-turn conversation with the Gemini API to gather requirements
-  and produce a structured implementation plan. Supports image attachments,
-  multiple-choice questions via tool calls, and clipboard paste on macOS.
+  Runs a multi-turn conversation via ReqLLM (provider-agnostic) to gather
+  requirements and produce a structured implementation plan. Supports image
+  attachments, multiple-choice questions via tool calls, and clipboard paste
+  on macOS. Works with any provider configured in ModelResolver (Anthropic,
+  Google, etc.).
   """
 
   alias Hive.CLI.Format
   alias Hive.CLI.Select
+  alias Hive.Runtime.{LLMClient, ModelResolver}
 
   @image_exts ~w(.png .jpg .jpeg .gif .webp .bmp)
+  @max_retries 3
+
+  # When a provider's quota is exhausted, try these alternatives (in order).
+  # Only models whose provider has a configured API key will be attempted.
+  @fallback_chain %{
+    "google:gemini-2.5-pro" => ["anthropic:claude-sonnet-4-6", "google:gemini-2.5-flash"],
+    "google:gemini-2.5-flash" => ["anthropic:claude-sonnet-4-6", "google:gemini-2.0-flash"],
+    "google:gemini-2.0-flash" => ["anthropic:claude-haiku-4-5"],
+    "anthropic:claude-opus-4-6" => ["google:gemini-2.5-pro", "anthropic:claude-sonnet-4-6"],
+    "anthropic:claude-sonnet-4-6" => ["google:gemini-2.5-flash"],
+    "anthropic:claude-haiku-4-5" => ["google:gemini-2.0-flash"]
+  }
+
+  @provider_env_vars %{
+    "google" => "GOOGLE_API_KEY",
+    "anthropic" => "ANTHROPIC_API_KEY",
+    "openai" => "OPENAI_API_KEY",
+    "bedrock" => "AWS_ACCESS_KEY_ID"
+  }
 
   defstruct [
     :quest,
-    :api_key,
     :model,
     :system_prompt,
-    messages: [],
+    context: nil,
+    tools: [],
     pending_images: [],
     plan: nil,
-    done: false
+    done: false,
+    failed_providers: MapSet.new()
   ]
 
   # -- Public API -------------------------------------------------------------
@@ -30,37 +53,52 @@ defmodule Hive.CLI.Chat do
   Returns `{:ok, plan}` on success or `{:error, reason}` if cancelled/failed.
   """
   def start(quest, opts \\ []) do
-    model = opts[:model] || Hive.Runtime.ModelResolver.resolve("sonnet")
-    api_key = resolve_api_key()
+    # Ensure API keys from .hive/config.toml are loaded into env vars
+    Hive.Runtime.Keys.load()
 
-    unless api_key do
-      Format.error("No API key. Set GOOGLE_API_KEY or [llm] keys.google_api_key in .hive/config.toml.")
-      {:error, :no_api_key}
-    else
-      codebase = build_codebase_context(quest)
-      system_prompt = build_system_prompt(quest, codebase)
+    if ModelResolver.ollama_mode?() do
+      ModelResolver.setup_ollama_env()
+    end
 
-      state = %__MODULE__{
-        quest: quest,
-        api_key: api_key,
-        model: map_model(model),
-        system_prompt: system_prompt
-      }
+    # Planning chat always uses the API (needs tool calling for ask_choice/submit_plan).
+    # In CLI mode, warn and use API anyway; in ollama mode, use local models via API.
+    if ModelResolver.execution_mode() == :cli do
+      IO.puts(IO.ANSI.yellow() <> "[WARN] Planning chat requires API access (tool calling). " <>
+        "Bees will use Claude CLI, but planning uses API." <> IO.ANSI.reset())
+    end
 
-      IO.puts("")
-      IO.puts(color(:cyan) <> "Planning: " <> reset() <> quest.goal)
-      IO.puts(dim("Commands: /image <path>  /paste  /done  /quit  /help"))
-      IO.puts("")
+    model = opts[:model] || ModelResolver.resolve("opus")
+    codebase = build_codebase_context(quest)
+    system_prompt = build_system_prompt(quest, codebase)
+    tools = build_tools()
 
-      state =
-        state
-        |> append_user([%{"text" => "I want to: #{quest.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need."}])
-        |> call_and_handle()
+    context =
+      ReqLLM.Context.new([
+        ReqLLM.Context.system(system_prompt),
+        ReqLLM.Context.user("I want to: #{quest.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need.")
+      ])
 
-      case chat_loop(state) do
-        %{plan: plan} when plan != nil -> {:ok, plan}
-        _ -> {:error, :cancelled}
-      end
+    state = %__MODULE__{
+      quest: quest,
+      model: model,
+      system_prompt: system_prompt,
+      context: context,
+      tools: tools
+    }
+
+    provider = ModelResolver.provider(model)
+
+    IO.puts("")
+    IO.puts(color(:cyan) <> "Planning: " <> reset() <> quest.goal)
+    IO.puts(dim("Provider: #{provider} · Model: #{ModelResolver.model_id(model)}"))
+    IO.puts(dim("Commands: /image <path>  /paste  /done  /quit  /help"))
+    IO.puts("")
+
+    state = call_and_handle(state)
+
+    case chat_loop(state) do
+      %{plan: plan} when plan != nil -> {:ok, plan}
+      _ -> {:error, :cancelled}
     end
   end
 
@@ -83,7 +121,7 @@ defmodule Hive.CLI.Chat do
 
       "/done" ->
         state
-        |> append_user([%{"text" => "I'm satisfied. Please submit the implementation plan now using the submit_plan tool."}])
+        |> append_user("I'm satisfied. Please submit the implementation plan now using the submit_plan tool.")
         |> call_and_handle()
         |> chat_loop()
 
@@ -109,10 +147,8 @@ defmodule Hive.CLI.Chat do
           IO.puts(dim("  Type a message to send with this image, or attach more."))
           chat_loop(state)
         else
-          parts = build_user_parts(trimmed, state.pending_images)
-
-          %{state | pending_images: []}
-          |> append_user(parts)
+          state
+          |> append_user_with_images(trimmed)
           |> call_and_handle()
           |> chat_loop()
         end
@@ -176,162 +212,397 @@ defmodule Hive.CLI.Chat do
     end
   end
 
-  defp build_user_parts(text, []) do
-    [%{"text" => text}]
-  end
-
-  defp build_user_parts(text, images) do
-    image_parts =
-      Enum.flat_map(images, fn path ->
-        case File.read(path) do
-          {:ok, data} ->
-            [%{"inline_data" => %{"mime_type" => mime_type(path), "data" => Base.encode64(data)}}]
-
-          {:error, _} ->
-            []
-        end
-      end)
-
-    [%{"text" => text} | image_parts]
-  end
-
   # -- API communication ------------------------------------------------------
 
-  defp call_and_handle(state) do
-    IO.write(dim("  Thinking..."))
+  defp call_and_handle(state, retries \\ 0) do
+    provider = ModelResolver.provider(state.model)
 
-    case call_gemini(state) do
-      {:ok, response} ->
-        clear_line()
-        handle_response(state, response)
+    # Circuit breaker: skip providers that already failed this session
+    if MapSet.member?(state.failed_providers, provider) do
+      case find_fallback_model(state.model, state.failed_providers) do
+        {:ok, fallback} ->
+          new_provider = ModelResolver.provider(fallback)
+          Format.info("Skipping #{provider} (tripped). Using #{new_provider}:#{ModelResolver.model_id(fallback)}")
+          call_and_handle(%{state | model: fallback}, 0)
 
-      {:error, reason} ->
-        clear_line()
-        Format.error("API error: #{inspect(reason)}")
+        :none ->
+          Format.error("All configured providers have failed. Add more API keys in .hive/config.toml under [llm.keys]")
+          state
+      end
+    else
+      IO.write(dim("  Thinking..."))
+
+      generate_opts = [
+        tools: state.tools,
+        temperature: 0.7,
+        max_tokens: 8192
+      ]
+
+      case LLMClient.generate_text(state.model, state.context, generate_opts) do
+        {:ok, response} ->
+          clear_line()
+          handle_response(state, response)
+
+        {:error, reason} ->
+          clear_line()
+          handle_api_error(state, reason, retries)
+      end
+    end
+  end
+
+  defp handle_api_error(state, error, retries) do
+    case classify_error(error) do
+      {:rate_limited, delay} when retries < @max_retries ->
+        IO.puts(dim("  Rate limited. Retrying in #{delay}s... (attempt #{retries + 1}/#{@max_retries})"))
+        Process.sleep(delay * 1000)
+        call_and_handle(state, retries + 1)
+
+      {:rate_limited, _delay} ->
+        provider = ModelResolver.provider(state.model)
+        Format.error("Rate limited by #{provider} after #{@max_retries} retries.")
+        trip_and_fallback(state, provider)
+
+      {:quota_exhausted, provider} ->
+        Format.warn("#{provider} quota exhausted.")
+        trip_and_fallback(state, provider)
+
+      {:auth_error, provider} ->
+        Format.error("Authentication failed for #{provider}. Check your API key in .hive/config.toml")
+        trip_and_fallback(state, provider)
+
+      {:api_error, message} ->
+        Format.error(message)
         state
     end
   end
 
-  defp call_gemini(state) do
-    url =
-      "https://generativelanguage.googleapis.com/v1beta/#{state.model}:generateContent?key=#{state.api_key}"
+  # Trip the circuit breaker for this provider and attempt fallback
+  defp trip_and_fallback(state, failed_provider) do
+    state = %{state | failed_providers: MapSet.put(state.failed_providers, failed_provider)}
 
-    body = %{
-      "system_instruction" => %{"parts" => [%{"text" => state.system_prompt}]},
-      "contents" => state.messages,
-      "tools" => [%{"function_declarations" => tool_declarations()}],
-      "generationConfig" => %{"temperature" => 0.7, "maxOutputTokens" => 8192}
-    }
+    case find_fallback_model(state.model, state.failed_providers) do
+      {:ok, fallback} ->
+        new_provider = ModelResolver.provider(fallback)
+        new_model_id = ModelResolver.model_id(fallback)
+        Format.info("Falling back to #{new_provider}:#{new_model_id}")
+        call_and_handle(%{state | model: fallback}, 0)
 
-    case Req.post(url, json: body, receive_timeout: 120_000) do
-      {:ok, %{status: 200, body: resp}} -> {:ok, resp}
-      {:ok, %{status: status, body: body}} -> {:error, "HTTP #{status}: #{inspect(body)}"}
-      {:error, reason} -> {:error, reason}
+      :none ->
+        Format.error("All configured providers have failed. Add more API keys in .hive/config.toml under [llm.keys]")
+        state
     end
   end
 
-  defp handle_response(state, response) do
-    candidate = List.first(response["candidates"] || [])
-    parts = get_in(candidate, ["content", "parts"]) || []
+  defp classify_error(%{status: 429} = error) do
+    reason = Map.get(error, :reason, "")
 
-    # Add full model response to history
-    state = append_model(state, parts)
-
-    # Display any text
-    text =
-      parts
-      |> Enum.filter(&Map.has_key?(&1, "text"))
-      |> Enum.map_join("\n", & &1["text"])
-
-    unless text == "" do
-      IO.puts("")
-      IO.puts(text)
-      IO.puts("")
-    end
-
-    # Handle tool calls
-    tool_calls = Enum.filter(parts, &Map.has_key?(&1, "functionCall"))
-
-    if tool_calls != [] do
-      handle_tool_calls(state, tool_calls)
+    if quota_exhausted?(reason) do
+      {:quota_exhausted, extract_provider_from_error(error)}
     else
-      state
+      delay = extract_retry_delay(error)
+      {:rate_limited, delay}
+    end
+  end
+
+  defp classify_error(%{status: status}) when status in [401, 403] do
+    {:auth_error, "unknown"}
+  end
+
+  defp classify_error(%{status: status, reason: reason}) when is_integer(status) do
+    {:api_error, "API error (#{status}): #{truncate_reason(reason)}"}
+  end
+
+  defp classify_error(%{reason: reason}) when is_binary(reason) do
+    cond do
+      String.contains?(reason, "429") and quota_exhausted?(reason) ->
+        {:quota_exhausted, extract_provider_from_reason(reason)}
+
+      String.contains?(reason, "429") ->
+        delay = extract_retry_delay_from_reason(reason)
+        {:rate_limited, delay}
+
+      String.contains?(reason, "401") or String.contains?(reason, "403") or
+          String.contains?(reason, "authentication") or String.contains?(reason, "API key") ->
+        {:auth_error, extract_provider_from_reason(reason)}
+
+      true ->
+        {:api_error, truncate_reason(reason)}
+    end
+  end
+
+  defp classify_error(error) do
+    {:api_error, "Unexpected error: #{inspect(error) |> String.slice(0, 200)}"}
+  end
+
+  defp quota_exhausted?(reason) when is_binary(reason) do
+    String.contains?(reason, "quota") or
+      String.contains?(reason, "RESOURCE_EXHAUSTED") or
+      (String.contains?(reason, "exceeded") and String.contains?(reason, "limit"))
+  end
+
+  defp quota_exhausted?(_), do: false
+
+  defp extract_retry_delay(%{response_body: %{"error" => %{"details" => details}}})
+       when is_list(details) do
+    retry_info =
+      Enum.find(details, fn d ->
+        Map.get(d, "@type", "") |> String.contains?("RetryInfo")
+      end)
+
+    case retry_info do
+      %{"retryDelay" => delay_str} -> parse_delay(delay_str)
+      _ -> 5
+    end
+  end
+
+  defp extract_retry_delay(_), do: 5
+
+  defp extract_retry_delay_from_reason(reason) do
+    case Regex.run(~r/retry in (\d+(?:\.\d+)?)s/i, reason) do
+      [_, seconds] ->
+        {delay, _} = Float.parse(seconds)
+        ceil(delay)
+
+      _ ->
+        5
+    end
+  end
+
+  defp parse_delay(delay_str) when is_binary(delay_str) do
+    # Parse "40s", "40.5s", etc.
+    case Float.parse(String.replace(delay_str, "s", "")) do
+      {seconds, _} -> ceil(seconds)
+      :error -> 5
+    end
+  end
+
+  defp parse_delay(_), do: 5
+
+  defp extract_provider_from_error(%{reason: reason}) when is_binary(reason) do
+    extract_provider_from_reason(reason)
+  end
+
+  defp extract_provider_from_error(_), do: "unknown"
+
+  defp extract_provider_from_reason(reason) when is_binary(reason) do
+    cond do
+      String.contains?(reason, "Google") or String.contains?(reason, "generativelanguage") ->
+        "google"
+
+      String.contains?(reason, "Anthropic") or String.contains?(reason, "anthropic") ->
+        "anthropic"
+
+      String.contains?(reason, "OpenAI") or String.contains?(reason, "openai") ->
+        "openai"
+
+      true ->
+        "unknown"
+    end
+  end
+
+  defp extract_provider_from_reason(_), do: "unknown"
+
+  defp find_fallback_model(current_model, %MapSet{} = failed_providers) do
+    candidates = Map.get(@fallback_chain, current_model, [])
+
+    fallback =
+      Enum.find(candidates, fn model ->
+        provider = ModelResolver.provider(model)
+        not MapSet.member?(failed_providers, provider) and provider_has_key?(provider)
+      end)
+
+    case fallback do
+      nil -> :none
+      model -> {:ok, model}
+    end
+  end
+
+  defp provider_has_key?(provider) do
+    case Map.get(@provider_env_vars, provider) do
+      nil -> false
+      env_var -> System.get_env(env_var) not in [nil, ""]
+    end
+  end
+
+  defp truncate_reason(reason) when is_binary(reason) do
+    if String.length(reason) > 200 do
+      String.slice(reason, 0, 200) <> "..."
+    else
+      reason
+    end
+  end
+
+  defp truncate_reason(other), do: inspect(other) |> truncate_reason()
+
+  defp handle_response(state, response) do
+    classified = ReqLLM.Response.classify(response)
+
+    # Update context from response (includes assistant message)
+    state = %{state | context: response.context}
+
+    case classified.type do
+      :final_answer ->
+        text = classified.text || ""
+
+        unless text == "" do
+          IO.puts("")
+          IO.puts(text)
+          IO.puts("")
+        end
+
+        state
+
+      :tool_calls ->
+        # Display any text that came with the tool calls
+        text = classified.text || ""
+
+        unless text == "" do
+          IO.puts("")
+          IO.puts(text)
+          IO.puts("")
+        end
+
+        handle_tool_calls(state, classified.tool_calls)
     end
   end
 
   # -- Tool handling ----------------------------------------------------------
 
   defp handle_tool_calls(state, tool_calls) do
-    {state, responses} =
-      Enum.reduce(tool_calls, {state, []}, fn call, {s, resps} ->
-        name = call["functionCall"]["name"]
-        args = call["functionCall"]["args"] || %{}
-
-        case name do
+    {state, tool_results} =
+      Enum.reduce(tool_calls, {state, []}, fn tc, {s, results} ->
+        case tc.name do
           "ask_choice" ->
-            answer = do_ask_choice(args)
-            resp = fn_response("ask_choice", %{"result" => answer})
-            {s, resps ++ [resp]}
+            answer = do_ask_choice(tc.arguments)
+            {s, results ++ [{tc, answer}]}
 
           "submit_plan" ->
-            {s, accepted?} = do_submit_plan(s, args)
+            {s, accepted?} = do_submit_plan(s, tc.arguments)
 
             if accepted? do
-              resp = fn_response("submit_plan", %{"result" => "Plan accepted."})
-              {s, resps ++ [resp]}
+              {s, results ++ [{tc, "Plan accepted."}]}
             else
               feedback = IO.gets("  What would you like to change? ") |> String.trim()
-              resp = fn_response("submit_plan", %{"result" => "Plan rejected. User feedback: #{feedback}"})
-              {s, resps ++ [resp]}
+              {s, results ++ [{tc, "Plan rejected. User feedback: #{feedback}"}]}
             end
 
           _ ->
-            {s, resps}
+            {s, results ++ [{tc, "Unknown tool: #{tc.name}"}]}
         end
       end)
 
     if state.done do
       state
     else
-      state
-      |> append_user(responses)
+      # Append tool results to context and continue
+      context =
+        Enum.reduce(tool_results, state.context, fn {tc, result}, ctx ->
+          ReqLLM.Context.append(ctx, ReqLLM.Context.tool_result(tc.id, result))
+        end)
+
+      %{state | context: context}
       |> call_and_handle()
     end
   end
 
   defp do_ask_choice(%{"question" => question, "options" => options, "multi" => true})
        when is_list(options) do
-    case Select.multi_select(question, normalize_options(options)) do
-      nil -> "No preference, please decide for me."
+    opts = normalize_options(options)
+
+    case Select.multi_select(question, opts) do
+      nil -> text_multi_select(question, opts)
       labels -> Enum.join(labels, ", ")
     end
   end
 
+  # Handle atom keys (some providers return atoms)
+  defp do_ask_choice(%{question: question, options: options, multi: true})
+       when is_list(options) do
+    do_ask_choice(%{"question" => question, "options" => options, "multi" => true})
+  end
+
   defp do_ask_choice(%{"question" => question, "options" => options}) when is_list(options) do
-    case Select.select(question, normalize_options(options)) do
-      nil -> "No preference, please decide for me."
+    opts = normalize_options(options)
+
+    case Select.select(question, opts) do
+      nil -> text_select(question, opts)
       label -> label
     end
   end
 
-  defp do_ask_choice(_bad_args) do
-    "No preference, please decide for me."
+  defp do_ask_choice(%{question: question, options: options}) when is_list(options) do
+    do_ask_choice(%{"question" => question, "options" => options})
   end
 
-  # Pass structured options through (maps with label/description/recommended)
-  # or wrap plain strings for backward compat
+  defp do_ask_choice(_bad_args) do
+    answer = IO.gets("  Your answer: ") |> String.trim()
+    if answer == "", do: "No preference, please decide for me.", else: answer
+  end
+
+  # Text-based fallback when TUI selector fails
+  defp text_select(_question, options) do
+    labels = extract_labels(options)
+    IO.puts("  " <> dim("(Use number to select)"))
+
+    Enum.with_index(labels, 1)
+    |> Enum.each(fn {label, idx} -> IO.puts("  #{idx}. #{label}") end)
+
+    answer = IO.gets("  > ") |> String.trim()
+
+    case Integer.parse(answer) do
+      {n, _} when n >= 1 and n <= length(labels) -> Enum.at(labels, n - 1)
+      _ -> List.first(labels) || "No preference"
+    end
+  end
+
+  defp text_multi_select(_question, options) do
+    labels = extract_labels(options)
+    IO.puts("  " <> dim("(Enter numbers separated by commas, e.g. 1,3,4)"))
+
+    Enum.with_index(labels, 1)
+    |> Enum.each(fn {label, idx} -> IO.puts("  #{idx}. #{label}") end)
+
+    answer = IO.gets("  > ") |> String.trim()
+
+    selected =
+      answer
+      |> String.split(~r/[,\s]+/)
+      |> Enum.flat_map(fn s ->
+        case Integer.parse(String.trim(s)) do
+          {n, _} when n >= 1 and n <= length(labels) -> [Enum.at(labels, n - 1)]
+          _ -> []
+        end
+      end)
+
+    if selected == [], do: Enum.join(labels, ", "), else: Enum.join(selected, ", ")
+  end
+
+  defp extract_labels(options) do
+    Enum.map(options, fn
+      %{"label" => l} -> l
+      %{label: l} -> l
+      opt when is_binary(opt) -> opt
+      other -> inspect(other)
+    end)
+  end
+
   defp normalize_options(options) do
     Enum.map(options, fn
       opt when is_binary(opt) -> opt
       %{"label" => _} = opt -> opt
+      %{label: l} = opt ->
+        %{"label" => l}
+        |> then(fn m -> if opt[:description], do: Map.put(m, "description", opt[:description]), else: m end)
+        |> then(fn m -> if opt[:recommended], do: Map.put(m, "recommended", true), else: m end)
       other -> inspect(other)
     end)
   end
 
   defp do_submit_plan(state, args) do
-    name = args["name"] || state.quest.goal
-    summary = args["summary"] || ""
-    jobs = args["jobs"] || []
+    # Handle both string and atom keys
+    name = args["name"] || args[:name] || state.quest.goal
+    summary = args["summary"] || args[:summary] || ""
+    jobs = args["jobs"] || args[:jobs] || []
 
     IO.puts("")
     IO.puts(color(:green) <> color(:bright) <> "Plan: #{name}" <> reset())
@@ -341,20 +612,24 @@ defmodule Hive.CLI.Chat do
     jobs
     |> Enum.with_index(1)
     |> Enum.each(fn {job, idx} ->
-      type = job["job_type"] || "implementation"
+      type = job["job_type"] || job[:job_type] || "implementation"
+      title = job["title"] || job[:title] || "Untitled"
+      desc = job["description"] || job[:description]
+      deps = job["depends_on"] || job[:depends_on]
+
       type_color = case type do
         "research" -> :cyan
         "verification" -> :magenta
         _ -> :yellow
       end
       badge = color(type_color) <> "[#{type}]" <> reset()
-      IO.puts("  #{idx}. #{badge} #{job["title"]}")
+      IO.puts("  #{idx}. #{badge} #{title}")
 
-      if desc = job["description"] do
+      if desc do
         IO.puts("     " <> dim(desc))
       end
 
-      case job["depends_on"] do
+      case deps do
         deps when is_list(deps) and deps != [] ->
           dep_nums = Enum.map(deps, &(&1 + 1)) |> Enum.join(", ")
           IO.puts("     " <> dim("depends on: #{dep_nums}"))
@@ -368,13 +643,56 @@ defmodule Hive.CLI.Chat do
     answer = IO.gets("  Accept this plan? [y/n] ") |> String.trim() |> String.downcase()
 
     if answer in ["y", "yes", ""] do
-      plan = %{name: name, summary: summary, jobs: jobs}
+      # Normalize job keys to strings for plan_handler
+      normalized_jobs = Enum.map(jobs, fn job ->
+        %{
+          "title" => job["title"] || job[:title] || "Untitled",
+          "description" => job["description"] || job[:description] || "",
+          "job_type" => job["job_type"] || job[:job_type] || "implementation",
+          "depends_on" => job["depends_on"] || job[:depends_on] || []
+        }
+      end)
+
+      plan = %{name: name, summary: summary, jobs: normalized_jobs}
       Format.success("Plan accepted with #{length(jobs)} job(s).")
       {%{state | plan: plan, done: true}, true}
     else
       IO.puts(dim("  Sending feedback to revise the plan..."))
       {state, false}
     end
+  end
+
+  # -- Context helpers --------------------------------------------------------
+
+  defp append_user(state, text) when is_binary(text) do
+    context = ReqLLM.Context.append(state.context, ReqLLM.Context.user(text))
+    %{state | context: context}
+  end
+
+  defp append_user_with_images(state, text) do
+    parts = build_content_parts(text, state.pending_images)
+    msg = ReqLLM.Context.user(parts)
+    context = ReqLLM.Context.append(state.context, msg)
+    %{state | context: context, pending_images: []}
+  end
+
+  defp build_content_parts(text, []) do
+    text
+  end
+
+  defp build_content_parts(text, images) do
+    image_parts =
+      Enum.flat_map(images, fn path ->
+        case File.read(path) do
+          {:ok, data} ->
+            [ReqLLM.Message.ContentPart.image(data, mime_type(path))]
+
+          {:error, _} ->
+            []
+        end
+      end)
+
+    [ReqLLM.Message.ContentPart.text(text) | image_parts]
   end
 
   # -- Input helpers ----------------------------------------------------------
@@ -387,18 +705,86 @@ defmodule Hive.CLI.Chat do
     end
   end
 
-  # -- Message history --------------------------------------------------------
+  # -- Tool definitions -------------------------------------------------------
 
-  defp append_user(state, parts) do
-    %{state | messages: state.messages ++ [%{"role" => "user", "parts" => parts}]}
-  end
-
-  defp append_model(state, parts) do
-    %{state | messages: state.messages ++ [%{"role" => "model", "parts" => parts}]}
-  end
-
-  defp fn_response(name, content) do
-    %{"functionResponse" => %{"name" => name, "response" => content}}
+  defp build_tools do
+    [
+      ReqLLM.Tool.new!(
+        name: "ask_choice",
+        description:
+          "Present a selection prompt to the user. The user navigates with arrow keys and presses enter. " <>
+            "For multi=true, the user can toggle multiple items with space before confirming.",
+        parameter_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "question" => %{"type" => "string", "description" => "The question to ask"},
+            "options" => %{
+              "type" => "array",
+              "items" => %{
+                "type" => "object",
+                "properties" => %{
+                  "label" => %{"type" => "string", "description" => "The option text"},
+                  "description" => %{
+                    "type" => "string",
+                    "description" => "Brief explanation shown when this option is focused"
+                  },
+                  "recommended" => %{
+                    "type" => "boolean",
+                    "description" => "Mark as true for the recommended choice"
+                  }
+                },
+                "required" => ["label"]
+              },
+              "description" => "2-6 options to choose from"
+            },
+            "multi" => %{
+              "type" => "boolean",
+              "description" =>
+                "If true, user can select multiple options. Default false (single select)."
+            }
+          },
+          "required" => ["question", "options"]
+        },
+        callback: fn _args -> {:ok, "handled"} end
+      ),
+      ReqLLM.Tool.new!(
+        name: "submit_plan",
+        description:
+          "Submit the final implementation plan. Call after gathering enough information from the user.",
+        parameter_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "name" => %{"type" => "string", "description" => "Short quest name"},
+            "summary" => %{"type" => "string", "description" => "1-2 sentence summary"},
+            "jobs" => %{
+              "type" => "array",
+              "items" => %{
+                "type" => "object",
+                "properties" => %{
+                  "title" => %{"type" => "string"},
+                  "description" => %{
+                    "type" => "string",
+                    "description" => "Detailed description for an AI agent to execute"
+                  },
+                  "job_type" => %{
+                    "type" => "string",
+                    "enum" => ["research", "implementation", "verification"]
+                  },
+                  "depends_on" => %{
+                    "type" => "array",
+                    "items" => %{"type" => "integer"},
+                    "description" => "0-based indices of prerequisite jobs"
+                  }
+                },
+                "required" => ["title", "description", "job_type"]
+              }
+            }
+          },
+          "required" => ["name", "summary", "jobs"]
+        },
+        callback: fn _args -> {:ok, "handled"} end
+      )
+    ]
   end
 
   # -- Codebase context -------------------------------------------------------
@@ -472,107 +858,29 @@ defmodule Hive.CLI.Chat do
     ## Codebase Context
     #{codebase}
 
-    ## Instructions
-    1. Start by understanding the user's goal. Ask 2-3 focused clarifying questions.
-    2. Use the `ask_choice` tool for questions with clear discrete options (frameworks, scope, approach).
-    3. Use regular text for open-ended questions.
-    4. The user may attach images (screenshots, diagrams, mockups) — analyze them carefully.
-    5. After gathering enough context (aim for 3-5 exchanges), call `submit_plan` with the structured plan.
+    ## CRITICAL: You MUST use tools — do NOT ask questions as plain text
 
-    ## Tool Usage
-    - `ask_choice`: Present options the user selects with arrow keys. Each option should have a `label`, a `description` (brief explanation), and optionally `recommended: true` for your top pick. Good for: tech choices, scope decisions, feature priorities. Use `multi: true` when the user should pick multiple items.
-    - `submit_plan`: Submit the final plan with jobs. Each job should be a focused unit of work (1-3 hours) that an AI coding agent can execute independently.
+    You have two tools: `ask_choice` and `submit_plan`. You MUST use them.
 
-    ## Plan Guidelines
-    - Break work into small, focused jobs
+    - **Every question to the user MUST use `ask_choice`**. Never write numbered lists of questions in text. Instead, call `ask_choice` once per question. You may call multiple `ask_choice` tools in a single response.
+    - Each `ask_choice` must have 2-6 concrete options with `label` and `description`. Mark your recommended option with `recommended: true`.
+    - Use `multi: true` when the user should pick multiple items (e.g., "which metrics to show").
+    - Only use plain text for brief context before tool calls (1-2 sentences max).
+    - After 2-4 exchanges, call `submit_plan` with the structured plan.
+
+    ## Flow
+    1. Respond with a brief greeting (1 sentence), then immediately call 2-3 `ask_choice` tools for your clarifying questions.
+    2. Based on answers, ask follow-up `ask_choice` questions to refine scope, or call `submit_plan` when you have enough context.
+    3. Be thoughtful — aim for 3-5 exchanges to fully understand what the user wants before submitting the plan. Don't rush to a plan before you understand the problem.
+
+    ## Plan Guidelines (for `submit_plan`)
+    - Break work into small, focused jobs (1-3 hours each for an AI coding agent)
     - Use job_type "research" for unknowns and exploration
     - Use job_type "implementation" for coding work
     - Use job_type "verification" for testing and validation
     - Set depends_on (0-based indices) to define execution order
-    - Each job's description should have enough detail for an AI agent to execute it without further context
-
-    Be conversational but efficient. Don't over-ask — 3-5 exchanges max before submitting a plan.
+    - Each job description must have enough detail for an AI agent to execute independently
     """
-  end
-
-  # -- Tool declarations ------------------------------------------------------
-
-  defp tool_declarations do
-    [
-      %{
-        "name" => "ask_choice",
-        "description" =>
-          "Present a selection prompt. The user navigates with arrow keys and presses enter. " <>
-            "For multi=true, the user can toggle multiple items with space before confirming.",
-        "parameters" => %{
-          "type" => "object",
-          "properties" => %{
-            "question" => %{"type" => "string", "description" => "The question to ask"},
-            "options" => %{
-              "type" => "array",
-              "items" => %{
-                "type" => "object",
-                "properties" => %{
-                  "label" => %{"type" => "string", "description" => "The option text"},
-                  "description" => %{
-                    "type" => "string",
-                    "description" => "Brief explanation shown when this option is focused"
-                  },
-                  "recommended" => %{
-                    "type" => "boolean",
-                    "description" => "Mark as true for the recommended choice"
-                  }
-                },
-                "required" => ["label"]
-              },
-              "description" => "2-6 options to choose from"
-            },
-            "multi" => %{
-              "type" => "boolean",
-              "description" =>
-                "If true, user can select multiple options. Default false (single select)."
-            }
-          },
-          "required" => ["question", "options"]
-        }
-      },
-      %{
-        "name" => "submit_plan",
-        "description" =>
-          "Submit the final implementation plan. Call after gathering enough information.",
-        "parameters" => %{
-          "type" => "object",
-          "properties" => %{
-            "name" => %{"type" => "string", "description" => "Short quest name"},
-            "summary" => %{"type" => "string", "description" => "1-2 sentence summary"},
-            "jobs" => %{
-              "type" => "array",
-              "items" => %{
-                "type" => "object",
-                "properties" => %{
-                  "title" => %{"type" => "string"},
-                  "description" => %{
-                    "type" => "string",
-                    "description" => "Detailed description for an AI agent to execute"
-                  },
-                  "job_type" => %{
-                    "type" => "string",
-                    "enum" => ["research", "implementation", "verification"]
-                  },
-                  "depends_on" => %{
-                    "type" => "array",
-                    "items" => %{"type" => "integer"},
-                    "description" => "0-based indices of prerequisite jobs"
-                  }
-                },
-                "required" => ["title", "description", "job_type"]
-              }
-            }
-          },
-          "required" => ["name", "summary", "jobs"]
-        }
-      }
-    ]
   end
 
   # -- Terminal helpers -------------------------------------------------------
@@ -591,28 +899,6 @@ defmodule Hive.CLI.Chat do
       ".webp" -> "image/webp"
       ".bmp" -> "image/bmp"
       _ -> "application/octet-stream"
-    end
-  end
-
-  defp map_model(model) do
-    clean = String.replace(model, "google:", "")
-    if String.starts_with?(clean, "models/"), do: clean, else: "models/#{clean}"
-  end
-
-  defp resolve_api_key do
-    System.get_env("GOOGLE_API_KEY") ||
-      System.get_env("GEMINI_API_KEY") ||
-      Application.get_env(:req_llm, :google_api_key) ||
-      config_api_key()
-  end
-
-  defp config_api_key do
-    with {:ok, root} <- Hive.hive_dir(),
-         {:ok, config} <- Hive.Config.read_config(Path.join([root, ".hive", "config.toml"])),
-         val when is_binary(val) and val != "" <- get_in(config, ["llm", "keys", "google_api_key"]) do
-      val
-    else
-      _ -> nil
     end
   end
 
