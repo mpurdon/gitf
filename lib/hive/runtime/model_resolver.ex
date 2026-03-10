@@ -11,11 +11,15 @@ defmodule Hive.Runtime.ModelResolver do
 
   ## Execution Mode
 
-  Returns `:api` or `:cli` based on (in priority order):
+  Returns `:api`, `:cli`, or `:ollama` based on (in priority order):
   1. `HIVE_EXECUTION_MODE` env var
   2. Hive config `execution_mode`
   3. Application config `:hive, :llm, :execution_mode`
   4. Default: `:api`
+
+  The `:ollama` mode is a convenience that behaves like `:api` but
+  auto-configures `OPENAI_API_BASE` for a local Ollama instance and
+  maps default model tiers to local model names.
   """
 
   @default_models %{
@@ -55,50 +59,154 @@ defmodule Hive.Runtime.ModelResolver do
   end
 
   @doc """
-  Returns the current execution mode: `:api` or `:cli`.
+  Returns the current execution mode: `:api`, `:cli`, `:ollama`, or `:bedrock`.
 
   Checked in priority order:
-  1. `HIVE_EXECUTION_MODE` env var ("api" or "cli")
+  1. `HIVE_EXECUTION_MODE` env var
   2. Hive config file `execution_mode`
   3. Application config `:hive, :llm, :execution_mode`
   4. Default: `:api`
   """
-  @spec execution_mode() :: :api | :cli
+  @spec execution_mode() :: :api | :cli | :ollama | :bedrock
   def execution_mode do
     case System.get_env("HIVE_EXECUTION_MODE") do
-      "api" ->
-        :api
-
-      "cli" ->
-        :cli
-
-      _ ->
-        hive_config_mode() || app_config_mode() || :api
+      "api" -> :api
+      "cli" -> :cli
+      "ollama" -> :ollama
+      "bedrock" -> :bedrock
+      _ -> hive_config_mode() || app_config_mode() || :api
     end
   end
 
   @doc """
-  Returns true if the current execution mode is `:api`.
+  Returns true if the current execution mode uses API calls
+  (`:api`, `:ollama`, or `:bedrock`).
   """
   @spec api_mode?() :: boolean()
   def api_mode? do
-    execution_mode() == :api
+    execution_mode() in [:api, :ollama, :bedrock]
+  end
+
+  @doc """
+  Returns true if the current execution mode is `:ollama`.
+  """
+  @spec ollama_mode?() :: boolean()
+  def ollama_mode? do
+    execution_mode() == :ollama
+  end
+
+  @doc """
+  Returns true if the current execution mode is `:bedrock`.
+  """
+  @spec bedrock_mode?() :: boolean()
+  def bedrock_mode? do
+    execution_mode() == :bedrock
+  end
+
+  @doc """
+  Sets up the environment for Ollama mode.
+
+  Auto-configures `OPENAI_API_BASE` to point at a local Ollama instance
+  if not already set. Called during application startup when execution
+  mode is `:ollama`.
+  """
+  @spec setup_ollama_env() :: :ok
+  def setup_ollama_env do
+    base = System.get_env("OPENAI_API_BASE") || System.get_env("OLLAMA_BASE_URL")
+
+    if base == nil do
+      System.put_env("OPENAI_API_BASE", "http://localhost:11434/v1")
+    end
+
+    # Ollama doesn't need a real key but ReqLLM may require one to be set
+    if System.get_env("OPENAI_API_KEY") == nil do
+      System.put_env("OPENAI_API_KEY", "ollama")
+    end
+
+    :ok
   end
 
   @doc """
   Returns the configured default models map.
+
+  In `:ollama` or `:bedrock` mode, overlays mode-specific model defaults
+  before applying any user customizations.
   """
   @spec configured_models() :: map()
   def configured_models do
+    mode = execution_mode()
+
+    base = cond do
+      mode == :ollama -> Map.merge(@default_models, mode_defaults(:ollama))
+      mode == :bedrock -> Map.merge(@default_models, mode_defaults(:bedrock))
+      true -> @default_models
+    end
+
     case Application.get_env(:hive, :llm) do
       nil ->
-        @default_models
+        base
 
       config ->
         custom = config[:default_models] || %{}
-        # Merge custom over defaults, converting atom keys to strings
         custom_string_keys = Map.new(custom, fn {k, v} -> {to_string(k), v} end)
-        Map.merge(@default_models, custom_string_keys)
+        Map.merge(base, custom_string_keys)
+    end
+  end
+
+  @ollama_defaults %{
+    "opus" => "openai:qwen2.5-coder:32b",
+    "sonnet" => "openai:qwen2.5-coder:14b",
+    "haiku" => "openai:qwen2.5-coder:7b",
+    "fast" => "openai:qwen2.5-coder:7b"
+  }
+
+  @bedrock_defaults %{
+    "opus" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
+    "sonnet" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
+    "haiku" => "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0",
+    "fast" => "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
+  }
+
+  defp mode_defaults(:ollama) do
+    case Hive.Config.Provider.get([:llm, :ollama_models]) do
+      nil -> @ollama_defaults
+      custom when is_map(custom) -> Map.merge(@ollama_defaults, Map.new(custom, fn {k, v} -> {to_string(k), v} end))
+      _ -> @ollama_defaults
+    end
+  rescue
+    _ -> @ollama_defaults
+  end
+
+  defp mode_defaults(:bedrock) do
+    case Hive.Config.Provider.get([:llm, :bedrock_models]) do
+      nil -> @bedrock_defaults
+      custom when is_map(custom) -> Map.merge(@bedrock_defaults, Map.new(custom, fn {k, v} -> {to_string(k), v} end))
+      _ -> @bedrock_defaults
+    end
+  rescue
+    _ -> @bedrock_defaults
+  end
+
+  @doc """
+  Returns a fallback model for the given model spec.
+
+  Degrades gracefully: opus → sonnet → haiku. Returns nil if no fallback.
+  Used when the primary model fails (API down, billing limit, etc.).
+  """
+  @spec fallback(String.t()) :: String.t() | nil
+  def fallback(model_spec) do
+    resolved = resolve(model_spec)
+    models = configured_models()
+
+    # Build a reverse lookup: model_spec → tier name
+    tier = Enum.find_value(models, fn {tier_name, spec} ->
+      if spec == resolved, do: tier_name
+    end)
+
+    case tier do
+      "opus" -> resolve("sonnet")
+      "sonnet" -> resolve("haiku")
+      _ -> nil
     end
   end
 
@@ -151,22 +259,23 @@ defmodule Hive.Runtime.ModelResolver do
       Hive.Config.Provider.get([:llm, :execution_mode]) ||
         Hive.Config.Provider.get([:execution_mode])
 
-    case mode do
-      "api" -> :api
-      :api -> :api
-      "cli" -> :cli
-      :cli -> :cli
-      _ -> nil
-    end
+    parse_mode(mode)
   rescue
     _ -> nil
   end
 
   defp app_config_mode do
-    case get_in(Application.get_env(:hive, :llm, []), [:execution_mode]) do
-      :api -> :api
-      :cli -> :cli
-      _ -> nil
-    end
+    get_in(Application.get_env(:hive, :llm, []), [:execution_mode])
+    |> parse_mode()
   end
+
+  defp parse_mode("api"), do: :api
+  defp parse_mode(:api), do: :api
+  defp parse_mode("cli"), do: :cli
+  defp parse_mode(:cli), do: :cli
+  defp parse_mode("ollama"), do: :ollama
+  defp parse_mode(:ollama), do: :ollama
+  defp parse_mode("bedrock"), do: :bedrock
+  defp parse_mode(:bedrock), do: :bedrock
+  defp parse_mode(_), do: nil
 end

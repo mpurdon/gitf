@@ -144,7 +144,126 @@ defmodule Hive.Runtime.Settings do
     generate(bee_id, hive_root, worktree_path)
   end
 
+  # -- Role-based settings.local.json -----------------------------------------
+
+  @doc """
+  Generates a `.claude/settings.local.json` file that restricts tool access
+  based on the bee's role.
+
+  Scouts get read-only access, builders get full access with safety rails,
+  and reviewers get read plus test-runner access.
+
+  This is written as `settings.local.json` (not `settings.json`) so it
+  layers on top of the base settings without overwriting hooks.
+
+  Returns `:ok`.
+  """
+  @spec generate_role_settings(:scout | :builder | :reviewer, String.t()) :: :ok
+  def generate_role_settings(role, worktree_path) do
+    role
+    |> role_permissions()
+    |> write_settings_local_json(worktree_path)
+  end
+
+  @doc """
+  Returns the permissions map for a given role without writing to disk.
+
+  Useful for testing or inspection.
+  """
+  @spec role_permissions(:scout | :builder | :reviewer) :: map()
+  def role_permissions(:scout) do
+    %{
+      "permissions" => %{
+        "allow" => [
+          "Read",
+          "Glob",
+          "Grep",
+          "Bash(git status:*)",
+          "Bash(git log:*)",
+          "Bash(git diff:*)",
+          "Bash(git show:*)",
+          "Bash(ls:*)",
+          "Bash(find:*)",
+          "Bash(wc:*)",
+          "Bash(file:*)"
+        ],
+        "deny" => [
+          "Write",
+          "Edit",
+          "NotebookEdit",
+          "Bash(rm:*)",
+          "Bash(mv:*)",
+          "Bash(cp:*)",
+          "Bash(mkdir:*)",
+          "Bash(touch:*)",
+          "Bash(chmod:*)",
+          "Bash(git push:*)",
+          "Bash(git checkout:*)",
+          "Bash(git reset:*)"
+        ]
+      }
+    }
+  end
+
+  def role_permissions(:builder) do
+    %{
+      "permissions" => %{
+        "allow" => [
+          "Read",
+          "Write",
+          "Edit",
+          "Glob",
+          "Grep",
+          "Bash(*)"
+        ],
+        "deny" => [
+          "Bash(git push:*)",
+          "Bash(git checkout main:*)",
+          "Bash(git checkout master:*)",
+          "Bash(rm -rf /:*)"
+        ]
+      }
+    }
+  end
+
+  def role_permissions(:reviewer) do
+    %{
+      "permissions" => %{
+        "allow" => [
+          "Read",
+          "Glob",
+          "Grep",
+          "Bash(git:*)",
+          "Bash(mix test:*)",
+          "Bash(npm test:*)",
+          "Bash(bun test:*)",
+          "Bash(cargo test:*)",
+          "Bash(pytest:*)",
+          "Bash(go test:*)"
+        ],
+        "deny" => [
+          "Write",
+          "Edit",
+          "NotebookEdit",
+          "Bash(rm:*)",
+          "Bash(git push:*)"
+        ]
+      }
+    }
+  end
+
   # -- Private ---------------------------------------------------------------
+
+  defp write_settings_local_json(settings, worktree_path) do
+    claude_dir = Path.join(worktree_path, ".claude")
+    settings_path = Path.join(claude_dir, "settings.local.json")
+
+    with :ok <- File.mkdir_p(claude_dir),
+         json = Jason.encode!(settings, pretty: true),
+         :ok <- File.write(settings_path, json) do
+      :ok
+    end
+  end
 
   defp write_settings_json(working_dir, settings) do
     claude_dir = Path.join(working_dir, ".claude")

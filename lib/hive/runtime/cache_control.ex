@@ -64,8 +64,12 @@ defmodule Hive.Runtime.CacheControl do
   Determines if caching should be applied based on content length.
   (Anthropic requires >1024 tokens for caching to be effective/allowed).
   """
-  def should_cache?(content) do
+  def should_cache?(nil), do: false
+
+  def should_cache?(content) when is_binary(content) do
     # Rough estimate: 4 chars per token. 1024 tokens ~ 4096 chars.
     String.length(content) > 4000
   end
+
+  def should_cache?(_), do: false
 end

@@ -148,7 +148,8 @@ defmodule Hive.Runtime.Claude do
 
   defp build_interactive_args(opts) do
     base = []
-    base ++ system_prompt_args(opts) ++ model_args(opts)
+    base = base ++ system_prompt_args(opts) ++ model_args(opts)
+    base ++ prompt_args(opts)
   end
 
   defp build_headless_args(prompt, opts) do
@@ -162,6 +163,13 @@ defmodule Hive.Runtime.Claude do
     case Keyword.get(opts, :system_prompt) do
       nil -> []
       prompt -> ["--system-prompt", prompt]
+    end
+  end
+
+  defp prompt_args(opts) do
+    case Keyword.get(opts, :prompt) do
+      nil -> []
+      prompt -> [prompt]
     end
   end
 

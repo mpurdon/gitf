@@ -10,7 +10,7 @@ defmodule Hive.Config do
     "hive" => %{"version" => Hive.version()},
     "queen" => %{"max_bees" => 5},
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
-    "llm" => %{"keys" => %{"google_api_key" => "", "anthropic_api_key" => ""}},
+    "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
     "server" => %{"url" => ""},
     "session" => %{"current_comb" => ""}
@@ -65,6 +65,27 @@ defmodule Hive.Config do
       _ -> nil
     end
   end
+
+  @doc """
+  Reads a top-level config value from .hive/config.toml.
+
+  Supports dotted keys like `:api_key` which maps to `["server", "api_key"]`.
+  Returns nil if not found or config can't be read.
+  """
+  @spec get(atom()) :: term() | nil
+  def get(key) do
+    with {:ok, root} <- Hive.hive_dir(),
+         {:ok, config} <- read_config(Path.join([root, ".hive", "config.toml"])) do
+      config_lookup(config, key)
+    else
+      _ -> nil
+    end
+  end
+
+  defp config_lookup(config, :api_key), do: get_in(config, ["server", "api_key"])
+  defp config_lookup(config, :max_bees), do: get_in(config, ["queen", "max_bees"])
+  defp config_lookup(config, :budget_usd), do: get_in(config, ["costs", "budget_usd"])
+  defp config_lookup(_config, _key), do: nil
 
   # -- Private: TOML encoding ------------------------------------------------
 

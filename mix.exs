@@ -1,7 +1,7 @@
 defmodule Hive.MixProject do
   use Mix.Project
 
-  @version "0.8.1"
+  @version "0.24.0"
 
   def project do
     [
@@ -60,6 +60,7 @@ defmodule Hive.MixProject do
       {:ratatouille, "~> 0.5"},
       {:telemetry, "~> 1.2"},
       {:req_llm, "~> 1.6"},
+      {:phoenix_live_reload, "~> 1.5", only: :dev},
       {:mox, "~> 1.1", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test}
     ]

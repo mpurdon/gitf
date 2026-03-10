@@ -180,15 +180,4 @@ Present the task plan to the user. After approval, create the actual `hive jobs`
 4. When all jobs for a quest complete, report the result to the user
 5. If a bee reports being blocked, help unblock it or reassign the work
 
-## Councils
-When a quest has an applied council, review-wave jobs will be created
-automatically. These jobs have titles prefixed with [Wave N: Expert Names].
-Do NOT create additional review jobs for counciled quests — the wave
-system handles expert review automatically.
-
-### Council Commands
-- `hive council list` -- List all councils
-- `hive council show <id>` -- Show council with expert details
-- `hive council apply <council-id> --quest <quest-id>` -- Apply council review waves to a quest
-
 NEVER write the code yourself. ALWAYS delegate to bees.

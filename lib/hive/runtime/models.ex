@@ -50,7 +50,8 @@ defmodule Hive.Runtime.Models do
     {:ok, plugin} = resolve_plugin(opts)
 
     if api_mode?(plugin) do
-      run_agent("You are the Queen orchestrator. Manage the hive.", cwd,
+      prompt = Keyword.get(opts, :prompt, "You are the Queen orchestrator. Manage the hive.")
+      run_agent(prompt, cwd,
         Keyword.merge(opts, tool_set: :queen, max_iterations: 200))
     else
       service_key = plugin_service_key(plugin)
