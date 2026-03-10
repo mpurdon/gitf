@@ -132,12 +132,18 @@ defmodule Hive.Observability.Health do
   end
 
   defp check_model_api do
-    case Hive.Runtime.Models.find_executable() do
-      {:ok, _path} -> :ok
-      {:error, _} -> :error
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      # In API mode, check that at least one API key is configured
+      has_key = Hive.Runtime.Keys.status() |> Enum.any?(fn {_, v} -> v end)
+      if has_key, do: :ok, else: :warning
+    else
+      case Hive.Runtime.Models.find_executable() do
+        {:ok, _path} -> :ok
+        {:error, _} -> :error
+      end
     end
   rescue
-    _ -> :error
+    _ -> :warning
   end
 
   defp check_git do
