@@ -30,6 +30,11 @@ defmodule Hive.TUI.App do
   @arrow_up key(:arrow_up)
   @arrow_down key(:arrow_down)
   @tab key(:tab)
+  @f1 key(:f1)
+  @f2 key(:f2)
+  @f3 key(:f3)
+  @f4 key(:f4)
+  @f5 key(:f5)
 
   @impl true
   def init(_context) do
@@ -40,7 +45,20 @@ defmodule Hive.TUI.App do
       plan: Plan.new(),
       busy: false,
       session_id: nil,
-      chat_scroll: 0
+      chat_scroll: 0,
+      # Dashboard state
+      right_panel: :activity,
+      jobs: [],
+      health: %{status: :unknown, checks: %{}, timestamp: nil},
+      alerts: [],
+      merge_queue: %{pending: [], active: nil, completed: []},
+      runs: [],
+      budget_status: [],
+      checkpoints: %{},
+      agent_identities: [],
+      event_store_events: [],
+      stats: nil,
+      refresh_count: 0
     }
   end
 
@@ -76,7 +94,12 @@ defmodule Hive.TUI.App do
         model
 
       :tick ->
-        refresh_activity(model)
+        count = (model[:refresh_count] || 0) + 1
+        model = %{model | refresh_count: count}
+
+        model
+        |> refresh_activity()
+        |> refresh_dashboard(count)
 
       {:chat_response, {:ok, {:switch_plan, plan_data}, _session_id}} ->
         strategy = plan_data[:strategy] || plan_data.strategy || "?"
@@ -122,6 +145,13 @@ defmodule Hive.TUI.App do
     input_empty? = model.input.text == ""
 
     case key do
+      # Panel switching (F-keys)
+      @f1 -> %{model | right_panel: :activity}
+      @f2 -> %{model | right_panel: :pipeline}
+      @f3 -> %{model | right_panel: :events}
+      @f4 -> %{model | right_panel: :merges}
+      @f5 -> %{model | right_panel: :models}
+
       @space ->
         input = Input.insert_char(model.input, " ")
         %{model | input: input}
@@ -175,6 +205,78 @@ defmodule Hive.TUI.App do
       _ ->
         model
     end
+  end
+
+  # -- Dashboard refresh ---------------------------------------------------
+
+  defp refresh_dashboard(model, count) do
+    model
+    |> refresh_fast()
+    |> maybe_refresh_medium(count)
+    |> maybe_refresh_slow(count)
+    |> maybe_refresh_events(count)
+  end
+
+  # Every tick: merge queue, runs
+  defp refresh_fast(model) do
+    model
+    |> Map.put(:merge_queue, safe_call(fn -> Hive.Merge.Queue.status() end, model.merge_queue))
+    |> Map.put(:runs, safe_call(fn -> Hive.Run.list(status: "active") end, model.runs))
+  end
+
+  # Every 6th tick (~3s): alerts, stats
+  defp maybe_refresh_medium(model, count) when rem(count, 6) == 0 do
+    model
+    |> Map.put(:alerts, safe_call(fn -> Hive.Observability.Alerts.check_alerts() end, model.alerts))
+    |> Map.put(:stats, safe_call(fn -> Hive.Observability.Metrics.collect_metrics() end, model.stats))
+  end
+
+  defp maybe_refresh_medium(model, _count), do: model
+
+  # Every 20th tick (~10s): health, identities, budget, checkpoints
+  defp maybe_refresh_slow(model, count) when rem(count, 20) == 0 do
+    bees = model.activity.bees
+    quests = model.activity.quests
+
+    checkpoints =
+      bees
+      |> Enum.filter(&(&1[:status] == "working"))
+      |> Enum.reduce(%{}, fn bee, acc ->
+        case safe_call(fn -> Hive.Checkpoint.load(bee[:id]) end, :error) do
+          {:ok, cp} -> Map.put(acc, bee[:id], cp)
+          _ -> acc
+        end
+      end)
+
+    budget_status = load_budget_status(quests)
+
+    model
+    |> Map.put(:health, safe_call(fn -> Hive.Observability.Health.check() end, model.health))
+    |> Map.put(:agent_identities, safe_call(fn -> Hive.AgentIdentity.list() end, model.agent_identities))
+    |> Map.put(:checkpoints, checkpoints)
+    |> Map.put(:budget_status, budget_status)
+  end
+
+  defp maybe_refresh_slow(model, _count), do: model
+
+  # Events: only when events panel is active, every 6th tick
+  defp maybe_refresh_events(%{right_panel: :events} = model, count) when rem(count, 6) == 0 do
+    Map.put(model, :event_store_events, safe_call(fn -> Hive.EventStore.list(limit: 30) end, model.event_store_events))
+  end
+
+  defp maybe_refresh_events(model, _count), do: model
+
+  defp load_budget_status(quests) do
+    quests
+    |> Enum.filter(&(&1[:status] in ["active", "pending"]))
+    |> Enum.map(fn q ->
+      budget = safe_call(fn -> Hive.Budget.budget_for(q[:id]) end, 0.0)
+      spent = safe_call(fn -> Hive.Budget.spent_for(q[:id]) end, 0.0)
+      remaining = Float.round(budget - spent, 2)
+      %{quest_id: q[:id], budget: budget, spent: spent, remaining: max(remaining, 0.0)}
+    end)
+  rescue
+    _ -> []
   end
 
   # -- Plan mode handlers ----------------------------------------------------
@@ -598,7 +700,7 @@ defmodule Hive.TUI.App do
     |> Activity.update_bees(active_bees)
     |> Activity.update_quests(quests)
     |> Activity.update_bee_logs(bee_logs)
-    %{model | activity: activity}
+    %{model | activity: activity, jobs: jobs}
   end
 
   defp reap_dead_bees(bees, _jobs) do
@@ -816,23 +918,124 @@ defmodule Hive.TUI.App do
     _ -> []
   end
 
+  defp safe_call(fun, default) do
+    try do
+      fun.()
+    rescue
+      _ -> default
+    catch
+      _, _ -> default
+    end
+  end
+
+  # -- Render ---------------------------------------------------------------
+
   @impl true
   def render(model) do
-    view bottom_bar: input_bar(model) do
+    view top_bar: status_bar(model), bottom_bar: input_bar(model) do
       row do
         column size: 8 do
           Views.Chat.render(model)
         end
         column size: 4 do
-          if model.plan.mode in [:reviewing, :confirmed] do
-            Views.Plan.render(model)
-          else
-            Views.Activity.render(model)
-          end
+          render_right_panel(model)
         end
       end
     end
   end
+
+  defp render_right_panel(model) do
+    if model.plan.mode in [:reviewing, :confirmed] do
+      Views.Plan.render(model)
+    else
+      case model.right_panel do
+        :activity -> Views.Activity.render(model)
+        :pipeline -> Views.Pipeline.render(model)
+        :events -> Views.Events.render(model)
+        :merges -> Views.Merges.render(model)
+        :models -> Views.Models.render(model)
+        _ -> Views.Activity.render(model)
+      end
+    end
+  end
+
+  defp status_bar(model) do
+    health = model[:health] || %{checks: %{}}
+    alerts = model[:alerts] || []
+    mq = model[:merge_queue] || %{pending: [], active: nil}
+    stats = model[:stats]
+
+    alert_count = length(alerts)
+    alert_color = if alert_count > 0, do: :yellow, else: :white
+    pending_count = length(mq[:pending] || [])
+    mq_color = if pending_count > 0, do: :yellow, else: :white
+
+    active_text = case mq[:active] do
+      nil -> ""
+      active -> " >>" <> ((active[:job_id] || active.job_id) |> to_string() |> String.slice(0, 8))
+    end
+
+    {_kpi_text, kpi_parts} = build_kpi_parts(stats)
+
+    bar do
+      label do
+        text(content: "Health:", color: :white)
+        for {name, status} <- health[:checks] || %{} do
+          text(content: " #{health_char(status)}", color: health_color(status))
+          text(content: "#{short_check_name(name)}", color: :white)
+        end
+        text(content: " | ", color: :white)
+        text(content: "Alerts:#{alert_count}", color: alert_color)
+        text(content: " | ", color: :white)
+        text(content: "MQ:#{pending_count}", color: mq_color)
+        text(content: active_text, color: :blue)
+        for {content, color} <- kpi_parts do
+          text(content: content, color: color)
+        end
+        text(content: " | ", color: :white)
+        text(content: "F1-F5:panels", color: :white)
+      end
+    end
+  end
+
+  defp build_kpi_parts(nil), do: {"", []}
+
+  defp build_kpi_parts(stats) do
+    parts = [
+      {" | ", :white},
+      {"B:#{stats.bees.active}", :cyan},
+      {" J:#{stats.jobs.running}", :yellow},
+      {" $#{Float.round(stats.costs.total, 2)}", :red}
+    ]
+
+    parts =
+      if stats.quality.count > 0 do
+        parts ++ [{" Q:#{Float.round(stats.quality.average * 100, 0)}%", :green}]
+      else
+        parts
+      end
+
+    {"", parts}
+  end
+
+  defp health_char(:ok), do: "o"
+  defp health_char(:warning), do: "!"
+  defp health_char(:error), do: "x"
+  defp health_char(_), do: "?"
+
+  defp health_color(:ok), do: :green
+  defp health_color(:warning), do: :yellow
+  defp health_color(:error), do: :red
+  defp health_color(_), do: :white
+
+  defp short_check_name(:pubsub), do: "P"
+  defp short_check_name(:store), do: "S"
+  defp short_check_name(:disk), do: "D"
+  defp short_check_name(:memory), do: "M"
+  defp short_check_name(:quests), do: "Q"
+  defp short_check_name(:model_api), do: "A"
+  defp short_check_name(:git), do: "G"
+  defp short_check_name(name), do: name |> to_string() |> String.first() |> String.upcase()
 
   defp input_bar(%{input: input, busy: busy}) do
     {before_cursor, at_cursor, after_cursor} = Views.Input.split_at_cursor(input.text, input.cursor)

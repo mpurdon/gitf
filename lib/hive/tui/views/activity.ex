@@ -1,6 +1,7 @@
 defmodule Hive.TUI.Views.Activity do
   @moduledoc """
-  Renders the activity panel with quests, phase progress, and their bees.
+  Renders the activity panel with quests, phase progress, their bees,
+  budget info, checkpoints, and active runs.
   """
   import Ratatouille.View
 
@@ -9,18 +10,22 @@ defmodule Hive.TUI.Views.Activity do
   def render(model) do
     %{activity: activity} = model
     bees_by_quest = Enum.group_by(activity.bees, fn b -> b[:quest_id] end)
+    budget_status = model[:budget_status] || []
+    checkpoints = model[:checkpoints] || %{}
+    runs = model[:runs] || []
 
-    panel title: "Activity", height: :fill do
+    panel title: "Activity [F1]", height: :fill do
       if Enum.empty?(activity.quests) and Enum.empty?(activity.bees) do
         label(content: "Idle")
       else
-        render_quests(activity.quests, bees_by_quest, activity.bee_logs) ++
-          render_orphan_bees(bees_by_quest, activity.bee_logs)
+        render_quests(activity.quests, bees_by_quest, activity.bee_logs, budget_status, checkpoints) ++
+          render_orphan_bees(bees_by_quest, activity.bee_logs, checkpoints) ++
+          render_runs(runs)
       end
     end
   end
 
-  defp render_quests(quests, bees_by_quest, bee_logs) do
+  defp render_quests(quests, bees_by_quest, bee_logs, budget_status, checkpoints) do
     Enum.flat_map(quests, fn quest ->
       quest_id = quest[:id]
       quest_bees = Map.get(bees_by_quest, quest_id, [])
@@ -28,18 +33,22 @@ defmodule Hive.TUI.Views.Activity do
       name = to_s(quest[:name] || quest[:goal] || quest[:title])
       short_name = String.slice(name, 0, 30)
       artifacts = quest[:artifacts] || %{}
+      budget = Enum.find(budget_status, &(&1.quest_id == quest_id))
+
+      {budget_text, budget_color} = format_budget(budget)
 
       [
         label do
           text(content: short_name, color: :yellow)
+          text(content: budget_text, color: budget_color)
         end
       ] ++
-        render_phase_tracker(current_phase, artifacts, quest_bees, bee_logs) ++
+        render_phase_tracker(current_phase, artifacts, quest_bees, bee_logs, checkpoints) ++
         [label(content: "")]
     end)
   end
 
-  defp render_phase_tracker(current_phase, artifacts, bees, bee_logs) do
+  defp render_phase_tracker(current_phase, artifacts, bees, bee_logs, checkpoints) do
     Enum.flat_map(@phases, fn phase ->
       {marker, color} =
         cond do
@@ -62,16 +71,18 @@ defmodule Hive.TUI.Views.Activity do
             bee_id = to_s(bee[:id])
             status = to_s(bee[:status] || bee[:state])
             log_lines = Map.get(bee_logs, bee[:id], [])
+            checkpoint = Map.get(checkpoints, bee[:id])
 
             [
               label do
                 text(content: "   #{bee_id}", color: :cyan)
                 text(content: " [#{status}]", color: status_color(status))
               end
-              | Enum.map(log_lines, fn line ->
-                  label(content: "     #{line}", color: :white)
-                end)
-            ]
+            ] ++
+              render_checkpoint(checkpoint) ++
+              Enum.map(log_lines, fn line ->
+                label(content: "     #{line}", color: :white)
+              end)
           end)
         else
           []
@@ -81,29 +92,96 @@ defmodule Hive.TUI.Views.Activity do
     end)
   end
 
-  defp render_orphan_bees(bees_by_quest, bee_logs) do
+  defp render_checkpoint(nil), do: []
+
+  defp render_checkpoint(cp) do
+    iter = cp[:iteration] || "?"
+    ctx = cp[:context_usage_pct] || 0
+    ctx_pct = Float.round(ctx * 100, 0)
+    files = length(cp[:files_modified] || [])
+    errors = cp[:error_count] || 0
+
+    ctx_color = cond do
+      ctx_pct > 80 -> :red
+      ctx_pct > 60 -> :yellow
+      true -> :green
+    end
+
+    error_part = if errors > 0, do: " err:#{errors}", else: ""
+
+    [
+      label do
+        text(content: "     iter:#{iter}", color: :white)
+        text(content: " ctx:#{trunc(ctx_pct)}%", color: ctx_color)
+        text(content: " files:#{files}", color: :white)
+        text(content: error_part, color: :red)
+      end
+    ]
+  end
+
+  defp render_orphan_bees(bees_by_quest, bee_logs, checkpoints) do
     case Map.get(bees_by_quest, nil, []) do
       [] -> []
-      bees -> render_bees(bees, bee_logs, "")
+      bees -> render_bees(bees, bee_logs, "", checkpoints)
     end
   end
 
-  defp render_bees(bees, bee_logs, indent) do
+  defp render_bees(bees, bee_logs, indent, checkpoints) do
     Enum.flat_map(bees, fn bee ->
       bee_id = to_s(bee[:id])
       status = to_s(bee[:status] || bee[:state])
       log_lines = Map.get(bee_logs, bee[:id], [])
+      checkpoint = Map.get(checkpoints, bee[:id])
 
       [
         label do
           text(content: indent <> bee_id, color: :cyan)
           text(content: " [#{status}]", color: status_color(status))
         end
-        | Enum.map(log_lines, fn line ->
-            label(content: indent <> "  " <> line, color: :white)
-          end)
-      ]
+      ] ++
+        render_checkpoint(checkpoint) ++
+        Enum.map(log_lines, fn line ->
+          label(content: indent <> "  " <> line, color: :white)
+        end)
     end)
+  end
+
+  defp render_runs([]), do: []
+
+  defp render_runs(runs) do
+    [
+      label(content: ""),
+      label(content: "Active Runs", color: :white, attributes: [:bold])
+    ] ++
+      Enum.flat_map(runs, fn run ->
+        pct = if run.total_jobs > 0, do: Float.round(run.completed_jobs / run.total_jobs * 100, 0), else: 0
+        bar_len = 15
+        filled = trunc(pct / 100 * bar_len)
+        bar_str = String.duplicate("#", filled) <> String.duplicate(".", bar_len - filled)
+
+        [
+          label do
+            text(content: " #{String.slice(run.quest_id, 0, 12)} ", color: :white)
+            text(content: "[#{bar_str}] ", color: :blue)
+            text(content: "#{run.completed_jobs}/#{run.total_jobs}", color: :cyan)
+          end
+        ]
+      end)
+  end
+
+  defp format_budget(nil), do: {"", :white}
+
+  defp format_budget(budget) do
+    pct = if budget.budget > 0, do: Float.round(budget.spent / budget.budget * 100, 0), else: 0
+
+    color =
+      cond do
+        pct >= 80 -> :red
+        pct >= 60 -> :yellow
+        true -> :green
+      end
+
+    {" $#{Float.round(budget.spent, 2)}/#{Float.round(budget.budget, 2)}", color}
   end
 
   defp to_s(nil), do: "?"

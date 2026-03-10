@@ -59,13 +59,15 @@ defmodule Hive.TUI.Context.Input do
   def prev_history(%__MODULE__{history: []} = state), do: state
 
   def prev_history(%__MODULE__{history: history, history_index: nil} = state) do
-    %{state | history_index: 0, text: Enum.at(history, 0), cursor: String.length(Enum.at(history, 0))}
+    text = Enum.at(history, 0) || ""
+    %{state | history_index: 0, text: text, cursor: String.length(text)}
   end
 
   def prev_history(%__MODULE__{history: history, history_index: index} = state) do
     if index + 1 < length(history) do
       new_index = index + 1
-      %{state | history_index: new_index, text: Enum.at(history, new_index), cursor: String.length(Enum.at(history, new_index))}
+      text = Enum.at(history, new_index) || ""
+      %{state | history_index: new_index, text: text, cursor: String.length(text)}
     else
       state
     end
@@ -79,6 +81,7 @@ defmodule Hive.TUI.Context.Input do
 
   def next_history(%__MODULE__{history: history, history_index: index} = state) do
     new_index = index - 1
-    %{state | history_index: new_index, text: Enum.at(history, new_index), cursor: String.length(Enum.at(history, new_index))}
+    text = Enum.at(history, new_index) || ""
+    %{state | history_index: new_index, text: text, cursor: String.length(text)}
   end
 end
