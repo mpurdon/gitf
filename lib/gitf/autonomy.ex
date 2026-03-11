@@ -55,8 +55,8 @@ defmodule GiTF.Autonomy do
   Predict likely issues before they occur.
   """
   def predict_issues(sector_id) do
-    patterns = GiTF.Intelligence.FailureAnalysis.get_failure_patterns(sector_id)
-    insights = GiTF.Intelligence.get_insights(sector_id)
+    patterns = GiTF.Intel.FailureAnalysis.get_failure_patterns(sector_id)
+    insights = GiTF.Intel.get_insights(sector_id)
     
     predictions = []
     
@@ -192,7 +192,7 @@ defmodule GiTF.Autonomy do
       Enum.each(stuck, fn op ->
         Logger.warning("Recovering stuck op: #{op.id}")
         # Attempt intelligent retry
-        GiTF.Intelligence.Retry.retry_with_strategy(op.id)
+        GiTF.Intel.Retry.retry_with_strategy(op.id)
       end)
       
       {:recovered_stuck_jobs, length(stuck)}

@@ -583,7 +583,7 @@ defmodule GiTF.Major.Planner do
   - Parallelism potential (25%): tasks without deps / total tasks
   - Complexity distribution (20%): balanced mix of simple/moderate/complex
   - Estimated cost (15%): lower is better
-  - Reputation-based model confidence (20%): avg model reputation for task types
+  - Trust-based model confidence (20%): avg model trust for task types
   """
   @spec score_plan(map()) :: float()
   def score_plan(plan) do
@@ -690,7 +690,7 @@ defmodule GiTF.Major.Planner do
       Enum.map(tasks, fn t ->
         model = t["model_recommendation"] || "sonnet"
         op_type = infer_op_type(t)
-        rep = GiTF.Reputation.model_reputation(model, op_type)
+        rep = GiTF.Trust.model_reputation(model, op_type)
         if rep, do: rep.success_rate, else: 0.5
       end)
 
@@ -741,7 +741,7 @@ defmodule GiTF.Major.Planner do
         analyses =
           failed_jobs
           |> Enum.map(fn op ->
-            case GiTF.Intelligence.FailureAnalysis.analyze_failure(op.id) do
+            case GiTF.Intel.FailureAnalysis.analyze_failure(op.id) do
               {:ok, analysis} -> analysis
               {:error, _} -> nil
             end

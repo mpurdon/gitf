@@ -1,9 +1,9 @@
-defmodule GiTF.Intelligence.Retry do
+defmodule GiTF.Intel.Retry do
   @moduledoc """
   Intelligent retry strategies for failed ops.
   """
 
-  alias GiTF.Intelligence.FailureAnalysis
+  alias GiTF.Intel.FailureAnalysis
   alias GiTF.Archive
 
   @doc """

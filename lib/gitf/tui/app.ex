@@ -252,7 +252,7 @@ defmodule GiTF.TUI.App do
 
     model
     |> Map.put(:health, safe_call(fn -> GiTF.Observability.Health.check() end, model.health))
-    |> Map.put(:agent_identities, safe_call(fn -> GiTF.AgentIdentity.list() end, model.agent_identities))
+    |> Map.put(:agent_identities, safe_call(fn -> GiTF.GhostID.list() end, model.agent_identities))
     |> Map.put(:backups, backups)
     |> Map.put(:budget_status, budget_status)
   end

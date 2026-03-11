@@ -131,7 +131,7 @@ defmodule GiTF.Runtime.ModelSelector do
 
     base_model =
       try do
-        case GiTF.Reputation.recommend_model(op_type, complexity) do
+        case GiTF.Trust.recommend_model(op_type, complexity) do
           model when is_binary(model) and model != "" -> model
           _ -> static_model
         end
@@ -149,7 +149,7 @@ defmodule GiTF.Runtime.ModelSelector do
     op_type_str = to_string(op_type)
     available = list_models()
 
-    case GiTF.AgentIdentity.recommend_model_for(op_type_str, available) do
+    case GiTF.GhostID.recommend_model_for(op_type_str, available) do
       {:ok, model} -> model
       {:error, :no_data} -> fallback
     end

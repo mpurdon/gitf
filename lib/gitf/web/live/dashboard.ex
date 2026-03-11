@@ -36,7 +36,7 @@ defmodule GiTF.Web.Live.Dashboard do
       |> assign(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, []))
       |> assign(:event_store_events, [])
       |> assign(:event_types, safe_call(fn -> GiTF.EventArchive.event_types() end, []))
-      |> assign(:agent_identities, safe_call(fn -> GiTF.AgentIdentity.list() end, []))
+      |> assign(:agent_identities, safe_call(fn -> GiTF.GhostID.list() end, []))
       |> assign(:backups, %{})
       |> assign(:budget_status, [])
       |> assign(:event_type_filter, nil)
@@ -220,7 +220,7 @@ defmodule GiTF.Web.Live.Dashboard do
 
     socket
     |> assign(:health, safe_call(fn -> GiTF.Observability.Health.check() end, socket.assigns.health))
-    |> assign(:agent_identities, safe_call(fn -> GiTF.AgentIdentity.list() end, socket.assigns.agent_identities))
+    |> assign(:agent_identities, safe_call(fn -> GiTF.GhostID.list() end, socket.assigns.agent_identities))
     |> assign(:budget_status, load_budget_status(socket.assigns.missions))
     |> assign(:backups, backups)
   end

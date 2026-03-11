@@ -24,7 +24,7 @@ defmodule GiTF.Resilience do
   @doc """
   Retry operation with exponential backoff.
 
-  Delegates to `GiTF.Intelligence.Retry` for strategy selection.
+  Delegates to `GiTF.Intel.Retry` for strategy selection.
   This function is kept as a lightweight convenience wrapper.
   """
   def retry_with_backoff(operation, max_attempts \\ 3) do

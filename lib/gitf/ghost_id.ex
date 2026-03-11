@@ -1,4 +1,4 @@
-defmodule GiTF.AgentIdentity do
+defmodule GiTF.GhostID do
   @moduledoc """
   Persistent per-model learning profiles that track what each model excels at
   and struggles with. Survives across missions.

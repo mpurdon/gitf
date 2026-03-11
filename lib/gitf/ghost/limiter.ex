@@ -1,4 +1,4 @@
-defmodule GiTF.Ghost.CognitiveFriction do
+defmodule GiTF.Ghost.Limiter do
   @moduledoc """
   Dynamic cognitive friction for ghosts.
 

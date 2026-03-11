@@ -576,7 +576,7 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:intelligence], result) do
+  defp dispatch([:intel], result) do
     subcommand = result_get(result, :args, :subcommand)
     
     case subcommand do
@@ -584,7 +584,7 @@ defmodule GiTF.CLI do
         op_id = result_get(result, :options, :op)
         
         if op_id do
-          case GiTF.Intelligence.analyze_and_suggest(op_id) do
+          case GiTF.Intel.analyze_and_suggest(op_id) do
             {:ok, result} ->
               Format.info("Failure Analysis for op #{op_id}:")
               Format.info("  Type: #{result.analysis.failure_type}")
@@ -602,14 +602,14 @@ defmodule GiTF.CLI do
               Format.error("Analysis failed: #{inspect(reason)}")
           end
         else
-          Format.error("Usage: section intelligence analyze --op <id>")
+          Format.error("Usage: section intel analyze --op <id>")
         end
       
       "retry" ->
         op_id = result_get(result, :options, :op)
         
         if op_id do
-          case GiTF.Intelligence.auto_retry(op_id) do
+          case GiTF.Intel.auto_retry(op_id) do
             {:ok, new_job} ->
               Format.success("Created retry op: #{new_job.id}")
               Format.info("  Strategy: #{new_job.retry_strategy}")
@@ -621,16 +621,16 @@ defmodule GiTF.CLI do
               Format.error("Retry failed: #{inspect(reason)}")
           end
         else
-          Format.error("Usage: section intelligence retry --op <id>")
+          Format.error("Usage: section intel retry --op <id>")
         end
       
       "insights" ->
         sector_id = result_get(result, :options, :sector)
         
         if sector_id do
-          insights = GiTF.Intelligence.get_insights(sector_id)
+          insights = GiTF.Intel.get_insights(sector_id)
           
-          Format.info("Intelligence Insights for sector #{sector_id}:")
+          Format.info("Intel Insights for sector #{sector_id}:")
           Format.info("  Total ops: #{insights.total_jobs}")
           Format.info("  Failed ops: #{insights.failed_jobs}")
           Format.info("  Success rate: #{insights.success_rate}%")
@@ -650,14 +650,14 @@ defmodule GiTF.CLI do
             end)
           end
         else
-          Format.error("Usage: section intelligence insights --sector <id>")
+          Format.error("Usage: section intel insights --sector <id>")
         end
       
       "learn" ->
         sector_id = result_get(result, :options, :sector)
         
         if sector_id do
-          case GiTF.Intelligence.learn(sector_id) do
+          case GiTF.Intel.learn(sector_id) do
             {:ok, learning} ->
               Format.success("Learned from #{learning.total_failures} failures")
               Format.info("  Patterns identified: #{length(learning.patterns)}")
@@ -666,14 +666,14 @@ defmodule GiTF.CLI do
               Format.error("Learning failed: #{inspect(reason)}")
           end
         else
-          Format.error("Usage: section intelligence learn --sector <id>")
+          Format.error("Usage: section intel learn --sector <id>")
         end
       
       "best-practices" ->
         sector_id = result_get(result, :options, :sector)
         
         if sector_id do
-          practices = GiTF.Intelligence.get_best_practices(sector_id)
+          practices = GiTF.Intel.get_best_practices(sector_id)
           
           if Enum.empty?(practices.common_factors || []) do
             Format.warn("No success patterns found for sector #{sector_id}")
@@ -706,14 +706,14 @@ defmodule GiTF.CLI do
             end
           end
         else
-          Format.error("Usage: section intelligence best-practices --sector <id>")
+          Format.error("Usage: section intel best-practices --sector <id>")
         end
       
       "recommend" ->
         sector_id = result_get(result, :options, :sector)
         
         if sector_id do
-          recommendation = GiTF.Intelligence.recommend_approach(sector_id)
+          recommendation = GiTF.Intel.recommend_approach(sector_id)
           
           Format.info("Recommended Approach for sector #{sector_id}:")
           Format.info("  Model: #{recommendation.model}")
@@ -729,11 +729,11 @@ defmodule GiTF.CLI do
             Format.info("  • #{s}")
           end)
         else
-          Format.error("Usage: section intelligence recommend --sector <id>")
+          Format.error("Usage: section intel recommend --sector <id>")
         end
       
       _ ->
-        Format.error("Usage: section intelligence <analyze|retry|insights|learn|best-practices|recommend> [options]")
+        Format.error("Usage: section intel <analyze|retry|insights|learn|best-practices|recommend> [options]")
     end
   end
 
@@ -925,7 +925,7 @@ defmodule GiTF.CLI do
     
     cond do
       op_id ->
-        result = GiTF.ScopeGuard.check_scope(op_id)
+        result = GiTF.Barrier.check_scope(op_id)
         
         IO.puts("Scope Check for op #{op_id}:")
         IO.puts("  In Scope: #{if result.in_scope, do: "✓", else: "✗"}")
@@ -940,7 +940,7 @@ defmodule GiTF.CLI do
         IO.puts("\nRecommendation: #{result.recommendation}")
       
       mission_id ->
-        result = GiTF.ScopeGuard.check_quest_scope(mission_id)
+        result = GiTF.Barrier.check_quest_scope(mission_id)
         
         IO.puts("Scope Check for mission #{mission_id}:")
         IO.puts("  Total Jobs: #{result.total_jobs}")
@@ -3483,9 +3483,9 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        intelligence: [
-          name: "intelligence",
-          about: "Adaptive intelligence and failure analysis",
+        intel: [
+          name: "intel",
+          about: "Adaptive intel and failure analysis",
           args: [
             subcommand: [
               help: "Subcommand: analyze, retry, insights, learn, best-practices, recommend",

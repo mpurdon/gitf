@@ -1,4 +1,4 @@
-defmodule GiTF.HumanGate do
+defmodule GiTF.Override do
   @moduledoc """
   Human-in-the-loop approval gates.
 

@@ -1,7 +1,7 @@
-defmodule GiTF.HumanGateTest do
+defmodule GiTF.OverrideTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.HumanGate
+  alias GiTF.Override
   alias GiTF.Archive
   alias GiTF.Test.StoreHelper
 
@@ -52,7 +52,7 @@ defmodule GiTF.HumanGateTest do
       add_job(mission, %{risk_level: :low})
       {:ok, mission} = GiTF.Missions.get(mission.id)
 
-      refute HumanGate.requires_approval?(mission)
+      refute Override.requires_approval?(mission)
     end
 
     test "returns true when a op has high risk" do
@@ -60,7 +60,7 @@ defmodule GiTF.HumanGateTest do
       add_job(mission, %{risk_level: :high})
       {:ok, mission} = GiTF.Missions.get(mission.id)
 
-      assert HumanGate.requires_approval?(mission)
+      assert Override.requires_approval?(mission)
     end
 
     test "returns true when a op has critical risk" do
@@ -68,7 +68,7 @@ defmodule GiTF.HumanGateTest do
       add_job(mission, %{risk_level: :critical})
       {:ok, mission} = GiTF.Missions.get(mission.id)
 
-      assert HumanGate.requires_approval?(mission)
+      assert Override.requires_approval?(mission)
     end
 
     test "returns true when sector has require_human_approval" do
@@ -76,14 +76,14 @@ defmodule GiTF.HumanGateTest do
       add_job(mission, %{risk_level: :low})
       {:ok, mission} = GiTF.Missions.get(mission.id)
 
-      assert HumanGate.requires_approval?(mission)
+      assert Override.requires_approval?(mission)
     end
 
     test "returns false when no ops exist" do
       mission = create_quest()
       {:ok, mission} = GiTF.Missions.get(mission.id)
 
-      refute HumanGate.requires_approval?(mission)
+      refute Override.requires_approval?(mission)
     end
   end
 
@@ -91,43 +91,43 @@ defmodule GiTF.HumanGateTest do
     test "approve stores artifact and updates status" do
       mission = create_quest()
 
-      {:ok, artifact} = HumanGate.approve(mission.id)
+      {:ok, artifact} = Override.approve(mission.id)
       assert artifact["approved"] == true
 
-      assert HumanGate.approval_status(mission.id) == :approved
+      assert Override.approval_status(mission.id) == :approved
     end
 
     test "reject stores artifact with reason" do
       mission = create_quest()
 
-      {:ok, artifact} = HumanGate.reject(mission.id, "Not ready")
+      {:ok, artifact} = Override.reject(mission.id, "Not ready")
       assert artifact["approved"] == false
       assert artifact["reason"] == "Not ready"
 
-      assert HumanGate.approval_status(mission.id) == :rejected
+      assert Override.approval_status(mission.id) == :rejected
     end
   end
 
   describe "approval_status/1" do
     test "returns :not_required when no request exists" do
       mission = create_quest()
-      assert HumanGate.approval_status(mission.id) == :not_required
+      assert Override.approval_status(mission.id) == :not_required
     end
 
     test "returns :pending after request_approval" do
       mission = create_quest()
       add_job(mission, %{risk_level: :high})
-      {:ok, _request} = HumanGate.request_approval(mission.id)
+      {:ok, _request} = Override.request_approval(mission.id)
 
-      assert HumanGate.approval_status(mission.id) == :pending
+      assert Override.approval_status(mission.id) == :pending
     end
 
     test "returns :approved after approve" do
       mission = create_quest()
-      {:ok, _request} = HumanGate.request_approval(mission.id)
-      {:ok, _} = HumanGate.approve(mission.id)
+      {:ok, _request} = Override.request_approval(mission.id)
+      {:ok, _} = Override.approve(mission.id)
 
-      assert HumanGate.approval_status(mission.id) == :approved
+      assert Override.approval_status(mission.id) == :approved
     end
   end
 
@@ -136,15 +136,15 @@ defmodule GiTF.HumanGateTest do
       quest1 = create_quest(%{goal: "Quest 1"})
       quest2 = create_quest(%{goal: "Quest 2"})
 
-      {:ok, _} = HumanGate.request_approval(quest1.id)
-      {:ok, _} = HumanGate.request_approval(quest2.id)
+      {:ok, _} = Override.request_approval(quest1.id)
+      {:ok, _} = Override.request_approval(quest2.id)
 
-      pending = HumanGate.pending_approvals()
+      pending = Override.pending_approvals()
       assert length(pending) == 2
 
       # Approve one
-      HumanGate.approve(quest1.id)
-      pending = HumanGate.pending_approvals()
+      Override.approve(quest1.id)
+      pending = Override.pending_approvals()
       assert length(pending) == 1
     end
   end
@@ -154,7 +154,7 @@ defmodule GiTF.HumanGateTest do
       mission = create_quest(%{goal: "Deploy new auth"})
       add_job(mission, %{risk_level: :high})
 
-      {:ok, request} = HumanGate.request_approval(mission.id)
+      {:ok, request} = Override.request_approval(mission.id)
       assert request.mission_id == mission.id
       assert request.goal == "Deploy new auth"
       assert request.status == "pending"

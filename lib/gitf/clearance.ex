@@ -1,10 +1,10 @@
-defmodule GiTF.Authority do
+defmodule GiTF.Clearance do
   @moduledoc """
-  Graduated authority system.
+  Graduated clearance system.
 
   Models that build strong reputations earn relaxed verification thresholds.
   New or poorly-performing models get strict verification. Uses
-  `GiTF.Reputation` data to determine the appropriate level.
+  `GiTF.Trust` data to determine the appropriate level.
 
   Levels (from strictest to most relaxed):
   - `:strict`       — success_rate < 0.60 AND total_jobs >= 5
@@ -14,19 +14,19 @@ defmodule GiTF.Authority do
   """
 
   @doc """
-  Determines the verification level for a op based on model reputation.
+  Determines the verification level for a op based on model trust.
   """
   @spec verification_level(map()) :: :strict | :standard | :relaxed | :auto_approve
   def verification_level(op) do
     model = normalize_model(op[:assigned_model])
     op_type = op[:op_type]
 
-    rep = GiTF.Reputation.model_reputation(model, op_type)
+    rep = GiTF.Trust.model_reputation(model, op_type)
     compute_level(rep)
   end
 
   @doc """
-  Adjusts verification thresholds based on authority level.
+  Adjusts verification thresholds based on clearance level.
 
   Returns a new thresholds map with values scaled according to level.
   """
@@ -50,7 +50,7 @@ defmodule GiTF.Authority do
   @doc """
   Returns true if a op should be auto-merged (skip verification entirely).
 
-  Only for `:auto_approve` authority AND `:low` risk ops.
+  Only for `:auto_approve` clearance AND `:low` risk ops.
   """
   @spec should_auto_merge?(map()) :: boolean()
   def should_auto_merge?(op) do

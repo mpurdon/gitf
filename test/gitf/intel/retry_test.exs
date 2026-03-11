@@ -1,7 +1,7 @@
-defmodule GiTF.Intelligence.RetryTest do
+defmodule GiTF.Intel.RetryTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Intelligence.Retry
+  alias GiTF.Intel.Retry
   alias GiTF.Archive
 
   setup do

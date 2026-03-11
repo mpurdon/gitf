@@ -1,4 +1,4 @@
-defmodule GiTF.Intelligence.FailureAnalysis do
+defmodule GiTF.Intel.FailureAnalysis do
   @moduledoc """
   Analyzes op failures to identify patterns and suggest fixes.
   """

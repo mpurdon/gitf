@@ -634,7 +634,7 @@ defmodule GiTF.Tachikoma do
   end
 
   defp analyze_failure(op_id, feedback) do
-    case GiTF.Intelligence.FailureAnalysis.analyze_failure(op_id, feedback) do
+    case GiTF.Intel.FailureAnalysis.analyze_failure(op_id, feedback) do
       {:ok, analysis} -> analysis
       _ -> nil
     end
@@ -764,7 +764,7 @@ defmodule GiTF.Tachikoma do
       Logger.debug("Tachikoma: recorded score for model #{score.model} on op #{op_id}")
 
       try do
-        GiTF.AgentIdentity.update_from_score(score.model, score)
+        GiTF.GhostID.update_from_score(score.model, score)
       rescue
         e -> Logger.debug("Tachikoma: agent identity update failed: #{Exception.message(e)}")
       end
@@ -776,7 +776,7 @@ defmodule GiTF.Tachikoma do
   end
 
   defp update_reputation(op_id) do
-    GiTF.Reputation.update_after_job(op_id)
+    GiTF.Trust.update_after_job(op_id)
   rescue
     _ -> :ok
   end

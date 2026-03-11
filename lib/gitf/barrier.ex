@@ -1,4 +1,4 @@
-defmodule GiTF.ScopeGuard do
+defmodule GiTF.Barrier do
   @moduledoc """
   Prevents scope creep and over-engineering.
   Ensures ghosts stay focused on the stated goal.

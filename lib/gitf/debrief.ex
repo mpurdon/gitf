@@ -4,7 +4,7 @@ defmodule GiTF.Debrief do
 
   After a mission is merged, monitors for regressions by periodically running
   the sector's validation command. If regressions are detected, creates
-  follow-up missions and penalizes model reputation.
+  follow-up missions and penalizes model trust.
   """
 
   require Logger
@@ -90,7 +90,7 @@ defmodule GiTF.Debrief do
   @doc """
   Handles a detected regression.
 
-  Creates a follow-up mission, applies reputation penalties, and broadcasts an alert.
+  Creates a follow-up mission, applies trust penalties, and broadcasts an alert.
   """
   @spec handle_regression(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def handle_regression(mission_id, findings) do
@@ -101,8 +101,8 @@ defmodule GiTF.Debrief do
         sector_id: mission.sector_id
       })
 
-      # Apply reputation penalty
-      GiTF.Reputation.apply_regression_penalty(mission_id)
+      # Apply trust penalty
+      GiTF.Trust.apply_regression_penalty(mission_id)
 
       # Update review record
       update_review(mission_id, %{

@@ -130,7 +130,7 @@ defmodule GiTF.DebriefTest do
     end
   end
 
-  describe "Reputation.apply_regression_penalty/1" do
+  describe "Trust.apply_regression_penalty/1" do
     test "marks ops with regression_detected" do
       mission = create_quest()
 
@@ -145,7 +145,7 @@ defmodule GiTF.DebriefTest do
       refute Map.get(fresh_job, :regression_detected, false)
 
       # Apply penalty
-      GiTF.Reputation.apply_regression_penalty(mission.id)
+      GiTF.Trust.apply_regression_penalty(mission.id)
 
       # Now regression flag should be set
       {:ok, updated_job} = GiTF.Ops.get(op.id)

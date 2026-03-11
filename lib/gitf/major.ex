@@ -223,7 +223,7 @@ defmodule GiTF.Major do
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.info("Audit passed for op #{op_id} (ghost #{ghost_id})")
     notify_run_job_completed(op_id)
-    GiTF.Reputation.update_after_job(op_id)
+    GiTF.Trust.update_after_job(op_id)
     state = advance_quest(ghost_id, state)
     {:noreply, state}
   end
@@ -233,7 +233,7 @@ defmodule GiTF.Major do
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.warning("Audit failed for op #{op_id}: #{inspect(result[:output])}")
     notify_run_job_failed(op_id)
-    GiTF.Reputation.update_after_job(op_id)
+    GiTF.Trust.update_after_job(op_id)
 
     # Treat as op failure -> trigger retry logic
     link_msg = %{
@@ -411,7 +411,7 @@ defmodule GiTF.Major do
           Logger.info("Job #{op_id} already verified (#{vs}), skipping duplicate verification")
           if vs == "passed" do
             notify_run_job_completed(op_id)
-            GiTF.Reputation.update_after_job(op_id)
+            GiTF.Trust.update_after_job(op_id)
             advance_quest(link_msg.from, state)
           else
             notify_run_job_failed(op_id)
@@ -651,12 +651,12 @@ defmodule GiTF.Major do
           approved_by: Map.get(data, "approved_by", link_msg.from),
           notes: Map.get(data, "notes")
         }
-        GiTF.HumanGate.approve(mission_id, opts)
+        GiTF.Override.approve(mission_id, opts)
         GiTF.Major.Orchestrator.advance_quest(mission_id)
 
       {:ok, %{"action" => "reject", "mission_id" => mission_id} = data} ->
         reason = Map.get(data, "reason", "Rejected via link_msg")
-        GiTF.HumanGate.reject(mission_id, reason)
+        GiTF.Override.reject(mission_id, reason)
         GiTF.Major.Orchestrator.advance_quest(mission_id)
 
       _ ->
@@ -726,7 +726,7 @@ defmodule GiTF.Major do
   end
 
   defp try_intelligent_retry(op_id, feedback, state) do
-    case GiTF.Intelligence.Retry.retry_with_strategy(op_id, feedback) do
+    case GiTF.Intel.Retry.retry_with_strategy(op_id, feedback) do
       {:ok, new_job} ->
         case check_quest_budget(new_job.mission_id) do
           :ok ->

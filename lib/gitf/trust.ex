@@ -1,8 +1,8 @@
-defmodule GiTF.Reputation do
+defmodule GiTF.Trust do
   @moduledoc """
-  Reputation system for models.
+  Trust system for models.
 
-  Computes reputation scores from historical op/mission data and caches
+  Computes trust scores from historical op/mission data and caches
   them in the Archive. Scores go stale after 30 minutes and are lazily
   recomputed on next access.
   """
@@ -11,10 +11,10 @@ defmodule GiTF.Reputation do
 
   @stale_minutes 30
 
-  # -- Model Reputation ------------------------------------------------------
+  # -- Model Trust ------------------------------------------------------
 
   @doc """
-  Returns reputation data for a model on a given op type.
+  Returns trust data for a model on a given op type.
 
   Computed from historical Jobs/Costs/Quality data:
   - success_rate: fraction of ops completed successfully
@@ -76,9 +76,9 @@ defmodule GiTF.Reputation do
   # -- Recommendations -------------------------------------------------------
 
   @doc """
-  Recommends the best model for a op type and complexity based on reputation.
+  Recommends the best model for a op type and complexity based on trust.
 
-  Falls back to ModelSelector if no reputation data exists.
+  Falls back to ModelSelector if no trust data exists.
   """
   @spec recommend_model(atom(), atom()) :: String.t()
   def recommend_model(op_type, complexity) do
@@ -130,7 +130,7 @@ defmodule GiTF.Reputation do
   Applies a regression penalty to all non-phase ops of a mission.
 
   Marks ops with `regression_detected: true` and invalidates their
-  reputation cache so the penalty is reflected in future computations.
+  trust cache so the penalty is reflected in future computations.
   """
   @spec apply_regression_penalty(String.t()) :: :ok
   def apply_regression_penalty(mission_id) do
@@ -142,7 +142,7 @@ defmodule GiTF.Reputation do
       updated = Map.put(op, :regression_detected, true)
       Archive.put(:ops, updated)
 
-      # Invalidate reputation cache for this op's model
+      # Invalidate trust cache for this op's model
       model = normalize_model(op[:assigned_model])
       op_type = op[:op_type]
 

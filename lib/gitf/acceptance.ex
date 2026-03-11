@@ -5,7 +5,7 @@ defmodule GiTF.Acceptance do
   """
 
   alias GiTF.Archive
-  alias GiTF.{Goals, ScopeGuard, Minimalism}
+  alias GiTF.{Goals, Barrier, Minimalism}
 
   @doc "Test if op meets acceptance criteria"
   def test_acceptance(op_id) do
@@ -13,7 +13,7 @@ defmodule GiTF.Acceptance do
     _quest = Archive.get(:missions, op.mission_id)
     
     goal_validation = Goals.validate_job(op_id)
-    scope_check = ScopeGuard.check_scope(op_id)
+    scope_check = Barrier.check_scope(op_id)
     minimalism_check = Minimalism.analyze_implementation(op_id)
     
     %{
@@ -30,7 +30,7 @@ defmodule GiTF.Acceptance do
   def test_quest_acceptance(mission_id) do
     _quest = Archive.get(:missions, mission_id)
     goal_validation = Goals.validate_quest_completion(mission_id)
-    scope_check = ScopeGuard.check_quest_scope(mission_id)
+    scope_check = Barrier.check_quest_scope(mission_id)
     
     %{
       goal_achieved: goal_validation.goal_achieved == {:achieved, "All ops completed"},

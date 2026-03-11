@@ -1,7 +1,7 @@
-defmodule GiTF.Intelligence.SuccessPatternsTest do
+defmodule GiTF.Intel.SuccessPatternsTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Intelligence.SuccessPatterns
+  alias GiTF.Intel.SuccessPatterns
   alias GiTF.Archive
 
   setup do

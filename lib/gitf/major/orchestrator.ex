@@ -315,13 +315,13 @@ defmodule GiTF.Major.Orchestrator do
 
   defp start_awaiting_approval(mission) do
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "awaiting_approval", "Validation passed, awaiting human approval") do
-      GiTF.HumanGate.request_approval(mission.id)
+      GiTF.Override.request_approval(mission.id)
       {:ok, "awaiting_approval"}
     end
   end
 
   defp handle_approval_result(mission) do
-    case GiTF.HumanGate.approval_status(mission.id) do
+    case GiTF.Override.approval_status(mission.id) do
       :approved ->
         {:ok, mission} = GiTF.Missions.get(mission.id)
         start_merge(mission)
@@ -340,12 +340,12 @@ defmodule GiTF.Major.Orchestrator do
 
           if validation_fresh? do
             Logger.info("Quest #{mission.id} auto-approved after #{@approval_timeout_hours}h timeout (dark factory mode)")
-            GiTF.HumanGate.approve(mission.id, %{approved_by: "auto_timeout", notes: "Auto-approved after #{@approval_timeout_hours}h (re-validated)"})
+            GiTF.Override.approve(mission.id, %{approved_by: "auto_timeout", notes: "Auto-approved after #{@approval_timeout_hours}h (re-validated)"})
             {:ok, mission} = GiTF.Missions.get(mission.id)
             start_merge(mission)
           else
             Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
-            GiTF.HumanGate.reject(mission.id, "Re-validation failed during auto-approve")
+            GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve")
             GiTF.Missions.transition_phase(mission.id, "completed", "Auto-approve failed re-validation")
             GiTF.Missions.update_status!(mission.id)
             {:ok, "completed"}
@@ -716,7 +716,7 @@ defmodule GiTF.Major.Orchestrator do
 
       validation["overall_verdict"] == "pass" ->
         # Check if human approval is required before sync
-        if GiTF.HumanGate.requires_approval?(mission) do
+        if GiTF.Override.requires_approval?(mission) do
           start_awaiting_approval(mission)
         else
           start_merge(mission)

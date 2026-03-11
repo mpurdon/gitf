@@ -1,7 +1,7 @@
-defmodule GiTF.ReputationTest do
+defmodule GiTF.TrustTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.{Reputation, Archive}
+  alias GiTF.{Trust, Archive}
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -18,7 +18,7 @@ defmodule GiTF.ReputationTest do
     {:ok, mission} =
       Archive.insert(:missions, %{
         name: "test-mission",
-        goal: "Test reputation",
+        goal: "Test trust",
         sector_id: sector.id,
         status: "completed",
         current_phase: "completed",
@@ -31,7 +31,7 @@ defmodule GiTF.ReputationTest do
 
   describe "model_reputation/2" do
     test "returns nil when no data exists" do
-      assert Reputation.model_reputation("sonnet", :implementation) == nil
+      assert Trust.model_reputation("sonnet", :implementation) == nil
     end
 
     test "computes success rate from op history", %{mission: mission, sector: sector} do
@@ -61,7 +61,7 @@ defmodule GiTF.ReputationTest do
           status: "failed"
         })
 
-      rep = Reputation.model_reputation("sonnet", :implementation)
+      rep = Trust.model_reputation("sonnet", :implementation)
       assert rep != nil
       assert rep.success_rate == 0.75
       assert rep.total_jobs == 4
@@ -80,23 +80,23 @@ defmodule GiTF.ReputationTest do
         })
 
       # First call computes
-      rep1 = Reputation.model_reputation("haiku", :research)
+      rep1 = Trust.model_reputation("haiku", :research)
       assert rep1.success_rate == 1.0
 
       # Second call should return cached
-      rep2 = Reputation.model_reputation("haiku", :research)
+      rep2 = Trust.model_reputation("haiku", :research)
       assert rep2.computed_at == rep1.computed_at
     end
   end
 
   describe "recommend_model/2" do
-    test "falls back to ModelSelector when no reputation data" do
-      model = Reputation.recommend_model(:implementation, :complex)
+    test "falls back to ModelSelector when no trust data" do
+      model = Trust.recommend_model(:implementation, :complex)
       # Should return something valid
       assert model in ["opus", "sonnet", "haiku"]
     end
 
-    test "uses reputation data when available", %{mission: mission, sector: sector} do
+    test "uses trust data when available", %{mission: mission, sector: sector} do
       # Create many successful haiku ops for research
       for _ <- 1..10 do
         {:ok, _} =
@@ -111,13 +111,13 @@ defmodule GiTF.ReputationTest do
           })
       end
 
-      model = Reputation.recommend_model(:research, :simple)
+      model = Trust.recommend_model(:research, :simple)
       assert model == "haiku"
     end
   end
 
   describe "update_after_job/1" do
-    test "invalidates cached reputation", %{mission: mission, sector: sector} do
+    test "invalidates cached trust", %{mission: mission, sector: sector} do
       {:ok, op} =
         GiTF.Ops.create(%{
           title: "Update test",
@@ -129,19 +129,19 @@ defmodule GiTF.ReputationTest do
           status: "done"
         })
 
-      # Compute reputation to cache it
-      _rep = Reputation.model_reputation("sonnet", :implementation)
+      # Compute trust to cache it
+      _rep = Trust.model_reputation("sonnet", :implementation)
 
       # Invalidate
-      assert :ok == Reputation.update_after_job(op.id)
+      assert :ok == Trust.update_after_job(op.id)
 
       # Next call should recompute (may return same data but with fresh timestamp)
-      rep2 = Reputation.model_reputation("sonnet", :implementation)
+      rep2 = Trust.model_reputation("sonnet", :implementation)
       assert rep2 != nil
     end
 
     test "handles non-existent op gracefully" do
-      assert :ok == Reputation.update_after_job("non-existent")
+      assert :ok == Trust.update_after_job("non-existent")
     end
   end
 end

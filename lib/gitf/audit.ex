@@ -22,14 +22,14 @@ defmodule GiTF.Audit do
          {:ok, shell} <- get_job_cell(op),
          {:ok, sector} <- Archive.fetch(:sectors, op.sector_id) do
 
-      # Check graduated authority — auto-approve eligible ops
-      authority_level = GiTF.Authority.verification_level(op)
+      # Check graduated clearance — auto-approve eligible ops
+      authority_level = GiTF.Clearance.verification_level(op)
 
-      if authority_level == :auto_approve and GiTF.Authority.should_auto_merge?(op) do
+      if authority_level == :auto_approve and GiTF.Clearance.should_auto_merge?(op) do
         auto_result = %{
           op_id: op_id,
           status: "auto_approved",
-          output: "Auto-approved via graduated authority (model reputation)",
+          output: "Auto-approved via graduated clearance (model trust)",
           exit_code: 0,
           quality_score: nil,
           ran_at: DateTime.utc_now()
@@ -270,7 +270,7 @@ defmodule GiTF.Audit do
   end
 
   defp adjust_contract_thresholds(contract, authority_level) do
-    adjusted = GiTF.Authority.adjusted_thresholds(contract.thresholds, authority_level)
+    adjusted = GiTF.Clearance.adjusted_thresholds(contract.thresholds, authority_level)
     %{contract | thresholds: adjusted}
   end
 

@@ -1,7 +1,7 @@
-defmodule GiTF.ScopeGuardTest do
+defmodule GiTF.BarrierTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.ScopeGuard
+  alias GiTF.Barrier
   alias GiTF.Archive
 
   setup do
@@ -35,7 +35,7 @@ defmodule GiTF.ScopeGuardTest do
       }
       Archive.insert(:ops, op)
       
-      result = ScopeGuard.check_scope("op-scope")
+      result = Barrier.check_scope("op-scope")
       
       assert result.in_scope == true
       assert result.recommendation == :approved
@@ -60,7 +60,7 @@ defmodule GiTF.ScopeGuardTest do
       }
       Archive.insert(:ops, op)
       
-      result = ScopeGuard.check_scope("op-creep")
+      result = Barrier.check_scope("op-creep")
       
       assert result.in_scope == false
       assert length(result.warnings) > 0

@@ -3,7 +3,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
   Multi-objective model selector that balances quality, cost, and budget.
 
   Replaces simple budget-downgrade logic with a weighted scoring system:
-  - Quality score (weight 0.5): from model reputation success_rate
+  - Quality score (weight 0.5): from model trust success_rate
   - Cost score (weight 0.3): inverted cost tier (haiku cheapest)
   - Budget score (weight 0.2): penalizes expensive models when budget is low
 
@@ -122,7 +122,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
   end
 
   defp quality_score(model, op_type) do
-    case GiTF.Reputation.model_reputation(model, op_type) do
+    case GiTF.Trust.model_reputation(model, op_type) do
       %{success_rate: rate} when is_number(rate) -> rate
       _ -> 0.5
     end

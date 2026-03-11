@@ -266,7 +266,7 @@ defmodule GiTF.Brief do
 
   defp friction_rules(op) do
     risk_level = Map.get(op, :risk_level, :low)
-    GiTF.Ghost.CognitiveFriction.friction_instructions(risk_level)
+    GiTF.Ghost.Limiter.friction_instructions(risk_level)
   end
 
   # -- Private: Quest Context ------------------------------------------------

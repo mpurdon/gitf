@@ -1,11 +1,11 @@
-defmodule GiTF.IntelligenceTest do
+defmodule GiTF.IntelTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Intelligence
+  alias GiTF.Intel
   alias GiTF.Archive
 
   setup do
-    store_dir = Path.join(System.tmp_dir!(), "section-intelligence-test-#{:rand.uniform(100000)}")
+    store_dir = Path.join(System.tmp_dir!(), "section-intel-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
     start_supervised!({Archive, data_dir: store_dir})
@@ -27,7 +27,7 @@ defmodule GiTF.IntelligenceTest do
       }
       Archive.insert(:ops, op)
       
-      {:ok, result} = Intelligence.analyze_and_suggest(op.id)
+      {:ok, result} = Intel.analyze_and_suggest(op.id)
       
       assert result.analysis
       assert result.recommended_strategy
@@ -36,7 +36,7 @@ defmodule GiTF.IntelligenceTest do
   end
 
   describe "get_insights/1" do
-    test "provides intelligence insights for sector" do
+    test "provides intel insights for sector" do
       sector_id = "sector-insights"
       
       # Create some ops
@@ -53,7 +53,7 @@ defmodule GiTF.IntelligenceTest do
         Archive.insert(:ops, op)
       end
       
-      insights = Intelligence.get_insights(sector_id)
+      insights = Intel.get_insights(sector_id)
       
       assert insights.sector_id == sector_id
       assert insights.total_jobs == 5

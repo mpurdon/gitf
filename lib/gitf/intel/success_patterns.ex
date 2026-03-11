@@ -1,4 +1,4 @@
-defmodule GiTF.Intelligence.SuccessPatterns do
+defmodule GiTF.Intel.SuccessPatterns do
   @moduledoc """
   Identifies and learns from successful op patterns.
   """

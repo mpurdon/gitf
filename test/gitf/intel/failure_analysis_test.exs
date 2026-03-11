@@ -1,7 +1,7 @@
-defmodule GiTF.Intelligence.FailureAnalysisTest do
+defmodule GiTF.Intel.FailureAnalysisTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Intelligence.FailureAnalysis
+  alias GiTF.Intel.FailureAnalysis
   alias GiTF.Archive
 
   setup do

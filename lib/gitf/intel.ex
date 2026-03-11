@@ -1,11 +1,11 @@
-defmodule GiTF.Intelligence do
+defmodule GiTF.Intel do
   @moduledoc """
-  Adaptive intelligence system for learning from failures and successes.
+  Adaptive intel system for learning from failures and successes.
   """
 
-  alias GiTF.Intelligence.FailureAnalysis
-  alias GiTF.Intelligence.Retry
-  alias GiTF.Intelligence.SuccessPatterns
+  alias GiTF.Intel.FailureAnalysis
+  alias GiTF.Intel.Retry
+  alias GiTF.Intel.SuccessPatterns
   alias GiTF.Archive
 
   @doc """
@@ -52,7 +52,7 @@ defmodule GiTF.Intelligence do
   end
 
   @doc """
-  Get intelligence insights for a sector.
+  Get intel insights for a sector.
   """
   def get_insights(sector_id) do
     patterns = FailureAnalysis.get_failure_patterns(sector_id)

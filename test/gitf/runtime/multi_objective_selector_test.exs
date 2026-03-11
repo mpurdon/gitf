@@ -30,7 +30,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
       assert Map.has_key?(breakdown, :budget)
     end
 
-    test "without reputation data, prefers cheaper models" do
+    test "without trust data, prefers cheaper models" do
       op = %{op_type: :implementation, risk_level: :low}
 
       {model, _} = MultiObjectiveSelector.select_optimal(op)
@@ -111,9 +111,9 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
     end
   end
 
-  describe "integration with reputation data" do
-    test "model with higher reputation scores higher on quality" do
-      # Seed reputation data: make opus have high success for :planning
+  describe "integration with trust data" do
+    test "model with higher trust scores higher on quality" do
+      # Seed trust data: make opus have high success for :planning
       for _ <- 1..10 do
         {:ok, _job} =
           Archive.insert(:ops, %{
