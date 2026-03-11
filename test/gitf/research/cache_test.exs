@@ -2,15 +2,15 @@ defmodule GiTF.Research.CacheTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Research.Cache
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     # Start store for testing
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: System.tmp_dir!() <> "/test_cache_#{:rand.uniform(10000)}")
+    {:ok, _} = Archive.start_link(data_dir: System.tmp_dir!() <> "/test_cache_#{:rand.uniform(10000)}")
     
     # Create test sector
-    {:ok, sector} = Store.insert(:sectors, %{
+    {:ok, sector} = Archive.insert(:sectors, %{
       name: "test-sector",
       path: System.tmp_dir!() <> "/test_repo_#{:rand.uniform(10000)}"
     })

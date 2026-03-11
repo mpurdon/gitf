@@ -1,5 +1,5 @@
 defmodule GiTF.Plugin.Builtin.Commands.Quit do
-  @moduledoc "Built-in /quit command. Initiates graceful shutdown."
+  @moduledoc "Built-in /quit command. Initiates graceful exfil."
 
   use GiTF.Plugin, type: :command
 
@@ -11,7 +11,7 @@ defmodule GiTF.Plugin.Builtin.Commands.Quit do
 
   @impl true
   def execute(_args, _ctx) do
-    GiTF.Shutdown.initiate()
+    GiTF.Exfil.initiate()
     :ok
   end
 

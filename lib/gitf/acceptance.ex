@@ -4,13 +4,13 @@ defmodule GiTF.Acceptance do
   Gates merges on goal achievement and code quality.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.{Goals, ScopeGuard, Minimalism}
 
   @doc "Test if op meets acceptance criteria"
   def test_acceptance(op_id) do
-    op = Store.get(:ops, op_id)
-    _quest = Store.get(:missions, op.mission_id)
+    op = Archive.get(:ops, op_id)
+    _quest = Archive.get(:missions, op.mission_id)
     
     goal_validation = Goals.validate_job(op_id)
     scope_check = ScopeGuard.check_scope(op_id)
@@ -28,7 +28,7 @@ defmodule GiTF.Acceptance do
 
   @doc "Test if mission meets acceptance criteria"
   def test_quest_acceptance(mission_id) do
-    _quest = Store.get(:missions, mission_id)
+    _quest = Archive.get(:missions, mission_id)
     goal_validation = Goals.validate_quest_completion(mission_id)
     scope_check = ScopeGuard.check_quest_scope(mission_id)
     

@@ -1,14 +1,14 @@
 defmodule GiTF.Major.StallDetectionTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
     tmp_dir = Path.join(System.tmp_dir!(), "stall_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = Archive.start_link(data_dir: tmp_dir)
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
@@ -16,7 +16,7 @@ defmodule GiTF.Major.StallDetectionTest do
   end
 
   describe "Link.send_checkpoint/2" do
-    test "sends checkpoint link_msg to queen" do
+    test "sends backup link_msg to queen" do
       {:ok, link_msg} =
         GiTF.Link.send_checkpoint("ghost-abc123", %{
           phase: "coding",
@@ -26,7 +26,7 @@ defmodule GiTF.Major.StallDetectionTest do
 
       assert link_msg.from == "ghost-abc123"
       assert link_msg.to == "major"
-      assert link_msg.subject == "checkpoint"
+      assert link_msg.subject == "backup"
 
       body = Jason.decode!(link_msg.body)
       assert body["phase"] == "coding"
@@ -54,12 +54,12 @@ defmodule GiTF.Major.StallDetectionTest do
   end
 
   describe "detect_stalled_bees/1" do
-    test "detects ghosts with no checkpoint beyond timeout" do
+    test "detects ghosts with no backup beyond timeout" do
       # Create a working ghost that was inserted 15 minutes ago
       old_time = DateTime.add(DateTime.utc_now(), -900, :second)
 
       {:ok, _bee} =
-        Store.insert(:ghosts, %{
+        Archive.insert(:ghosts, %{
           name: "stale-ghost",
           status: "working",
           op_id: nil,
@@ -81,9 +81,9 @@ defmodule GiTF.Major.StallDetectionTest do
       assert :ok == GiTF.Major.detect_stalled_bees(state)
     end
 
-    test "does not flag ghosts with recent checkpoints" do
+    test "does not flag ghosts with recent backups" do
       {:ok, ghost} =
-        Store.insert(:ghosts, %{
+        Archive.insert(:ghosts, %{
           name: "active-ghost",
           status: "working",
           op_id: nil,
@@ -107,7 +107,7 @@ defmodule GiTF.Major.StallDetectionTest do
   end
 
   describe "TranscriptWatcher.maybe_emit_checkpoint/2" do
-    test "emits checkpoint for coding-related entries" do
+    test "emits backup for coding-related entries" do
       entries = [
         %{content: "Using Write tool to create file"},
         %{content: "Using Edit tool to modify code"}
@@ -120,7 +120,7 @@ defmodule GiTF.Major.StallDetectionTest do
       assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("ghost-test", [])
     end
 
-    test "emits checkpoint for test-related entries" do
+    test "emits backup for test-related entries" do
       entries = [%{content: "Running test suite with assert checks"}]
       assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("ghost-test", entries)
     end

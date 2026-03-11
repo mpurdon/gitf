@@ -2,7 +2,7 @@ defmodule GiTF.Ghost.WorkerTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Ghost.Worker
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @tmp_dir System.tmp_dir!()
 
@@ -11,7 +11,7 @@ defmodule GiTF.Ghost.WorkerTest do
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     # Create a temp git repo to serve as a sector
@@ -22,7 +22,7 @@ defmodule GiTF.Ghost.WorkerTest do
       GiTF.Sector.add(repo_path, name: "worker-test-sector-#{:erlang.unique_integer([:positive])}")
 
     {:ok, mission} =
-      Store.insert(:missions, %{
+      Archive.insert(:missions, %{
         name: "worker-test-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
@@ -35,7 +35,7 @@ defmodule GiTF.Ghost.WorkerTest do
         sector_id: sector.id
       })
 
-    {:ok, ghost} = Store.insert(:ghosts, %{name: "test-worker-ghost", status: "starting"})
+    {:ok, ghost} = Archive.insert(:ghosts, %{name: "test-worker-ghost", status: "starting"})
 
     # Assign the op to the ghost so the transition pending->assigned works
     {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
@@ -149,7 +149,7 @@ defmodule GiTF.Ghost.WorkerTest do
 
   describe "stop/1" do
     test "gracefully stops a running worker", ctx do
-      # Trap exits so the :shutdown signal from GenServer.stop doesn't kill the test
+      # Trap exits so the :exfil signal from GenServer.stop doesn't kill the test
       Process.flag(:trap_exit, true)
 
       {:ok, pid} =

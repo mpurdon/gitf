@@ -2,20 +2,20 @@ defmodule GiTF.Major.PlannerReplanTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Major.Planner
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
     tmp_dir = Path.join(System.tmp_dir!(), "replan_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = Archive.start_link(data_dir: tmp_dir)
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     # Create a mission
     {:ok, mission} =
-      Store.insert(:missions, %{
+      Archive.insert(:missions, %{
         name: "Test Quest",
         goal: "Build a widget",
         status: "implementation",
@@ -27,7 +27,7 @@ defmodule GiTF.Major.PlannerReplanTest do
 
     # Create a sector
     {:ok, _comb} =
-      Store.insert(:sectors, %{id: "sector-1", name: "test", path: "/tmp/test"})
+      Archive.insert(:sectors, %{id: "sector-1", name: "test", path: "/tmp/test"})
 
     {:ok, mission: mission}
   end
@@ -48,8 +48,8 @@ defmodule GiTF.Major.PlannerReplanTest do
         })
 
       # Manually set status to failed
-      job_record = Store.get(:ops, op.id)
-      Store.put(:ops, %{job_record | status: "failed"})
+      job_record = Archive.get(:ops, op.id)
+      Archive.put(:ops, %{job_record | status: "failed"})
 
       # Replan will fail because there's no LLM in test, but it should
       # attempt the analysis and return :replan_failed
@@ -79,8 +79,8 @@ defmodule GiTF.Major.PlannerReplanTest do
             sector_id: "sector-1"
           })
 
-        job_record = Store.get(:ops, op.id)
-        Store.put(:ops, %{job_record | status: "failed"})
+        job_record = Archive.get(:ops, op.id)
+        Archive.put(:ops, %{job_record | status: "failed"})
       end
 
       result = Planner.replan_from_failures(mission.id)

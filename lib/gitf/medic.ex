@@ -1,9 +1,9 @@
-defmodule GiTF.Doctor do
+defmodule GiTF.Medic do
   @moduledoc """
   Health checks and auto-fixes for the GiTF environment.
 
   Each check is a small, focused function that inspects one aspect of the
-  system and returns a result map. The Doctor runs all checks in sequence,
+  system and returns a result map. The Medic runs all checks in sequence,
   reports their status, and can optionally auto-fix issues that have a
   known remediation path.
 
@@ -15,7 +15,7 @@ defmodule GiTF.Doctor do
   transforms system observations into structured health reports.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @type check_result :: %{
           name: atom(),
@@ -181,11 +181,11 @@ defmodule GiTF.Doctor do
   end
 
   defp check_database_ok do
-    Store.count(:ghosts)
-    result(:database_ok, :ok, "Store is accessible")
+    Archive.count(:ghosts)
+    result(:database_ok, :ok, "Archive is accessible")
   rescue
     e ->
-      result(:database_ok, :error, "Store error: #{Exception.message(e)}")
+      result(:database_ok, :error, "Archive error: #{Exception.message(e)}")
   end
 
   defp check_config_valid do
@@ -327,7 +327,7 @@ defmodule GiTF.Doctor do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     count =
-      Store.update_matching(
+      Archive.update_matching(
         :ghosts,
         fn b -> b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid)) end,
         fn b -> %{b | status: "crashed", updated_at: now} end
@@ -400,7 +400,7 @@ defmodule GiTF.Doctor do
         # Regenerate active shell settings
         active_cells =
           try do
-            Store.filter(:shells, fn c -> c.status == "active" end)
+            Archive.filter(:shells, fn c -> c.status == "active" end)
           rescue
             _ -> []
           end
@@ -440,10 +440,10 @@ defmodule GiTF.Doctor do
   # -- Query helpers ---------------------------------------------------------
 
   defp count_orphan_cells do
-    active_cells = Store.filter(:shells, fn c -> c.status == "active" end)
+    active_cells = Archive.filter(:shells, fn c -> c.status == "active" end)
 
     Enum.count(active_cells, fn shell ->
-      case Store.get(:ghosts, shell.ghost_id) do
+      case Archive.get(:ghosts, shell.ghost_id) do
         nil -> true
         ghost -> ghost.status in ["stopped", "crashed"]
       end
@@ -453,7 +453,7 @@ defmodule GiTF.Doctor do
   end
 
   defp count_stale_ghosts do
-    Store.count(:ghosts, fn b ->
+    Archive.count(:ghosts, fn b ->
       b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid))
     end)
   rescue
@@ -494,7 +494,7 @@ defmodule GiTF.Doctor do
 
     cell_settings =
       try do
-        Store.filter(:shells, fn c -> c.status == "active" end)
+        Archive.filter(:shells, fn c -> c.status == "active" end)
         |> Enum.map(fn shell ->
           Path.join([shell.worktree_path, ".claude", "settings.json"])
         end)

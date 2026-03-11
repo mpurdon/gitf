@@ -50,12 +50,12 @@ defmodule GiTF.Runtime.CrossModelAudit.EnabledTest do
     end
 
     test "returns false when cross_model_audit not set" do
-      GiTF.Store.insert(:sectors, %{id: "cmb_test", path: "/tmp", name: "test"})
+      GiTF.Archive.insert(:sectors, %{id: "cmb_test", path: "/tmp", name: "test"})
       refute CrossModelAudit.enabled?("cmb_test")
     end
 
     test "returns true when cross_model_audit is true" do
-      GiTF.Store.insert(:sectors, %{id: "cmb_audit", path: "/tmp", name: "audit", cross_model_audit: true})
+      GiTF.Archive.insert(:sectors, %{id: "cmb_audit", path: "/tmp", name: "audit", cross_model_audit: true})
       assert CrossModelAudit.enabled?("cmb_audit")
     end
   end

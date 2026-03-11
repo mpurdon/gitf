@@ -2,7 +2,7 @@ defmodule GiTF.Runtime.ContextMonitorTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Runtime.ContextMonitor
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -14,10 +14,10 @@ defmodule GiTF.Runtime.ContextMonitorTest do
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _pid} = Store.start_link(data_dir: store_dir)
+    {:ok, _pid} = Archive.start_link(data_dir: store_dir)
     
     # Create a test ghost
-    {:ok, ghost} = Store.insert(:ghosts, %{
+    {:ok, ghost} = Archive.insert(:ghosts, %{
       name: "test-ghost",
       status: "working",
       op_id: "op-123",
@@ -35,7 +35,7 @@ defmodule GiTF.Runtime.ContextMonitorTest do
       # Record 40k tokens (20% of 200k limit)
       assert {:ok, :normal} = ContextMonitor.record_usage(ghost_id, 20_000, 20_000)
       
-      ghost = Store.get(:ghosts, ghost_id)
+      ghost = Archive.get(:ghosts, ghost_id)
       assert ghost.context_tokens_used == 40_000
       assert ghost.context_tokens_limit == 200_000
       assert ghost.context_percentage == 0.2
@@ -45,7 +45,7 @@ defmodule GiTF.Runtime.ContextMonitorTest do
       # Record 80k tokens (40% of 200k)
       assert {:ok, :warning} = ContextMonitor.record_usage(ghost_id, 40_000, 40_000)
       
-      ghost = Store.get(:ghosts, ghost_id)
+      ghost = Archive.get(:ghosts, ghost_id)
       assert ghost.context_percentage == 0.4
     end
 
@@ -53,15 +53,15 @@ defmodule GiTF.Runtime.ContextMonitorTest do
       # Record 90k tokens (45% of 200k)
       assert {:ok, :critical} = ContextMonitor.record_usage(ghost_id, 45_000, 45_000)
       
-      ghost = Store.get(:ghosts, ghost_id)
+      ghost = Archive.get(:ghosts, ghost_id)
       assert ghost.context_percentage == 0.45
     end
 
-    test "returns handoff_needed at 50% threshold", %{ghost_id: ghost_id} do
+    test "returns transfer_needed at 50% threshold", %{ghost_id: ghost_id} do
       # Record 100k tokens (50% of 200k)
-      assert {:ok, :handoff_needed} = ContextMonitor.record_usage(ghost_id, 50_000, 50_000)
+      assert {:ok, :transfer_needed} = ContextMonitor.record_usage(ghost_id, 50_000, 50_000)
       
-      ghost = Store.get(:ghosts, ghost_id)
+      ghost = Archive.get(:ghosts, ghost_id)
       assert ghost.context_percentage == 0.5
     end
 
@@ -70,7 +70,7 @@ defmodule GiTF.Runtime.ContextMonitorTest do
       assert {:ok, :normal} = ContextMonitor.record_usage(ghost_id, 10_000, 10_000)
       assert {:ok, :warning} = ContextMonitor.record_usage(ghost_id, 20_000, 20_000)
       
-      ghost = Store.get(:ghosts, ghost_id)
+      ghost = Archive.get(:ghosts, ghost_id)
       assert ghost.context_tokens_used == 80_000
       assert ghost.context_percentage == 0.4
     end
@@ -123,7 +123,7 @@ defmodule GiTF.Runtime.ContextMonitorTest do
   describe "create_snapshot/1" do
     test "creates a context snapshot", %{ghost_id: ghost_id} do
       # Create a op for the ghost
-      {:ok, op} = Store.insert(:ops, %{
+      {:ok, op} = Archive.insert(:ops, %{
         title: "Test op",
         status: "running",
         mission_id: "mission-123",
@@ -131,8 +131,8 @@ defmodule GiTF.Runtime.ContextMonitorTest do
       })
       
       # Update ghost with op
-      ghost = Store.get(:ghosts, ghost_id)
-      Store.put(:ghosts, %{ghost | op_id: op.id})
+      ghost = Archive.get(:ghosts, ghost_id)
+      Archive.put(:ghosts, %{ghost | op_id: op.id})
       
       # Record some usage
       ContextMonitor.record_usage(ghost_id, 40_000, 40_000)
@@ -149,15 +149,15 @@ defmodule GiTF.Runtime.ContextMonitorTest do
   describe "get_latest_snapshot/1" do
     test "returns most recent snapshot", %{ghost_id: ghost_id} do
       # Create op
-      {:ok, op} = Store.insert(:ops, %{
+      {:ok, op} = Archive.insert(:ops, %{
         title: "Test op",
         status: "running",
         mission_id: "mission-123",
         sector_id: "sector-456"
       })
       
-      ghost = Store.get(:ghosts, ghost_id)
-      Store.put(:ghosts, %{ghost | op_id: op.id})
+      ghost = Archive.get(:ghosts, ghost_id)
+      Archive.put(:ghosts, %{ghost | op_id: op.id})
       
       # Create multiple snapshots
       ContextMonitor.record_usage(ghost_id, 20_000, 20_000)

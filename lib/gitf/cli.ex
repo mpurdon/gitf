@@ -157,7 +157,7 @@ defmodule GiTF.CLI do
 
   defp find_mode_flag([head | rest], acc, mode), do: find_mode_flag(rest, [head | acc], mode)
 
-  @quest_subcommands ~w(new list show remove merge report close spec plan start status)
+  @quest_subcommands ~w(new list show remove sync report close spec plan start status)
 
   defp expand_defaults(["mission" | rest]) when rest != [] do
     case rest do
@@ -221,10 +221,10 @@ defmodule GiTF.CLI do
       {:ok, root} ->
         store_dir = Path.join([root, ".gitf", "store"])
 
-        case GiTF.Store.start_link(data_dir: store_dir) do
+        case GiTF.Archive.start_link(data_dir: store_dir) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
-          {:error, reason} -> Format.error("Store error: #{inspect(reason)}")
+          {:error, reason} -> Format.error("Archive error: #{inspect(reason)}")
         end
 
       {:error, :not_in_gitf} ->
@@ -309,7 +309,7 @@ defmodule GiTF.CLI do
             Format.info("\nSuggested Configuration:")
             Format.info("  Name: #{info.suggestions.name}")
             if info.suggestions.validation_command, do: Format.info("  Validation: #{info.suggestions.validation_command}")
-            Format.info("  Merge Strategy: #{info.suggestions.merge_strategy}")
+            Format.info("  Sync Strategy: #{info.suggestions.sync_strategy}")
             Format.info("\nFile Counts:")
             Enum.each(info.codebase_map.file_count, fn {ext, count} ->
               Format.info("  #{ext}: #{count} files")
@@ -357,7 +357,7 @@ defmodule GiTF.CLI do
 
     cond do
       op_id ->
-        case GiTF.Verification.verify_job(op_id) do
+        case GiTF.Audit.verify_job(op_id) do
           {:ok, :pass, result} ->
             Format.success("Job #{op_id} verification passed")
             if result[:quality_score] do
@@ -384,7 +384,7 @@ defmodule GiTF.CLI do
               Format.error("  #{result.output}")
             end
           {:error, reason} ->
-            Format.error("Verification error: #{inspect(reason)}")
+            Format.error("Audit error: #{inspect(reason)}")
         end
 
       mission_id ->
@@ -393,7 +393,7 @@ defmodule GiTF.CLI do
             ops = GiTF.Ops.list(mission_id: mission_id)
             results = Enum.map(ops, fn op ->
               if op.status == "done" do
-                case GiTF.Verification.verify_job(op.id) do
+                case GiTF.Audit.verify_job(op.id) do
                   {:ok, status, _} -> {op.id, status}
                   {:error, _} -> {op.id, :error}
                 end
@@ -889,9 +889,9 @@ defmodule GiTF.CLI do
         IO.puts("")
         
         if result.ready_to_merge do
-          Format.success("✓ Ready to merge")
+          Format.success("✓ Ready to sync")
         else
-          Format.warn("✗ Not ready to merge")
+          Format.warn("✗ Not ready to sync")
           IO.puts("\nBlockers:")
           Enum.each(result.blockers, fn blocker ->
             Format.warn("  • #{blocker}")
@@ -1032,14 +1032,14 @@ defmodule GiTF.CLI do
       else
         # Original manual configuration
         name = result_get(result, :options, :name)
-        merge_strategy = result_get(result, :options, :merge_strategy)
+        sync_strategy = result_get(result, :options, :sync_strategy)
         validation_command = result_get(result, :options, :validation_command)
         github_owner = result_get(result, :options, :github_owner)
         github_repo = result_get(result, :options, :github_repo)
 
         opts = []
         opts = if name, do: Keyword.put(opts, :name, name), else: opts
-        opts = if merge_strategy, do: Keyword.put(opts, :merge_strategy, merge_strategy), else: opts
+        opts = if sync_strategy, do: Keyword.put(opts, :sync_strategy, sync_strategy), else: opts
 
         opts =
           if validation_command,
@@ -1227,7 +1227,7 @@ defmodule GiTF.CLI do
   defp dispatch([:link_msg, :show], result) do
     id = result_get(result, :args, :id)
 
-    case GiTF.Store.get(:links, id) do
+    case GiTF.Archive.get(:links, id) do
       nil ->
         Format.error("Link not found: #{id}")
         Format.info("Hint: use `gitf link list` to see all messages.")
@@ -1284,12 +1284,12 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:prime], result) do
+  defp dispatch([:brief], result) do
     ghost_id = result_get(result, :options, :ghost)
     queen? = result_get(result, :flags, :major) || false
 
     if GiTF.Client.remote?() do
-      # In remote mode, prime is a no-op — the ghost works without local context injection
+      # In remote mode, brief is a no-op — the ghost works without local context injection
       :ok
     else
       cond do
@@ -1436,7 +1436,7 @@ defmodule GiTF.CLI do
     else
       case GiTF.Ghosts.get(ghost_id) do
         {:ok, ghost} ->
-          GiTF.Store.put(:ghosts, %{ghost | status: "stopped"})
+          GiTF.Archive.put(:ghosts, %{ghost | status: "stopped"})
 
           if ghost.op_id do
             GiTF.Ops.complete(ghost.op_id)
@@ -1470,7 +1470,7 @@ defmodule GiTF.CLI do
     else
       case GiTF.Ghosts.get(ghost_id) do
         {:ok, ghost} ->
-          GiTF.Store.put(:ghosts, %{ghost | status: "crashed"})
+          GiTF.Archive.put(:ghosts, %{ghost | status: "crashed"})
 
           if ghost.op_id do
             GiTF.Ops.fail(ghost.op_id)
@@ -1515,10 +1515,10 @@ defmodule GiTF.CLI do
         IO.puts("  Tokens limit: #{stats.tokens_limit || "unknown"}")
         IO.puts("  Percentage:   #{Float.round(stats.percentage * 100, 2)}%")
         IO.puts("  Status:       #{stats.status}")
-        IO.puts("  Needs handoff: #{stats.needs_handoff}")
+        IO.puts("  Needs transfer: #{stats.needs_handoff}")
 
         if stats.needs_handoff do
-          Format.error("\n⚠️  This ghost needs a handoff - context usage is critical!")
+          Format.error("\n⚠️  This ghost needs a transfer - context usage is critical!")
         end
 
       {:error, :not_found} ->
@@ -1548,16 +1548,16 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:mission, :merge], result) do
+  defp dispatch([:mission, :sync], result) do
     id = result_get(result, :args, :id)
 
     if GiTF.Client.remote?() do
       case GiTF.Client.quest_merge(id) do
         {:ok, data} -> Format.success("All ghost branches merged into #{data[:branch] || "mission branch"}")
-        {:error, reason} -> Format.error("Quest merge failed: #{format_error(reason)}")
+        {:error, reason} -> Format.error("Quest sync failed: #{format_error(reason)}")
       end
     else
-      case GiTF.Merge.merge_quest(id) do
+      case GiTF.Sync.merge_quest(id) do
         {:ok, branch} ->
           Format.success("All ghost branches merged into #{branch}")
 
@@ -1565,13 +1565,13 @@ defmodule GiTF.CLI do
           show_not_found_error(:mission, id)
 
         {:error, :no_cells} ->
-          Format.error("No active shells to merge for this mission.")
+          Format.error("No active shells to sync for this mission.")
 
         {:error, {:merge_conflicts, branch, failed}} ->
-          Format.warn("Merged into #{branch} with conflicts in: #{Enum.join(failed, ", ")}")
+          Format.warn("Syncd into #{branch} with conflicts in: #{Enum.join(failed, ", ")}")
 
         {:error, reason} ->
-          Format.error("Quest merge failed: #{format_error(reason)}")
+          Format.error("Quest sync failed: #{format_error(reason)}")
       end
     end
   end
@@ -1988,9 +1988,9 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:doctor], result) do
+  defp dispatch([:medic], result) do
     fix? = result_get(result, :flags, :fix) || false
-    results = GiTF.Doctor.run_all(fix: fix?)
+    results = GiTF.Medic.run_all(fix: fix?)
 
     Enum.each(results, fn check ->
       status_label = doctor_status_label(check.status)
@@ -2018,33 +2018,33 @@ defmodule GiTF.CLI do
     IO.puts(GiTF.CLI.Help.quick_reference())
   end
 
-  defp dispatch([:handoff, :create], result) do
+  defp dispatch([:transfer, :create], result) do
     ghost_id = result_get(result, :options, :ghost)
 
-    case GiTF.Handoff.create(ghost_id) do
+    case GiTF.Transfer.create(ghost_id) do
       {:ok, link_msg} ->
-        Format.success("Handoff created for #{ghost_id} (link_msg #{link_msg.id})")
+        Format.success("Transfer created for #{ghost_id} (link_msg #{link_msg.id})")
 
       {:error, :bee_not_found} ->
         show_not_found_error(:ghost, ghost_id)
 
       {:error, reason} ->
-        Format.error("Handoff failed: #{inspect(reason)}")
+        Format.error("Transfer failed: #{inspect(reason)}")
     end
   end
 
-  defp dispatch([:handoff, :show], result) do
+  defp dispatch([:transfer, :show], result) do
     ghost_id = result_get(result, :options, :ghost)
 
-    case GiTF.Handoff.detect_handoff(ghost_id) do
+    case GiTF.Transfer.detect_handoff(ghost_id) do
       {:ok, link_msg} ->
-        IO.puts("Handoff link_msg: #{link_msg.id}")
+        IO.puts("Transfer link_msg: #{link_msg.id}")
         IO.puts("Created: #{link_msg.inserted_at}")
         IO.puts("")
         IO.puts(link_msg.body || "(empty)")
 
       {:error, :no_handoff} ->
-        Format.info("No handoff found for #{ghost_id}")
+        Format.info("No transfer found for #{ghost_id}")
     end
   end
 
@@ -2081,7 +2081,7 @@ defmodule GiTF.CLI do
     Format.info("API available at #{url}/api/v1/health")
     Format.info("Press Ctrl+C to stop.")
 
-    # Block the main process. The BEAM's shutdown handler (Ctrl+C -> 'a')
+    # Block the main process. The BEAM's exfil handler (Ctrl+C -> 'a')
     # will stop the supervision tree which releases the port.
     ref = Process.monitor(Process.whereis(GiTF.Supervisor))
 
@@ -2217,7 +2217,7 @@ defmodule GiTF.CLI do
       case GiTF.Ghosts.get(ghost_id) do
         {:ok, ghost} ->
           shell =
-            GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+            GiTF.Archive.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
 
           if shell do
             case GiTF.Conflict.check(shell.id) do
@@ -2259,7 +2259,7 @@ defmodule GiTF.CLI do
 
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
          {:ok, op} <- GiTF.Ops.get(ghost.op_id) do
-      shell = GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+      shell = GiTF.Archive.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
 
       if shell do
         Format.info("Running validation for ghost #{ghost_id}...")
@@ -2295,8 +2295,8 @@ defmodule GiTF.CLI do
 
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
          {:ok, op} <- GiTF.Ops.get(ghost.op_id) do
-      shell = GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id end)
-      sector = shell && GiTF.Store.get(:sectors, shell.sector_id)
+      shell = GiTF.Archive.find_one(:shells, fn c -> c.ghost_id == ghost.id end)
+      sector = shell && GiTF.Archive.get(:sectors, shell.sector_id)
 
       cond do
         is_nil(shell) ->
@@ -2596,9 +2596,9 @@ defmodule GiTF.CLI do
   defp do_prime_major do
     case GiTF.gitf_dir() do
       {:ok, gitf_root} ->
-        case GiTF.Prime.prime(:major, gitf_root) do
+        case GiTF.Brief.brief(:major, gitf_root) do
           {:ok, markdown} -> IO.puts(markdown)
-          {:error, reason} -> Format.error("Prime failed: #{inspect(reason)}")
+          {:error, reason} -> Format.error("Brief failed: #{inspect(reason)}")
         end
 
       {:error, :not_in_gitf} ->
@@ -2607,10 +2607,10 @@ defmodule GiTF.CLI do
   end
 
   defp do_prime_bee(ghost_id) do
-    case GiTF.Prime.prime(:ghost, ghost_id) do
+    case GiTF.Brief.brief(:ghost, ghost_id) do
       {:ok, markdown} -> IO.puts(markdown)
       {:error, :bee_not_found} -> show_not_found_error(:ghost, ghost_id)
-      {:error, reason} -> Format.error("Prime failed: #{inspect(reason)}")
+      {:error, reason} -> Format.error("Brief failed: #{inspect(reason)}")
     end
   end
 
@@ -2674,8 +2674,8 @@ defmodule GiTF.CLI do
       version: GiTF.version(),
       about: "Coordinate multiple Claude Code agents working on a shared codebase.",
       subcommands: [
-        doctor: [
-          name: "doctor",
+        medic: [
+          name: "medic",
           about: "Check system prerequisites and GiTF health",
           flags: [
             fix: [
@@ -2723,9 +2723,9 @@ defmodule GiTF.CLI do
                   parser: :string,
                   required: false
                 ],
-                merge_strategy: [
-                  long: "--merge-strategy",
-                  help: "Merge strategy: manual, auto_merge, or pr_branch (default: manual)",
+                sync_strategy: [
+                  long: "--sync-strategy",
+                  help: "Sync strategy: manual, auto_merge, or pr_branch (default: manual)",
                   parser: :string,
                   required: false
                 ],
@@ -2967,13 +2967,13 @@ defmodule GiTF.CLI do
                 ]
               ]
             ],
-            merge: [
-              name: "merge",
-              about: "Merge all completed ghost branches into a mission branch",
+            sync: [
+              name: "sync",
+              about: "Sync all completed ghost branches into a mission branch",
               args: [
                 id: [
                   value_name: "ID",
-                  help: "Quest ID to merge",
+                  help: "Quest ID to sync",
                   required: true,
                   parser: :string
                 ]
@@ -3577,18 +3577,18 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        handoff: [
-          name: "handoff",
-          about: "Manage context-preserving ghost handoffs",
+        transfer: [
+          name: "transfer",
+          about: "Manage context-preserving ghost transfers",
           subcommands: [
             create: [
               name: "create",
-              about: "Create a handoff for a ghost",
+              about: "Create a transfer for a ghost",
               options: [
                 ghost: [
                   short: "-b",
                   long: "--ghost",
-                  help: "Bee ID to create handoff for",
+                  help: "Bee ID to create transfer for",
                   parser: :string,
                   required: true
                 ]
@@ -3596,12 +3596,12 @@ defmodule GiTF.CLI do
             ],
             show: [
               name: "show",
-              about: "Show handoff context for a ghost",
+              about: "Show transfer context for a ghost",
               options: [
                 ghost: [
                   short: "-b",
                   long: "--ghost",
-                  help: "Bee ID to show handoff for",
+                  help: "Bee ID to show transfer for",
                   parser: :string,
                   required: true
                 ]
@@ -3609,20 +3609,20 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        prime: [
-          name: "prime",
+        brief: [
+          name: "brief",
           about: "Output context prompt for a Major or Bee session",
           flags: [
             queen: [
               long: "--queen",
-              help: "Prime the Major with instructions and section state"
+              help: "Brief the Major with instructions and section state"
             ]
           ],
           options: [
             ghost: [
               short: "-b",
               long: "--ghost",
-              help: "Bee ID to prime with op context",
+              help: "Bee ID to brief with op context",
               parser: :string,
               required: false
             ]

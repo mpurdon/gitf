@@ -2,13 +2,13 @@ defmodule GiTF.MinimalismTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Minimalism
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-min-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -24,7 +24,7 @@ defmodule GiTF.MinimalismTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       result = Minimalism.analyze_implementation("op-simple")
       
@@ -40,7 +40,7 @@ defmodule GiTF.MinimalismTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       result = Minimalism.analyze_implementation("op-complex")
       
@@ -58,7 +58,7 @@ defmodule GiTF.MinimalismTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       assert Minimalism.is_minimal?("op-min") == true
     end

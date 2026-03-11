@@ -77,15 +77,15 @@ defmodule GiTF.E2E.FailureRetryTest do
 
     # Create a ghost record and transition the op to failed state manually
     {:ok, ghost} =
-      GiTF.Store.insert(:ghosts, %{name: "exhaust-ghost", status: "working", op_id: job1.id})
+      GiTF.Archive.insert(:ghosts, %{name: "exhaust-ghost", status: "working", op_id: job1.id})
 
     {:ok, _} = GiTF.Ops.assign(job1.id, ghost.id)
     {:ok, _} = GiTF.Ops.start(job1.id)
     {:ok, _} = GiTF.Ops.fail(job1.id)
 
     # Set retry_count on op record to max so next failure triggers exhaustion
-    job_record = GiTF.Store.get(:ops, job1.id)
-    GiTF.Store.put(:ops, Map.put(job_record, :retry_count, 3))
+    job_record = GiTF.Archive.get(:ops, job1.id)
+    GiTF.Archive.put(:ops, Map.put(job_record, :retry_count, 3))
 
     # Send failure link_msg directly to Major
     link_msg = %{

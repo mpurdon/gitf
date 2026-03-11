@@ -7,7 +7,7 @@ defmodule GiTF.Shell do
   """
 
   alias GiTF.Git
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Public API ------------------------------------------------------------
 
@@ -57,7 +57,7 @@ defmodule GiTF.Shell do
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    shells = Store.all(:shells)
+    shells = Archive.all(:shells)
 
     shells =
       case Keyword.get(opts, :sector_id) do
@@ -81,7 +81,7 @@ defmodule GiTF.Shell do
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(shell_id) do
-    Store.fetch(:shells, shell_id)
+    Archive.fetch(:shells, shell_id)
   end
 
   @doc """
@@ -93,7 +93,7 @@ defmodule GiTF.Shell do
   def adopt(shell_id, new_ghost_id) do
     with {:ok, shell} <- get(shell_id) do
       updated = %{shell | ghost_id: new_ghost_id}
-      Store.put(:shells, updated)
+      Archive.put(:shells, updated)
     end
   end
 
@@ -107,18 +107,18 @@ defmodule GiTF.Shell do
   def cleanup_orphans do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    active_cells = Store.filter(:shells, fn c -> c.status == "active" end)
+    active_cells = Archive.filter(:shells, fn c -> c.status == "active" end)
 
     orphan_count =
       Enum.count(active_cells, fn shell ->
         orphan? =
-          case Store.get(:ghosts, shell.ghost_id) do
+          case Archive.get(:ghosts, shell.ghost_id) do
             nil -> true
             ghost -> ghost.status in ["stopped", "crashed"]
           end
 
         if orphan? do
-          Store.put(:shells, Map.merge(shell, %{status: "removed", removed_at: now}))
+          Archive.put(:shells, Map.merge(shell, %{status: "removed", removed_at: now}))
 
           # Best-effort: remove worktree and branch from disk
           try do
@@ -163,7 +163,7 @@ defmodule GiTF.Shell do
       removed_at: nil
     }
 
-    Store.insert(:shells, record)
+    Archive.insert(:shells, record)
   end
 
   defp remove_worktree(sector_path, worktree_path, opts) do
@@ -183,7 +183,7 @@ defmodule GiTF.Shell do
   defp mark_removed(shell) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     updated = %{shell | status: "removed", removed_at: now}
-    Store.put(:shells, updated)
+    Archive.put(:shells, updated)
   end
 
   defp maybe_generate_settings(_ghost_id, nil, _worktree_path), do: :ok

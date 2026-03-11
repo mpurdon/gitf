@@ -53,7 +53,7 @@ defmodule GiTF.CLI.Help do
   def show_tip(:context_warning) do
     IO.puts("")
     IO.puts("⚠️  Context usage is high. Consider:")
-    IO.puts("   • Creating a handoff:  section handoff create --ghost <ghost-id>")
+    IO.puts("   • Creating a transfer:  section transfer create --ghost <ghost-id>")
     IO.puts("   • Simplifying the op")
     IO.puts("   • Breaking into smaller tasks")
   end
@@ -91,7 +91,7 @@ defmodule GiTF.CLI.Help do
       # Manual configuration
       $ section sector add /path/to/repo --name myproject \\
           --validation-command "mix test" \\
-          --merge-strategy auto_merge
+          --sync-strategy auto_merge
 
       # With GitHub integration
       $ section sector add /path/to/repo --auto \\
@@ -114,7 +114,7 @@ defmodule GiTF.CLI.Help do
       # Start automatic verification
       $ section tachikoma --verify
 
-    Verification runs the sector's validation command (e.g., tests) to ensure
+    Audit runs the sector's validation command (e.g., tests) to ensure
     the work meets quality standards.
     """
   end
@@ -153,7 +153,7 @@ defmodule GiTF.CLI.Help do
     Setup:
       section init ~/my-section              Initialize workspace
       section sector add <path> --auto      Add project (auto-config)
-      section doctor                      Check system health
+      section medic                      Check system health
 
     Quests:
       section mission new "goal"            Create mission
@@ -167,7 +167,7 @@ defmodule GiTF.CLI.Help do
       section ghost list                    List all ghosts
       section costs summary               Check token costs
 
-    Verification:
+    Audit:
       section verify --op <id>           Verify op
       section verify --mission <id>         Verify mission
       section tachikoma --verify              Auto-verify mode
@@ -178,7 +178,7 @@ defmodule GiTF.CLI.Help do
 
     Help:
       section <command> --help            Command help
-      section doctor                      System diagnostics
+      section medic                      System diagnostics
       section --version                   Show version
 
     For full documentation: https://github.com/mpurdon/gitf

@@ -18,7 +18,7 @@ defmodule GiTF.Runtime.Settings do
 
   The settings configure Claude Code hooks:
 
-  - `SessionStart`: runs `gitf prime --ghost <ghost_id>` to inject context
+  - `SessionStart`: runs `gitf brief --ghost <ghost_id>` to inject context
   - `Stop`: runs `gitf costs record --ghost <ghost_id>` to capture cost data
 
   Returns `:ok` on success or `{:error, reason}` on failure.
@@ -59,7 +59,7 @@ defmodule GiTF.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} prime --ghost #{ghost_id}"}
+              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} brief --ghost #{ghost_id}"}
             ]
           }
         ],
@@ -94,7 +94,7 @@ defmodule GiTF.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{gitf_bin} prime --queen"}
+              %{"type" => "command", "command" => "#{gitf_bin} brief --queen"}
             ]
           }
         ],

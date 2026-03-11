@@ -4,7 +4,7 @@ defmodule GiTF.Major do
 
   The Major coordinates work across ghosts by subscribing to link_msg messages
   and reacting to status updates. This is a thin GenServer -- the business
-  logic for link_msg processing lives in `GiTF.Link` and `GiTF.Prime`,
+  logic for link_msg processing lives in `GiTF.Link` and `GiTF.Brief`,
   while the Major merely maintains session state and dispatches reactions.
 
   ## State
@@ -128,7 +128,7 @@ defmodule GiTF.Major do
     schedule_stuck_recovery()
 
     # Periodically check post-review windows
-    schedule_post_review_check()
+    schedule_debrief_check()
 
     # Periodically advance stuck mission phases
     schedule_phase_advancement()
@@ -221,7 +221,7 @@ defmodule GiTF.Major do
     # Flush task monitor
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
-    Logger.info("Verification passed for op #{op_id} (ghost #{ghost_id})")
+    Logger.info("Audit passed for op #{op_id} (ghost #{ghost_id})")
     notify_run_job_completed(op_id)
     GiTF.Reputation.update_after_job(op_id)
     state = advance_quest(ghost_id, state)
@@ -231,7 +231,7 @@ defmodule GiTF.Major do
   def handle_info({ref, {:verification_failed, ghost_id, op_id, result}}, state) do
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
-    Logger.warning("Verification failed for op #{op_id}: #{inspect(result[:output])}")
+    Logger.warning("Audit failed for op #{op_id}: #{inspect(result[:output])}")
     notify_run_job_failed(op_id)
     GiTF.Reputation.update_after_job(op_id)
 
@@ -239,7 +239,7 @@ defmodule GiTF.Major do
     link_msg = %{
       from: ghost_id,
       subject: "verification_failed",
-      body: "Verification failed: #{result[:output]}"
+      body: "Audit failed: #{result[:output]}"
     }
     state = maybe_retry_job(link_msg, state)
     {:noreply, state}
@@ -248,7 +248,7 @@ defmodule GiTF.Major do
   def handle_info({ref, {:verification_error, ghost_id, op_id, reason}}, state) do
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
-    Logger.error("Verification system error for op #{op_id}: #{inspect(reason)}")
+    Logger.error("Audit system error for op #{op_id}: #{inspect(reason)}")
 
     # Fail safe: retry
     link_msg = %{
@@ -290,9 +290,9 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
-  def handle_info(:check_post_reviews, state) do
-    check_post_reviews()
-    schedule_post_review_check()
+  def handle_info(:check_debriefs, state) do
+    check_debriefs()
+    schedule_debrief_check()
     {:noreply, state}
   end
 
@@ -316,7 +316,7 @@ defmodule GiTF.Major do
 
   defp recover_stuck_jobs do
     stuck_jobs =
-      GiTF.Store.filter(:ops, fn j -> j.status == "running" end)
+      GiTF.Archive.filter(:ops, fn j -> j.status == "running" end)
 
     Enum.each(stuck_jobs, fn op ->
       worker_alive? =
@@ -348,14 +348,14 @@ defmodule GiTF.Major do
     now = DateTime.utc_now()
 
     # Timeout ops stuck in "pending" for too long (>10 min)
-    GiTF.Store.filter(:ops, fn j -> j.status == "pending" end)
+    GiTF.Archive.filter(:ops, fn j -> j.status == "pending" end)
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
       if age > @pending_timeout_seconds do
         # Only fail if the op is supposed to be active (has a mission that's running)
         quest_active? =
-          case GiTF.Store.get(:missions, op.mission_id) do
+          case GiTF.Archive.get(:missions, op.mission_id) do
             %{status: s} when s in ["active", "implementation"] -> true
             _ -> false
           end
@@ -369,7 +369,7 @@ defmodule GiTF.Major do
     end)
 
     # Timeout ops stuck in "assigned" (ghost never started working)
-    GiTF.Store.filter(:ops, fn j -> j.status == "assigned" end)
+    GiTF.Archive.filter(:ops, fn j -> j.status == "assigned" end)
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
@@ -422,7 +422,7 @@ defmodule GiTF.Major do
         _ ->
           # Implementation ops go through verification
           task = Task.async(fn ->
-            case GiTF.Verification.verify_job(op_id) do
+            case GiTF.Audit.verify_job(op_id) do
               {:ok, :pass, _result} -> {:verification_passed, link_msg.from, op_id}
               {:ok, :fail, result} -> {:verification_failed, link_msg.from, op_id, result}
               {:error, reason} -> {:verification_error, link_msg.from, op_id, reason}
@@ -457,13 +457,13 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "merge_conflict_warning"} = link_msg, state) do
-    Logger.warning("Merge conflict detected from ghost #{link_msg.from}: #{link_msg.body}")
+    Logger.warning("Sync conflict detected from ghost #{link_msg.from}: #{link_msg.body}")
 
     # Extract shell_id from the ghost record
     shell_id =
       case GiTF.Ghosts.get(link_msg.from) do
         {:ok, ghost} ->
-          case GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id end) do
+          case GiTF.Archive.find_one(:shells, fn c -> c.ghost_id == ghost.id end) do
             nil -> nil
             shell -> shell.id
           end
@@ -492,14 +492,14 @@ defmodule GiTF.Major do
             end
 
           if validation_ok? do
-            # Re-attempt merge after successful rebase + validation
-            case GiTF.Merge.merge_back(shell_id) do
+            # Re-attempt sync after successful rebase + validation
+            case GiTF.Sync.sync_back(shell_id) do
               {:ok, strategy} ->
-                Logger.info("Post-rebase merge succeeded (#{strategy}) for shell #{shell_id}")
+                Logger.info("Post-rebase sync succeeded (#{strategy}) for shell #{shell_id}")
                 state
 
               {:error, reason} ->
-                Logger.warning("Post-rebase merge failed for shell #{shell_id}: #{inspect(reason)}")
+                Logger.warning("Post-rebase sync failed for shell #{shell_id}: #{inspect(reason)}")
                 reimagine_conflicted_job(shell_id, link_msg, state)
             end
           else
@@ -519,12 +519,12 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "merge_failed"} = link_msg, state) do
-    Logger.warning("Merge failed from #{link_msg.from}: #{link_msg.body}")
+    Logger.warning("Sync failed from #{link_msg.from}: #{link_msg.body}")
     state
   end
 
   defp handle_waggle(%{subject: "job_merged"} = link_msg, state) do
-    Logger.info("MergeQueue reports: #{link_msg.body}")
+    Logger.info("SyncQueue reports: #{link_msg.body}")
 
     # Extract op_id from body (format: "Job <op_id> merged successfully (tier N)")
     op_id = extract_op_id_from_body(link_msg.body)
@@ -584,15 +584,15 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "reimagine_job_created"} = link_msg, state) do
-    Logger.info("Merge resolver created re-imagine op: #{link_msg.body}")
+    Logger.info("Sync resolver created re-imagine op: #{link_msg.body}")
     state
   end
 
-  defp handle_waggle(%{subject: "checkpoint"} = link_msg, state) do
+  defp handle_waggle(%{subject: "backup"} = link_msg, state) do
     ghost_id = link_msg.from
-    Logger.debug("Checkpoint from ghost #{ghost_id}: #{link_msg.body}")
+    Logger.debug("Backup from ghost #{ghost_id}: #{link_msg.body}")
 
-    checkpoint_data =
+    backup_data =
       case Jason.decode(link_msg.body) do
         {:ok, data} -> data
         _ -> %{}
@@ -601,14 +601,14 @@ defmodule GiTF.Major do
     last_checkpoint =
       Map.put(state.last_checkpoint, ghost_id, %{
         at: DateTime.utc_now(),
-        data: checkpoint_data
+        data: backup_data
       })
 
     # Broadcast progress update
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
       "section:progress",
-      {:bee_checkpoint, ghost_id, checkpoint_data}
+      {:bee_checkpoint, ghost_id, backup_data}
     )
 
     %{state | last_checkpoint: last_checkpoint}
@@ -932,7 +932,7 @@ defmodule GiTF.Major do
     case GiTF.Ops.get(op.id) do
       {:ok, current} ->
         updated = %{current | triage_result: %{complexity: complexity, pipeline: pipeline}}
-        GiTF.Store.put(:ops, updated)
+        GiTF.Archive.put(:ops, updated)
 
       _ ->
         :ok
@@ -942,7 +942,7 @@ defmodule GiTF.Major do
   end
 
   defp scout_exists?(parent_op_id) do
-    GiTF.Store.filter(:ops, fn j ->
+    GiTF.Archive.filter(:ops, fn j ->
       Map.get(j, :scout_for) == parent_op_id and
         j.status not in ["failed", "rejected"]
     end)
@@ -974,26 +974,26 @@ defmodule GiTF.Major do
 
   # -- Private: post-review checks --------------------------------------------
 
-  @post_review_interval :timer.minutes(5)
+  @debrief_interval :timer.minutes(5)
 
-  defp schedule_post_review_check do
-    Process.send_after(self(), :check_post_reviews, @post_review_interval)
+  defp schedule_debrief_check do
+    Process.send_after(self(), :check_debriefs, @debrief_interval)
   end
 
-  defp check_post_reviews do
-    reviews = GiTF.PostReview.active_reviews()
+  defp check_debriefs do
+    reviews = GiTF.Debrief.active_reviews()
 
     Enum.each(reviews, fn review ->
-      if GiTF.PostReview.expired?(review) do
+      if GiTF.Debrief.expired?(review) do
         Logger.info("Post-review expired for mission #{review.mission_id}, closing")
-        GiTF.PostReview.close_review(review.mission_id)
+        GiTF.Debrief.close_review(review.mission_id)
       else
-        case GiTF.PostReview.check_regressions(review.mission_id) do
+        case GiTF.Debrief.check_regressions(review.mission_id) do
           {:ok, :clean} ->
             :ok
 
           {:ok, :regression, findings} ->
-            GiTF.PostReview.handle_regression(review.mission_id, findings)
+            GiTF.Debrief.handle_regression(review.mission_id, findings)
 
           {:error, _reason} ->
             :ok
@@ -1026,14 +1026,14 @@ defmodule GiTF.Major do
   defp resume_active_quests(_state) do
     # On startup, find active missions with no running ops or phase ghosts and kick them
     active_quests =
-      GiTF.Store.all(:missions)
+      GiTF.Archive.all(:missions)
       |> Enum.filter(fn q ->
         q[:status] not in [nil, "completed", "failed", "cancelled", "paused"] and
           q[:current_phase] not in [nil, "completed", "failed", "cancelled"]
       end)
 
     Enum.each(active_quests, fn mission ->
-      quest_jobs = GiTF.Store.filter(:ops, fn j ->
+      quest_jobs = GiTF.Archive.filter(:ops, fn j ->
         j.mission_id == mission.id and j.status in ["running", "assigned", "pending"]
       end)
 
@@ -1053,7 +1053,7 @@ defmodule GiTF.Major do
     phase_statuses = ["research", "requirements", "design", "review", "planning",
                       "implementation", "validation", "awaiting_approval"]
 
-    GiTF.Store.all(:missions)
+    GiTF.Archive.all(:missions)
     |> Enum.filter(fn q -> q[:status] in phase_statuses or q[:current_phase] in phase_statuses end)
     |> Enum.each(fn mission ->
       current_phase = mission[:current_phase]
@@ -1083,7 +1083,7 @@ defmodule GiTF.Major do
     Enum.each(working_bees, fn ghost ->
       last_cp = Map.get(state.last_checkpoint, ghost.id)
 
-      # Use checkpoint time if available, otherwise use ghost's inserted_at
+      # Use backup time if available, otherwise use ghost's inserted_at
       reference_time =
         if last_cp, do: last_cp.at, else: ghost.inserted_at
 
@@ -1112,12 +1112,12 @@ defmodule GiTF.Major do
           link_msg = %{
             from: ghost.id,
             subject: "stall_timeout",
-            body: "Bee stalled for #{seconds_since}s without checkpoint. Auto-failed for retry."
+            body: "Bee stalled for #{seconds_since}s without backup. Auto-failed for retry."
           }
           maybe_retry_job(link_msg, state)
         end
 
-        GiTF.Store.put(:ghosts, %{ghost | status: "failed"})
+        GiTF.Archive.put(:ghosts, %{ghost | status: "failed"})
       else
         if seconds_since > stall_seconds do
           Logger.warning(
@@ -1146,8 +1146,8 @@ defmodule GiTF.Major do
   end
 
   defp spawn_all_ready_jobs(state) do
-    missions = GiTF.Store.all(:missions)
-    all_jobs = GiTF.Store.all(:ops)
+    missions = GiTF.Archive.all(:missions)
+    all_jobs = GiTF.Archive.all(:ops)
 
     Enum.reduce(missions, state, fn mission, acc ->
       if mission[:status] in ["active", "pending", "planning", "research", "implementation", "awaiting_approval"] do
@@ -1320,7 +1320,7 @@ defmodule GiTF.Major do
       conflict_waggle = %{
         from: link_msg.from,
         subject: "merge_conflict",
-        body: "Merge conflict #{cell_info}: #{link_msg.body}. " <>
+        body: "Sync conflict #{cell_info}: #{link_msg.body}. " <>
               "Redo the work avoiding conflicting file regions."
       }
 

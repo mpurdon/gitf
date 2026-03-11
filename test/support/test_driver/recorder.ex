@@ -5,7 +5,7 @@ defmodule GiTF.TestDriver.Recorder do
   Attaches to:
   - All `GiTF.Telemetry.events()` via `:telemetry.attach_many/4`
   - PubSub topics: `link_msg:major`, `section:progress`, `section:costs`, `section:system`
-  - Store polling every 200ms, diffing snapshots for changes
+  - Archive polling every 200ms, diffing snapshots for changes
 
   The timeline is a list of entries ordered by timestamp:
 
@@ -209,14 +209,14 @@ defmodule GiTF.TestDriver.Recorder do
     send(pid, {:telemetry_event, event, measurements, metadata})
   end
 
-  # -- Private: Store snapshotting ---------------------------------------------
+  # -- Private: Archive snapshotting ---------------------------------------------
 
   defp take_store_snapshot do
     collections = [:missions, :ops, :ghosts, :links, :costs, :shells, :sectors]
 
     Map.new(collections, fn col ->
       records =
-        GiTF.Store.all(col)
+        GiTF.Archive.all(col)
         |> Map.new(fn r -> {r.id, r} end)
 
       {col, records}

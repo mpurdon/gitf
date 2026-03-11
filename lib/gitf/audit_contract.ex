@@ -1,4 +1,4 @@
-defmodule GiTF.VerificationContract do
+defmodule GiTF.AuditContract do
   @moduledoc """
   Per-op verification contracts.
 
@@ -38,7 +38,7 @@ defmodule GiTF.VerificationContract do
 
     # Layer 2: sector-level thresholds
     comb_thresholds =
-      case GiTF.Store.get(:sectors, op.sector_id) do
+      case GiTF.Archive.get(:sectors, op.sector_id) do
         nil -> %{}
         sector -> Map.get(sector, :quality_thresholds, %{})
       end
@@ -52,7 +52,7 @@ defmodule GiTF.VerificationContract do
 
     # Layer 3: op-level contract overrides
     job_contract = Map.get(op, :verification_contract) || %{}
-    merged = merge(with_comb, normalize_contract(job_contract))
+    merged = sync(with_comb, normalize_contract(job_contract))
 
     # Layer 4: risk-based adjustments
     risk = Map.get(op, :risk_level, :low)
@@ -93,11 +93,11 @@ defmodule GiTF.VerificationContract do
   end
 
   @doc """
-  Merges two contracts. Override takes precedence for thresholds;
+  Syncs two contracts. Override takes precedence for thresholds;
   union for required_checks.
   """
-  @spec merge(map(), map()) :: map()
-  def merge(base, override) do
+  @spec sync(map(), map()) :: map()
+  def sync(base, override) do
     merged_thresholds =
       Map.merge(
         Map.get(base, :thresholds, %{}),

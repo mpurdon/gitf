@@ -1,6 +1,6 @@
-defmodule GiTF.Merge.Strategy do
+defmodule GiTF.Sync.Strategy do
   @moduledoc """
-  Computes optimal merge order for pending ops.
+  Computes optimal sync order for pending ops.
 
   Uses dependency-aware topological sort with multi-factor tie-breaking
   to minimize merge conflicts and maximize throughput.
@@ -8,13 +8,13 @@ defmodule GiTF.Merge.Strategy do
   ## Ordering rules (in priority order)
 
   1. Dependency graph: topological sort respecting depends_on
-  2. File disjointness: ops touching unique files merge first
+  2. File disjointness: ops touching unique files sync first
   3. Smaller diffs first: fewer changed_files = less conflict surface
   4. Phase order: research < implementation < verification
   5. Conflict history penalty: historically-conflicting files go later
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @phase_order %{
     "research" => 0,
@@ -30,8 +30,8 @@ defmodule GiTF.Merge.Strategy do
   @doc """
   Returns an optimally-ordered list of `{op_id, shell_id}` tuples.
 
-  Input: list of `{op_id, shell_id}` tuples representing merge-ready ops.
-  Output: same tuples reordered for optimal merge sequence.
+  Input: list of `{op_id, shell_id}` tuples representing sync-ready ops.
+  Output: same tuples reordered for optimal sync sequence.
   """
   @spec optimal_order([{String.t(), String.t()}]) :: [{String.t(), String.t()}]
   def optimal_order([]), do: []
@@ -154,7 +154,7 @@ defmodule GiTF.Merge.Strategy do
 
   defp load_jobs(op_ids) do
     Map.new(op_ids, fn jid ->
-      case Store.get(:ops, jid) do
+      case Archive.get(:ops, jid) do
         nil -> {jid, %{}}
         op -> {jid, op}
       end
@@ -163,14 +163,14 @@ defmodule GiTF.Merge.Strategy do
 
   defp build_dependency_edges(op_ids, pending_set) do
     Enum.flat_map(op_ids, fn jid ->
-      Store.filter(:op_dependencies, fn d -> d.op_id == jid end)
+      Archive.filter(:op_dependencies, fn d -> d.op_id == jid end)
       |> Enum.filter(fn d -> MapSet.member?(pending_set, d.depends_on_id) end)
       |> Enum.map(fn d -> {d.depends_on_id, d.op_id} end)
     end)
   end
 
   defp conflict_prone_set do
-    GiTF.Merge.History.conflict_prone_files()
+    GiTF.Sync.History.conflict_prone_files()
     |> Enum.take(50)
     |> Enum.map(&elem(&1, 0))
     |> MapSet.new()

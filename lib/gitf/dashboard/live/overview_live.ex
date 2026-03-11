@@ -50,7 +50,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     end
     high_context_bees = Enum.count(bees_with_context, &((&1.context_percentage || 0) > 40))
     
-    # Verification stats
+    # Audit stats
     ops = GiTF.Ops.list()
     verified_jobs = Enum.count(ops, &(Map.get(&1, :verification_status) == "passed"))
     failed_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "failed"))
@@ -129,7 +129,7 @@ defmodule GiTF.Dashboard.OverviewLive do
           </div>
         </div>
         <div class="card">
-          <div class="card-label">Verification</div>
+          <div class="card-label">Audit</div>
           <div class={"card-value #{if @failed_verification > 0, do: "red", else: "green"}"}>
             {@verified_jobs}
           </div>

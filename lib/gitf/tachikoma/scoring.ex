@@ -4,13 +4,13 @@ defmodule GiTF.Tachikoma.Scoring do
 
   Transforms verification results into structured scores that track how
   well each model performs across op types. Scores are append-only records
-  in the Store, enabling aggregate analysis of model strengths, weaknesses,
+  in the Archive, enabling aggregate analysis of model strengths, weaknesses,
   and op type affinities over time.
 
-  This is a pure context module -- data in, scores out, stored in the Store.
+  This is a pure context module -- data in, scores out, stored in the Archive.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @collection :model_scores
 
@@ -19,17 +19,17 @@ defmodule GiTF.Tachikoma.Scoring do
   @doc """
   Scores a model's performance on a op based on verification results.
 
-  Takes the op map and the verification result (from `GiTF.Verification.verify_job/1`).
+  Takes the op map and the verification result (from `GiTF.Audit.verify_job/1`).
   Returns a score map with correctness, completeness, code quality, efficiency,
   strengths, weaknesses, and op type fit assessment.
   """
   @spec score(map(), map()) :: map()
-  def score(op, verification_result) do
-    passed = verification_passed?(verification_result)
+  def score(op, audit_result) do
+    passed = verification_passed?(audit_result)
     base_scores = base_scores(passed)
-    quality_scores = extract_quality_scores(verification_result)
+    quality_scores = extract_quality_scores(audit_result)
     scores = merge_scores(base_scores, quality_scores)
-    {strengths, weaknesses} = analyze_traits(verification_result, passed)
+    {strengths, weaknesses} = analyze_traits(audit_result, passed)
     fit = assess_op_type_fit(passed, scores)
 
     %{
@@ -45,13 +45,13 @@ defmodule GiTF.Tachikoma.Scoring do
   end
 
   @doc """
-  Records a score map in the Store. Returns `{:ok, score_record}`.
+  Records a score map in the Archive. Returns `{:ok, score_record}`.
   """
   @spec record(map()) :: {:ok, map()}
   def record(score_map) when is_map(score_map) do
     score_map
     |> Map.put(:scored_at, DateTime.utc_now() |> DateTime.truncate(:second))
-    |> then(&Store.insert(@collection, &1))
+    |> then(&Archive.insert(@collection, &1))
   end
 
   @doc """
@@ -62,7 +62,7 @@ defmodule GiTF.Tachikoma.Scoring do
   """
   @spec aggregate(String.t()) :: map()
   def aggregate(model) when is_binary(model) do
-    scores = Store.filter(@collection, &(&1.model == model))
+    scores = Archive.filter(@collection, &(&1.model == model))
     build_aggregate(model, scores)
   end
 
@@ -73,7 +73,7 @@ defmodule GiTF.Tachikoma.Scoring do
   def aggregate_by_op_type(model, op_type)
       when is_binary(model) and is_binary(op_type) do
     scores =
-      Store.filter(@collection, fn s ->
+      Archive.filter(@collection, fn s ->
         s.model == model and s.op_type == op_type
       end)
 

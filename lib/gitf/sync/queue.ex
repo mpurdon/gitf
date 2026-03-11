@@ -1,10 +1,10 @@
-defmodule GiTF.Merge.Queue do
+defmodule GiTF.Sync.Queue do
   @moduledoc """
-  GenServer that serializes merge operations using optimal ordering.
+  GenServer that serializes sync operations using optimal ordering.
 
-  Subscribes to the `"merge:queue"` PubSub topic. When a op passes
+  Subscribes to the `"sync:queue"` PubSub topic. When a op passes
   verification, it is added to a pending list. Jobs are dequeued one at
-  a time, merged in optimal order (via `GiTF.Merge.Strategy`), and the
+  a time, merged in optimal order (via `GiTF.Sync.Strategy`), and the
   result is reported back to the Major via link_msg.
 
   ## State
@@ -17,15 +17,15 @@ defmodule GiTF.Merge.Queue do
 
   ## Registration
 
-  Registered in `GiTF.Registry` under `:merge_queue`.
-  At most one MergeQueue process per section.
+  Registered in `GiTF.Registry` under `:sync_queue`.
+  At most one SyncQueue process per section.
   """
 
   use GenServer
   require Logger
 
   @registry GiTF.Registry
-  @registry_key :merge_queue
+  @registry_key :sync_queue
   @max_history 100
   @merge_timeout_ms :timer.minutes(5)
 
@@ -42,7 +42,7 @@ defmodule GiTF.Merge.Queue do
 
   # -- Client API --------------------------------------------------------------
 
-  @doc "Starts the MergeQueue GenServer."
+  @doc "Starts the SyncQueue GenServer."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = {:via, Registry, {@registry, @registry_key}}
@@ -67,7 +67,7 @@ defmodule GiTF.Merge.Queue do
     end
   end
 
-  @doc "Looks up the MergeQueue process via the Registry."
+  @doc "Looks up the SyncQueue process via the Registry."
   @spec lookup() :: {:ok, pid()} | :error
   def lookup do
     case Registry.lookup(@registry, @registry_key) do
@@ -80,7 +80,7 @@ defmodule GiTF.Merge.Queue do
 
   @impl true
   def init(_opts) do
-    Phoenix.PubSub.subscribe(GiTF.PubSub, "merge:queue")
+    Phoenix.PubSub.subscribe(GiTF.PubSub, "sync:queue")
 
     state = %{
       pending: [],
@@ -93,7 +93,7 @@ defmodule GiTF.Merge.Queue do
     Process.send_after(self(), :recover_pending, 5_000)
     Process.send_after(self(), :periodic_recovery, :timer.minutes(5))
 
-    Logger.info("MergeQueue started")
+    Logger.info("SyncQueue started")
     {:ok, state}
   end
 
@@ -120,7 +120,7 @@ defmodule GiTF.Merge.Queue do
 
   @impl true
   def handle_info({:merge_ready, op_id, shell_id}, state) do
-    Logger.info("MergeQueue received merge-ready op #{op_id}")
+    Logger.info("SyncQueue received sync-ready op #{op_id}")
 
     # Deduplicate: don't add if already pending or active
     already_queued =
@@ -128,7 +128,7 @@ defmodule GiTF.Merge.Queue do
         match?({^op_id, _, _}, state.active)
 
     if already_queued do
-      Logger.debug("Job #{op_id} already in merge queue, skipping")
+      Logger.debug("Job #{op_id} already in sync queue, skipping")
       {:noreply, state}
     else
       state = %{state | pending: state.pending ++ [{op_id, shell_id}]}
@@ -137,7 +137,7 @@ defmodule GiTF.Merge.Queue do
     end
   end
 
-  # Handle Task completion for the active merge
+  # Handle Task completion for the active sync
   def handle_info({ref, {:merge_result, op_id, result}}, %{active: {_, _, ref}} = state) do
     Process.demonitor(ref, [:flush])
     if state.merge_timer, do: Process.cancel_timer(state.merge_timer)
@@ -154,13 +154,13 @@ defmodule GiTF.Merge.Queue do
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{active: {op_id, _, ref}} = state) do
-    Logger.error("Merge task crashed for op #{op_id}: #{inspect(reason)}")
+    Logger.error("Sync task crashed for op #{op_id}: #{inspect(reason)}")
     if state.merge_timer, do: Process.cancel_timer(state.merge_timer)
 
-    GiTF.Link.send("merge_queue", "major", "merge_failed",
-      "Merge task crashed for op #{op_id}: #{inspect(reason)}")
+    GiTF.Link.send("sync_queue", "major", "merge_failed",
+      "Sync task crashed for op #{op_id}: #{inspect(reason)}")
 
-    GiTF.Telemetry.emit([:gitf, :merge, :crashed], %{}, %{
+    GiTF.Telemetry.emit([:gitf, :sync, :crashed], %{}, %{
       op_id: op_id,
       reason: inspect(reason)
     })
@@ -171,16 +171,16 @@ defmodule GiTF.Merge.Queue do
     {:noreply, state}
   end
 
-  # Merge task timed out — kill it and move on
+  # Sync task timed out — kill it and move on
   def handle_info({:merge_timeout, ref, task_pid}, %{active: {op_id, _, ref}} = state) do
-    Logger.error("Merge task timed out for op #{op_id} after #{div(@merge_timeout_ms, 1000)}s")
+    Logger.error("Sync task timed out for op #{op_id} after #{div(@merge_timeout_ms, 1000)}s")
     Process.demonitor(ref, [:flush])
     Process.exit(task_pid, :kill)
 
-    GiTF.Link.send("merge_queue", "major", "merge_failed",
-      "Merge task timed out for op #{op_id}")
+    GiTF.Link.send("sync_queue", "major", "merge_failed",
+      "Sync task timed out for op #{op_id}")
 
-    GiTF.Telemetry.emit([:gitf, :merge, :timeout], %{}, %{
+    GiTF.Telemetry.emit([:gitf, :sync, :timeout], %{}, %{
       op_id: op_id,
       timeout_seconds: div(@merge_timeout_ms, 1000)
     })
@@ -191,7 +191,7 @@ defmodule GiTF.Merge.Queue do
     {:noreply, state}
   end
 
-  # Stale timeout for already-completed merge — ignore
+  # Stale timeout for already-completed sync — ignore
   def handle_info({:merge_timeout, _ref, _pid}, state), do: {:noreply, state}
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
@@ -200,16 +200,16 @@ defmodule GiTF.Merge.Queue do
 
   def handle_info(:recover_pending, state) do
     # Find ops that are done + verified but haven't been merged yet
-    # This catches ops that were verified while the MergeQueue was down
+    # This catches ops that were verified while the SyncQueue was down
     recovered =
-      GiTF.Store.filter(:ops, fn j ->
+      GiTF.Archive.filter(:ops, fn j ->
         j.status == "done" and
           Map.get(j, :verification_status) == "passed" and
           Map.get(j, :merged_at) == nil and
           not Map.get(j, :phase_job, false)
       end)
       |> Enum.flat_map(fn op ->
-        case GiTF.Store.find_one(:shells, fn c ->
+        case GiTF.Archive.find_one(:shells, fn c ->
                c.ghost_id == op.ghost_id and c.status == "active"
              end) do
           nil -> []
@@ -218,7 +218,7 @@ defmodule GiTF.Merge.Queue do
       end)
 
     if recovered != [] do
-      Logger.info("MergeQueue recovered #{length(recovered)} pending merge(s)")
+      Logger.info("SyncQueue recovered #{length(recovered)} pending sync(s)")
     end
 
     # Add to pending, deduplicating
@@ -247,14 +247,14 @@ defmodule GiTF.Merge.Queue do
   defp maybe_process_next(%{active: nil, pending: []} = state), do: state
 
   defp maybe_process_next(%{active: nil, pending: pending} = state) do
-    ordered = GiTF.Merge.Strategy.optimal_order(pending)
+    ordered = GiTF.Sync.Strategy.optimal_order(pending)
 
     case ordered do
       [{op_id, shell_id} | rest] ->
-        Logger.info("MergeQueue processing op #{op_id}")
+        Logger.info("SyncQueue processing op #{op_id}")
 
         task = Task.async(fn ->
-          result = GiTF.Merge.Resolver.resolve(op_id, shell_id)
+          result = GiTF.Sync.Resolver.resolve(op_id, shell_id)
           {:merge_result, op_id, result}
         end)
 
@@ -266,7 +266,7 @@ defmodule GiTF.Merge.Queue do
     end
   end
 
-  # Active merge in progress — wait
+  # Active sync in progress — wait
   defp maybe_process_next(state), do: state
 
   # -- Private: result handling ------------------------------------------------
@@ -275,13 +275,13 @@ defmodule GiTF.Merge.Queue do
     Logger.info("Job #{op_id} merged successfully at tier #{tier}")
 
     # Mark the op as merged
-    case GiTF.Store.get(:ops, op_id) do
+    case GiTF.Archive.get(:ops, op_id) do
       nil -> :ok
-      op -> GiTF.Store.put(:ops, Map.put(op, :merged_at, DateTime.utc_now()))
+      op -> GiTF.Archive.put(:ops, Map.put(op, :merged_at, DateTime.utc_now()))
     end
 
     # Link Major
-    GiTF.Link.send("merge_queue", "major", "job_merged",
+    GiTF.Link.send("sync_queue", "major", "job_merged",
       "Job #{op_id} merged successfully (tier #{tier})")
 
     entry = {op_id, :success, DateTime.utc_now()}
@@ -296,10 +296,10 @@ defmodule GiTF.Merge.Queue do
   end
 
   defp handle_merge_result(op_id, {:error, reason, tier}, state) do
-    Logger.warning("Job #{op_id} merge failed at tier #{tier}: #{inspect(reason)}")
+    Logger.warning("Job #{op_id} sync failed at tier #{tier}: #{inspect(reason)}")
 
-    GiTF.Link.send("merge_queue", "major", "merge_failed",
-      "Job #{op_id} merge failed at tier #{tier}: #{inspect(reason)}")
+    GiTF.Link.send("sync_queue", "major", "merge_failed",
+      "Job #{op_id} sync failed at tier #{tier}: #{inspect(reason)}")
 
     entry = {op_id, {:failure, reason}, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}

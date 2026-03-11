@@ -2,13 +2,13 @@ defmodule GiTF.ResilienceTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Resilience
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-resilience-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -31,11 +31,11 @@ defmodule GiTF.ResilienceTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
-      {:ok, :flagged_for_review} = Resilience.handle_failure(:verification, :failed, %{op_id: op.id})
+      {:ok, :flagged_for_review} = Resilience.handle_failure(:audit, :failed, %{op_id: op.id})
       
-      updated = Store.get(:ops, op.id)
+      updated = Archive.get(:ops, op.id)
       assert updated.needs_review == true
     end
   end
@@ -68,8 +68,8 @@ defmodule GiTF.ResilienceTest do
       job1 = %{id: "op-1", mission_id: mission_id, depends_on: [], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
       job2 = %{id: "op-2", mission_id: mission_id, depends_on: ["op-1"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
       
-      Store.insert(:ops, job1)
-      Store.insert(:ops, job2)
+      Archive.insert(:ops, job1)
+      Archive.insert(:ops, job2)
       
       assert {:ok, :no_deadlock} = Resilience.detect_deadlock(mission_id)
     end
@@ -81,8 +81,8 @@ defmodule GiTF.ResilienceTest do
       job1 = %{id: "op-a", mission_id: mission_id, depends_on: ["op-b"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
       job2 = %{id: "op-b", mission_id: mission_id, depends_on: ["op-a"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
       
-      Store.insert(:ops, job1)
-      Store.insert(:ops, job2)
+      Archive.insert(:ops, job1)
+      Archive.insert(:ops, job2)
       
       assert {:error, {:deadlock, cycles}} = Resilience.detect_deadlock(mission_id)
       assert length(cycles) > 0

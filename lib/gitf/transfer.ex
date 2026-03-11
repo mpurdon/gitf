@@ -1,35 +1,35 @@
-defmodule GiTF.Handoff do
+defmodule GiTF.Transfer do
   @moduledoc """
   Context-preserving ghost restart mechanism.
 
   When a ghost is replaced -- due to crash, context exhaustion, or manual
-  restart -- the handoff system captures the outgoing ghost's state and
+  restart -- the transfer system captures the outgoing ghost's state and
   provides it to the incoming ghost so work can continue seamlessly.
 
-  The handoff is stored as a link_msg message from the ghost to itself with
-  the subject "handoff". This keeps all state within the existing link_msg
+  The transfer is stored as a link_msg message from the ghost to itself with
+  the subject "transfer". This keeps all state within the existing link_msg
   infrastructure: no new tables, no new schemas, just a well-structured
   message that a new ghost can consume when it starts.
 
   This is a pure context module. Every function transforms ghost state into
-  a structured handoff document and back.
+  a structured transfer document and back.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
-  @handoff_subject "handoff"
+  @transfer_subject "transfer"
 
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Creates a handoff record for a ghost.
+  Creates a transfer record for a ghost.
 
   Captures the ghost's current op state, recent links, shell info, and
-  stores it as a link_msg from the ghost to itself with subject "handoff".
+  stores it as a link_msg from the ghost to itself with subject "transfer".
   
   Also creates a context snapshot for tracking purposes.
 
-  Returns `{:ok, link_msg}` with the handoff content.
+  Returns `{:ok, link_msg}` with the transfer content.
   """
   @spec create(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def create(ghost_id, opts \\ []) do
@@ -46,21 +46,21 @@ defmodule GiTF.Handoff do
       # Create context snapshot for tracking
       GiTF.Runtime.ContextMonitor.create_snapshot(ghost_id)
 
-      GiTF.Link.send(ghost_id, ghost_id, @handoff_subject, context)
+      GiTF.Link.send(ghost_id, ghost_id, @transfer_subject, context)
     end
   end
 
   @doc """
-  Reads a handoff link_msg and generates a briefing for the new ghost.
+  Reads a transfer link_msg and generates a briefing for the new ghost.
 
-  Takes a ghost_id and a handoff waggle_id, marks the link_msg as read,
-  and returns the handoff context as markdown.
+  Takes a ghost_id and a transfer waggle_id, marks the link_msg as read,
+  and returns the transfer context as markdown.
   """
   @spec resume(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def resume(_ghost_id, handoff_waggle_id) do
-    case Store.get(:links, handoff_waggle_id) do
+  def resume(_ghost_id, transfer_waggle_id) do
+    case Archive.get(:links, transfer_waggle_id) do
       nil ->
-        {:error, :handoff_not_found}
+        {:error, :transfer_not_found}
 
       link_msg ->
         GiTF.Link.mark_read(link_msg.id)
@@ -70,15 +70,15 @@ defmodule GiTF.Handoff do
   end
 
   @doc """
-  Checks if there is an unread handoff link_msg for this ghost.
+  Checks if there is an unread transfer link_msg for this ghost.
 
-  Returns `{:ok, link_msg}` if a handoff exists, `{:error, :no_handoff}` otherwise.
+  Returns `{:ok, link_msg}` if a transfer exists, `{:error, :no_handoff}` otherwise.
   """
   @spec detect_handoff(String.t()) :: {:ok, map()} | {:error, :no_handoff}
   def detect_handoff(ghost_id) do
     link_msg =
-      Store.filter(:links, fn w ->
-        w.to == ghost_id and w.subject == @handoff_subject and w.read == false
+      Archive.filter(:links, fn w ->
+        w.to == ghost_id and w.subject == @transfer_subject and w.read == false
       end)
       |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
       |> List.first()
@@ -90,7 +90,7 @@ defmodule GiTF.Handoff do
   end
 
   @doc """
-  Extracts a session ID from a handoff link_msg body, if present.
+  Extracts a session ID from a transfer link_msg body, if present.
   """
   @spec extract_session_id(String.t() | nil) :: String.t() | nil
   def extract_session_id(nil), do: nil
@@ -103,7 +103,7 @@ defmodule GiTF.Handoff do
   end
 
   @doc """
-  Builds the markdown state dump for a ghost's handoff context.
+  Builds the markdown state dump for a ghost's transfer context.
 
   Gathers: current op status, shell info, recent links sent and received,
   and a summary of the ghost's state.
@@ -115,13 +115,13 @@ defmodule GiTF.Handoff do
       shell = fetch_cell(ghost_id)
       sent_waggles = GiTF.Link.list(from: ghost_id, limit: 10)
       received_waggles = GiTF.Link.list(to: ghost_id, limit: 10)
-      checkpoint_section = build_checkpoint_section(ghost_id)
+      backup_section = build_checkpoint_section(ghost_id)
 
       error_section = build_error_section(ghost_id)
 
       markdown =
         [
-          "# Handoff Context for #{Map.get(ghost, :name, ghost.id)} (#{ghost.id})",
+          "# Transfer Context for #{Map.get(ghost, :name, ghost.id)} (#{ghost.id})",
           "",
           "## Bee Status",
           "- Status: #{ghost.status}",
@@ -133,7 +133,7 @@ defmodule GiTF.Handoff do
           "## Workspace",
           format_cell_section(shell),
           "",
-          checkpoint_section,
+          backup_section,
           error_section,
           "## Recent Messages Sent (#{length(sent_waggles)})",
           format_waggles_section(sent_waggles),
@@ -157,7 +157,7 @@ defmodule GiTF.Handoff do
   # -- Private: data fetching ------------------------------------------------
 
   defp fetch_bee(ghost_id) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil -> {:error, :bee_not_found}
       ghost -> {:ok, ghost}
     end
@@ -166,13 +166,13 @@ defmodule GiTF.Handoff do
   defp fetch_job(%{op_id: nil}), do: nil
 
   defp fetch_job(%{op_id: op_id}) when is_binary(op_id) do
-    Store.get(:ops, op_id)
+    Archive.get(:ops, op_id)
   end
 
   defp fetch_job(_bee), do: nil
 
   defp fetch_cell(ghost_id) do
-    Store.filter(:shells, fn c -> c.ghost_id == ghost_id end)
+    Archive.filter(:shells, fn c -> c.ghost_id == ghost_id end)
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
     |> List.first()
   end
@@ -224,7 +224,7 @@ defmodule GiTF.Handoff do
   defp build_error_section(ghost_id) do
     # Gather recent error links for this ghost
     error_waggles =
-      Store.filter(:links, fn w ->
+      Archive.filter(:links, fn w ->
         w.from == ghost_id and
           w.subject in ["job_failed", "verification_failed", "validation_failed", "merge_conflict"]
       end)
@@ -246,9 +246,9 @@ defmodule GiTF.Handoff do
   end
 
   defp build_checkpoint_section(ghost_id) do
-    case GiTF.Checkpoint.load(ghost_id) do
-      {:ok, checkpoint} ->
-        GiTF.Checkpoint.build_resume_prompt(checkpoint) <> "\n\n"
+    case GiTF.Backup.load(ghost_id) do
+      {:ok, backup} ->
+        GiTF.Backup.build_resume_prompt(backup) <> "\n\n"
 
       {:error, :not_found} ->
         ""
@@ -257,10 +257,10 @@ defmodule GiTF.Handoff do
 
   defp format_resume_briefing(link_msg) do
     [
-      "# Handoff Briefing",
+      "# Transfer Briefing",
       "",
       "You are continuing work from a previous ghost session.",
-      "The handoff was created at #{link_msg.inserted_at}.",
+      "The transfer was created at #{link_msg.inserted_at}.",
       "",
       "---",
       "",

@@ -2,7 +2,7 @@ defmodule GiTF.Ingestion.WatchdogTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Ingestion.Watchdog
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -11,9 +11,9 @@ defmodule GiTF.Ingestion.WatchdogTest do
     root = Path.join(System.tmp_dir!(), "gitf_ingest_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(root)
 
-    # Initialize Store (needed for sectors/missions)
+    # Initialize Archive (needed for sectors/missions)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: Path.join(root, ".gitf/store"))
+    {:ok, _} = GiTF.Archive.start_link(data_dir: Path.join(root, ".gitf/store"))
 
     # Create a dummy sector so ingestion works
     GiTF.Sector.add(root, name: "test-sector")
@@ -51,7 +51,7 @@ defmodule GiTF.Ingestion.WatchdogTest do
     Process.sleep(100)
     
     # 4. Verify Quest created
-    missions = Store.all(:missions)
+    missions = Archive.all(:missions)
     assert length(missions) == 1
     mission = hd(missions)
     assert mission.name == "Fix login bug" # Title derived from filename

@@ -12,7 +12,7 @@ defmodule GiTF.Recon do
 
   require Logger
 
-  alias GiTF.{Jobs, Store, Triage}
+  alias GiTF.{Jobs, Archive, Triage}
 
   @sections ~w(relevant_files patterns risks complexity approach)a
 
@@ -123,7 +123,7 @@ defmodule GiTF.Recon do
       new_description = report <> "\n\n" <> (op.description || "")
 
       updated = %{op | description: new_description, scout_findings: findings}
-      Store.put(:ops, updated)
+      Archive.put(:ops, updated)
     end
   end
 

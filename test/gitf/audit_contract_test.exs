@@ -1,11 +1,11 @@
-defmodule GiTF.VerificationContractTest do
+defmodule GiTF.AuditContractTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.VerificationContract
+  alias GiTF.AuditContract
 
   describe "default_contract/0" do
     test "returns expected defaults" do
-      contract = VerificationContract.default_contract()
+      contract = AuditContract.default_contract()
       assert :static in contract.required_checks
       assert :security in contract.required_checks
       assert contract.thresholds.composite == 70
@@ -32,7 +32,7 @@ defmodule GiTF.VerificationContractTest do
         quality_score: 85
       }
 
-      assert :pass = VerificationContract.evaluate(contract, result)
+      assert :pass = AuditContract.evaluate(contract, result)
     end
 
     test "fails when a required check is below threshold" do
@@ -48,7 +48,7 @@ defmodule GiTF.VerificationContractTest do
         quality_score: 85
       }
 
-      assert {:fail, reasons} = VerificationContract.evaluate(contract, result)
+      assert {:fail, reasons} = AuditContract.evaluate(contract, result)
       assert Enum.any?(reasons, &String.contains?(&1, "security"))
     end
 
@@ -65,7 +65,7 @@ defmodule GiTF.VerificationContractTest do
         quality_score: 85
       }
 
-      assert {:fail, reasons} = VerificationContract.evaluate(contract, result)
+      assert {:fail, reasons} = AuditContract.evaluate(contract, result)
       assert Enum.any?(reasons, &String.contains?(&1, "security"))
     end
 
@@ -82,7 +82,7 @@ defmodule GiTF.VerificationContractTest do
         quality_score: 85
       }
 
-      assert :pass = VerificationContract.evaluate(contract, result)
+      assert :pass = AuditContract.evaluate(contract, result)
     end
 
     test "composite threshold is always checked if present" do
@@ -97,12 +97,12 @@ defmodule GiTF.VerificationContractTest do
         quality_score: 50
       }
 
-      assert {:fail, reasons} = VerificationContract.evaluate(contract, result)
+      assert {:fail, reasons} = AuditContract.evaluate(contract, result)
       assert Enum.any?(reasons, &String.contains?(&1, "composite"))
     end
   end
 
-  describe "merge/2" do
+  describe "sync/2" do
     test "override thresholds take precedence" do
       base = %{
         required_checks: [:static],
@@ -115,7 +115,7 @@ defmodule GiTF.VerificationContractTest do
         thresholds: %{security: 80}
       }
 
-      merged = VerificationContract.merge(base, override)
+      merged = AuditContract.sync(base, override)
       assert :static in merged.required_checks
       assert :security in merged.required_checks
       assert merged.thresholds.security == 80
@@ -126,7 +126,7 @@ defmodule GiTF.VerificationContractTest do
       base = %{required_checks: [:static], skip_checks: [:performance], thresholds: %{}}
       override = %{required_checks: [:security], skip_checks: [:static], thresholds: %{}}
 
-      merged = VerificationContract.merge(base, override)
+      merged = AuditContract.sync(base, override)
       assert :static in merged.required_checks
       assert :security in merged.required_checks
       assert :performance in merged.skip_checks
@@ -150,7 +150,7 @@ defmodule GiTF.VerificationContractTest do
         custom_validation_command: "mix test"
       }
 
-      merged = VerificationContract.merge(base, override)
+      merged = AuditContract.sync(base, override)
       assert merged.auto_approve_eligible == false
       assert merged.custom_validation_command == "mix test"
     end
@@ -164,7 +164,7 @@ defmodule GiTF.VerificationContractTest do
         verification_contract: nil
       }
 
-      contract = VerificationContract.build_contract(op)
+      contract = AuditContract.build_contract(op)
       assert :performance in contract.required_checks
       # Thresholds should be raised ~10%
       assert contract.thresholds.composite > 70
@@ -179,7 +179,7 @@ defmodule GiTF.VerificationContractTest do
         verification_contract: nil
       }
 
-      contract = VerificationContract.build_contract(op)
+      contract = AuditContract.build_contract(op)
       assert contract.thresholds.composite == 70
       assert contract.thresholds.security == 60
       assert contract.auto_approve_eligible == true
@@ -195,7 +195,7 @@ defmodule GiTF.VerificationContractTest do
         }
       }
 
-      contract = VerificationContract.build_contract(op)
+      contract = AuditContract.build_contract(op)
       assert :performance in contract.required_checks
       assert :static in contract.required_checks
       assert contract.thresholds.composite == 90

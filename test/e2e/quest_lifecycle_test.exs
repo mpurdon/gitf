@@ -32,7 +32,7 @@ defmodule GiTF.E2E.QuestLifecycleTest do
 
     await(
       fn ->
-        links = GiTF.Store.all(:links)
+        links = GiTF.Archive.all(:links)
         Enum.any?(links, &(&1.from in ghost_ids))
       end,
       timeout: 15_000

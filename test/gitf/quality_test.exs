@@ -2,13 +2,13 @@ defmodule GiTF.QualityTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Quality
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-quality-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -191,7 +191,7 @@ defmodule GiTF.QualityTest do
     test "set and get custom thresholds" do
       sector_id = "sector-thresh"
       sector = %{id: sector_id, path: "/tmp"}
-      Store.insert(:sectors, sector)
+      Archive.insert(:sectors, sector)
       
       custom = %{composite: 80, static: 75, security: 70, performance: 60}
       {:ok, _} = Quality.set_thresholds(sector_id, custom)
@@ -219,7 +219,7 @@ defmodule GiTF.QualityTest do
           status: "done",
           updated_at: DateTime.utc_now()
         }
-        Store.insert(:ops, op)
+        Archive.insert(:ops, op)
         {:ok, _} = Quality.analyze_static(op.id, "/tmp", :unknown)
       end
       

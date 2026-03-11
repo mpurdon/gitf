@@ -4,13 +4,13 @@ defmodule GiTF.Ghosts do
 
   Provides the public API for spawning, listing, and stopping ghosts. This
   module coordinates between the Ghost.Worker GenServer (runtime lifecycle),
-  the Store (persistence), and the SectorSupervisor (process supervision).
+  the Archive (persistence), and the SectorSupervisor (process supervision).
 
   This is a context module: thin orchestration layer over store records
   and supervised processes.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Public API --------------------------------------------------------------
 
@@ -139,7 +139,7 @@ defmodule GiTF.Ghosts do
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    ghosts = Store.all(:ghosts)
+    ghosts = Archive.all(:ghosts)
 
     ghosts =
       case Keyword.get(opts, :status) do
@@ -157,7 +157,7 @@ defmodule GiTF.Ghosts do
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(ghost_id) do
-    Store.fetch(:ghosts, ghost_id)
+    Archive.fetch(:ghosts, ghost_id)
   end
 
   @doc """
@@ -209,7 +209,7 @@ defmodule GiTF.Ghosts do
       context_percentage: 0.0
     }
 
-    Store.insert(:ghosts, record)
+    Archive.insert(:ghosts, record)
   end
 
   defp assign_job(op_id, ghost_id) do
@@ -243,13 +243,13 @@ defmodule GiTF.Ghosts do
   end
 
   defp update_bee_working(ghost_id, shell) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil ->
         {:error, :bee_not_found}
 
       ghost ->
         updated = Map.merge(ghost, %{status: "working", shell_path: shell.worktree_path, pid: nil})
-        Store.put(:ghosts, updated)
+        Archive.put(:ghosts, updated)
         :ok
     end
   end
@@ -276,7 +276,7 @@ defmodule GiTF.Ghosts do
       case GiTF.Ops.get(op_id) do
         {:ok, op} ->
           # Standard sector-level agent
-          case Store.get(:sectors, shell.sector_id) do
+          case Archive.get(:sectors, shell.sector_id) do
             nil ->
               :ok
 
@@ -450,7 +450,7 @@ defmodule GiTF.Ghosts do
   defp validate_dead(_bee), do: {:error, :bee_still_active}
 
   defp find_active_cell(ghost_id) do
-    case Store.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
+    case Archive.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> {:error, :no_active_cell}
       shell -> {:ok, shell}
     end
@@ -471,7 +471,7 @@ defmodule GiTF.Ghosts do
 
   defp revive_job(op, new_ghost_id) do
     # running or assigned — just update the ghost_id
-    Store.put(:ops, %{op | ghost_id: new_ghost_id})
+    Archive.put(:ops, %{op | ghost_id: new_ghost_id})
     :ok
   end
 

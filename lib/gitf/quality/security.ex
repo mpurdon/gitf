@@ -71,7 +71,7 @@ defmodule GiTF.Quality.Security do
       System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @audit_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {_output, 0}} -> []
       {:ok, {output, _}} -> parse_mix_audit(output)
       nil -> []
@@ -85,7 +85,7 @@ defmodule GiTF.Quality.Security do
       System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @audit_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, _}} -> parse_npm_audit(output)
       nil -> []
     end
@@ -98,7 +98,7 @@ defmodule GiTF.Quality.Security do
       System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @audit_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, _}} -> parse_cargo_audit(output)
       nil -> []
     end
@@ -111,7 +111,7 @@ defmodule GiTF.Quality.Security do
       System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @audit_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, _}} -> parse_pip_audit(output)
       nil -> []
     end

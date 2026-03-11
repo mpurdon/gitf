@@ -2,13 +2,13 @@ defmodule GiTF.AcceptanceTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Acceptance
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-accept-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -23,7 +23,7 @@ defmodule GiTF.AcceptanceTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:missions, mission)
+      Archive.insert(:missions, mission)
       
       op = %{
         id: "op-accept",
@@ -36,7 +36,7 @@ defmodule GiTF.AcceptanceTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       result = Acceptance.test_acceptance("op-accept")
       
@@ -55,7 +55,7 @@ defmodule GiTF.AcceptanceTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:missions, mission)
+      Archive.insert(:missions, mission)
       
       op = %{
         id: "op-block",
@@ -67,7 +67,7 @@ defmodule GiTF.AcceptanceTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       result = Acceptance.test_acceptance("op-block")
       

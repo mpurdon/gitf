@@ -1,7 +1,7 @@
 defmodule GiTF.Budget.WatchdogTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -10,7 +10,7 @@ defmodule GiTF.Budget.WatchdogTest do
     tmp_dir = Path.join(System.tmp_dir!(), "gitf_budget_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     # Terminate Budget.Watchdog from supervisor to prevent auto-restart conflicts
@@ -31,9 +31,9 @@ defmodule GiTF.Budget.WatchdogTest do
     op_id = "j-test-budget-#{suffix}"
 
     # Create test data
-    Store.insert(:missions, %{id: mission_id, status: "active", goal: "Test Budget"})
-    Store.insert(:ops, %{id: op_id, mission_id: mission_id, ghost_id: ghost_id, status: "assigned"})
-    Store.insert(:ghosts, %{id: ghost_id, op_id: op_id, status: "working", pid: "dummy"})
+    Archive.insert(:missions, %{id: mission_id, status: "active", goal: "Test Budget"})
+    Archive.insert(:ops, %{id: op_id, mission_id: mission_id, ghost_id: ghost_id, status: "assigned"})
+    Archive.insert(:ghosts, %{id: ghost_id, op_id: op_id, status: "working", pid: "dummy"})
 
     {:ok, %{mission_id: mission_id, ghost_id: ghost_id}}
   end
@@ -55,7 +55,7 @@ defmodule GiTF.Budget.WatchdogTest do
 
     # 4. Quest should be marked as failed_budget or paused_budget
     # (paused_budget when no active ghosts are running worker processes)
-    mission = Store.get(:missions, mission_id)
+    mission = Archive.get(:missions, mission_id)
     assert mission.status in ["failed_budget", "paused_budget"]
   end
 end

@@ -7,7 +7,7 @@ defmodule GiTF.Report do
   """
 
   alias GiTF.Runtime.StreamParser
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Public API ------------------------------------------------------------
 
@@ -61,7 +61,7 @@ defmodule GiTF.Report do
 
   defp enrich_jobs(ops, gitf_root) do
     Enum.map(ops, fn op ->
-      ghost = if op.ghost_id, do: Store.get(:ghosts, op.ghost_id)
+      ghost = if op.ghost_id, do: Archive.get(:ghosts, op.ghost_id)
       log_tokens = parse_bee_log(op.ghost_id, gitf_root)
 
       %{

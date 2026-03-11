@@ -2,7 +2,7 @@ defmodule GiTF.Tachikoma do
   @moduledoc """
   GenServer that periodically runs health checks (patrols) on the section.
 
-  The Tachikoma is a background watchdog that polls `GiTF.Doctor.run_all/1`
+  The Tachikoma is a background watchdog that polls `GiTF.Medic.run_all/1`
   on a fixed interval and notifies the Major when issues are found.
   It follows the same polling pattern as `GiTF.TranscriptWatcher`.
 
@@ -11,7 +11,7 @@ defmodule GiTF.Tachikoma do
       %{
         poll_interval: pos_integer(),
         auto_fix: boolean(),
-        last_results: [GiTF.Doctor.check_result()]
+        last_results: [GiTF.Medic.check_result()]
       }
 
   ## Lifecycle
@@ -158,15 +158,15 @@ defmodule GiTF.Tachikoma do
   end
 
   defp run_patrol(state) do
-    results = GiTF.Doctor.run_all(fix: state.auto_fix)
+    results = GiTF.Medic.run_all(fix: state.auto_fix)
     budget_results = check_budgets()
     conflict_results = check_merge_conflicts()
-    verification_results = check_verifications()
+    audit_results = check_verifications()
     check_stuck_jobs()
     check_deadlocks()
 
     queen_results = check_major_heartbeat()
-    all_results = results ++ budget_results ++ conflict_results ++ verification_results ++ queen_results
+    all_results = results ++ budget_results ++ conflict_results ++ audit_results ++ queen_results
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
     if issues != [] do
@@ -247,7 +247,7 @@ defmodule GiTF.Tachikoma do
   @verification_max_age_seconds 3600
 
   defp check_verifications do
-    unverified_jobs = GiTF.Verification.jobs_needing_verification()
+    unverified_jobs = GiTF.Audit.jobs_needing_verification()
     now = DateTime.utc_now()
 
     # Run verification for unverified ops
@@ -255,15 +255,15 @@ defmodule GiTF.Tachikoma do
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
       if age > @verification_max_age_seconds do
-        # Job stuck in verification queue too long — skip verification, let it merge
+        # Job stuck in verification queue too long — skip verification, let it sync
         Logger.warning("Tachikoma: op #{op.id} stuck in verification for #{age}s, auto-passing")
         case GiTF.Ops.get(op.id) do
-          {:ok, j} -> GiTF.Store.put(:ops, Map.put(j, :verification_status, "passed"))
+          {:ok, j} -> GiTF.Archive.put(:ops, Map.put(j, :verification_status, "passed"))
           _ -> :ok
         end
         []
       else
-        case GiTF.Verification.verify_job(op.id) do
+        case GiTF.Audit.verify_job(op.id) do
           {:ok, :pass, _result} ->
             []
           {:ok, :fail, result} ->
@@ -271,7 +271,7 @@ defmodule GiTF.Tachikoma do
               %{
                 name: "verification_failed",
                 status: :error,
-                message: "Job #{op.id} verification failed: #{format_verification_result(result)}"
+                message: "Job #{op.id} verification failed: #{format_audit_result(result)}"
               }
             ]
           {:error, reason} ->
@@ -353,7 +353,7 @@ defmodule GiTF.Tachikoma do
   end
 
   defp prune_worktrees do
-    GiTF.Store.all(:sectors)
+    GiTF.Archive.all(:sectors)
     |> Enum.each(fn sector ->
       if sector.path && File.dir?(sector.path) do
         GiTF.Git.worktree_prune(sector.path)
@@ -370,7 +370,7 @@ defmodule GiTF.Tachikoma do
       {:ok, gitf_root} ->
         task = Task.async(fn -> System.cmd("df", ["-m", gitf_root], stderr_to_stdout: true) end)
 
-        df_result = case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
+        df_result = case Task.yield(task, 5_000) || Task.exfil(task, 1_000) do
           {:ok, cmd_result} -> cmd_result
           nil -> {"", 1}
         end
@@ -390,7 +390,7 @@ defmodule GiTF.Tachikoma do
               Logger.warning("Low disk space (#{available_mb}MB), triggering cleanup")
 
               # 1. Remove completed/stopped shells' worktrees
-              GiTF.Store.filter(:shells, fn c ->
+              GiTF.Archive.filter(:shells, fn c ->
                 c.status in ["completed", "stopped", "removed"]
               end)
               |> Enum.each(fn shell ->
@@ -447,25 +447,25 @@ defmodule GiTF.Tachikoma do
     unread_cutoff = DateTime.add(DateTime.utc_now(), -7 * 24 * 3600, :second)
 
     pruned_waggles =
-      GiTF.Store.filter(:links, fn w ->
+      GiTF.Archive.filter(:links, fn w ->
         (w.read == true and DateTime.compare(w.inserted_at, cutoff) == :lt) or
           (w.read != true and DateTime.compare(w.inserted_at, unread_cutoff) == :lt)
       end)
 
     Enum.each(pruned_waggles, fn w ->
-      GiTF.Store.delete(:links, w.id)
+      GiTF.Archive.delete(:links, w.id)
     end)
 
     # Prune old completed runs
     pruned_runs =
-      GiTF.Store.filter(:runs, fn r ->
+      GiTF.Archive.filter(:runs, fn r ->
         r.status == "completed" and
           r.completed_at != nil and
           DateTime.compare(r.completed_at, cutoff) == :lt
       end)
 
     Enum.each(pruned_runs, fn r ->
-      GiTF.Store.delete(:runs, r.id)
+      GiTF.Archive.delete(:runs, r.id)
     end)
 
     # Prune old tachikoma scores (keep last 50 per model)
@@ -476,21 +476,21 @@ defmodule GiTF.Tachikoma do
 
     total = length(pruned_waggles) + length(pruned_runs)
     if total > 0 do
-      Logger.info("Store pruned: #{length(pruned_waggles)} links, #{length(pruned_runs)} runs")
+      Logger.info("Archive pruned: #{length(pruned_waggles)} links, #{length(pruned_runs)} runs")
     end
   rescue
     _ -> :ok
   end
 
   defp prune_old_scores do
-    GiTF.Store.all(:tachikoma_scores)
+    GiTF.Archive.all(:tachikoma_scores)
     |> Enum.group_by(& &1.model)
     |> Enum.each(fn {_model, scores} ->
       if length(scores) > 50 do
         scores
         |> Enum.sort_by(& &1.inserted_at, {:asc, DateTime})
         |> Enum.drop(-50)
-        |> Enum.each(fn s -> GiTF.Store.delete(:tachikoma_scores, s.id) end)
+        |> Enum.each(fn s -> GiTF.Archive.delete(:tachikoma_scores, s.id) end)
       end
     end)
   rescue
@@ -499,14 +499,14 @@ defmodule GiTF.Tachikoma do
 
   defp prune_event_store do
     if Code.ensure_loaded?(GiTF.EventStore) and function_exported?(GiTF.EventStore, :prune, 1) do
-      GiTF.EventStore.prune(days: 30)
+      GiTF.EventArchive.prune(days: 30)
     end
   rescue
     _ -> :ok
   end
 
   defp check_stuck_jobs do
-    GiTF.Store.filter(:ops, fn j -> j.status == "running" end)
+    GiTF.Archive.filter(:ops, fn j -> j.status == "running" end)
     |> Enum.each(fn op ->
       worker_alive? =
         case op.ghost_id do
@@ -538,7 +538,7 @@ defmodule GiTF.Tachikoma do
     _ -> :ok
   end
 
-  defp format_verification_result(result) do
+  defp format_audit_result(result) do
     case Map.get(result, :validations) do
       nil -> Map.get(result, :output, "Unknown failure")
       validations ->
@@ -550,7 +550,7 @@ defmodule GiTF.Tachikoma do
     end
   end
 
-  # -- Verification & improvement pipeline ------------------------------------
+  # -- Audit & improvement pipeline ------------------------------------
 
   @verification_max_attempts 3
 
@@ -562,16 +562,16 @@ defmodule GiTF.Tachikoma do
   end
 
   defp do_review_job_attempt(op_id, shell_id, attempt) do
-    case GiTF.Verification.verify_job(op_id) do
+    case GiTF.Audit.verify_job(op_id) do
       {:ok, :pass, result} ->
         Logger.info("Tachikoma: op #{op_id} passed verification (attempt #{attempt})")
         update_reputation(op_id)
         score_model(op_id, result)
 
-        # Forward to merge queue
+        # Forward to sync queue
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
-          "merge:queue",
+          "sync:queue",
           {:merge_ready, op_id, shell_id}
         )
 
@@ -594,12 +594,12 @@ defmodule GiTF.Tachikoma do
           do_review_job_attempt(op_id, shell_id, attempt + 1)
         else
           Logger.error("Tachikoma: verification error for op #{op_id} after #{attempt} attempts: #{inspect(reason)}")
-          reject_and_improve(op_id, shell_id, %{output: "Verification error: #{inspect(reason)}"})
+          reject_and_improve(op_id, shell_id, %{output: "Audit error: #{inspect(reason)}"})
         end
     end
   end
 
-  defp reject_and_improve(op_id, shell_id, verification_result) do
+  defp reject_and_improve(op_id, shell_id, audit_result) do
     # 1. Reject the op
     GiTF.Ops.reject(op_id)
 
@@ -607,7 +607,7 @@ defmodule GiTF.Tachikoma do
     cleanup_cell(shell_id)
 
     # 3. Analyze the failure
-    feedback = extract_feedback(verification_result)
+    feedback = extract_feedback(audit_result)
     analysis = analyze_failure(op_id, feedback)
 
     # 4. Improve agent profile
@@ -644,7 +644,7 @@ defmodule GiTF.Tachikoma do
 
   defp improve_from_failure(op_id, analysis) do
     with {:ok, op} <- GiTF.Ops.get(op_id) do
-      case GiTF.Store.get(:sectors, op.sector_id) do
+      case GiTF.Archive.get(:sectors, op.sector_id) do
         nil -> :ok
         sector when is_binary(sector.path) -> improve_agent_profile(sector.path, analysis, op)
         _ -> :ok
@@ -681,7 +681,7 @@ defmodule GiTF.Tachikoma do
   defp build_failure_analysis(nil, op) do
     %{
       type: :unknown,
-      root_cause: "Verification failed for: #{op.title}",
+      root_cause: "Audit failed for: #{op.title}",
       suggestions: ["Ensure changes pass all quality gates before completion"]
     }
   end
@@ -757,9 +757,9 @@ defmodule GiTF.Tachikoma do
     _ -> :ok
   end
 
-  defp score_model(op_id, verification_result) do
+  defp score_model(op_id, audit_result) do
     with {:ok, op} <- GiTF.Ops.get(op_id) do
-      score = GiTF.Tachikoma.Scoring.score(op, verification_result)
+      score = GiTF.Tachikoma.Scoring.score(op, audit_result)
       GiTF.Tachikoma.Scoring.record(score)
       Logger.debug("Tachikoma: recorded score for model #{score.model} on op #{op_id}")
 

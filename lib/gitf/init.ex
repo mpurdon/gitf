@@ -72,7 +72,7 @@ defmodule GiTF.Init do
   - `gitf sector list` -- List registered sectors
   - `gitf sector use <name>` -- Set the current working sector
 
-  ## Merge Strategies
+  ## Sync Strategies
   When a ghost completes its op, its changes can be merged using the sector's strategy:
   - **manual** (default): Branch is left for human review
   - **auto_merge**: Automatically merges the ghost's branch into main
@@ -207,7 +207,7 @@ defmodule GiTF.Init do
   @doc """
   Returns the Major's instruction text.
 
-  Used by `GiTF.Doctor` to regenerate `QUEEN.md` when it is missing.
+  Used by `GiTF.Medic` to regenerate `QUEEN.md` when it is missing.
   """
   @spec queen_instructions() :: String.t()
   def queen_instructions, do: @queen_instructions
@@ -279,7 +279,7 @@ defmodule GiTF.Init do
     store_dir = Path.join(gitf_dir, "store")
     File.mkdir_p(store_dir)
 
-    case GiTF.Store.start_link(data_dir: store_dir) do
+    case GiTF.Archive.start_link(data_dir: store_dir) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
       {:error, reason} -> {:error, {:store, reason}}

@@ -1,14 +1,14 @@
-defmodule GiTF.Runtime.ToolBox.DynamicToolsTest do
+defmodule GiTF.Runtime.Loadout.DynamicToolsTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Runtime.ToolBox.DynamicTools
-  alias GiTF.Store
+  alias GiTF.Runtime.Loadout.DynamicTools
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-dyntools-test-#{:rand.uniform(100_000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
 
     # Ensure plugin registry exists
     GiTF.Plugin.Registry.init()

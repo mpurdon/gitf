@@ -2,12 +2,12 @@ defmodule GiTF.TestDriver.Harness do
   @moduledoc """
   Creates and manages isolated test environments for E2E scenarios.
 
-  Each scenario gets its own temp Store directory, git repository,
+  Each scenario gets its own temp Archive directory, git repository,
   and gitf workspace. Patterns extracted from existing test suites
   (`queen_test.exs`, `bees_test.exs`).
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.TestDriver.MockClaude
 
   @tmp_dir System.tmp_dir!()
@@ -24,8 +24,8 @@ defmodule GiTF.TestDriver.Harness do
   @doc """
   Boots an isolated environment for a scenario.
 
-  Creates temp directories for the Store, gitf workspace, and mock scripts.
-  Restarts the Store GenServer pointing at the temp directory.
+  Creates temp directories for the Archive, gitf workspace, and mock scripts.
+  Restarts the Archive GenServer pointing at the temp directory.
 
   Returns an env map for use with other harness functions.
   """
@@ -42,9 +42,9 @@ defmodule GiTF.TestDriver.Harness do
     File.write!(Path.join([gitf_root, ".gitf", "major", "QUEEN.md"]), "# Major\n")
     File.mkdir_p!(mock_dir)
 
-    # Restart Store with isolated directory
+    # Restart Archive with isolated directory
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: store_dir)
+    {:ok, _} = Archive.start_link(data_dir: store_dir)
 
     env = %{
       store_dir: store_dir,

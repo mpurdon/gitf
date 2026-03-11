@@ -2,14 +2,14 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Runtime.MultiObjectiveSelector
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
     tmp_dir = Path.join(System.tmp_dir!(), "mos_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = Archive.start_link(data_dir: tmp_dir)
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
@@ -98,7 +98,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
     end
 
     test "each candidate has quality, cost, budget, total" do
-      op = %{op_type: :verification}
+      op = %{op_type: :audit}
 
       result = MultiObjectiveSelector.score_breakdown(op)
 
@@ -116,7 +116,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
       # Seed reputation data: make opus have high success for :planning
       for _ <- 1..10 do
         {:ok, _job} =
-          Store.insert(:ops, %{
+          Archive.insert(:ops, %{
             title: "Plan",
             status: "done",
             mission_id: "q1",
@@ -128,7 +128,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
       end
 
       # Invalidate cache
-      Store.delete(:model_reputation, "model:opus:planning")
+      Archive.delete(:model_reputation, "model:opus:planning")
 
       op = %{op_type: :planning, risk_level: :high}
       {_model, breakdown} = MultiObjectiveSelector.select_optimal(op)

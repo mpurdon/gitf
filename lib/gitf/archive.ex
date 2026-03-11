@@ -1,4 +1,4 @@
-defmodule GiTF.Store do
+defmodule GiTF.Archive do
   @moduledoc """
   Pure-Elixir key-value store backed by an ETF (Erlang Term Format) file.
 
@@ -124,7 +124,7 @@ defmodule GiTF.Store do
 
   ## Example
 
-      Store.transact(fn data ->
+      Archive.transact(fn data ->
         op = get_in(data, [:ops, op_id])
         dep = %{id: GiTF.ID.generate(:jdp), op_id: op_id, depends_on_id: other_id}
         data
@@ -176,7 +176,7 @@ defmodule GiTF.Store do
     data_path = Path.join(data_dir, "section.etf")
     lock_path = Path.join(data_dir, ".lock")
 
-    # Store paths in persistent_term so API functions can access them
+    # Archive paths in persistent_term so API functions can access them
     # without going through the GenServer process
     :persistent_term.put({__MODULE__, :data_path}, data_path)
     :persistent_term.put({__MODULE__, :lock_path}, lock_path)
@@ -232,7 +232,7 @@ defmodule GiTF.Store do
 
       {:error, reason} ->
         require Logger
-        Logger.error("Store read failed: #{inspect(reason)}, trying backup")
+        Logger.error("Archive read failed: #{inspect(reason)}, trying backup")
         recover_from_backup()
     end
   end
@@ -249,7 +249,7 @@ defmodule GiTF.Store do
         {:ok, binary} ->
           try do
             data = :erlang.binary_to_term(binary)
-            Logger.warning("Store corrupted — recovered from #{Path.basename(backup)}")
+            Logger.warning("Archive corrupted — recovered from #{Path.basename(backup)}")
             File.write(data_path(), binary)
             {:halt, data}
           rescue
@@ -288,7 +288,7 @@ defmodule GiTF.Store do
     else
       {:error, reason} ->
         require Logger
-        Logger.error("Store write failed: #{inspect(reason)}")
+        Logger.error("Archive write failed: #{inspect(reason)}")
         # Still update cache so in-memory state is consistent
         cache_put(data)
         GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{reason: reason})
@@ -472,12 +472,12 @@ defmodule GiTF.Store do
   defp collection_prefix(:mission_phase_transitions), do: :qpt
   defp collection_prefix(:sector_research_cache), do: :crc
   defp collection_prefix(:research_file_index), do: :rfi
-  defp collection_prefix(:verification_results), do: :vrf
+  defp collection_prefix(:audit_results), do: :vrf
   defp collection_prefix(:context_snapshots), do: :ctx
   defp collection_prefix(:model_reputation), do: :mrp
   defp collection_prefix(:approval_requests), do: :apr
-  defp collection_prefix(:post_reviews), do: :prv
-  defp collection_prefix(:checkpoints), do: :ckp
+  defp collection_prefix(:debriefs), do: :prv
+  defp collection_prefix(:backups), do: :ckp
   defp collection_prefix(:model_scores), do: :msc
   defp collection_prefix(:events), do: :evt
   defp collection_prefix(:agent_identities), do: :agi

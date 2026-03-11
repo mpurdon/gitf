@@ -1,19 +1,19 @@
-defmodule GiTF.Merge.History do
+defmodule GiTF.Sync.History do
   @moduledoc """
-  Tracks merge attempt outcomes to inform future merge strategy decisions.
+  Tracks sync attempt outcomes to inform future sync strategy decisions.
 
-  Records are stored in the `:merge_history` Store collection. Each record
+  Records are stored in the `:sync_history` Archive collection. Each record
   captures which tier was attempted, whether it succeeded, and which files
   were involved. This data drives the tier-skipping heuristic: if a tier
   has failed 2+ times for a set of files with 0 successes, skip it.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Records a merge attempt outcome.
+  Records a sync attempt outcome.
 
   ## Attrs
 
@@ -27,7 +27,7 @@ defmodule GiTF.Merge.History do
   @spec record(map()) :: {:ok, map()}
   def record(attrs) do
     record = Map.merge(attrs, %{merged_at: DateTime.utc_now()})
-    Store.insert(:merge_history, record)
+    Archive.insert(:sync_history, record)
   end
 
   @doc """
@@ -41,7 +41,7 @@ defmodule GiTF.Merge.History do
     file_set = MapSet.new(file_paths)
 
     relevant =
-      Store.filter(:merge_history, fn h ->
+      Archive.filter(:sync_history, fn h ->
         h.tier == tier and files_overlap?(h.files, file_set)
       end)
 
@@ -54,14 +54,14 @@ defmodule GiTF.Merge.History do
   end
 
   @doc """
-  Returns merge history records whose files overlap with the given paths.
+  Returns sync history records whose files overlap with the given paths.
   Sorted by merged_at descending.
   """
   @spec get_history([String.t()]) :: [map()]
   def get_history(file_paths) do
     file_set = MapSet.new(file_paths)
 
-    Store.filter(:merge_history, fn h ->
+    Archive.filter(:sync_history, fn h ->
       files_overlap?(h.files, file_set)
     end)
     |> Enum.sort_by(& &1.merged_at, {:desc, DateTime})
@@ -74,7 +74,7 @@ defmodule GiTF.Merge.History do
   """
   @spec conflict_prone_files() :: [{String.t(), non_neg_integer()}]
   def conflict_prone_files do
-    Store.all(:merge_history)
+    Archive.all(:sync_history)
     |> Enum.filter(&(&1.status == :failure))
     |> Enum.flat_map(fn h -> h.files || [] end)
     |> Enum.frequencies()

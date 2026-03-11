@@ -66,7 +66,7 @@ defmodule GiTF.Runtime.CrossModelAudit do
   """
   @spec enabled?(String.t()) :: boolean()
   def enabled?(sector_id) do
-    case GiTF.Store.get(:sectors, sector_id) do
+    case GiTF.Archive.get(:sectors, sector_id) do
       nil -> false
       sector -> Map.get(sector, :cross_model_audit, false) == true
     end
@@ -75,7 +75,7 @@ defmodule GiTF.Runtime.CrossModelAudit do
   # -- Private ---------------------------------------------------------------
 
   defp find_cell(op) do
-    case GiTF.Store.find_one(:shells, fn c ->
+    case GiTF.Archive.find_one(:shells, fn c ->
       c.ghost_id == op.ghost_id and c.status == "active"
     end) do
       nil -> {:error, :no_cell}

@@ -2,7 +2,7 @@ defmodule GiTF.JobsTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Ops
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -10,14 +10,14 @@ defmodule GiTF.JobsTest do
     tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, sector} =
-      Store.insert(:sectors, %{name: "ops-test-sector-#{:erlang.unique_integer([:positive])}"})
+      Archive.insert(:sectors, %{name: "ops-test-sector-#{:erlang.unique_integer([:positive])}"})
 
     {:ok, mission} =
-      Store.insert(:missions, %{
+      Archive.insert(:missions, %{
         name: "ops-test-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
@@ -37,7 +37,7 @@ defmodule GiTF.JobsTest do
 
   defp create_bee(name \\ nil) do
     name = name || "test-ghost-#{:erlang.unique_integer([:positive])}"
-    {:ok, ghost} = Store.insert(:ghosts, %{name: name, status: "starting"})
+    {:ok, ghost} = Archive.insert(:ghosts, %{name: name, status: "starting"})
     ghost
   end
 
@@ -89,7 +89,7 @@ defmodule GiTF.JobsTest do
       {:ok, _} = create_job(mission, sector)
 
       {:ok, other_quest} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "other-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })

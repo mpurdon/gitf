@@ -4,11 +4,11 @@ defmodule GiTF.Minimalism do
   Detects over-engineering and unnecessary complexity.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc "Analyze implementation for minimalism"
   def analyze_implementation(op_id) do
-    op = Store.get(:ops, op_id)
+    op = Archive.get(:ops, op_id)
     
     %{
       complexity_score: calculate_complexity(op),
@@ -20,7 +20,7 @@ defmodule GiTF.Minimalism do
 
   @doc "Check if implementation is minimal"
   def is_minimal?(op_id) do
-    op = Store.get(:ops, op_id)
+    op = Archive.get(:ops, op_id)
     violations = find_violations(op)
     
     Enum.empty?(violations)

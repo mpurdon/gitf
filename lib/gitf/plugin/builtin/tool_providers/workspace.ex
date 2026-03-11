@@ -73,7 +73,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
             "Name: #{sector.name}",
             "Path: #{sector[:path] || "N/A"}",
             "Repo URL: #{sector[:repo_url] || "N/A"}",
-            "Merge Strategy: #{sector[:merge_strategy] || "N/A"}",
+            "Sync Strategy: #{sector[:sync_strategy] || "N/A"}",
             "Validation: #{sector[:validation_command] || "N/A"}"
           ]
           |> Enum.join("\n")
@@ -98,7 +98,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   end
 
   defp list_cells do
-    shells = GiTF.Store.all(:shells)
+    shells = GiTF.Archive.all(:shells)
 
     if shells == [] do
       {:ok, "No active shells."}

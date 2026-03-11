@@ -1,31 +1,31 @@
 defmodule GiTF.TUI.Views.Activity do
   @moduledoc """
   Renders the activity panel with missions, phase progress, their ghosts,
-  budget info, checkpoints, and active runs.
+  budget info, backups, and active runs.
   """
   import Ratatouille.View
 
-  @phases ~w(research requirements design review planning implementation validation merge)
+  @phases ~w(research requirements design review planning implementation validation sync)
 
   def render(model) do
     %{activity: activity} = model
     bees_by_quest = Enum.group_by(activity.ghosts, fn b -> b[:mission_id] end)
     budget_status = model[:budget_status] || []
-    checkpoints = model[:checkpoints] || %{}
+    backups = model[:backups] || %{}
     runs = model[:runs] || []
 
     panel title: "Activity [F1]", height: :fill do
       if Enum.empty?(activity.missions) and Enum.empty?(activity.ghosts) do
         label(content: "Idle")
       else
-        render_quests(activity.missions, bees_by_quest, activity.bee_logs, budget_status, checkpoints) ++
-          render_orphan_bees(bees_by_quest, activity.bee_logs, checkpoints) ++
+        render_quests(activity.missions, bees_by_quest, activity.bee_logs, budget_status, backups) ++
+          render_orphan_bees(bees_by_quest, activity.bee_logs, backups) ++
           render_runs(runs)
       end
     end
   end
 
-  defp render_quests(missions, bees_by_quest, bee_logs, budget_status, checkpoints) do
+  defp render_quests(missions, bees_by_quest, bee_logs, budget_status, backups) do
     Enum.flat_map(missions, fn mission ->
       mission_id = mission[:id]
       quest_bees = Map.get(bees_by_quest, mission_id, [])
@@ -43,12 +43,12 @@ defmodule GiTF.TUI.Views.Activity do
           text(content: budget_text, color: budget_color)
         end
       ] ++
-        render_phase_tracker(current_phase, artifacts, quest_bees, bee_logs, checkpoints) ++
+        render_phase_tracker(current_phase, artifacts, quest_bees, bee_logs, backups) ++
         [label(content: "")]
     end)
   end
 
-  defp render_phase_tracker(current_phase, artifacts, ghosts, bee_logs, checkpoints) do
+  defp render_phase_tracker(current_phase, artifacts, ghosts, bee_logs, backups) do
     Enum.flat_map(@phases, fn phase ->
       {marker, color} =
         cond do
@@ -71,7 +71,7 @@ defmodule GiTF.TUI.Views.Activity do
             ghost_id = to_s(ghost[:id])
             status = to_s(ghost[:status] || ghost[:state])
             log_lines = Map.get(bee_logs, ghost[:id], [])
-            checkpoint = Map.get(checkpoints, ghost[:id])
+            backup = Map.get(backups, ghost[:id])
 
             [
               label do
@@ -79,7 +79,7 @@ defmodule GiTF.TUI.Views.Activity do
                 text(content: " [#{status}]", color: status_color(status))
               end
             ] ++
-              render_checkpoint(checkpoint) ++
+              render_checkpoint(backup) ++
               Enum.map(log_lines, fn line ->
                 label(content: "     #{line}", color: :white)
               end)
@@ -119,19 +119,19 @@ defmodule GiTF.TUI.Views.Activity do
     ]
   end
 
-  defp render_orphan_bees(bees_by_quest, bee_logs, checkpoints) do
+  defp render_orphan_bees(bees_by_quest, bee_logs, backups) do
     case Map.get(bees_by_quest, nil, []) do
       [] -> []
-      ghosts -> render_bees(ghosts, bee_logs, "", checkpoints)
+      ghosts -> render_bees(ghosts, bee_logs, "", backups)
     end
   end
 
-  defp render_bees(ghosts, bee_logs, indent, checkpoints) do
+  defp render_bees(ghosts, bee_logs, indent, backups) do
     Enum.flat_map(ghosts, fn ghost ->
       ghost_id = to_s(ghost[:id])
       status = to_s(ghost[:status] || ghost[:state])
       log_lines = Map.get(bee_logs, ghost[:id], [])
-      checkpoint = Map.get(checkpoints, ghost[:id])
+      backup = Map.get(backups, ghost[:id])
 
       [
         label do
@@ -139,7 +139,7 @@ defmodule GiTF.TUI.Views.Activity do
           text(content: " [#{status}]", color: status_color(status))
         end
       ] ++
-        render_checkpoint(checkpoint) ++
+        render_checkpoint(backup) ++
         Enum.map(log_lines, fn line ->
           label(content: indent <> "  " <> line, color: :white)
         end)

@@ -56,7 +56,7 @@ defmodule GiTF.Ops.Classifier do
         :simple_fix
 
       matches_keywords?(text, ["verify", "validate", "check", "test", "confirm"]) ->
-        :verification
+        :audit
 
       matches_keywords?(text, ["refactor", "restructure", "reorganize", "clean up"]) ->
         :refactoring
@@ -166,7 +166,7 @@ defmodule GiTF.Ops.Classifier do
   defp type_reason(:planning, _text), do: "Classified as planning task"
   defp type_reason(:research, _text), do: "Classified as research/analysis task"
   defp type_reason(:summarization, _text), do: "Classified as summarization task"
-  defp type_reason(:verification, _text), do: "Classified as verification task"
+  defp type_reason(:audit, _text), do: "Classified as verification task"
   defp type_reason(:refactoring, _text), do: "Classified as refactoring task"
   defp type_reason(:simple_fix, _text), do: "Classified as bug fix"
   defp type_reason(:implementation, _text), do: "Classified as implementation task"

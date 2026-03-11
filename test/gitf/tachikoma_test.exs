@@ -9,7 +9,7 @@ defmodule GiTF.TachikomaTest do
     tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     # Ensure no tachikoma is running before each test

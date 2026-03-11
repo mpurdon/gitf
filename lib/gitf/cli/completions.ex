@@ -7,7 +7,7 @@ defmodule GiTF.CLI.Completions do
   """
 
   @command_tree %{
-    "mission" => ~w(new list plan start status show report merge close kill),
+    "mission" => ~w(new list plan start status show report sync close kill),
     "ghost" => ~w(list spawn stop context revive status),
     "sector" => ~w(add list use show remove),
     "op" => ~w(show reset kill),
@@ -16,16 +16,16 @@ defmodule GiTF.CLI.Completions do
     "costs" => ~w(summary record),
     "link_msg" => ~w(list show send),
     "shell" => ~w(list clean),
-    "handoff" => ~w(create show),
+    "transfer" => ~w(create show),
     "conflict" => ~w(check),
     "github" => ~w(pr issues sync)
   }
 
   @top_commands ~w(
-    mission ghost sector op ops plugin doctor dashboard costs status version
+    mission ghost sector op ops plugin medic dashboard costs status version
     init server queen onboard verify quality intelligence heal optimize
-    deadlock monitor accept scope prime quickref tachikoma budget watch
-    validate handoff conflict github shell link_msg completions
+    deadlock monitor accept scope brief quickref tachikoma budget watch
+    validate transfer conflict github shell link_msg completions
   )
 
   # -- Public API --------------------------------------------------------------

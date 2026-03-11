@@ -4,7 +4,7 @@ defmodule GiTF.Intelligence.Retry do
   """
 
   alias GiTF.Intelligence.FailureAnalysis
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Retry a failed op with an intelligent strategy.
@@ -115,7 +115,7 @@ defmodule GiTF.Intelligence.Retry do
 
   defp retry_with_fresh_worktree(op, analysis) do
     retry_job(op, :fresh_worktree, %{
-      note: "Merge conflict detected. Starting with fresh worktree.",
+      note: "Sync conflict detected. Starting with fresh worktree.",
       feedback: analysis[:feedback]
     })
   end
@@ -136,11 +136,11 @@ defmodule GiTF.Intelligence.Retry do
       updated_at: DateTime.utc_now()
     }
     
-    Store.insert(:ops, new_job)
+    Archive.insert(:ops, new_job)
     
     # Update original op to mark it as retried
     updated_original = Map.put(op, :retried_as, new_job.id)
-    Store.put(:ops, updated_original)
+    Archive.put(:ops, updated_original)
     
     {:ok, new_job}
   end

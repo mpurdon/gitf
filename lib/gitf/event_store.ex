@@ -2,7 +2,7 @@ defmodule GiTF.EventStore do
   @moduledoc """
   Persistent event log with replay support.
 
-  A context module (no GenServer) backed by `GiTF.Store`. Every significant
+  A context module (no GenServer) backed by `GiTF.Archive`. Every significant
   action in the system — ghost lifecycle, op transitions, mission milestones —
   is recorded as an immutable event. This provides:
 
@@ -14,7 +14,7 @@ defmodule GiTF.EventStore do
   persistence to ensure secrets never reach the event log.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @event_types [
     :bee_spawned,
@@ -35,7 +35,7 @@ defmodule GiTF.EventStore do
     :quest_completed,
     :quest_failed,
     :waggle_sent,
-    :checkpoint,
+    :backup,
     :error
   ]
 
@@ -54,7 +54,7 @@ defmodule GiTF.EventStore do
 
   ## Examples
 
-      iex> GiTF.EventStore.record(:bee_spawned, "ghost-abc123", %{model: "sonnet"})
+      iex> GiTF.EventArchive.record(:bee_spawned, "ghost-abc123", %{model: "sonnet"})
       {:ok, %{type: :bee_spawned, entity_id: "ghost-abc123", ...}}
   """
   @spec record(atom(), String.t(), map()) :: {:ok, map()} | {:error, :invalid_event_type}
@@ -82,7 +82,7 @@ defmodule GiTF.EventStore do
       timestamp: DateTime.utc_now()
     }
 
-    Store.insert(@collection, event)
+    Archive.insert(@collection, event)
   end
 
   @doc """
@@ -104,7 +104,7 @@ defmodule GiTF.EventStore do
   def list(opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
 
-    Store.all(@collection)
+    Archive.all(@collection)
     |> apply_filters(opts)
     |> Enum.sort_by(& &1.timestamp, {:desc, DateTime})
     |> Enum.take(limit)
@@ -122,7 +122,7 @@ defmodule GiTF.EventStore do
   def replay(entity_id, opts \\ []) do
     types = Keyword.get(opts, :types)
 
-    Store.all(@collection)
+    Archive.all(@collection)
     |> Enum.filter(&(&1.entity_id == entity_id))
     |> maybe_filter_since(Keyword.get(opts, :since))
     |> maybe_filter_types(types)
@@ -138,7 +138,7 @@ defmodule GiTF.EventStore do
   """
   @spec timeline(String.t()) :: [map()]
   def timeline(mission_id) do
-    Store.all(@collection)
+    Archive.all(@collection)
     |> Enum.filter(fn event ->
       get_in(event, [:metadata, :mission_id]) == mission_id or
         event.entity_id == mission_id
@@ -161,10 +161,10 @@ defmodule GiTF.EventStore do
     cutoff = DateTime.utc_now() |> DateTime.add(-days * 86_400, :second)
 
     to_delete =
-      Store.all(@collection)
+      Archive.all(@collection)
       |> Enum.filter(fn event -> DateTime.compare(event.timestamp, cutoff) == :lt end)
 
-    Enum.each(to_delete, fn event -> Store.delete(@collection, event.id) end)
+    Enum.each(to_delete, fn event -> Archive.delete(@collection, event.id) end)
 
     length(to_delete)
   end
@@ -176,7 +176,7 @@ defmodule GiTF.EventStore do
   """
   @spec count(keyword()) :: non_neg_integer()
   def count(opts \\ []) do
-    Store.all(@collection)
+    Archive.all(@collection)
     |> apply_filters(opts)
     |> length()
   end

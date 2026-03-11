@@ -2,7 +2,7 @@ defmodule GiTF.AutonomyTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Autonomy
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -10,7 +10,7 @@ defmodule GiTF.AutonomyTest do
     store_dir = Path.join(System.tmp_dir!(), "section-autonomy-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: store_dir)
+    {:ok, _} = Archive.start_link(data_dir: store_dir)
 
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
@@ -32,7 +32,7 @@ defmodule GiTF.AutonomyTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ghosts, ghost)
+      Archive.insert(:ghosts, ghost)
       
       results = Autonomy.self_heal()
       
@@ -63,7 +63,7 @@ defmodule GiTF.AutonomyTest do
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
-        Store.insert(:ops, op)
+        Archive.insert(:ops, op)
       end
       
       predictions = Autonomy.predict_issues(sector_id)
@@ -81,7 +81,7 @@ defmodule GiTF.AutonomyTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       assert Autonomy.auto_approve?(op.id) == true
     end
@@ -94,7 +94,7 @@ defmodule GiTF.AutonomyTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       assert Autonomy.auto_approve?(op.id) == false
     end

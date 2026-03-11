@@ -2,16 +2,16 @@ defmodule GiTF.CostsTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Costs
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    {:ok, ghost} = Store.insert(:ghosts, %{name: "cost-test-ghost", status: "starting"})
+    {:ok, ghost} = Archive.insert(:ghosts, %{name: "cost-test-ghost", status: "starting"})
 
     %{ghost: ghost}
   end
@@ -142,10 +142,10 @@ defmodule GiTF.CostsTest do
   describe "for_quest/1" do
     test "returns costs for ghosts working on mission ops", %{ghost: ghost} do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "cost-mission-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "cost-mission-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "cost-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
@@ -231,10 +231,10 @@ defmodule GiTF.CostsTest do
 
     test "phase op research maps to planning", %{ghost: ghost} do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "cat-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
@@ -250,7 +250,7 @@ defmodule GiTF.CostsTest do
         })
 
       # Update ghost with op_id
-      Store.put(:ghosts, Map.put(ghost, :op_id, op.id))
+      Archive.put(:ghosts, Map.put(ghost, :op_id, op.id))
 
       {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "planning"
@@ -258,10 +258,10 @@ defmodule GiTF.CostsTest do
 
     test "phase op validation maps to verification", %{ghost: ghost} do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "cat-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
@@ -276,7 +276,7 @@ defmodule GiTF.CostsTest do
           phase: "validation"
         })
 
-      Store.put(:ghosts, Map.put(ghost, :op_id, op.id))
+      Archive.put(:ghosts, Map.put(ghost, :op_id, op.id))
 
       {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "verification"
@@ -284,10 +284,10 @@ defmodule GiTF.CostsTest do
 
     test "non-phase op maps to implementation", %{ghost: ghost} do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "cat-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
@@ -301,7 +301,7 @@ defmodule GiTF.CostsTest do
           phase_job: false
         })
 
-      Store.put(:ghosts, Map.put(ghost, :op_id, op.id))
+      Archive.put(:ghosts, Map.put(ghost, :op_id, op.id))
 
       {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "implementation"

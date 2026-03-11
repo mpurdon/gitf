@@ -30,7 +30,7 @@ defmodule GiTF.Budget do
   @spec budget_for(String.t()) :: float()
   def budget_for(mission_id) do
     # Check for watchdog-escalated budget override on the mission record first
-    case GiTF.Store.get(:missions, mission_id) do
+    case GiTF.Archive.get(:missions, mission_id) do
       %{budget_override: override} when is_number(override) and override > 0 ->
         override * 1.0
 

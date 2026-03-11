@@ -1,12 +1,12 @@
-defmodule GiTF.PostReviewTest do
+defmodule GiTF.DebriefTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.PostReview
-  alias GiTF.Store
+  alias GiTF.Debrief
+  alias GiTF.Archive
   alias GiTF.Test.StoreHelper
 
   setup do
-    data_dir = Path.join(System.tmp_dir!(), "gitf_test_post_review_#{:rand.uniform(1_000_000)}")
+    data_dir = Path.join(System.tmp_dir!(), "gitf_test_debrief_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(data_dir)
     StoreHelper.restart_store!(data_dir)
 
@@ -24,7 +24,7 @@ defmodule GiTF.PostReviewTest do
 
     comb_attrs = Map.get(opts, :sector, %{})
     sector = Map.merge(%{id: sector_id, path: System.tmp_dir!(), name: "test"}, comb_attrs)
-    Store.insert(:sectors, sector)
+    Archive.insert(:sectors, sector)
 
     {:ok, mission} = GiTF.Missions.create(%{goal: goal, sector_id: sector_id})
     mission
@@ -33,7 +33,7 @@ defmodule GiTF.PostReviewTest do
   describe "start_review/1" do
     test "creates an active review record" do
       mission = create_quest()
-      {:ok, review} = PostReview.start_review(mission.id)
+      {:ok, review} = Debrief.start_review(mission.id)
 
       assert review.mission_id == mission.id
       assert review.status == "active"
@@ -42,9 +42,9 @@ defmodule GiTF.PostReviewTest do
 
     test "review appears in active_reviews" do
       mission = create_quest()
-      {:ok, _} = PostReview.start_review(mission.id)
+      {:ok, _} = Debrief.start_review(mission.id)
 
-      reviews = PostReview.active_reviews()
+      reviews = Debrief.active_reviews()
       assert length(reviews) == 1
       assert hd(reviews).mission_id == mission.id
     end
@@ -52,65 +52,65 @@ defmodule GiTF.PostReviewTest do
 
   describe "enabled?/1" do
     test "returns false when sector not found" do
-      refute PostReview.enabled?("nonexistent")
+      refute Debrief.enabled?("nonexistent")
     end
 
-    test "returns false when post_review not set" do
-      Store.insert(:sectors, %{id: "cmb_no_review", path: "/tmp", name: "no-review"})
-      refute PostReview.enabled?("cmb_no_review")
+    test "returns false when debrief not set" do
+      Archive.insert(:sectors, %{id: "cmb_no_review", path: "/tmp", name: "no-review"})
+      refute Debrief.enabled?("cmb_no_review")
     end
 
-    test "returns true when post_review is true" do
-      Store.insert(:sectors, %{id: "cmb_with_review", path: "/tmp", name: "with-review", post_review: true})
-      assert PostReview.enabled?("cmb_with_review")
+    test "returns true when debrief is true" do
+      Archive.insert(:sectors, %{id: "cmb_with_review", path: "/tmp", name: "with-review", debrief: true})
+      assert Debrief.enabled?("cmb_with_review")
     end
   end
 
   describe "close_review/1" do
     test "marks review as completed" do
       mission = create_quest()
-      {:ok, _} = PostReview.start_review(mission.id)
+      {:ok, _} = Debrief.start_review(mission.id)
 
-      assert length(PostReview.active_reviews()) == 1
+      assert length(Debrief.active_reviews()) == 1
 
-      :ok = PostReview.close_review(mission.id)
+      :ok = Debrief.close_review(mission.id)
 
-      assert length(PostReview.active_reviews()) == 0
+      assert length(Debrief.active_reviews()) == 0
     end
   end
 
   describe "expired?/1" do
     test "returns false for fresh review" do
       review = %{expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)}
-      refute PostReview.expired?(review)
+      refute Debrief.expired?(review)
     end
 
     test "returns true for expired review" do
       review = %{expires_at: DateTime.add(DateTime.utc_now(), -1, :second)}
-      assert PostReview.expired?(review)
+      assert Debrief.expired?(review)
     end
   end
 
   describe "check_regressions/1" do
     test "returns :clean when no validation command" do
       mission = create_quest()
-      {:ok, _} = PostReview.start_review(mission.id)
+      {:ok, _} = Debrief.start_review(mission.id)
 
-      assert {:ok, :clean} = PostReview.check_regressions(mission.id)
+      assert {:ok, :clean} = Debrief.check_regressions(mission.id)
     end
 
     test "returns :clean when validation passes" do
       mission = create_quest(%{sector: %{validation_command: "true"}})
-      {:ok, _} = PostReview.start_review(mission.id)
+      {:ok, _} = Debrief.start_review(mission.id)
 
-      assert {:ok, :clean} = PostReview.check_regressions(mission.id)
+      assert {:ok, :clean} = Debrief.check_regressions(mission.id)
     end
 
     test "returns :regression when validation fails" do
       mission = create_quest(%{sector: %{validation_command: "echo 'test failed' && exit 1"}})
-      {:ok, _} = PostReview.start_review(mission.id)
+      {:ok, _} = Debrief.start_review(mission.id)
 
-      assert {:ok, :regression, findings} = PostReview.check_regressions(mission.id)
+      assert {:ok, :regression, findings} = Debrief.check_regressions(mission.id)
       assert String.contains?(findings, "test failed")
     end
   end
@@ -118,15 +118,15 @@ defmodule GiTF.PostReviewTest do
   describe "handle_regression/2" do
     test "creates follow-up mission and updates review" do
       mission = create_quest()
-      {:ok, _} = PostReview.start_review(mission.id)
+      {:ok, _} = Debrief.start_review(mission.id)
 
-      {:ok, followup} = PostReview.handle_regression(mission.id, "Tests failed")
+      {:ok, followup} = Debrief.handle_regression(mission.id, "Tests failed")
 
       assert String.contains?(followup.goal, "Fix regression")
       assert followup.sector_id == mission.sector_id
 
       # Review should be updated
-      assert length(PostReview.active_reviews()) == 0
+      assert length(Debrief.active_reviews()) == 0
     end
   end
 

@@ -9,7 +9,7 @@ defmodule GiTF.QuickStartTest do
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
     :ok
   end

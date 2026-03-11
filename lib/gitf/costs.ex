@@ -6,7 +6,7 @@ defmodule GiTF.Costs do
   provides aggregation queries for reporting.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @default_model "google:gemini-2.5-flash"
 
@@ -42,7 +42,7 @@ defmodule GiTF.Costs do
       recorded_at: attrs[:recorded_at]
     }
 
-    {:ok, cost} = Store.insert(:costs, record)
+    {:ok, cost} = Archive.insert(:costs, record)
     broadcast_cost_update(cost)
 
     GiTF.Telemetry.emit([:gitf, :token, :consumed], %{
@@ -60,7 +60,7 @@ defmodule GiTF.Costs do
   @doc "Returns all cost records for a given ghost."
   @spec for_bee(String.t()) :: [map()]
   def for_bee(ghost_id) do
-    Store.filter(:costs, fn c -> c.ghost_id == ghost_id end)
+    Archive.filter(:costs, fn c -> c.ghost_id == ghost_id end)
     |> Enum.sort_by(& &1.recorded_at, {:desc, DateTime})
   end
 
@@ -80,7 +80,7 @@ defmodule GiTF.Costs do
         []
 
       ids ->
-        Store.filter(:costs, fn c -> c.ghost_id in ids end)
+        Archive.filter(:costs, fn c -> c.ghost_id in ids end)
         |> Enum.sort_by(& &1.recorded_at, {:desc, DateTime})
     end
   end
@@ -98,7 +98,7 @@ defmodule GiTF.Costs do
   """
   @spec summary() :: map()
   def summary do
-    costs = Store.all(:costs)
+    costs = Archive.all(:costs)
 
     %{
       total_cost: total(costs),

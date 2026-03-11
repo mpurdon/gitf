@@ -2,13 +2,13 @@ defmodule GiTF.ConflictTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Conflict
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     # Create a temporary git repo for testing
@@ -25,13 +25,13 @@ defmodule GiTF.ConflictTest do
     System.cmd("git", ["commit", "-m", "initial"], cd: tmp_dir)
 
     {:ok, sector} =
-      Store.insert(:sectors, %{
+      Archive.insert(:sectors, %{
         name: "conflict-sector-#{:erlang.unique_integer([:positive])}",
         path: tmp_dir
       })
 
     {:ok, ghost} =
-      Store.insert(:ghosts, %{
+      Archive.insert(:ghosts, %{
         name: "conflict-ghost-#{:erlang.unique_integer([:positive])}",
         status: "starting"
       })
@@ -51,7 +51,7 @@ defmodule GiTF.ConflictTest do
       System.cmd("git", ["checkout", "main"], cd: tmp_dir)
 
       {:ok, shell} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: ghost.id,
           branch: "test-branch",
@@ -78,9 +78,9 @@ defmodule GiTF.ConflictTest do
       assert {:error, :cell_not_found} = Conflict.resolve("cel-nonexistent", :rebase)
     end
 
-    test "defer strategy marks shell for manual merge", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
+    test "defer strategy marks shell for manual sync", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
       {:ok, shell} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: ghost.id,
           branch: "test-branch",
@@ -90,8 +90,8 @@ defmodule GiTF.ConflictTest do
 
       assert {:ok, :resolved} = Conflict.resolve(shell.id, :defer)
 
-      # Verify shell was marked for manual merge
-      updated_cell = Store.get(:shells, shell.id)
+      # Verify shell was marked for manual sync
+      updated_cell = Archive.get(:shells, shell.id)
       assert updated_cell.needs_manual_merge == true
     end
 
@@ -103,7 +103,7 @@ defmodule GiTF.ConflictTest do
       System.cmd("git", ["commit", "-m", "add feature"], cd: tmp_dir)
 
       {:ok, shell} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: ghost.id,
           branch: "feature-branch",
@@ -130,11 +130,11 @@ defmodule GiTF.ConflictTest do
       System.cmd("git", ["commit", "-m", "add file_b"], cd: tmp_dir)
       System.cmd("git", ["checkout", "main"], cd: tmp_dir)
 
-      {:ok, bee_a} = Store.insert(:ghosts, %{name: "ghost-a", status: "working"})
-      {:ok, bee_b} = Store.insert(:ghosts, %{name: "ghost-b", status: "working"})
+      {:ok, bee_a} = Archive.insert(:ghosts, %{name: "ghost-a", status: "working"})
+      {:ok, bee_b} = Archive.insert(:ghosts, %{name: "ghost-b", status: "working"})
 
       {:ok, cell_a} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: bee_a.id,
           branch: "branch-a",
@@ -143,7 +143,7 @@ defmodule GiTF.ConflictTest do
         })
 
       {:ok, cell_b} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: bee_b.id,
           branch: "branch-b",
@@ -168,11 +168,11 @@ defmodule GiTF.ConflictTest do
       System.cmd("git", ["commit", "-m", "modify readme d"], cd: tmp_dir)
       System.cmd("git", ["checkout", "main"], cd: tmp_dir)
 
-      {:ok, bee_c} = Store.insert(:ghosts, %{name: "ghost-c", status: "working"})
-      {:ok, bee_d} = Store.insert(:ghosts, %{name: "ghost-d", status: "working"})
+      {:ok, bee_c} = Archive.insert(:ghosts, %{name: "ghost-c", status: "working"})
+      {:ok, bee_d} = Archive.insert(:ghosts, %{name: "ghost-d", status: "working"})
 
       {:ok, cell_c} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: bee_c.id,
           branch: "branch-c",
@@ -181,7 +181,7 @@ defmodule GiTF.ConflictTest do
         })
 
       {:ok, cell_d} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: bee_d.id,
           branch: "branch-d",

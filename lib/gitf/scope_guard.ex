@@ -4,12 +4,12 @@ defmodule GiTF.ScopeGuard do
   Ensures ghosts stay focused on the stated goal.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc "Check if op stays within scope"
   def check_scope(op_id) do
-    op = Store.get(:ops, op_id)
-    mission = Store.get(:missions, op.mission_id)
+    op = Archive.get(:ops, op_id)
+    mission = Archive.get(:missions, op.mission_id)
     
     %{
       in_scope: within_scope?(op, mission),
@@ -20,8 +20,8 @@ defmodule GiTF.ScopeGuard do
 
   @doc "Detect scope creep in mission"
   def check_quest_scope(mission_id) do
-    mission = Store.get(:missions, mission_id)
-    ops = Store.all(:ops) |> Enum.filter(&(&1.mission_id == mission_id))
+    mission = Archive.get(:missions, mission_id)
+    ops = Archive.all(:ops) |> Enum.filter(&(&1.mission_id == mission_id))
     
     %{
       total_jobs: length(ops),

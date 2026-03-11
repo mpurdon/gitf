@@ -45,7 +45,7 @@ defmodule GiTF.E2E.ConcurrentBeesTest do
 
     await(
       fn ->
-        all_waggles = GiTF.Store.all(:links)
+        all_waggles = GiTF.Archive.all(:links)
         bee_waggles = Enum.filter(all_waggles, &(&1.from in ghost_ids))
         length(bee_waggles) >= 3
       end,

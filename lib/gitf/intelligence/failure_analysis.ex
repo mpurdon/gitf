@@ -3,7 +3,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
   Analyzes op failures to identify patterns and suggest fixes.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Analyze a failed op and classify the failure.
@@ -29,7 +29,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
         analyzed_at: DateTime.utc_now()
       }
       
-      Store.insert(:failure_analyses, analysis)
+      Archive.insert(:failure_analyses, analysis)
       {:ok, analysis}
     else
       _ -> {:error, :not_failed_job}
@@ -40,7 +40,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
   Get failure patterns for a sector.
   """
   def get_failure_patterns(sector_id) do
-    ops = Store.filter(:ops, &(&1.sector_id == sector_id and &1.status == "failed"))
+    ops = Archive.filter(:ops, &(&1.sector_id == sector_id and &1.status == "failed"))
     
     analyses = ops
     |> Enum.map(&get_analysis(&1.id))
@@ -76,7 +76,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
       learned_at: DateTime.utc_now()
     }
     
-    Store.insert(:failure_learnings, learning)
+    Archive.insert(:failure_learnings, learning)
     {:ok, learning}
   end
 
@@ -84,7 +84,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
 
   defp classify_failure(op, feedback) do
     error_msg = Map.get(op, :error_message, "")
-    output = Map.get(op, :verification_result, "")
+    output = Map.get(op, :audit_result, "")
     combined = Enum.join([error_msg, output, feedback || ""], " ")
 
     cond do
@@ -95,7 +95,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
       String.contains?(combined, "validation") -> :validation_failure
       String.contains?(combined, "quality") -> :quality_gate_failure
       String.contains?(combined, "security") -> :security_gate_failure
-      String.contains?(combined, "merge") -> :merge_conflict
+      String.contains?(combined, "sync") -> :merge_conflict
       true -> :unknown
     end
   end
@@ -125,7 +125,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
   end
 
   defp extract_test_failure(op) do
-    output = Map.get(op, :verification_result, "")
+    output = Map.get(op, :audit_result, "")
     
     # Try to extract test name
     case Regex.run(~r/\d+\) test (.+)/, output) do
@@ -135,7 +135,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
   end
 
   defp find_similar_failures(op, failure_type) do
-    Store.filter(:ops, fn j ->
+    Archive.filter(:ops, fn j ->
       j.sector_id == op.sector_id and
       j.status == "failed" and
       j.id != op.id
@@ -158,7 +158,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
         ["Review test expectations", "Check test data", "Verify logic"]
       
       :context_overflow ->
-        ["Create handoff", "Simplify op scope", "Use more focused context"]
+        ["Create transfer", "Simplify op scope", "Use more focused context"]
       
       :validation_failure ->
         ["Fix validation errors", "Update validation command", "Review changes"]
@@ -196,7 +196,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
   end
 
   defp get_analysis(op_id) do
-    Store.all(:failure_analyses)
+    Archive.all(:failure_analyses)
     |> Enum.find(&(&1.op_id == op_id))
   end
 

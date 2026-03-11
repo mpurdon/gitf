@@ -7,7 +7,7 @@ defmodule GiTF.Link do
   via PubSub for real-time subscribers.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @pubsub GiTF.PubSub
 
@@ -31,7 +31,7 @@ defmodule GiTF.Link do
       metadata: metadata
     }
 
-    {:ok, link_msg} = Store.insert(:links, record)
+    {:ok, link_msg} = Archive.insert(:links, record)
     broadcast(to, {:waggle_received, link_msg})
 
     GiTF.Telemetry.emit([:gitf, :link_msg, :sent], %{}, %{
@@ -57,7 +57,7 @@ defmodule GiTF.Link do
   def list(opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
 
-    links = Store.all(:links)
+    links = Archive.all(:links)
 
     links =
       case Keyword.get(opts, :to) do
@@ -97,25 +97,25 @@ defmodule GiTF.Link do
   """
   @spec mark_read(String.t()) :: {:ok, map()} | {:error, :not_found}
   def mark_read(waggle_id) do
-    case Store.get(:links, waggle_id) do
+    case Archive.get(:links, waggle_id) do
       nil ->
         {:error, :not_found}
 
       link_msg ->
         updated = %{link_msg | read: true}
-        Store.put(:links, updated)
+        Archive.put(:links, updated)
     end
   end
 
   @doc """
-  Sends a checkpoint link_msg from a ghost, reporting progress.
+  Sends a backup link_msg from a ghost, reporting progress.
 
-  The body contains checkpoint data: phase, files_changed, progress_pct.
+  The body contains backup data: phase, files_changed, progress_pct.
   """
   @spec send_checkpoint(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def send_checkpoint(ghost_id, %{} = data) do
     body = Jason.encode!(data)
-    __MODULE__.send(ghost_id, "major", "checkpoint", body)
+    __MODULE__.send(ghost_id, "major", "backup", body)
   end
 
   @doc """

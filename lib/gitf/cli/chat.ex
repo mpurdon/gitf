@@ -792,7 +792,7 @@ defmodule GiTF.CLI.Chat do
   defp build_codebase_context(mission) do
     sector_id = Map.get(mission, :sector_id)
 
-    case sector_id && GiTF.Store.get(:sectors, sector_id) do
+    case sector_id && GiTF.Archive.get(:sectors, sector_id) do
       nil ->
         "No codebase context available."
 

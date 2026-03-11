@@ -4,7 +4,7 @@ defmodule GiTF.AgentIdentity do
   and struggles with. Survives across missions.
 
   This is a pure context module -- no GenServer, no state, just data
-  transformations against the Store. Fed by `GiTF.Tachikoma.Scoring` data,
+  transformations against the Archive. Fed by `GiTF.Tachikoma.Scoring` data,
   consumed by `GiTF.Runtime.ModelSelector` for informed model selection.
 
   Each identity is a living CV for a model: total ops worked, pass rates
@@ -12,7 +12,7 @@ defmodule GiTF.AgentIdentity do
   and a rolling window of recent op summaries.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @collection :agent_identities
   @max_recent_jobs 20
@@ -28,7 +28,7 @@ defmodule GiTF.AgentIdentity do
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(model) when is_binary(model) do
-    case Store.find_one(@collection, &(&1.model == model)) do
+    case Archive.find_one(@collection, &(&1.model == model)) do
       nil -> {:error, :not_found}
       identity -> {:ok, identity}
     end
@@ -41,7 +41,7 @@ defmodule GiTF.AgentIdentity do
   def get_or_create(model) when is_binary(model) do
     case get(model) do
       {:ok, identity} -> {:ok, identity}
-      {:error, :not_found} -> Store.insert(@collection, new_identity(model))
+      {:error, :not_found} -> Archive.insert(@collection, new_identity(model))
     end
   end
 
@@ -63,7 +63,7 @@ defmodule GiTF.AgentIdentity do
     |> update_op_type_stats(score)
     |> append_recent_job(score)
     |> Map.put(:last_updated, DateTime.utc_now() |> DateTime.truncate(:second))
-    |> then(&Store.put(@collection, &1))
+    |> then(&Archive.put(@collection, &1))
   end
 
   @doc """
@@ -113,7 +113,7 @@ defmodule GiTF.AgentIdentity do
   """
   @spec list() :: [map()]
   def list do
-    Store.all(@collection)
+    Archive.all(@collection)
     |> Enum.sort_by(& &1.total_jobs, :desc)
   end
 

@@ -7,7 +7,7 @@ defmodule GiTF.Observability.Metrics do
   still available via `collect_metrics/0`.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @table :gitf_metrics_ring
   @max_points 1000
@@ -163,7 +163,7 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp system_metrics do
-    ghosts = Store.all(:ghosts)
+    ghosts = Archive.all(:ghosts)
     workers = Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
 
     %{
@@ -174,7 +174,7 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp quest_metrics do
-    missions = Store.all(:missions)
+    missions = Archive.all(:missions)
 
     %{
       total: length(missions),
@@ -185,7 +185,7 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp job_metrics do
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
 
     %{
       total: length(ops),
@@ -197,7 +197,7 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp bee_metrics do
-    ghosts = Store.all(:ghosts)
+    ghosts = Archive.all(:ghosts)
 
     %{
       total: length(ghosts),
@@ -208,7 +208,7 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp quality_metrics do
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
     scores = Enum.map(ops, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
 
     %{
@@ -218,7 +218,7 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp cost_metrics do
-    costs = Store.all(:costs)
+    costs = Archive.all(:costs)
 
     %{
       total: Enum.sum(Enum.map(costs, &Map.get(&1, :cost_usd, 0.0))),

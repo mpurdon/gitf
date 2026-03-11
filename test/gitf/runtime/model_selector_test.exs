@@ -15,7 +15,7 @@ defmodule GiTF.Runtime.ModelSelectorTest do
     end
 
     test "selects haiku for verification tasks" do
-      assert ModelSelector.select_model_for_job(:verification, :simple) == "haiku"
+      assert ModelSelector.select_model_for_job(:audit, :simple) == "haiku"
     end
 
     test "selects haiku for summarization tasks" do

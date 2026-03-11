@@ -114,7 +114,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                                 <th>Job ID</th>
                                 <th>Title</th>
                                 <th>Status</th>
-                                <th>Verification</th>
+                                <th>Audit</th>
                                 <th>Bee ID</th>
                               </tr>
                             </thead>

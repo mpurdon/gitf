@@ -2,13 +2,13 @@ defmodule GiTF.Intelligence.RetryTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Intelligence.Retry
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-retry-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -24,7 +24,7 @@ defmodule GiTF.Intelligence.RetryTest do
       assert Retry.recommend_strategy(:compilation_error) == :different_model
     end
 
-    test "recommends handoff for context overflow" do
+    test "recommends transfer for context overflow" do
       assert Retry.recommend_strategy(:context_overflow) == :create_handoff
     end
   end
@@ -42,7 +42,7 @@ defmodule GiTF.Intelligence.RetryTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       {:ok, new_job} = Retry.retry_with_strategy(op.id)
       
@@ -51,7 +51,7 @@ defmodule GiTF.Intelligence.RetryTest do
       assert is_atom(new_job.retry_strategy)
       
       # Original op should be marked as retried
-      original = Store.get(:ops, op.id)
+      original = Archive.get(:ops, op.id)
       assert original.retried_as == new_job.id
     end
   end

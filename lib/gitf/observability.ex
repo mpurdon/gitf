@@ -70,8 +70,8 @@ defmodule GiTF.Observability do
       Alerts.notify(alerts)
     end
 
-    # Run Doctor checks and emit health status (with auto-fix enabled)
-    health_results = GiTF.Doctor.run_all(fix: true)
+    # Run Medic checks and emit health status (with auto-fix enabled)
+    health_results = GiTF.Medic.run_all(fix: true)
     overall_status = 
       if Enum.any?(health_results, &(&1.status == :error)), do: :error, 
       else: (if Enum.any?(health_results, &(&1.status == :warn)), do: :warn, else: :ok)

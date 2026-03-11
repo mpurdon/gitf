@@ -22,12 +22,12 @@ defmodule GiTF.Runtime.SettingsTest do
       assert Map.has_key?(hooks, "Stop")
     end
 
-    test "SessionStart hook runs section prime with the ghost ID" do
+    test "SessionStart hook runs section brief with the ghost ID" do
       settings = Settings.build_settings("ghost-abc123", "/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["SessionStart"]
       assert hook["type"] == "command"
-      assert hook["command"] =~ "prime --ghost ghost-abc123"
+      assert hook["command"] =~ "brief --ghost ghost-abc123"
     end
 
     test "Stop hook runs section costs record with the ghost ID" do
@@ -74,12 +74,12 @@ defmodule GiTF.Runtime.SettingsTest do
       refute "Edit" in tools
     end
 
-    test "SessionStart hook runs section prime --queen" do
+    test "SessionStart hook runs section brief --queen" do
       settings = Settings.build_major_settings("/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["SessionStart"]
       assert hook["type"] == "command"
-      assert hook["command"] =~ "prime --queen"
+      assert hook["command"] =~ "brief --queen"
     end
 
     test "Stop hook runs section costs record --queen" do

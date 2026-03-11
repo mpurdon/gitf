@@ -13,11 +13,11 @@ defmodule GiTF.Dashboard.SmokeTest do
   setup_all do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    # Ensure Store is running
-    unless Process.whereis(GiTF.Store) do
+    # Ensure Archive is running
+    unless Process.whereis(GiTF.Archive) do
       tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(tmp_dir)
-      GiTF.Store.start_link(data_dir: tmp_dir)
+      GiTF.Archive.start_link(data_dir: tmp_dir)
     end
 
     # Ensure the Dashboard.Endpoint has required config

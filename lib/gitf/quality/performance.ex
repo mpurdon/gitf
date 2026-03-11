@@ -49,7 +49,7 @@ defmodule GiTF.Quality.Performance do
       System.cmd("sh", ["-c", command], cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @benchmark_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @benchmark_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, 0}} ->
         end_time = System.monotonic_time(:millisecond)
         duration = end_time - start_time

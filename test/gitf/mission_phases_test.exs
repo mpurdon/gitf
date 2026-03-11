@@ -1,7 +1,7 @@
 defmodule GiTF.QuestPhasesTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.Missions
 
   setup do
@@ -9,7 +9,7 @@ defmodule GiTF.QuestPhasesTest do
     tmp_dir = System.tmp_dir!() |> Path.join("mission_phases_test_#{:rand.uniform(1000000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: tmp_dir})
+    start_supervised!({Archive, data_dir: tmp_dir})
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok
   end
@@ -79,7 +79,7 @@ defmodule GiTF.QuestPhasesTest do
         status: "pending"
       }
       
-      {:ok, mission} = Store.insert(:missions, quest_record)
+      {:ok, mission} = Archive.insert(:missions, quest_record)
       
       # Manually run migration 3 on this mission
       updated =
@@ -88,10 +88,10 @@ defmodule GiTF.QuestPhasesTest do
         |> Map.put_new(:research_summary, nil)
         |> Map.put_new(:implementation_plan, nil)
       
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
       
       # Verify mission now has phase fields
-      updated_quest = Store.get(:missions, mission.id)
+      updated_quest = Archive.get(:missions, mission.id)
       assert updated_quest.current_phase == "pending"
       assert updated_quest.research_summary == nil
       assert updated_quest.implementation_plan == nil

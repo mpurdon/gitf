@@ -45,7 +45,7 @@ defmodule GiTF.Application do
     children = [
       # PubSub MUST be first — everything else depends on it
       {Phoenix.PubSub, name: GiTF.PubSub},
-      {GiTF.Store, data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!, ".gitf/store"))},
+      {GiTF.Archive, data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!, ".gitf/store"))},
       {Registry, keys: :unique, name: GiTF.Registry},
       {GiTF.RateLimiter, name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
       # The Major is the brain of the factory - starts automatically now
@@ -61,7 +61,7 @@ defmodule GiTF.Application do
       {GiTF.Runtime.GeminiCacheManager, []},
       # ViewModel starts after PubSub; subscribes in handle_continue
       {GiTF.ViewModel, []},
-      {GiTF.Shutdown, []}
+      {GiTF.Exfil, []}
     ] ++ optional_children()
 
     opts = [strategy: :one_for_one, name: GiTF.Supervisor]
@@ -97,7 +97,7 @@ defmodule GiTF.Application do
   end
 
   # Background monitoring processes — skip in test to avoid conflicts
-  # with tests that restart Store or other supervised components.
+  # with tests that restart Archive or other supervised components.
   defp optional_children do
     if function_exported?(Mix, :env, 0) and Mix.env() == :test do
       []
@@ -105,7 +105,7 @@ defmodule GiTF.Application do
       [
         {GiTF.Observability, []},
         {GiTF.Tachikoma, []},
-        {GiTF.Merge.Queue, []}
+        {GiTF.Sync.Queue, []}
       ]
     end
   end

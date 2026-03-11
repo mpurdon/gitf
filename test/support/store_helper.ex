@@ -2,31 +2,31 @@ defmodule GiTF.Test.StoreHelper do
   @moduledoc """
   Helpers for restarting GenServers in tests.
 
-  The application starts GiTF.Store, GiTF.Major, GiTF.Tachikoma, etc. automatically.
+  The application starts GiTF.Archive, GiTF.Major, GiTF.Tachikoma, etc. automatically.
   Tests that need isolated instances must stop the existing ones first.
   """
 
   @doc """
-  Stops any running GiTF.Store and starts a fresh one with the given data_dir.
+  Stops any running GiTF.Archive and starts a fresh one with the given data_dir.
   Returns `{:ok, pid}`.
   """
   def restart_store!(data_dir) do
     stop_store()
-    GiTF.Store.start_link(data_dir: data_dir)
+    GiTF.Archive.start_link(data_dir: data_dir)
   end
 
-  @doc "Stops the currently running GiTF.Store, if any."
+  @doc "Stops the currently running GiTF.Archive, if any."
   def stop_store do
     # First try to terminate and remove from the supervisor to prevent auto-restart
     try do
-      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Store)
-      Supervisor.delete_child(GiTF.Supervisor, GiTF.Store)
+      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Archive)
+      Supervisor.delete_child(GiTF.Supervisor, GiTF.Archive)
     catch
       :exit, _ -> :ok
     end
 
     # Also try direct stop in case it was started outside the supervisor
-    safe_stop(GiTF.Store)
+    safe_stop(GiTF.Archive)
 
     # Brief pause to ensure the process is fully down
     Process.sleep(10)

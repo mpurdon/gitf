@@ -6,7 +6,7 @@ defmodule GiTF.Intelligence do
   alias GiTF.Intelligence.FailureAnalysis
   alias GiTF.Intelligence.Retry
   alias GiTF.Intelligence.SuccessPatterns
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Analyze a failed op and suggest retry strategy.
@@ -57,7 +57,7 @@ defmodule GiTF.Intelligence do
   def get_insights(sector_id) do
     patterns = FailureAnalysis.get_failure_patterns(sector_id)
     
-    ops = Store.filter(:ops, &(&1.sector_id == sector_id))
+    ops = Archive.filter(:ops, &(&1.sector_id == sector_id))
     total = length(ops)
     failed = Enum.count(ops, &(&1.status == "failed"))
     success_rate = if total > 0, do: (total - failed) / total * 100, else: 0

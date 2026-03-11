@@ -27,7 +27,7 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
     # may spawn Claude for diff assessment (up to 60s timeout), so be very generous
     await(
       fn ->
-        links = GiTF.Store.all(:links)
+        links = GiTF.Archive.all(:links)
         Enum.any?(links, &(&1.from == bee1.id))
       end,
       timeout: 15_000
@@ -67,7 +67,7 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
     # Wait for any link_msg from the ghost.
     await(
       fn ->
-        links = GiTF.Store.all(:links)
+        links = GiTF.Archive.all(:links)
         Enum.any?(links, &(&1.from == bee1.id))
       end,
       timeout: 15_000
@@ -76,7 +76,7 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
     # If job_complete link_msg was sent, Major auto-advances the mission.
     # If validation_failed link_msg was sent, Major treats it as failure.
     # Check which link_msg was sent and verify accordingly.
-    links = GiTF.Store.filter(:links, fn w -> w.from == bee1.id end)
+    links = GiTF.Archive.filter(:links, fn w -> w.from == bee1.id end)
     link_msg = hd(links)
 
     case link_msg.subject do

@@ -3,7 +3,7 @@ defmodule GiTF.Quality do
   Quality assurance system for code analysis and scoring.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.Quality.StaticAnalysis
   alias GiTF.Quality.Security
   alias GiTF.Quality.Performance
@@ -29,7 +29,7 @@ defmodule GiTF.Quality do
       updated_at: DateTime.utc_now()
     }
 
-    Store.insert(:quality_reports, report)
+    Archive.insert(:quality_reports, report)
     {:ok, report}
   rescue
     e ->
@@ -57,7 +57,7 @@ defmodule GiTF.Quality do
       updated_at: DateTime.utc_now()
     }
 
-    Store.insert(:quality_reports, report)
+    Archive.insert(:quality_reports, report)
     {:ok, report}
   rescue
     e ->
@@ -96,7 +96,7 @@ defmodule GiTF.Quality do
           updated_at: DateTime.utc_now()
         }
 
-        Store.insert(:quality_reports, report)
+        Archive.insert(:quality_reports, report)
         {:ok, report}
 
       {:error, reason} ->
@@ -116,14 +116,14 @@ defmodule GiTF.Quality do
       created_at: DateTime.utc_now()
     }
     
-    Store.insert(:performance_baselines, baseline)
+    Archive.insert(:performance_baselines, baseline)
   end
 
   @doc """
   Get performance baseline for a sector.
   """
   def get_performance_baseline(sector_id) do
-    Store.all(:performance_baselines)
+    Archive.all(:performance_baselines)
     |> Enum.filter(&(&1.sector_id == sector_id))
     |> Enum.sort_by(& &1.created_at, {:desc, DateTime})
     |> List.first()
@@ -133,7 +133,7 @@ defmodule GiTF.Quality do
   Get all quality reports for a op.
   """
   def get_reports(op_id) do
-    Store.all(:quality_reports)
+    Archive.all(:quality_reports)
     |> Enum.filter(&(&1.op_id == op_id))
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
   end
@@ -211,7 +211,7 @@ defmodule GiTF.Quality do
   Returns default thresholds if not configured.
   """
   def get_thresholds(sector_id) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil ->
         default_thresholds()
       
@@ -224,13 +224,13 @@ defmodule GiTF.Quality do
   Set quality thresholds for a sector.
   """
   def set_thresholds(sector_id, thresholds) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil ->
         {:error, :comb_not_found}
       
       sector ->
         updated = Map.put(sector, :quality_thresholds, thresholds)
-        Store.put(:sectors, updated)
+        Archive.put(:sectors, updated)
         {:ok, updated}
     end
   end
@@ -241,7 +241,7 @@ defmodule GiTF.Quality do
   """
   def get_quality_trends(sector_id, limit \\ 10) do
     # Get all ops for this sector
-    ops = Store.filter(:ops, &(&1.sector_id == sector_id and &1.status == "done"))
+    ops = Archive.filter(:ops, &(&1.sector_id == sector_id and &1.status == "done"))
     
     # Calculate scores and sort by completion time
     ops

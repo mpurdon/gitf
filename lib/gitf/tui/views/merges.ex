@@ -1,11 +1,11 @@
-defmodule GiTF.TUI.Views.Merges do
-  @moduledoc "Renders the merge queue view."
+defmodule GiTF.TUI.Views.Syncs do
+  @moduledoc "Renders the sync queue view."
   import Ratatouille.View
 
   def render(model) do
-    mq = model[:merge_queue] || %{pending: [], active: nil, completed: []}
+    mq = model[:sync_queue] || %{pending: [], active: nil, completed: []}
 
-    panel title: "Merges [F4]", height: :fill do
+    panel title: "Syncs [F4]", height: :fill do
       # Active
       [label(content: "ACTIVE", color: :white, attributes: [:bold])] ++
         render_active(mq[:active]) ++

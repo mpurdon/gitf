@@ -200,13 +200,13 @@ defmodule GiTF.Git do
     end
   end
 
-  @doc "Merges a branch into the current branch."
-  @spec merge(String.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
-  def merge(repo_path, branch, opts \\ []) do
+  @doc "Syncs a branch into the current branch."
+  @spec sync(String.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  def sync(repo_path, branch, opts \\ []) do
     args =
       if Keyword.get(opts, :no_ff, false),
-        do: ["merge", "--no-ff", branch],
-        else: ["merge", branch]
+        do: ["sync", "--no-ff", branch],
+        else: ["sync", branch]
 
     case safe_cmd( args, cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> :ok
@@ -302,7 +302,7 @@ defmodule GiTF.Git do
   def safe_cmd(args, opts \\ []) do
     task = Task.async(fn -> System.cmd("git", args, opts) end)
 
-    case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @git_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, result} -> result
       nil -> {"git command timed out after #{div(@git_timeout_ms, 1000)}s", 1}
     end

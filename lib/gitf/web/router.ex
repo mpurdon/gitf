@@ -46,7 +46,7 @@ defmodule GiTF.Web.Router do
     get "/missions/:id/status", ApiController, :quest_status
     post "/missions/:id/plan", ApiController, :plan_quest
     get "/missions/:id/report", ApiController, :quest_report
-    post "/missions/:id/merge", ApiController, :quest_merge
+    post "/missions/:id/sync", ApiController, :quest_merge
     get "/missions/:id/spec/:phase", ApiController, :quest_spec_show
     put "/missions/:id/spec/:phase", ApiController, :quest_spec_write
     post "/missions/:id/plan/confirm", ApiController, :confirm_plan

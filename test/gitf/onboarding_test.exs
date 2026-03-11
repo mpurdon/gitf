@@ -1,6 +1,6 @@
 defmodule GiTF.OnboardingTest do
   use ExUnit.Case, async: false
-  alias GiTF.{Onboarding, Store}
+  alias GiTF.{Onboarding, Archive}
 
   setup do
     tmp_dir = System.tmp_dir!() |> Path.join("gitf_onboarding_test_#{:rand.uniform(1000000)}")
@@ -18,11 +18,11 @@ defmodule GiTF.OnboardingTest do
     System.cmd("git", ["config", "user.email", "test@example.com"], cd: project_dir)
     System.cmd("git", ["config", "user.name", "Test User"], cd: project_dir)
     
-    # Start Store
+    # Start Archive
     store_dir = Path.join(tmp_dir, "store")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     {:ok, project_dir: project_dir}
@@ -81,9 +81,9 @@ defmodule GiTF.OnboardingTest do
     assert reason =~ "not a git repository"
   end
 
-  test "suggests merge strategy based on project type", %{project_dir: project_dir} do
+  test "suggests sync strategy based on project type", %{project_dir: project_dir} do
     # Library project should suggest pr_branch
     {:ok, result} = Onboarding.onboard(project_dir, skip_research: true)
-    assert result.sector.merge_strategy == :pr_branch
+    assert result.sector.sync_strategy == :pr_branch
   end
 end

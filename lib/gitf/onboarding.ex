@@ -77,7 +77,7 @@ defmodule GiTF.Onboarding do
     comb_opts = [
       name: name,
       validation_command: validation_cmd,
-      merge_strategy: suggest_merge_strategy(project_info)
+      sync_strategy: suggest_sync_strategy(project_info)
     ]
     
     case Comb.add(path, comb_opts) do
@@ -86,9 +86,9 @@ defmodule GiTF.Onboarding do
     end
   end
 
-  defp suggest_merge_strategy(%{project_type: :library}), do: :pr_branch
-  defp suggest_merge_strategy(%{test_framework: nil}), do: :manual
-  defp suggest_merge_strategy(_), do: :auto_merge
+  defp suggest_sync_strategy(%{project_type: :library}), do: :pr_branch
+  defp suggest_sync_strategy(%{test_framework: nil}), do: :manual
+  defp suggest_sync_strategy(_), do: :auto_merge
 
   defp maybe_generate_research(_comb, _opts) do
     {:ok, :skipped}
@@ -107,7 +107,7 @@ defmodule GiTF.Onboarding do
         suggestions: %{
           name: Path.basename(full_path),
           validation_command: project_info.validation_command,
-          merge_strategy: suggest_merge_strategy(project_info)
+          sync_strategy: suggest_sync_strategy(project_info)
         }
       }}
     end

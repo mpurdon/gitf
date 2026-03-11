@@ -8,10 +8,10 @@ defmodule GiTF.Run do
   can trigger mission completion or the next phase automatically.
 
   This is a pure context module: no process state, just data transformations
-  against the Store.
+  against the Archive.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Public API --------------------------------------------------------------
 
@@ -36,7 +36,7 @@ defmodule GiTF.Run do
       failed_jobs: 0
     }
 
-    Store.insert(:runs, record)
+    Archive.insert(:runs, record)
   end
 
   @doc """
@@ -46,13 +46,13 @@ defmodule GiTF.Run do
   """
   @spec add_bee(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
   def add_bee(run_id, ghost_id) do
-    case Store.get(:runs, run_id) do
+    case Archive.get(:runs, run_id) do
       nil ->
         {:error, :not_found}
 
       run ->
         updated = %{run | ghost_ids: Enum.uniq([ghost_id | run.ghost_ids])}
-        Store.put(:runs, updated)
+        Archive.put(:runs, updated)
     end
   end
 
@@ -63,7 +63,7 @@ defmodule GiTF.Run do
   """
   @spec add_job(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
   def add_job(run_id, op_id) do
-    case Store.get(:runs, run_id) do
+    case Archive.get(:runs, run_id) do
       nil ->
         {:error, :not_found}
 
@@ -74,7 +74,7 @@ defmodule GiTF.Run do
             total_jobs: run.total_jobs + 1
         }
 
-        Store.put(:runs, updated)
+        Archive.put(:runs, updated)
     end
   end
 
@@ -89,7 +89,7 @@ defmodule GiTF.Run do
           {:ok, map()} | {:ok, map(), :run_complete} | {:error, :not_found}
   def job_completed(run_id, _op_id) do
     # Atomic increment via update_matching to prevent race on concurrent completions
-    count = Store.update_matching(
+    count = Archive.update_matching(
       :runs,
       fn r -> r.id == run_id end,
       fn r -> %{r | completed_jobs: r.completed_jobs + 1} end
@@ -98,7 +98,7 @@ defmodule GiTF.Run do
     if count == 0 do
       {:error, :not_found}
     else
-      case Store.get(:runs, run_id) do
+      case Archive.get(:runs, run_id) do
         nil -> {:error, :not_found}
         run -> maybe_finish_check(run)
       end
@@ -113,7 +113,7 @@ defmodule GiTF.Run do
   @spec job_failed(String.t(), String.t()) ::
           {:ok, map()} | {:ok, map(), :run_complete} | {:error, :not_found}
   def job_failed(run_id, _op_id) do
-    count = Store.update_matching(
+    count = Archive.update_matching(
       :runs,
       fn r -> r.id == run_id end,
       fn r -> %{r | failed_jobs: r.failed_jobs + 1} end
@@ -122,7 +122,7 @@ defmodule GiTF.Run do
     if count == 0 do
       {:error, :not_found}
     else
-      case Store.get(:runs, run_id) do
+      case Archive.get(:runs, run_id) do
         nil -> {:error, :not_found}
         run -> maybe_finish_check(run)
       end
@@ -136,7 +136,7 @@ defmodule GiTF.Run do
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(run_id) do
-    Store.fetch(:runs, run_id)
+    Archive.fetch(:runs, run_id)
   end
 
   @doc """
@@ -144,7 +144,7 @@ defmodule GiTF.Run do
   """
   @spec active_for_quest(String.t()) :: map() | nil
   def active_for_quest(mission_id) do
-    Store.find_one(:runs, fn r ->
+    Archive.find_one(:runs, fn r ->
       r.mission_id == mission_id and r.status == "active"
     end)
   end
@@ -159,7 +159,7 @@ defmodule GiTF.Run do
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    runs = Store.all(:runs)
+    runs = Archive.all(:runs)
 
     runs
     |> maybe_filter(:mission_id, Keyword.get(opts, :mission_id))
@@ -175,13 +175,13 @@ defmodule GiTF.Run do
   """
   @spec all_idle?(String.t()) :: boolean()
   def all_idle?(run_id) do
-    case Store.get(:runs, run_id) do
+    case Archive.get(:runs, run_id) do
       nil ->
         true
 
       run ->
         Enum.all?(run.ghost_ids, fn ghost_id ->
-          case Store.get(:ghosts, ghost_id) do
+          case Archive.get(:ghosts, ghost_id) do
             nil -> true
             %{status: status} -> status in ["stopped", "crashed", "done"]
           end
@@ -197,7 +197,7 @@ defmodule GiTF.Run do
 
     if resolved >= run.total_jobs and run.total_jobs > 0 do
       finished = %{run | status: "completed", completed_at: DateTime.utc_now()}
-      Store.put(:runs, finished)
+      Archive.put(:runs, finished)
       {:ok, finished, :run_complete}
     else
       {:ok, run}

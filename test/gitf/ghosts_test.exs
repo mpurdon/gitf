@@ -2,7 +2,7 @@ defmodule GiTF.GhostsTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Ghosts
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @tmp_dir System.tmp_dir!()
 
@@ -17,7 +17,7 @@ defmodule GiTF.GhostsTest do
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     repo_path = create_temp_git_repo()
@@ -27,7 +27,7 @@ defmodule GiTF.GhostsTest do
       GiTF.Sector.add(repo_path, name: "ghosts-test-sector-#{:erlang.unique_integer([:positive])}")
 
     {:ok, mission} =
-      Store.insert(:missions, %{
+      Archive.insert(:missions, %{
         name: "ghosts-test-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
@@ -84,15 +84,15 @@ defmodule GiTF.GhostsTest do
 
   describe "list/1" do
     test "lists all ghosts" do
-      {:ok, _} = Store.insert(:ghosts, %{name: "listed-ghost", status: "idle"})
+      {:ok, _} = Archive.insert(:ghosts, %{name: "listed-ghost", status: "idle"})
 
       ghosts = Ghosts.list()
       assert length(ghosts) >= 1
     end
 
     test "filters by status" do
-      {:ok, _} = Store.insert(:ghosts, %{name: "idle-ghost", status: "idle"})
-      {:ok, _} = Store.insert(:ghosts, %{name: "working-ghost", status: "working"})
+      {:ok, _} = Archive.insert(:ghosts, %{name: "idle-ghost", status: "idle"})
+      {:ok, _} = Archive.insert(:ghosts, %{name: "working-ghost", status: "working"})
 
       idle = Ghosts.list(status: "idle")
       assert Enum.all?(idle, &(&1.status == "idle"))
@@ -104,7 +104,7 @@ defmodule GiTF.GhostsTest do
 
   describe "get/1" do
     test "retrieves a ghost by ID" do
-      {:ok, created} = Store.insert(:ghosts, %{name: "get-test-ghost", status: "starting"})
+      {:ok, created} = Archive.insert(:ghosts, %{name: "get-test-ghost", status: "starting"})
 
       assert {:ok, found} = Ghosts.get(created.id)
       assert found.id == created.id
@@ -152,11 +152,11 @@ defmodule GiTF.GhostsTest do
 
       # Bee should be stopped now; mark it as crashed for revive testing
       {:ok, stopped_bee} = Ghosts.get(ghost.id)
-      Store.put(:ghosts, %{stopped_bee | status: "crashed"})
+      Archive.put(:ghosts, %{stopped_bee | status: "crashed"})
 
       # The op was completed by the worker — mark it failed so revive transition works
       {:ok, op} = GiTF.Ops.get(ctx.op.id)
-      Store.put(:ops, %{op | status: "failed"})
+      Archive.put(:ops, %{op | status: "failed"})
 
       # Revive
       {:ok, new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
@@ -165,7 +165,7 @@ defmodule GiTF.GhostsTest do
       assert new_bee.op_id == ghost.op_id
 
       # Cell should be reassigned to new ghost
-      shell = Store.find_one(:shells, fn c -> c.ghost_id == new_ghost.id and c.status == "active" end)
+      shell = Archive.find_one(:shells, fn c -> c.ghost_id == new_ghost.id and c.status == "active" end)
       assert shell != nil
 
       Process.sleep(1_000)
@@ -173,14 +173,14 @@ defmodule GiTF.GhostsTest do
 
     test "fails for active ghost", ctx do
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "active-ghost", status: "working", op_id: ctx.op.id})
+        Archive.insert(:ghosts, %{name: "active-ghost", status: "working", op_id: ctx.op.id})
 
       assert {:error, :bee_still_active} = Ghosts.revive(ghost.id, ctx.gitf_root)
     end
 
     test "fails with no shell", ctx do
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "no-shell-ghost", status: "crashed", op_id: ctx.op.id})
+        Archive.insert(:ghosts, %{name: "no-shell-ghost", status: "crashed", op_id: ctx.op.id})
 
       assert {:error, :no_active_cell} = Ghosts.revive(ghost.id, ctx.gitf_root)
     end
@@ -197,10 +197,10 @@ defmodule GiTF.GhostsTest do
       Process.sleep(1_000)
 
       {:ok, stopped_bee} = Ghosts.get(ghost.id)
-      Store.put(:ghosts, %{stopped_bee | status: "crashed"})
+      Archive.put(:ghosts, %{stopped_bee | status: "crashed"})
 
       {:ok, op} = GiTF.Ops.get(ctx.op.id)
-      Store.put(:ops, %{op | status: "failed"})
+      Archive.put(:ops, %{op | status: "failed"})
 
       {:ok, new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
@@ -223,7 +223,7 @@ defmodule GiTF.GhostsTest do
       Process.sleep(1_000)
 
       {:ok, stopped_bee} = Ghosts.get(ghost.id)
-      Store.put(:ghosts, %{stopped_bee | status: "crashed"})
+      Archive.put(:ghosts, %{stopped_bee | status: "crashed"})
 
       # Job is "done" from the worker completing — leave it done
       {:ok, op} = GiTF.Ops.get(ctx.op.id)

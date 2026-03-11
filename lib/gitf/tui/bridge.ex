@@ -4,7 +4,7 @@ defmodule GiTF.TUI.Bridge do
 
   Subscribes to PubSub topics, converts links to TUI messages.
   Forwards user input via the intent event bus.
-  Queries Store for state snapshots.
+  Queries Archive for state snapshots.
 
   ## Intent Event Bus
 

@@ -2,7 +2,7 @@ defmodule GiTF.CellTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Shell
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @tmp_dir System.tmp_dir!()
 
@@ -10,7 +10,7 @@ defmodule GiTF.CellTest do
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     # Create a temp git repo to serve as a sector
@@ -21,7 +21,7 @@ defmodule GiTF.CellTest do
       GiTF.Sector.add(repo_path, name: "shell-test-sector-#{:erlang.unique_integer([:positive])}")
 
     # Create a ghost record
-    {:ok, ghost} = Store.insert(:ghosts, %{name: "test-ghost", status: "starting"})
+    {:ok, ghost} = Archive.insert(:ghosts, %{name: "test-ghost", status: "starting"})
 
     %{sector: sector, ghost: ghost, repo_path: repo_path}
   end
@@ -80,7 +80,7 @@ defmodule GiTF.CellTest do
     test "returns error for sector without a path", %{ghost: ghost} do
       # Insert a sector with nil path
       {:ok, remote_comb} =
-        Store.insert(:sectors, %{
+        Archive.insert(:sectors, %{
           name: "remote-only-#{:erlang.unique_integer([:positive])}",
           repo_url: "https://example.com/repo",
           path: nil
@@ -149,7 +149,7 @@ defmodule GiTF.CellTest do
   describe "cleanup_orphans/0" do
     test "marks shells as removed when ghost is stopped", %{sector: sector} do
       # Create a ghost that is stopped
-      {:ok, stopped_bee} = Store.insert(:ghosts, %{name: "stopped-ghost", status: "stopped"})
+      {:ok, stopped_bee} = Archive.insert(:ghosts, %{name: "stopped-ghost", status: "stopped"})
 
       {:ok, _cell} = Cell.create(sector.id, stopped_ghost.id)
 

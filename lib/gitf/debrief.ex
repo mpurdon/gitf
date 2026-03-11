@@ -1,4 +1,4 @@
-defmodule GiTF.PostReview do
+defmodule GiTF.Debrief do
   @moduledoc """
   Post-completion review window.
 
@@ -8,12 +8,12 @@ defmodule GiTF.PostReview do
   """
 
   require Logger
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @review_duration_seconds 3600
 
   @doc """
-  Starts a post-merge review window for a completed mission.
+  Starts a post-sync review window for a completed mission.
 
   Inserts a review record that will be checked periodically by the Major.
   """
@@ -30,14 +30,14 @@ defmodule GiTF.PostReview do
         outcome: nil
       }
 
-      {:ok, stored} = Store.insert(:post_reviews, review)
+      {:ok, stored} = Archive.insert(:debriefs, review)
 
       # Broadcast alert (best-effort)
       try do
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "section:alerts",
-          {:post_review_started, mission_id, mission.name}
+          {:debrief_started, mission_id, mission.name}
         )
       rescue
         _ -> :ok
@@ -57,7 +57,7 @@ defmodule GiTF.PostReview do
   @spec check_regressions(String.t()) :: {:ok, :clean} | {:ok, :regression, String.t()} | {:error, term()}
   def check_regressions(mission_id) do
     with {:ok, review} <- get_review(mission_id),
-         {:ok, sector} <- Store.fetch(:sectors, review.sector_id) do
+         {:ok, sector} <- Archive.fetch(:sectors, review.sector_id) do
 
       validation_command = Map.get(sector, :validation_command)
 
@@ -69,7 +69,7 @@ defmodule GiTF.PostReview do
             cd: sector.path, stderr_to_stdout: true)
         end)
 
-        case Task.yield(task, 120_000) || Task.shutdown(task, 5_000) do
+        case Task.yield(task, 120_000) || Task.exfil(task, 5_000) do
           {:ok, {_output, 0}} ->
             {:ok, :clean}
 
@@ -150,9 +150,9 @@ defmodule GiTF.PostReview do
   """
   @spec enabled?(String.t()) :: boolean()
   def enabled?(sector_id) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil -> false
-      sector -> Map.get(sector, :post_review, false) == true
+      sector -> Map.get(sector, :debrief, false) == true
     end
   end
 
@@ -161,7 +161,7 @@ defmodule GiTF.PostReview do
   """
   @spec active_reviews() :: [map()]
   def active_reviews do
-    Store.filter(:post_reviews, fn r -> r.status == "active" end)
+    Archive.filter(:debriefs, fn r -> r.status == "active" end)
   end
 
   @doc """
@@ -182,7 +182,7 @@ defmodule GiTF.PostReview do
   end
 
   defp get_review_raw(mission_id) do
-    Store.find_one(:post_reviews, fn r -> r.mission_id == mission_id end)
+    Archive.find_one(:debriefs, fn r -> r.mission_id == mission_id end)
   end
 
   defp update_review(mission_id, updates) do
@@ -190,7 +190,7 @@ defmodule GiTF.PostReview do
       nil -> :ok
       review ->
         updated = Map.merge(review, updates)
-        Store.put(:post_reviews, updated)
+        Archive.put(:debriefs, updated)
     end
   end
 end

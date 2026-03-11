@@ -2,17 +2,17 @@ defmodule GiTF.QuestsTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Missions
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, sector} =
-      Store.insert(:sectors, %{name: "missions-test-sector-#{:erlang.unique_integer([:positive])}"})
+      Archive.insert(:sectors, %{name: "missions-test-sector-#{:erlang.unique_integer([:positive])}"})
 
     %{sector: sector}
   end
@@ -69,7 +69,7 @@ defmodule GiTF.QuestsTest do
       {:ok, _} = Quests.create(%{goal: "Pending mission"})
       {:ok, q} = Quests.create(%{goal: "Active mission"})
 
-      Store.put(:missions, %{q | status: "active"})
+      Archive.put(:missions, %{q | status: "active"})
 
       pending = Quests.list(status: "pending")
       assert Enum.all?(pending, &(&1.status == "pending"))
@@ -194,11 +194,11 @@ defmodule GiTF.QuestsTest do
           status: "done"
         })
 
-      {:ok, ghost} = Store.insert(:ghosts, %{name: "test-ghost", op_id: op.id, status: "stopped"})
+      {:ok, ghost} = Archive.insert(:ghosts, %{name: "test-ghost", op_id: op.id, status: "stopped"})
       GiTF.Ops.assign(op.id, ghost.id)
 
       {:ok, _cell} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           ghost_id: ghost.id,
           sector_id: sector.id,
           worktree_path: "/tmp/fake-worktree-#{ghost.id}",
@@ -228,7 +228,7 @@ defmodule GiTF.QuestsTest do
 
     test "rejects transition from non-pending status" do
       {:ok, mission} = Quests.create(%{goal: "Already active"})
-      Store.put(:missions, %{mission | status: "active"})
+      Archive.put(:missions, %{mission | status: "active"})
 
       assert {:error, :invalid_transition} = Quests.set_planning(mission.id)
     end

@@ -17,7 +17,7 @@ defmodule GiTF.Ops do
   against the store.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Valid transitions -------------------------------------------------------
 
@@ -84,9 +84,9 @@ defmodule GiTF.Ops do
         phase: attrs[:phase],
         acceptance_criteria: attrs[:acceptance_criteria] || [],
         target_files: attrs[:target_files] || [],
-        # Verification fields
+        # Audit fields
         verification_status: "pending",
-        verification_result: nil,
+        audit_result: nil,
         verified_at: nil,
         # Risk level for adaptive permissions
         risk_level: classification[:risk_level] || attrs[:risk_level] || :low,
@@ -104,7 +104,7 @@ defmodule GiTF.Ops do
         skip_verification: attrs[:skip_verification] || false
       }
 
-      Store.insert(:ops, record)
+      Archive.insert(:ops, record)
     end
   end
 
@@ -118,7 +118,7 @@ defmodule GiTF.Ops do
     with {:ok, op} <- get(op_id),
          {:ok, next_status} <- validate_transition(op.status, :assign) do
       updated = %{op | status: next_status, ghost_id: ghost_id}
-      Store.put(:ops, updated)
+      Archive.put(:ops, updated)
     end
   end
 
@@ -219,7 +219,7 @@ defmodule GiTF.Ops do
 
       retry_count = Map.get(op, :retry_count, 0) + 1
       updated = %{op | status: next_status, ghost_id: nil, retry_count: retry_count, description: new_description}
-      Store.put(:ops, updated)
+      Archive.put(:ops, updated)
     end
   end
 
@@ -234,7 +234,7 @@ defmodule GiTF.Ops do
     with {:ok, op} <- get(op_id),
          {:ok, next_status} <- validate_transition(op.status, :revive) do
       updated = %{op | status: next_status, ghost_id: ghost_id}
-      Store.put(:ops, updated)
+      Archive.put(:ops, updated)
     end
   end
 
@@ -245,14 +245,14 @@ defmodule GiTF.Ops do
     GiTF.Ghosts.stop(ghost_id)
 
     # Find and remove the ghost's active shell (worktree + branch)
-    case Store.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
+    case Archive.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> :ok
       shell -> GiTF.Shell.remove(shell.id, force: true)
     end
 
     # Mark ghost as stopped
     case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} -> Store.put(:ghosts, %{ghost | status: "stopped"})
+      {:ok, ghost} -> Archive.put(:ghosts, %{ghost | status: "stopped"})
       _ -> :ok
     end
 
@@ -272,12 +272,12 @@ defmodule GiTF.Ops do
         cleanup_bee_and_cell(op[:ghost_id])
 
         # Remove dependencies in both directions
-        Store.filter(:op_dependencies, fn d ->
+        Archive.filter(:op_dependencies, fn d ->
           d.op_id == op_id or d.depends_on_id == op_id
         end)
-        |> Enum.each(fn d -> Store.delete(:op_dependencies, d.id) end)
+        |> Enum.each(fn d -> Archive.delete(:op_dependencies, d.id) end)
 
-        Store.delete(:ops, op_id)
+        Archive.delete(:ops, op_id)
         :ok
 
       {:error, :not_found} ->
@@ -296,7 +296,7 @@ defmodule GiTF.Ops do
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
 
     ops =
       case Keyword.get(opts, :mission_id) do
@@ -326,7 +326,7 @@ defmodule GiTF.Ops do
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(op_id) do
-    Store.fetch(:ops, op_id)
+    Archive.fetch(:ops, op_id)
   end
 
   # -- Private helpers ---------------------------------------------------------
@@ -335,7 +335,7 @@ defmodule GiTF.Ops do
     with {:ok, op} <- get(op_id),
          {:ok, next_status} <- validate_transition(op.status, action) do
       updated = %{op | status: next_status}
-      result = Store.put(:ops, updated)
+      result = Archive.put(:ops, updated)
 
       case action do
         :start ->
@@ -394,21 +394,21 @@ defmodule GiTF.Ops do
 
       true ->
         record = %{op_id: op_id, depends_on_id: depends_on_id}
-        Store.insert(:op_dependencies, record)
+        Archive.insert(:op_dependencies, record)
     end
   end
 
   @doc "Removes a dependency between two ops."
   @spec remove_dependency(String.t(), String.t()) :: :ok | {:error, :not_found}
   def remove_dependency(op_id, depends_on_id) do
-    case Store.find_one(:op_dependencies, fn d ->
+    case Archive.find_one(:op_dependencies, fn d ->
            d.op_id == op_id and d.depends_on_id == depends_on_id
          end) do
       nil ->
         {:error, :not_found}
 
       dep ->
-        Store.delete(:op_dependencies, dep.id)
+        Archive.delete(:op_dependencies, dep.id)
         :ok
     end
   end
@@ -417,11 +417,11 @@ defmodule GiTF.Ops do
   @spec dependencies(String.t()) :: [map()]
   def dependencies(op_id) do
     dep_ids =
-      Store.filter(:op_dependencies, fn d -> d.op_id == op_id end)
+      Archive.filter(:op_dependencies, fn d -> d.op_id == op_id end)
       |> Enum.map(& &1.depends_on_id)
 
     Enum.flat_map(dep_ids, fn id ->
-      case Store.get(:ops, id) do
+      case Archive.get(:ops, id) do
         nil -> []
         op -> [op]
       end
@@ -432,11 +432,11 @@ defmodule GiTF.Ops do
   @spec dependents(String.t()) :: [map()]
   def dependents(op_id) do
     dep_op_ids =
-      Store.filter(:op_dependencies, fn d -> d.depends_on_id == op_id end)
+      Archive.filter(:op_dependencies, fn d -> d.depends_on_id == op_id end)
       |> Enum.map(& &1.op_id)
 
     Enum.flat_map(dep_op_ids, fn id ->
-      case Store.get(:ops, id) do
+      case Archive.get(:ops, id) do
         nil -> []
         op -> [op]
       end
@@ -453,10 +453,10 @@ defmodule GiTF.Ops do
   """
   @spec ready?(String.t()) :: boolean()
   def ready?(op_id) do
-    deps = Store.filter(:op_dependencies, fn d -> d.op_id == op_id end)
+    deps = Archive.filter(:op_dependencies, fn d -> d.op_id == op_id end)
 
     Enum.all?(deps, fn dep ->
-      case Store.get(:ops, dep.depends_on_id) do
+      case Archive.get(:ops, dep.depends_on_id) do
         nil -> true
         op -> op.status in ["done", "failed", "rejected"]
       end
@@ -473,7 +473,7 @@ defmodule GiTF.Ops do
   @spec unblock_dependents(String.t()) :: :ok
   def unblock_dependents(op_id) do
     dependent_ids =
-      Store.filter(:op_dependencies, fn d -> d.depends_on_id == op_id end)
+      Archive.filter(:op_dependencies, fn d -> d.depends_on_id == op_id end)
       |> Enum.map(& &1.op_id)
 
     # Check if this dependency failed (so we can warn dependents)
@@ -492,7 +492,7 @@ defmodule GiTF.Ops do
               warning = "\n\n## Warning: Dependency failed\n\nDependency op #{op_id} failed. " <>
                 "Proceed with available context; the prerequisite work was not completed."
               updated = %{dep_job | description: (dep_job.description || "") <> warning}
-              Store.put(:ops, updated)
+              Archive.put(:ops, updated)
             end
 
             unblock(dep_op_id)
@@ -524,7 +524,7 @@ defmodule GiTF.Ops do
         visited = MapSet.put(visited, from_id)
 
         deps =
-          Store.filter(:op_dependencies, fn d -> d.op_id == from_id end)
+          Archive.filter(:op_dependencies, fn d -> d.op_id == from_id end)
           |> Enum.map(& &1.depends_on_id)
 
         Enum.any?(deps, fn dep_id -> bfs_reachable?(dep_id, target_id, visited) end)

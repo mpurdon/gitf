@@ -7,11 +7,11 @@ defmodule GiTF.CLI.VerifyTest do
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
 
     on_exit(fn ->
       try do
-        if Process.whereis(GiTF.Store), do: GenServer.stop(GiTF.Store)
+        if Process.whereis(GiTF.Archive), do: GenServer.stop(GiTF.Archive)
       catch
         :exit, _ -> :ok
       end
@@ -35,7 +35,7 @@ defmodule GiTF.CLI.VerifyTest do
 
       # Record a passing verification result
       result = %{status: "passed", validations: [], output: "All tests passed"}
-      {:ok, _} = GiTF.Verification.record_result(op.id, result)
+      {:ok, _} = GiTF.Audit.record_result(op.id, result)
       
       # Check status was updated
       {:ok, updated_job} = GiTF.Ops.get(op.id)
@@ -57,7 +57,7 @@ defmodule GiTF.CLI.VerifyTest do
 
       # Record a failing verification result
       result = %{status: "failed", validations: [%{name: "test", status: "fail", output: "Test failed"}], output: "Tests failed"}
-      {:ok, _} = GiTF.Verification.record_result(op.id, result)
+      {:ok, _} = GiTF.Audit.record_result(op.id, result)
       
       {:ok, updated_job} = GiTF.Ops.get(op.id)
       assert updated_job.verification_status == "failed"

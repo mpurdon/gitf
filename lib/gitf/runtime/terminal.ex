@@ -11,7 +11,7 @@ defmodule GiTF.Runtime.Terminal do
   """
 
   @doc """
-  Prepares the terminal for handoff to an interactive child process.
+  Prepares the terminal for transfer to an interactive child process.
 
   Call this before spawning any TUI-based CLI with `:nouse_stdio`.
   """

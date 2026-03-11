@@ -50,7 +50,7 @@ defmodule GiTF.CLI.PlanHandler do
     # Remove stale plan file from previous attempts
     File.rm(plan_file)
 
-    workspace = case mission.sector_id && GiTF.Store.get(:sectors, mission.sector_id) do
+    workspace = case mission.sector_id && GiTF.Archive.get(:sectors, mission.sector_id) do
       nil -> root
       sector -> sector.path
     end
@@ -114,7 +114,7 @@ defmodule GiTF.CLI.PlanHandler do
   end
 
   defp build_cli_initial_prompt(mission) do
-    codebase_hint = case mission.sector_id && GiTF.Store.get(:sectors, mission.sector_id) do
+    codebase_hint = case mission.sector_id && GiTF.Archive.get(:sectors, mission.sector_id) do
       nil -> ""
       sector -> " The codebase is at #{sector.path}."
     end
@@ -180,9 +180,9 @@ defmodule GiTF.CLI.PlanHandler do
 
     # Update mission name if the plan provided one
     if plan[:name] && plan[:name] != "" do
-      case GiTF.Store.get(:missions, mission.id) do
+      case GiTF.Archive.get(:missions, mission.id) do
         nil -> :ok
-        q -> GiTF.Store.put(:missions, %{q | name: plan[:name]})
+        q -> GiTF.Archive.put(:missions, %{q | name: plan[:name]})
       end
     end
 
@@ -249,7 +249,7 @@ defmodule GiTF.CLI.PlanHandler do
   end
 
   defp first_comb_id do
-    case GiTF.Store.all(:sectors) do
+    case GiTF.Archive.all(:sectors) do
       [sector | _] -> sector.id
       _ -> nil
     end

@@ -111,7 +111,7 @@ defmodule GiTF.Plugin.Builtin.Models.Claude do
            name: "claude-haiku",
            full_name: "claude-haiku-3-20250219",
            context_limit: 200_000,
-           capabilities: [:research, :summarization, :verification],
+           capabilities: [:research, :summarization, :audit],
            cost_tier: :low
          }}
 

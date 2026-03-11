@@ -3,7 +3,7 @@ defmodule GiTF.Intelligence.SuccessPatterns do
   Identifies and learns from successful op patterns.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Analyze a successful op to identify success factors.
@@ -26,7 +26,7 @@ defmodule GiTF.Intelligence.SuccessPatterns do
         analyzed_at: DateTime.utc_now()
       }
       
-      Store.insert(:success_patterns, pattern)
+      Archive.insert(:success_patterns, pattern)
       {:ok, pattern}
     else
       _ -> {:error, :not_successful_job}
@@ -37,7 +37,7 @@ defmodule GiTF.Intelligence.SuccessPatterns do
   Get best practices for a sector based on successful ops.
   """
   def get_best_practices(sector_id) do
-    patterns = Store.filter(:success_patterns, &(&1.sector_id == sector_id))
+    patterns = Archive.filter(:success_patterns, &(&1.sector_id == sector_id))
     
     if Enum.empty?(patterns) do
       []
@@ -106,7 +106,7 @@ defmodule GiTF.Intelligence.SuccessPatterns do
       factors
     end
     
-    # Verification passed
+    # Audit passed
     factors = if Map.get(op, :verification_status) == "passed" do
       ["verification_passed" | factors]
     else

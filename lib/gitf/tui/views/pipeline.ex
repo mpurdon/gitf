@@ -4,7 +4,7 @@ defmodule GiTF.TUI.Views.Pipeline do
 
   def render(model) do
     ops = model[:ops] || []
-    merge_queue = model[:merge_queue] || %{pending: [], active: nil, completed: []}
+    sync_queue = model[:sync_queue] || %{pending: [], active: nil, completed: []}
 
     visible =
       ops
@@ -32,7 +32,7 @@ defmodule GiTF.TUI.Views.Pipeline do
           end
         ] ++
           Enum.map(visible, fn op ->
-            {sc, tr, be, dr, mg} = stages(op, merge_queue)
+            {sc, tr, be, dr, mg} = stages(op, sync_queue)
             title = String.slice(op[:title] || "untitled", 0, 26) |> String.pad_trailing(27)
 
             label do
@@ -88,7 +88,7 @@ defmodule GiTF.TUI.Views.Pipeline do
         true -> :skip
       end
 
-    merge =
+    sync =
       cond do
         op[:merged_at] != nil -> :done
         in_active?(mq, op[:id]) -> :active
@@ -98,7 +98,7 @@ defmodule GiTF.TUI.Views.Pipeline do
         true -> :skip
       end
 
-    {recon, triage, ghost, tachikoma, merge}
+    {recon, triage, ghost, tachikoma, sync}
   end
 
   defp in_active?(%{active: nil}, _), do: false

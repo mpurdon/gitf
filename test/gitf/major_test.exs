@@ -2,7 +2,7 @@ defmodule GiTF.MajorTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Major
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @tmp_dir System.tmp_dir!()
 
@@ -17,7 +17,7 @@ defmodule GiTF.MajorTest do
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     gitf_root = create_gitf_workspace()
@@ -168,10 +168,10 @@ defmodule GiTF.MajorTest do
     test "retry logic increments retry count for failed op" do
       # Create the necessary DB records for retry
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "retry-test-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "retry-test-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "retry-test-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
@@ -184,7 +184,7 @@ defmodule GiTF.MajorTest do
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "retry-test-ghost", status: "starting", op_id: op.id})
+        Archive.insert(:ghosts, %{name: "retry-test-ghost", status: "starting", op_id: op.id})
 
       # Move op through states to failed
       {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
@@ -214,10 +214,10 @@ defmodule GiTF.MajorTest do
     test "updates mission status to completed on job_complete" do
       # Create records: sector, mission, op (done), ghost
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "mission-adv-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "mission-adv-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "mission-adv-test-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
@@ -230,7 +230,7 @@ defmodule GiTF.MajorTest do
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "adv-ghost", status: "working", op_id: op.id})
+        Archive.insert(:ghosts, %{name: "adv-ghost", status: "working", op_id: op.id})
 
       # Move op to "done" state
       {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
@@ -269,10 +269,10 @@ defmodule GiTF.MajorTest do
       GiTF.Link.subscribe("link:major")
 
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "wag-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "wag-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "wag-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
@@ -285,7 +285,7 @@ defmodule GiTF.MajorTest do
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "wag-ghost", status: "working", op_id: op.id})
+        Archive.insert(:ghosts, %{name: "wag-ghost", status: "working", op_id: op.id})
 
       {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
       {:ok, _} = GiTF.Ops.start(op.id)
@@ -312,17 +312,17 @@ defmodule GiTF.MajorTest do
 
       after
         2_000 ->
-          # Verification failed -> retry path. Major should still be alive.
+          # Audit failed -> retry path. Major should still be alive.
           assert Process.alive?(Process.whereis(GiTF.Major))
       end
     end
 
     test "attempts to spawn ghost for next pending op after completion" do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "spawn-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "spawn-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "spawn-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
@@ -345,7 +345,7 @@ defmodule GiTF.MajorTest do
       {:ok, _dep} = GiTF.Ops.add_dependency(job_2.id, job_1.id)
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "spawn-ghost", status: "working", op_id: job_1.id})
+        Archive.insert(:ghosts, %{name: "spawn-ghost", status: "working", op_id: job_1.id})
 
       # Complete job_1
       {:ok, _} = GiTF.Ops.assign(job_1.id, ghost.id)
@@ -376,10 +376,10 @@ defmodule GiTF.MajorTest do
 
     test "updates mission status on retry exhaustion" do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "exhaust-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "exhaust-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "exhaust-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
@@ -392,7 +392,7 @@ defmodule GiTF.MajorTest do
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{
+        Archive.insert(:ghosts, %{
           name: "exhaust-ghost",
           status: "working",
           op_id: op.id
@@ -408,7 +408,7 @@ defmodule GiTF.MajorTest do
       # Pre-load retry count to max so next failure triggers exhaustion
       # Retry counts are now persisted on the op record
       {:ok, exhausted_job} = GiTF.Ops.get(op.id)
-      Store.put(:ops, Map.put(exhausted_job, :retry_count, 3))
+      Archive.put(:ops, Map.put(exhausted_job, :retry_count, 3))
 
       link_msg = %{
         id: "wag-exhaust-1",
@@ -430,10 +430,10 @@ defmodule GiTF.MajorTest do
 
     test "handles validation_failed link_msg like job_failed" do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "val-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "val-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
-        Store.insert(:missions, %{
+        Archive.insert(:missions, %{
           name: "val-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
@@ -446,7 +446,7 @@ defmodule GiTF.MajorTest do
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "val-ghost", status: "working", op_id: op.id})
+        Archive.insert(:ghosts, %{name: "val-ghost", status: "working", op_id: op.id})
 
       {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
       {:ok, _} = GiTF.Ops.start(op.id)

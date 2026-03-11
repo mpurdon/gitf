@@ -5,7 +5,7 @@ defmodule GiTF.Observability.Alerts do
   """
 
   require Logger
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @alert_rules [
     {:quest_stuck, 30 * 60},      # 30 minutes
@@ -34,7 +34,7 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:validation_failed, threshold_seconds) do
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
     recent_failures = Enum.filter(ops, fn j ->
       j.status == "done" &&
       Map.get(j, :verification_status) == "failed" &&
@@ -51,7 +51,7 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:quest_stuck, threshold_seconds) do
-    missions = Store.all(:missions)
+    missions = Archive.all(:missions)
     stuck = Enum.filter(missions, fn q ->
       q.status == "active" && 
       DateTime.diff(DateTime.utc_now(), q.updated_at) > threshold_seconds
@@ -65,7 +65,7 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:quality_drop, threshold) do
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
     recent = Enum.take(ops, -10)
     scores = Enum.map(recent, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
     
@@ -82,7 +82,7 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:cost_spike, multiplier) do
-    costs = Store.all(:costs)
+    costs = Archive.all(:costs)
     
     if length(costs) < 10 do
       :ok
@@ -102,7 +102,7 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:failure_rate_high, threshold) do
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
     recent = Enum.take(ops, -20)
     
     if length(recent) > 0 do

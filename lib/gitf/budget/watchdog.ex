@@ -13,7 +13,7 @@ defmodule GiTF.Budget.Watchdog do
   use GenServer
   require Logger
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.Budget
 
   @check_interval :timer.seconds(10)
@@ -44,7 +44,7 @@ defmodule GiTF.Budget.Watchdog do
 
   defp check_active_quests(state) do
     active_quests =
-      Store.filter(:missions, fn q ->
+      Archive.filter(:missions, fn q ->
         q[:status] in ["active", "implementation", "research", "design",
                         "review", "planning", "validation", "requirements"]
       end)
@@ -70,13 +70,13 @@ defmodule GiTF.Budget.Watchdog do
       new_budget = Float.round(spent * 1.25, 2)
       new_budget = min(new_budget, max_allowed)
 
-      # Store budget override on the mission record
-      case Store.get(:missions, mission_id) do
+      # Archive budget override on the mission record
+      case Archive.get(:missions, mission_id) do
         nil ->
           Logger.warning("Failed to escalate budget for mission #{mission_id}")
 
         quest_record ->
-          Store.put(:missions, Map.put(quest_record, :budget_override, new_budget))
+          Archive.put(:missions, Map.put(quest_record, :budget_override, new_budget))
 
           Logger.info(
             "Budget auto-escalated for mission #{mission_id}: " <>
@@ -107,11 +107,11 @@ defmodule GiTF.Budget.Watchdog do
 
     # Stop active ghosts but don't fail their ops (they can resume)
     active_ghosts =
-      Store.filter(:ghosts, fn b ->
+      Archive.filter(:ghosts, fn b ->
         b.op_id != nil and b.status == "working"
       end)
       |> Enum.filter(fn b ->
-        case Store.get(:ops, b.op_id) do
+        case Archive.get(:ops, b.op_id) do
           %{mission_id: ^mission_id} -> true
           _ -> false
         end
@@ -119,9 +119,9 @@ defmodule GiTF.Budget.Watchdog do
 
     Enum.each(active_ghosts, fn ghost ->
       Logger.warning("Watchdog killing ghost #{ghost.id} (Quest #{mission_id} over budget)")
-      # Create handoff before stopping so work isn't lost
+      # Create transfer before stopping so work isn't lost
       try do
-        GiTF.Handoff.create(ghost.id)
+        GiTF.Transfer.create(ghost.id)
       rescue
         _ -> :ok
       end
@@ -148,7 +148,7 @@ defmodule GiTF.Budget.Watchdog do
 
   defp check_paused_quests do
     # Check if any paused missions now have budget (e.g., manual increase)
-    paused = Store.filter(:missions, fn q -> q[:status] == "paused_budget" end)
+    paused = Archive.filter(:missions, fn q -> q[:status] == "paused_budget" end)
 
     Enum.each(paused, fn mission ->
       case Budget.check(mission.id) do
@@ -173,9 +173,9 @@ defmodule GiTF.Budget.Watchdog do
   end
 
   defp update_quest_status(mission_id, status) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil -> :ok
-      mission -> Store.put(:missions, Map.put(mission, :status, status))
+      mission -> Archive.put(:missions, Map.put(mission, :status, status))
     end
   end
 end

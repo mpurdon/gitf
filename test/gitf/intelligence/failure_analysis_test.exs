@@ -2,13 +2,13 @@ defmodule GiTF.Intelligence.FailureAnalysisTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Intelligence.FailureAnalysis
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-intel-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -25,7 +25,7 @@ defmodule GiTF.Intelligence.FailureAnalysisTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       {:ok, analysis} = FailureAnalysis.analyze_failure(op.id)
       
@@ -45,7 +45,7 @@ defmodule GiTF.Intelligence.FailureAnalysisTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       {:ok, analysis} = FailureAnalysis.analyze_failure(op.id)
       
@@ -59,7 +59,7 @@ defmodule GiTF.Intelligence.FailureAnalysisTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       assert {:error, :not_failed_job} = FailureAnalysis.analyze_failure(op.id)
     end
@@ -85,7 +85,7 @@ defmodule GiTF.Intelligence.FailureAnalysisTest do
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
-        Store.insert(:ops, op)
+        Archive.insert(:ops, op)
         FailureAnalysis.analyze_failure(op.id)
       end
       
@@ -110,7 +110,7 @@ defmodule GiTF.Intelligence.FailureAnalysisTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       FailureAnalysis.analyze_failure(op.id)
       
       {:ok, learning} = FailureAnalysis.learn_from_failures(sector_id)

@@ -13,10 +13,10 @@ defmodule GiTF.Major.Orchestrator do
 
   require Logger
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.Major.{FastPath, PhasePrompts, Planner}
 
-  @phases ~w(research requirements design review planning implementation validation awaiting_approval merge)
+  @phases ~w(research requirements design review planning implementation validation awaiting_approval sync)
   @max_redesign_iterations 2
   @approval_timeout_hours 1
   @max_quest_age_hours 24
@@ -170,7 +170,7 @@ defmodule GiTF.Major.Orchestrator do
       {:error, :no_comb_assigned}
     else
       with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
-        sector = Store.get(:sectors, sector_id)
+        sector = Archive.get(:sectors, sector_id)
         prompt = PhasePrompts.research_prompt(mission, sector)
         spawn_phase_ghost(mission, "research", prompt, model: "sonnet")
         {:ok, "research"}
@@ -290,10 +290,10 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp start_merge(mission) do
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "merge", "Validation passed, merging") do
-      case GiTF.Merge.merge_quest(mission.id) do
+    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "sync", "Validation passed, merging") do
+      case GiTF.Sync.merge_quest(mission.id) do
         {:ok, branch} ->
-          GiTF.Missions.store_artifact(mission.id, "merge", %{
+          GiTF.Missions.store_artifact(mission.id, "sync", %{
             "status" => "success",
             "branch" => branch,
             "merged_at" => DateTime.utc_now()
@@ -301,12 +301,12 @@ defmodule GiTF.Major.Orchestrator do
           complete_quest(mission.id)
 
         {:error, reason} ->
-          GiTF.Missions.store_artifact(mission.id, "merge", %{
+          GiTF.Missions.store_artifact(mission.id, "sync", %{
             "status" => "failed",
             "error" => inspect(reason)
           })
-          Logger.warning("Quest #{mission.id} merge failed: #{inspect(reason)}, completing as failed")
-          GiTF.Missions.transition_phase(mission.id, "completed", "Merge failed: #{inspect(reason)}")
+          Logger.warning("Quest #{mission.id} sync failed: #{inspect(reason)}, completing as failed")
+          GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
           GiTF.Missions.update_status!(mission.id)
           {:ok, "completed"}
       end
@@ -375,7 +375,7 @@ defmodule GiTF.Major.Orchestrator do
 
       results =
         Enum.map(sample, fn op ->
-          case GiTF.Verification.verify_job(op.id) do
+          case GiTF.Audit.verify_job(op.id) do
             {:ok, :pass, _} -> true
             _ -> false
           end
@@ -391,7 +391,7 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp approval_timed_out?(mission_id) do
-    case Store.find_one(:approval_requests, fn r -> r.mission_id == mission_id and r.status == "pending" end) do
+    case Archive.find_one(:approval_requests, fn r -> r.mission_id == mission_id and r.status == "pending" end) do
       nil -> false
       request ->
         hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
@@ -425,7 +425,7 @@ defmodule GiTF.Major.Orchestrator do
 
         if age > @phase_timeout_seconds do
           # Check if there's already a running phase ghost to avoid duplicate spawning
-          running_phase_job = Store.find_one(:ops, fn j ->
+          running_phase_job = Archive.find_one(:ops, fn j ->
             j.mission_id == mission.id and
               j[:op_type] == "phase" and
               j[:phase] == phase and
@@ -474,7 +474,7 @@ defmodule GiTF.Major.Orchestrator do
 
   # Rebuild the real prompt for a phase re-spawn using available artifacts
   defp rebuild_phase_prompt(mission, phase) do
-    sector = if mission.sector_id, do: Store.get(:sectors, mission.sector_id)
+    sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
 
     case phase do
       "research" ->
@@ -505,9 +505,9 @@ defmodule GiTF.Major.Orchestrator do
         all_artifacts = Map.get(mission, :artifacts, %{})
         {PhasePrompts.validation_prompt(mission, all_artifacts), "sonnet"}
 
-      phase when phase in ["implementation", "merge", "awaiting_approval"] ->
+      phase when phase in ["implementation", "sync", "awaiting_approval"] ->
         # These phases don't use phase ghosts — handled by op spawning,
-        # merge queue, or user approval respectively. No prompt rebuild needed.
+        # sync queue, or user approval respectively. No prompt rebuild needed.
         nil
 
       _ ->
@@ -536,9 +536,9 @@ defmodule GiTF.Major.Orchestrator do
 
         if redesign_count < @max_redesign_iterations do
           # Go back to design with feedback
-          quest_record = Store.get(:missions, mission.id)
+          quest_record = Archive.get(:missions, mission.id)
           updated = Map.put(quest_record, :redesign_count, redesign_count + 1)
-          Store.put(:missions, updated)
+          Archive.put(:missions, updated)
 
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_design(mission)
@@ -604,13 +604,13 @@ defmodule GiTF.Major.Orchestrator do
         )
 
         # Record tried plan
-        quest_record = Store.get(:missions, mission.id)
+        quest_record = Archive.get(:missions, mission.id)
 
         if quest_record do
           tried = Map.get(quest_record, :tried_plans, [])
           current_plan = Map.get(quest_record, :draft_plan, %{})
           updated = Map.put(quest_record, :tried_plans, [current_plan | tried])
-          Store.put(:missions, updated)
+          Archive.put(:missions, updated)
         end
 
         # Re-enter implementation with fallback plan
@@ -637,11 +637,11 @@ defmodule GiTF.Major.Orchestrator do
           Logger.info("Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)")
 
           # Increment replan count
-          quest_record = Store.get(:missions, mission.id)
+          quest_record = Archive.get(:missions, mission.id)
 
           if quest_record do
             updated = Map.put(quest_record, :replan_count, replan_count + 1)
-            Store.put(:missions, updated)
+            Archive.put(:missions, updated)
           end
 
           case Planner.replan_from_failures(mission.id) do
@@ -715,7 +715,7 @@ defmodule GiTF.Major.Orchestrator do
         {:ok, "validation"}
 
       validation["overall_verdict"] == "pass" ->
-        # Check if human approval is required before merge
+        # Check if human approval is required before sync
         if GiTF.HumanGate.requires_approval?(mission) do
           start_awaiting_approval(mission)
         else
@@ -740,11 +740,11 @@ defmodule GiTF.Major.Orchestrator do
 
   defp attempt_validation_fixes(mission, validation, fix_attempt) do
     # Increment fix attempt counter
-    quest_record = Store.get(:missions, mission.id)
+    quest_record = Archive.get(:missions, mission.id)
 
     if quest_record do
       updated = Map.put(quest_record, :validation_fix_count, fix_attempt + 1)
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
     end
 
     # Extract specific gaps from validation artifact
@@ -826,8 +826,8 @@ defmodule GiTF.Major.Orchestrator do
       # Start post-review if enabled for this sector
       with {:ok, mission} <- GiTF.Missions.get(mission_id),
            sector_id when not is_nil(sector_id) <- mission.sector_id,
-           true <- GiTF.PostReview.enabled?(sector_id) do
-        GiTF.PostReview.start_review(mission_id)
+           true <- GiTF.Debrief.enabled?(sector_id) do
+        GiTF.Debrief.start_review(mission_id)
       end
 
       {:ok, "completed"}

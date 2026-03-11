@@ -6,7 +6,7 @@ defmodule GiTF.Research.Cache do
   Provides file-level granular caching for incremental updates.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Get cached research for a sector.
@@ -15,7 +15,7 @@ defmodule GiTF.Research.Cache do
   """
   @spec get_research(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_research(sector_id) do
-    case Store.get(:sector_research_cache, sector_id) do
+    case Archive.get(:sector_research_cache, sector_id) do
       nil -> {:error, :not_found}
       cache -> {:ok, cache}
     end
@@ -38,7 +38,7 @@ defmodule GiTF.Research.Cache do
   end
 
   @doc """
-  Store research results for a sector.
+  Archive research results for a sector.
   
   Saves research with current git hash and file index.
   """
@@ -55,9 +55,9 @@ defmodule GiTF.Research.Cache do
         cached_at: DateTime.utc_now()
       }
 
-      {:ok, cache} = Store.put(:sector_research_cache, cache_record)
+      {:ok, cache} = Archive.put(:sector_research_cache, cache_record)
       
-      # Store file-level research
+      # Archive file-level research
       Enum.each(file_index, fn file_data ->
         file_record = %{
           sector_id: sector_id,
@@ -65,7 +65,7 @@ defmodule GiTF.Research.Cache do
           research: file_data.research,
           git_hash: git_hash
         }
-        Store.insert(:research_file_index, file_record)
+        Archive.insert(:research_file_index, file_record)
       end)
 
       {:ok, cache}
@@ -75,7 +75,7 @@ defmodule GiTF.Research.Cache do
   @doc """
   Update research with incremental changes.
   
-  Merges new research with existing cache.
+  Syncs new research with existing cache.
   """
   @spec update_research(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def update_research(sector_id, new_research) do
@@ -94,11 +94,11 @@ defmodule GiTF.Research.Cache do
   """
   @spec invalidate(String.t()) :: :ok
   def invalidate(sector_id) do
-    Store.delete(:sector_research_cache, sector_id)
+    Archive.delete(:sector_research_cache, sector_id)
     
     # Delete file-level cache
-    Store.filter(:research_file_index, fn f -> f.sector_id == sector_id end)
-    |> Enum.each(fn file -> Store.delete(:research_file_index, file.id) end)
+    Archive.filter(:research_file_index, fn f -> f.sector_id == sector_id end)
+    |> Enum.each(fn file -> Archive.delete(:research_file_index, file.id) end)
     
     :ok
   end
@@ -108,7 +108,7 @@ defmodule GiTF.Research.Cache do
   """
   @spec get_file_research(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_file_research(sector_id, file_path) do
-    case Store.find_one(:research_file_index, fn f -> 
+    case Archive.find_one(:research_file_index, fn f -> 
       f.sector_id == sector_id and f.file_path == file_path 
     end) do
       nil -> {:error, :not_found}

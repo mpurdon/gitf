@@ -2,13 +2,13 @@ defmodule GiTF.CombTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Sector
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     tmp = Path.join(System.tmp_dir!(), "gitf_comb_test_#{:erlang.unique_integer([:positive])}")
@@ -145,7 +145,7 @@ defmodule GiTF.CombTest do
 
       # Create a shell with a worktree_path under the sector
       {:ok, shell} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           sector_id: sector.id,
           ghost_id: "ghost-1",
           branch: "feat",
@@ -155,7 +155,7 @@ defmodule GiTF.CombTest do
 
       # Create a ghost with a shell_path under the sector
       {:ok, ghost} =
-        Store.insert(:ghosts, %{
+        Archive.insert(:ghosts, %{
           name: "worker",
           status: "running",
           shell_path: Path.join(dir, "worktrees/ghost-1"),
@@ -165,10 +165,10 @@ defmodule GiTF.CombTest do
       assert {:ok, _} = Comb.rename("repo", "renamed-repo")
 
       new_dir = Path.join(tmp, "renamed-repo")
-      updated_cell = Store.get(:shells, shell.id)
+      updated_cell = Archive.get(:shells, shell.id)
       assert updated_cell.worktree_path == Path.join(new_dir, "worktrees/ghost-1")
 
-      updated_bee = Store.get(:ghosts, ghost.id)
+      updated_bee = Archive.get(:ghosts, ghost.id)
       assert updated_bee.shell_path == Path.join(new_dir, "worktrees/ghost-1")
     end
 
@@ -186,24 +186,24 @@ defmodule GiTF.CombTest do
     end
   end
 
-  describe "merge_strategy field" do
+  describe "sync_strategy field" do
     test "defaults to manual when not specified", %{tmp: tmp} do
       assert {:ok, sector} = Comb.add(tmp, name: "default-strategy")
 
-      assert sector.merge_strategy == "manual"
+      assert sector.sync_strategy == "manual"
     end
 
-    test "can create sector with specific merge_strategy" do
-      # Test that valid merge strategies are accepted as plain map fields
+    test "can create sector with specific sync_strategy" do
+      # Test that valid sync strategies are accepted as plain map fields
       {:ok, pr_comb} =
-        Store.insert(:sectors, %{name: "pr-sector", merge_strategy: "pr_branch"})
+        Archive.insert(:sectors, %{name: "pr-sector", sync_strategy: "pr_branch"})
 
-      assert pr_comb.merge_strategy == "pr_branch"
+      assert pr_comb.sync_strategy == "pr_branch"
 
       {:ok, auto_comb} =
-        Store.insert(:sectors, %{name: "auto-sector", merge_strategy: "auto_merge"})
+        Archive.insert(:sectors, %{name: "auto-sector", sync_strategy: "auto_merge"})
 
-      assert auto_comb.merge_strategy == "auto_merge"
+      assert auto_comb.sync_strategy == "auto_merge"
     end
   end
 end

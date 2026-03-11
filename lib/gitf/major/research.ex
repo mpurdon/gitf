@@ -98,7 +98,7 @@ defmodule GiTF.Major.Research do
       System.cmd("find", [path, "-type", "f", "-not", "-path", "*/.*"], stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, 30_000) || Task.exfil(task, 5_000) do
       {:ok, {output, 0}} ->
         files =
           output

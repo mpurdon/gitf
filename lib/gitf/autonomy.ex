@@ -4,7 +4,7 @@ defmodule GiTF.Autonomy do
   """
 
   require Logger
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Perform self-healing checks and repairs.
@@ -108,14 +108,14 @@ defmodule GiTF.Autonomy do
       timestamp: DateTime.utc_now()
     }
     
-    Store.insert(:audit_log, entry)
+    Archive.insert(:audit_log, entry)
   end
 
   # Private functions
 
   defp cleanup_orphaned_processes do
     # Check for ghosts without active ops
-    ghosts = Store.all(:ghosts)
+    ghosts = Archive.all(:ghosts)
     
     orphaned = Enum.filter(ghosts, fn ghost ->
       ghost.status == "active" and
@@ -136,7 +136,7 @@ defmodule GiTF.Autonomy do
 
   defp reconcile_state do
     # Check for inconsistent state
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
     
     inconsistent = Enum.filter(ops, fn op ->
       op.status == "running" and
@@ -148,7 +148,7 @@ defmodule GiTF.Autonomy do
         Logger.warning("Reconciling inconsistent op state: #{op.id}")
         updated = Map.put(op, :status, "failed")
         |> Map.put(:error_message, "Bee disappeared, marked as failed")
-        Store.put(:ops, updated)
+        Archive.put(:ops, updated)
       end)
       
       {:reconciled_jobs, length(inconsistent)}
@@ -159,7 +159,7 @@ defmodule GiTF.Autonomy do
 
   defp cleanup_stale_worktrees do
     # Check for worktrees older than 7 days
-    shells = Store.all(:shells)
+    shells = Archive.all(:shells)
     cutoff = DateTime.add(DateTime.utc_now(), -7, :day)
     
     stale = Enum.filter(shells, fn shell ->
@@ -180,7 +180,7 @@ defmodule GiTF.Autonomy do
 
   defp recover_stuck_jobs do
     # Check for ops stuck in running state for > 1 hour
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
     cutoff = DateTime.add(DateTime.utc_now(), -1, :hour)
     
     stuck = Enum.filter(ops, fn op ->
@@ -202,22 +202,22 @@ defmodule GiTF.Autonomy do
   end
 
   defp has_active_job?(ghost_id) do
-    Store.all(:ops)
+    Archive.all(:ops)
     |> Enum.any?(fn op ->
       op.ghost_id == ghost_id and op.status in ["pending", "running"]
     end)
   end
 
   defp has_active_bee?(ghost_id) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil -> false
       ghost -> ghost.status == "active"
     end
   end
 
   defp collect_metrics do
-    ghosts = Store.all(:ghosts)
-    ops = Store.all(:ops)
+    ghosts = Archive.all(:ghosts)
+    ops = Archive.all(:ops)
     
     active_ghosts = Enum.count(ghosts, &(&1.status == "active"))
     pending_jobs = Enum.count(ops, &(&1.status == "pending"))

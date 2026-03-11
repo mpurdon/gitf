@@ -3,13 +3,13 @@ defmodule GiTF.ObservabilityTest do
 
   alias GiTF.Observability
   alias GiTF.Observability.{Metrics, Alerts, Health}
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-obs-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -51,7 +51,7 @@ defmodule GiTF.ObservabilityTest do
         created_at: DateTime.add(DateTime.utc_now(), -3600),
         updated_at: DateTime.add(DateTime.utc_now(), -3600)
       }
-      Store.insert(:missions, mission)
+      Archive.insert(:missions, mission)
       
       alerts = Alerts.check_alerts()
       

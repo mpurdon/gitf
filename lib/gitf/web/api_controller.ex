@@ -100,7 +100,7 @@ defmodule GiTF.Web.ApiController do
         tasks = plan[:tasks] || plan.tasks || []
 
         # Read candidate count from mission record
-        quest_record = GiTF.Store.get(:missions, id)
+        quest_record = GiTF.Archive.get(:missions, id)
         candidates = if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
 
         json(conn, %{
@@ -132,7 +132,7 @@ defmodule GiTF.Web.ApiController do
   end
 
   def list_plan_candidates(conn, %{"id" => id}) do
-    quest_record = GiTF.Store.get(:missions, id)
+    quest_record = GiTF.Archive.get(:missions, id)
 
     if quest_record do
       candidates = Map.get(quest_record, :plan_candidates, [])
@@ -154,7 +154,7 @@ defmodule GiTF.Web.ApiController do
 
   def select_plan_candidate(conn, %{"id" => id} = params) do
     strategy = params["strategy"]
-    quest_record = GiTF.Store.get(:missions, id)
+    quest_record = GiTF.Archive.get(:missions, id)
 
     cond do
       is_nil(quest_record) ->
@@ -172,7 +172,7 @@ defmodule GiTF.Web.ApiController do
 
           candidate ->
             updated = Map.put(quest_record, :draft_plan, candidate)
-            GiTF.Store.put(:missions, updated)
+            GiTF.Archive.put(:missions, updated)
 
             tasks = candidate[:tasks] || candidate.tasks || []
 
@@ -234,7 +234,7 @@ defmodule GiTF.Web.ApiController do
   end
 
   def quest_merge(conn, %{"id" => id}) do
-    case GiTF.Merge.merge_quest(id) do
+    case GiTF.Sync.merge_quest(id) do
       {:ok, branch} ->
         json(conn, %{data: %{branch: branch, mission_id: id}})
 
@@ -283,11 +283,11 @@ defmodule GiTF.Web.ApiController do
     feedback = params["feedback"]
 
     # Clear the draft plan
-    quest_record = GiTF.Store.get(:missions, mission_id)
+    quest_record = GiTF.Archive.get(:missions, mission_id)
 
     if quest_record do
       updated = Map.delete(quest_record, :draft_plan)
-      GiTF.Store.put(:missions, updated)
+      GiTF.Archive.put(:missions, updated)
 
       if feedback do
         GiTF.Missions.store_artifact(mission_id, "plan_rejection", %{
@@ -307,12 +307,12 @@ defmodule GiTF.Web.ApiController do
 
     case GiTF.Major.Planner.generate_llm_plan(mission_id, %{feedback: feedback}) do
       {:ok, plan} ->
-        # Store as draft
-        quest_record = GiTF.Store.get(:missions, mission_id)
+        # Archive as draft
+        quest_record = GiTF.Archive.get(:missions, mission_id)
 
         if quest_record do
           updated = Map.put(quest_record, :draft_plan, plan)
-          GiTF.Store.put(:missions, updated)
+          GiTF.Archive.put(:missions, updated)
         end
 
         json(conn, %{data: plan})
@@ -399,7 +399,7 @@ defmodule GiTF.Web.ApiController do
   def complete_bee(conn, %{"id" => ghost_id}) do
     case GiTF.Ghosts.get(ghost_id) do
       {:ok, ghost} ->
-        GiTF.Store.put(:ghosts, %{ghost | status: "stopped"})
+        GiTF.Archive.put(:ghosts, %{ghost | status: "stopped"})
 
         if ghost[:op_id] do
           # For phase ops, extract artifact from the ghost's log before completing
@@ -428,7 +428,7 @@ defmodule GiTF.Web.ApiController do
 
     case GiTF.Ghosts.get(ghost_id) do
       {:ok, ghost} ->
-        GiTF.Store.put(:ghosts, %{ghost | status: "crashed"})
+        GiTF.Archive.put(:ghosts, %{ghost | status: "crashed"})
 
         if ghost[:op_id] do
           GiTF.Ops.fail(ghost[:op_id])
@@ -452,7 +452,7 @@ defmodule GiTF.Web.ApiController do
       opts_map
       |> Enum.reduce([], fn
         {"name", v}, acc -> [{:name, v} | acc]
-        {"merge_strategy", v}, acc -> [{:merge_strategy, v} | acc]
+        {"sync_strategy", v}, acc -> [{:sync_strategy, v} | acc]
         {"validation_command", v}, acc -> [{:validation_command, v} | acc]
         _, acc -> acc
       end)
@@ -669,7 +669,7 @@ defmodule GiTF.Web.ApiController do
       name: c.name,
       path: c[:path],
       repo_url: c[:repo_url],
-      merge_strategy: c[:merge_strategy],
+      sync_strategy: c[:sync_strategy],
       validation_command: c[:validation_command]
     }
   end

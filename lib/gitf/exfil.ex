@@ -1,11 +1,11 @@
-defmodule GiTF.Shutdown do
+defmodule GiTF.Exfil do
   @moduledoc """
-  Graceful shutdown orchestration for long-running TUI sessions.
+  Graceful exfil orchestration for long-running TUI sessions.
 
   Traps exit signals and performs ordered teardown:
   1. Notify channels ("gitf shutting down")
   2. Drain in-flight links
-  3. Save Store state
+  3. Save Archive state
   4. Stop ghosts gracefully (SIGTERM to Claude ports, wait timeout)
   5. Stop Major
   6. Close TUI
@@ -20,15 +20,15 @@ defmodule GiTF.Shutdown do
 
   # -- Public API ------------------------------------------------------------
 
-  @doc "Starts the shutdown coordinator."
+  @doc "Starts the exfil coordinator."
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @doc "Initiates graceful shutdown."
+  @doc "Initiates graceful exfil."
   @spec initiate() :: :ok
   def initiate do
-    GenServer.cast(__MODULE__, :shutdown)
+    GenServer.cast(__MODULE__, :exfil)
   end
 
   # -- GenServer callbacks ---------------------------------------------------
@@ -41,11 +41,11 @@ defmodule GiTF.Shutdown do
   end
 
   @impl true
-  def handle_cast(:shutdown, %{shutting_down: true} = state) do
+  def handle_cast(:exfil, %{shutting_down: true} = state) do
     {:noreply, state}
   end
 
-  def handle_cast(:shutdown, state) do
+  def handle_cast(:exfil, state) do
     do_shutdown(state.drain_timeout)
     {:noreply, %{state | shutting_down: true}}
   end
@@ -71,10 +71,10 @@ defmodule GiTF.Shutdown do
     # 2. Mark running ops as stopped (preserves state for resume)
     mark_jobs_stopped()
 
-    # 3. Save checkpoints for active ghosts
+    # 3. Save backups for active ghosts
     save_active_checkpoints()
 
-    # 4. Flush Store to ensure all state is persisted before stopping processes
+    # 4. Flush Archive to ensure all state is persisted before stopping processes
     flush_store()
 
     # 5. Drain links (wait for in-flight to complete)
@@ -94,19 +94,19 @@ defmodule GiTF.Shutdown do
   end
 
   defp mark_jobs_stopped do
-    GiTF.Store.filter(:ops, fn j -> j.status in ["running", "assigned"] end)
+    GiTF.Archive.filter(:ops, fn j -> j.status in ["running", "assigned"] end)
     |> Enum.each(fn op ->
-      GiTF.Store.put(:ops, %{op | status: "pending"})
+      GiTF.Archive.put(:ops, %{op | status: "pending"})
     end)
   rescue
     _ -> :ok
   end
 
   defp save_active_checkpoints do
-    GiTF.Store.filter(:ghosts, fn b -> b.status == "working" end)
+    GiTF.Archive.filter(:ghosts, fn b -> b.status == "working" end)
     |> Enum.each(fn ghost ->
       try do
-        GiTF.Handoff.create(ghost.id)
+        GiTF.Transfer.create(ghost.id)
       rescue
         _ -> :ok
       end
@@ -129,7 +129,7 @@ defmodule GiTF.Shutdown do
         children = DynamicSupervisor.which_children(GiTF.SectorSupervisor)
 
         # Stop ghosts in parallel with per-ghost timeout to prevent one hung ghost
-        # from blocking shutdown of all others
+        # from blocking exfil of all others
         tasks =
           Enum.map(children, fn {_, pid, _, _} ->
             Task.async(fn ->
@@ -146,7 +146,7 @@ defmodule GiTF.Shutdown do
         # Wait for all with a hard ceiling
         Task.yield_many(tasks, timeout + 1_000)
         |> Enum.each(fn {task, result} ->
-          if result == nil, do: Task.shutdown(task, :brutal_kill)
+          if result == nil, do: Task.exfil(task, :brutal_kill)
         end)
     end
   rescue
@@ -156,7 +156,7 @@ defmodule GiTF.Shutdown do
   defp flush_store do
     # Force a no-op write cycle to ensure all pending data is on disk
     # This is a read-then-write under the lock, which flushes the cache to disk
-    GiTF.Store.transact(fn data -> data end)
+    GiTF.Archive.transact(fn data -> data end)
   rescue
     _ -> :ok
   end

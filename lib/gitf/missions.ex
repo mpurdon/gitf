@@ -10,7 +10,7 @@ defmodule GiTF.Missions do
   against the store.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Public API --------------------------------------------------------------
 
@@ -43,7 +43,7 @@ defmodule GiTF.Missions do
         phase_jobs: %{}
       }
 
-      case Store.insert(:missions, record) do
+      case Archive.insert(:missions, record) do
         {:ok, mission} = result ->
           GiTF.Telemetry.emit([:gitf, :mission, :created], %{}, %{
             mission_id: mission.id,
@@ -77,7 +77,7 @@ defmodule GiTF.Missions do
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
     missions =
-      Store.all(:missions)
+      Archive.all(:missions)
       |> Enum.map(&derive_status/1)
 
     missions =
@@ -104,9 +104,9 @@ defmodule GiTF.Missions do
   """
   @spec delete(String.t()) :: :ok | {:error, :not_found}
   def delete(mission_id) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil -> {:error, :not_found}
-      _quest -> Store.delete(:missions, mission_id)
+      _quest -> Archive.delete(:missions, mission_id)
     end
   end
 
@@ -118,7 +118,7 @@ defmodule GiTF.Missions do
   """
   @spec kill(String.t()) :: :ok | {:error, :not_found}
   def kill(mission_id) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
 
@@ -126,7 +126,7 @@ defmodule GiTF.Missions do
         GiTF.Ops.list(mission_id: mission_id)
         |> Enum.each(fn op -> GiTF.Ops.kill(op[:id] || op.id) end)
 
-        Store.delete(:missions, mission_id)
+        Archive.delete(:missions, mission_id)
         :ok
     end
   end
@@ -142,14 +142,14 @@ defmodule GiTF.Missions do
       ghost_ids = mission.ops |> Enum.map(& &1.ghost_id) |> Enum.reject(&is_nil/1)
 
       Enum.each(ghost_ids, fn ghost_id ->
-        case Store.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
+        case Archive.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
           nil -> :ok
           shell -> GiTF.Shell.remove(shell.id, force: true)
         end
       end)
 
       updated = %{mission | status: "closed"} |> Map.delete(:ops)
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
     end
   end
 
@@ -160,7 +160,7 @@ defmodule GiTF.Missions do
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(mission_id) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
 
@@ -210,13 +210,13 @@ defmodule GiTF.Missions do
   """
   @spec set_planning(String.t()) :: {:ok, map()} | {:error, term()}
   def set_planning(mission_id) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
 
       %{status: "pending"} = mission ->
         updated = %{mission | status: "planning"}
-        Store.put(:missions, updated)
+        Archive.put(:missions, updated)
 
       _quest ->
         {:error, :invalid_transition}
@@ -244,7 +244,7 @@ defmodule GiTF.Missions do
       else
         new_status = compute_status(op_statuses)
         updated = %{mission | status: new_status} |> Map.delete(:ops)
-        result = Store.put(:missions, updated)
+        result = Archive.put(:missions, updated)
 
         if new_status == "completed" and mission.status != "completed" do
           GiTF.Telemetry.emit([:gitf, :mission, :completed], %{}, %{
@@ -261,7 +261,7 @@ defmodule GiTF.Missions do
   @doc """
   Adds a op to a mission.
 
-  Merges the mission_id into the op attrs and delegates to `GiTF.Ops.create/1`.
+  Syncs the mission_id into the op attrs and delegates to `GiTF.Ops.create/1`.
 
   Returns `{:ok, op}` or `{:error, reason}`.
   """
@@ -277,19 +277,19 @@ defmodule GiTF.Missions do
   @doc """
   Stores a phase artifact on a mission record.
 
-  Merges the artifact into the mission's `artifacts` map under the given phase key.
+  Syncs the artifact into the mission's `artifacts` map under the given phase key.
   Returns `{:ok, mission}` or `{:error, :not_found}`.
   """
   @spec store_artifact(String.t(), String.t(), map()) :: {:ok, map()} | {:error, :not_found}
   def store_artifact(mission_id, phase, artifact) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
 
       mission ->
         artifacts = Map.get(mission, :artifacts, %{})
         updated = Map.put(mission, :artifacts, Map.put(artifacts, phase, artifact))
-        Store.put(:missions, updated)
+        Archive.put(:missions, updated)
     end
   end
 
@@ -300,7 +300,7 @@ defmodule GiTF.Missions do
   """
   @spec get_artifact(String.t(), String.t()) :: map() | nil
   def get_artifact(mission_id, phase) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil -> nil
       mission -> get_in(mission, [:artifacts, phase]) || get_in(mission, [:artifacts, Access.key(phase)])
     end
@@ -313,14 +313,14 @@ defmodule GiTF.Missions do
   """
   @spec record_phase_job(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
   def record_phase_job(mission_id, phase, op_id) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
 
       mission ->
         phase_jobs = Map.get(mission, :phase_jobs, %{})
         updated = Map.put(mission, :phase_jobs, Map.put(phase_jobs, phase, op_id))
-        Store.put(:missions, updated)
+        Archive.put(:missions, updated)
     end
   end
 
@@ -334,7 +334,7 @@ defmodule GiTF.Missions do
   """
   @spec transition_phase(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def transition_phase(mission_id, to_phase, reason \\ nil) do
-    case Store.get(:missions, mission_id) do
+    case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
 
@@ -349,7 +349,7 @@ defmodule GiTF.Missions do
           reason: reason,
           seq: System.monotonic_time(:microsecond)
         }
-        Store.insert(:mission_phase_transitions, transition)
+        Archive.insert(:mission_phase_transitions, transition)
 
         # Update mission phase and derive status from the phase
         status =
@@ -364,7 +364,7 @@ defmodule GiTF.Missions do
           |> Map.put(:current_phase, to_phase)
           |> Map.put(:status, status)
 
-        Store.put(:missions, updated)
+        Archive.put(:missions, updated)
     end
   end
 
@@ -373,7 +373,7 @@ defmodule GiTF.Missions do
   """
   @spec get_phase_transitions(String.t()) :: [map()]
   def get_phase_transitions(mission_id) do
-    Store.filter(:mission_phase_transitions, fn t -> t.mission_id == mission_id end)
+    Archive.filter(:mission_phase_transitions, fn t -> t.mission_id == mission_id end)
     |> Enum.sort_by(&Map.get(&1, :seq, 0))
   end
 end

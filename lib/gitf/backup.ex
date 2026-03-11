@@ -1,21 +1,21 @@
-defmodule GiTF.Checkpoint do
+defmodule GiTF.Backup do
   @moduledoc """
-  Structured checkpointing for ghost state persistence.
+  Structured backuping for ghost state persistence.
 
-  Provides richer state snapshots than link_msg-based handoffs by capturing
+  Provides richer state snapshots than link_msg-based transfers by capturing
   progress summaries, files modified, pending work, tool call counts, and
   context usage. Each save appends a new record (append-only history),
   enabling both point-in-time recovery and progress trend analysis.
 
   This is a pure context module -- no GenServer, no state. Every function
-  is a data transformation against the Store.
+  is a data transformation against the Archive.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
-  @collection :checkpoints
+  @collection :backups
 
-  @checkpoint_keys ~w(
+  @backup_keys ~w(
     progress_summary files_modified pending_work tool_calls
     iteration context_usage_pct phase error_count
   )a
@@ -23,65 +23,65 @@ defmodule GiTF.Checkpoint do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Saves a checkpoint for a ghost.
+  Saves a backup for a ghost.
 
   Creates a new append-only record with the given data. Accepts a map with
   optional keys: `:progress_summary`, `:files_modified`, `:pending_work`,
   `:tool_calls`, `:iteration`, `:context_usage_pct`, `:phase`, `:error_count`.
 
-  Returns `{:ok, checkpoint}`.
+  Returns `{:ok, backup}`.
   """
   @spec save(String.t(), map()) :: {:ok, map()}
   def save(ghost_id, data) when is_binary(ghost_id) and is_map(data) do
     data
-    |> Map.take(@checkpoint_keys)
+    |> Map.take(@backup_keys)
     |> Map.put(:ghost_id, ghost_id)
     |> Map.put(:saved_at, DateTime.utc_now() |> DateTime.truncate(:second))
-    |> then(&Store.insert(@collection, &1))
+    |> then(&Archive.insert(@collection, &1))
   end
 
   @doc """
-  Loads the most recent checkpoint for a ghost.
+  Loads the most recent backup for a ghost.
 
-  Returns `{:ok, checkpoint}` or `{:error, :not_found}`.
+  Returns `{:ok, backup}` or `{:error, :not_found}`.
   """
   @spec load(String.t()) :: {:ok, map()} | {:error, :not_found}
   def load(ghost_id) when is_binary(ghost_id) do
     case latest_checkpoint(ghost_id) do
       nil -> {:error, :not_found}
-      checkpoint -> {:ok, checkpoint}
+      backup -> {:ok, backup}
     end
   end
 
   @doc """
-  Returns all checkpoints for a ghost, sorted by timestamp ascending.
+  Returns all backups for a ghost, sorted by timestamp ascending.
   """
   @spec history(String.t()) :: [map()]
   def history(ghost_id) when is_binary(ghost_id) do
-    Store.filter(@collection, &(&1.ghost_id == ghost_id))
+    Archive.filter(@collection, &(&1.ghost_id == ghost_id))
     |> Enum.sort_by(& &1.saved_at, {:asc, DateTime})
   end
 
   @doc """
   Builds a markdown prompt for injecting into a replacement ghost's context.
 
-  Takes a checkpoint map and produces a structured resume briefing that
+  Takes a backup map and produces a structured resume briefing that
   gives the new ghost enough context to continue where the previous one
   left off.
   """
   @spec build_resume_prompt(map()) :: String.t()
-  def build_resume_prompt(checkpoint) when is_map(checkpoint) do
+  def build_resume_prompt(backup) when is_map(backup) do
     sections =
       [
         "## Resuming Previous Work",
         "",
-        format_field("Progress so far", checkpoint[:progress_summary]),
-        format_files(checkpoint[:files_modified]),
-        format_field("Remaining work", checkpoint[:pending_work]),
-        format_field("Previous phase", checkpoint[:phase]),
-        format_field("Iterations completed", checkpoint[:iteration]),
-        format_field("Errors encountered", checkpoint[:error_count]),
-        format_context_usage(checkpoint[:context_usage_pct])
+        format_field("Progress so far", backup[:progress_summary]),
+        format_files(backup[:files_modified]),
+        format_field("Remaining work", backup[:pending_work]),
+        format_field("Previous phase", backup[:phase]),
+        format_field("Iterations completed", backup[:iteration]),
+        format_field("Errors encountered", backup[:error_count]),
+        format_context_usage(backup[:context_usage_pct])
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -89,28 +89,28 @@ defmodule GiTF.Checkpoint do
   end
 
   @doc """
-  Keeps only the N most recent checkpoints for a ghost, deleting the rest.
+  Keeps only the N most recent backups for a ghost, deleting the rest.
 
-  Returns the count of deleted checkpoints.
+  Returns the count of deleted backups.
   """
   @spec cleanup(String.t(), keyword()) :: non_neg_integer()
   def cleanup(ghost_id, opts) when is_binary(ghost_id) do
     keep = Keyword.fetch!(opts, :keep)
 
-    checkpoints =
-      Store.filter(@collection, &(&1.ghost_id == ghost_id))
+    backups =
+      Archive.filter(@collection, &(&1.ghost_id == ghost_id))
       |> Enum.sort_by(& &1.saved_at, {:desc, DateTime})
 
-    to_delete = Enum.drop(checkpoints, keep)
+    to_delete = Enum.drop(backups, keep)
 
-    Enum.each(to_delete, &Store.delete(@collection, &1.id))
+    Enum.each(to_delete, &Archive.delete(@collection, &1.id))
     length(to_delete)
   end
 
   # -- Private ---------------------------------------------------------------
 
   defp latest_checkpoint(ghost_id) do
-    Store.filter(@collection, &(&1.ghost_id == ghost_id))
+    Archive.filter(@collection, &(&1.ghost_id == ghost_id))
     |> Enum.sort_by(& &1.saved_at, {:desc, DateTime})
     |> List.first()
   end

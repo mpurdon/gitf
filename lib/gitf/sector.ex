@@ -10,7 +10,7 @@ defmodule GiTF.Sector do
   transforms input data into a store operation and returns the result.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Registers a sector with the section.
@@ -38,7 +38,7 @@ defmodule GiTF.Sector do
   """
   @spec list() :: [map()]
   def list do
-    Store.all(:sectors)
+    Archive.all(:sectors)
   end
 
   @doc """
@@ -48,9 +48,9 @@ defmodule GiTF.Sector do
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(name_or_id) do
-    case Store.get(:sectors, name_or_id) do
+    case Archive.get(:sectors, name_or_id) do
       nil ->
-        case Store.find_one(:sectors, fn c -> c.name == name_or_id end) do
+        case Archive.find_one(:sectors, fn c -> c.name == name_or_id end) do
           nil -> {:error, :not_found}
           sector -> {:ok, sector}
         end
@@ -77,7 +77,7 @@ defmodule GiTF.Sector do
         File.rm_rf(sector.path)
       end
 
-      Store.delete(:sectors, sector.id)
+      Archive.delete(:sectors, sector.id)
       {:ok, sector}
     end
   end
@@ -144,7 +144,7 @@ defmodule GiTF.Sector do
         case File.rename(sector.path, new_path) do
           :ok ->
             updated = %{updated | path: new_path}
-            Store.put(:sectors, updated)
+            Archive.put(:sectors, updated)
             update_stored_paths(sector.path, new_path)
             {:ok, updated}
 
@@ -152,7 +152,7 @@ defmodule GiTF.Sector do
             {:error, {:rename_failed, reason}}
         end
       else
-        Store.put(:sectors, updated)
+        Archive.put(:sectors, updated)
         {:ok, updated}
       end
     end
@@ -171,13 +171,13 @@ defmodule GiTF.Sector do
         name: name,
         path: expanded,
         repo_url: nil,
-        merge_strategy: Keyword.get(opts, :merge_strategy, "manual"),
+        sync_strategy: Keyword.get(opts, :sync_strategy, "manual"),
         validation_command: Keyword.get(opts, :validation_command),
         github_owner: Keyword.get(opts, :github_owner),
         github_repo: Keyword.get(opts, :github_repo)
       }
 
-      with {:ok, sector} <- Store.insert(:sectors, record) do
+      with {:ok, sector} <- Archive.insert(:sectors, record) do
         set_current(sector.id)
         {:ok, sector}
       end
@@ -195,13 +195,13 @@ defmodule GiTF.Sector do
         name: name,
         repo_url: url,
         path: cloned_path,
-        merge_strategy: Keyword.get(opts, :merge_strategy, "manual"),
+        sync_strategy: Keyword.get(opts, :sync_strategy, "manual"),
         validation_command: Keyword.get(opts, :validation_command),
         github_owner: Keyword.get(opts, :github_owner),
         github_repo: Keyword.get(opts, :github_repo)
       }
 
-      with {:ok, sector} <- Store.insert(:sectors, record) do
+      with {:ok, sector} <- Archive.insert(:sectors, record) do
         set_current(sector.id)
         {:ok, sector}
       end
@@ -215,7 +215,7 @@ defmodule GiTF.Sector do
   defp validate_unique_name(opts, expanded) do
     name = Keyword.get(opts, :name, Path.basename(expanded))
 
-    case Store.find_one(:sectors, fn c -> c.name == name end) do
+    case Archive.find_one(:sectors, fn c -> c.name == name end) do
       nil -> :ok
       _existing -> {:error, :name_already_taken}
     end
@@ -229,27 +229,27 @@ defmodule GiTF.Sector do
   end
 
   defp validate_name_available(name, excluding_id) do
-    case Store.find_one(:sectors, fn c -> c.name == name && c.id != excluding_id end) do
+    case Archive.find_one(:sectors, fn c -> c.name == name && c.id != excluding_id end) do
       nil -> :ok
       _existing -> {:error, :name_already_taken}
     end
   end
 
   defp update_stored_paths(old_path, new_path) do
-    Store.filter(:shells, fn c ->
+    Archive.filter(:shells, fn c ->
       is_binary(c[:worktree_path]) && String.starts_with?(c.worktree_path, old_path)
     end)
     |> Enum.each(fn shell ->
       updated_path = String.replace_prefix(shell.worktree_path, old_path, new_path)
-      Store.put(:shells, %{shell | worktree_path: updated_path})
+      Archive.put(:shells, %{shell | worktree_path: updated_path})
     end)
 
-    Store.filter(:ghosts, fn b ->
+    Archive.filter(:ghosts, fn b ->
       is_binary(b[:shell_path]) && String.starts_with?(b.shell_path, old_path)
     end)
     |> Enum.each(fn ghost ->
       updated_path = String.replace_prefix(ghost.shell_path, old_path, new_path)
-      Store.put(:ghosts, %{ghost | shell_path: updated_path})
+      Archive.put(:ghosts, %{ghost | shell_path: updated_path})
     end)
   end
 end

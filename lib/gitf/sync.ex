@@ -1,35 +1,35 @@
-defmodule GiTF.Merge do
+defmodule GiTF.Sync do
   @moduledoc """
   Handles merging ghost worktree branches back into the main codebase.
 
-  After a ghost completes its op, the merge module applies the sector's
-  configured merge strategy to integrate the ghost's changes.
+  After a ghost completes its op, the sync module applies the sector's
+  configured sync strategy to integrate the ghost's changes.
 
   ## Strategies
 
-    * `"manual"` -- No auto-merge. Sends a link_msg with instructions.
+    * `"manual"` -- No auto-sync. Sends a link_msg with instructions.
     * `"auto_merge"` -- Checks out the main branch and merges the ghost branch.
     * `"pr_branch"` -- Keeps the branch intact for a PR workflow.
   """
 
   require Logger
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @lock_timeout 60_000
   @lock_retry_interval 500
 
   @doc """
-  Merges a ghost's worktree branch back according to the sector's merge strategy.
+  Syncs a ghost's worktree branch back according to the sector's sync strategy.
 
-  Looks up the shell, finds the sector, reads the merge_strategy, and dispatches.
+  Looks up the shell, finds the sector, reads the sync_strategy, and dispatches.
   Returns `{:ok, strategy_applied}` or `{:error, reason}`.
   """
-  @spec merge_back(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def merge_back(shell_id, _opts \\ []) do
+  @spec sync_back(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def sync_back(shell_id, _opts \\ []) do
     with {:ok, shell} <- fetch_cell(shell_id),
          {:ok, sector} <- fetch_comb(shell.sector_id) do
-      strategy = sector.merge_strategy || "manual"
+      strategy = sector.sync_strategy || "manual"
 
       if strategy == "auto_merge" do
         with_comb_lock(sector.id, fn -> apply_strategy(strategy, shell, sector) end)
@@ -40,11 +40,11 @@ defmodule GiTF.Merge do
   end
 
   @doc """
-  Merges all completed ghost branches for a mission into a single mission branch.
+  Syncs all completed ghost branches for a mission into a single mission branch.
 
   Creates `mission/<mission-name>` off the main branch, then merges each ghost's
   branch into it sequentially. Returns `{:ok, quest_branch}` with the branch
-  name, or `{:error, reason}` if any merge fails.
+  name, or `{:error, reason}` if any sync fails.
   """
   @spec merge_quest(String.t()) :: {:ok, String.t()} | {:error, term()}
   def merge_quest(mission_id) do
@@ -62,17 +62,17 @@ defmodule GiTF.Merge do
     end
   end
 
-  # -- Private: per-sector merge lock --------------------------------------------
+  # -- Private: per-sector sync lock --------------------------------------------
 
   @doc false
   def with_comb_lock(sector_id, fun) do
-    lock_key = {:merge_lock, sector_id}
+    lock_key = {:sync_lock, sector_id}
     acquire_lock(lock_key, @lock_timeout, fun)
   end
 
   defp acquire_lock(lock_key, remaining, _fun) when remaining <= 0 do
-    Logger.warning("Merge lock timeout for #{inspect(lock_key)}")
-    {:error, :merge_lock_timeout}
+    Logger.warning("Sync lock timeout for #{inspect(lock_key)}")
+    {:error, :sync_lock_timeout}
   end
 
   defp acquire_lock(lock_key, remaining, fun) do
@@ -93,17 +93,17 @@ defmodule GiTF.Merge do
   # -- Private: strategy dispatch ----------------------------------------------
 
   defp apply_strategy("manual", shell, _comb) do
-    Logger.info("Merge strategy: manual. Branch #{shell.branch} ready for manual merge.")
+    Logger.info("Sync strategy: manual. Branch #{shell.branch} ready for manual sync.")
     {:ok, "manual"}
   end
 
   defp apply_strategy("auto_merge", shell, sector) do
     repo_path = sector.path
 
-    # Clean up any stale merge state from interrupted previous merge
+    # Clean up any stale sync state from interrupted previous sync
     cleanup_stale_merge_state(repo_path)
 
-    # Save HEAD before any checkout/merge so we can always roll back
+    # Save HEAD before any checkout/sync so we can always roll back
     original_head =
       case get_head(repo_path) do
         {:ok, head} -> head
@@ -112,12 +112,12 @@ defmodule GiTF.Merge do
 
     with {:ok, main_branch} <- detect_main_branch(repo_path),
          :ok <- GiTF.Git.checkout(repo_path, main_branch),
-         :ok <- GiTF.Git.merge(repo_path, shell.branch, no_ff: true) do
+         :ok <- GiTF.Git.sync(repo_path, shell.branch, no_ff: true) do
       Logger.info("Auto-merged #{shell.branch} into #{main_branch}")
       {:ok, "auto_merge"}
     else
       {:error, reason} ->
-        Logger.warning("Auto-merge failed for #{shell.branch}: #{inspect(reason)}, rolling back")
+        Logger.warning("Auto-sync failed for #{shell.branch}: #{inspect(reason)}, rolling back")
         rollback_merge(repo_path, original_head)
         {:error, {:merge_conflict, reason}}
     end
@@ -134,25 +134,25 @@ defmodule GiTF.Merge do
   end
 
   @doc """
-  Merges a ghost branch using rebase-then-merge strategy.
+  Syncs a ghost branch using rebase-then-sync strategy.
 
-  Rebases the ghost branch onto main first, then does a fast-forward merge.
+  Rebases the ghost branch onto main first, then does a fast-forward sync.
   Returns `{:ok, "rebase_merge"}` or `{:error, reason}`.
   """
-  @spec merge_back_with_rebase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def merge_back_with_rebase(shell_id, _opts \\ []) do
+  @spec sync_back_with_rebase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def sync_back_with_rebase(shell_id, _opts \\ []) do
     with {:ok, shell} <- fetch_cell(shell_id),
          {:ok, sector} <- fetch_comb(shell.sector_id) do
       with_comb_lock(sector.id, fn ->
         with {:ok, main_branch} <- detect_main_branch(sector.path),
              :ok <- rebase_branch(shell.worktree_path, main_branch),
              :ok <- GiTF.Git.checkout(sector.path, main_branch),
-             :ok <- GiTF.Git.merge(sector.path, shell.branch, []) do
+             :ok <- GiTF.Git.sync(sector.path, shell.branch, []) do
           Logger.info("Rebase-merged #{shell.branch} into #{main_branch}")
           {:ok, "rebase_merge"}
         else
           {:error, reason} ->
-            Logger.warning("Rebase-merge failed: #{inspect(reason)}")
+            Logger.warning("Rebase-sync failed: #{inspect(reason)}")
             {:error, reason}
         end
       end)
@@ -162,14 +162,14 @@ defmodule GiTF.Merge do
   # -- Private: data fetching --------------------------------------------------
 
   defp fetch_cell(shell_id) do
-    case Store.get(:shells, shell_id) do
+    case Archive.get(:shells, shell_id) do
       nil -> {:error, :cell_not_found}
       shell -> {:ok, shell}
     end
   end
 
   defp fetch_comb(sector_id) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
       sector -> {:ok, sector}
     end
@@ -178,7 +178,7 @@ defmodule GiTF.Merge do
   defp maybe_create_github_pr(sector, shell) do
     if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) do
       # Look up the op for this shell's ghost
-      case Store.find_one(:ops, fn j -> j.ghost_id == shell.ghost_id end) do
+      case Archive.find_one(:ops, fn j -> j.ghost_id == shell.ghost_id end) do
         nil ->
           Logger.debug("No op found for ghost #{shell.ghost_id}, skipping GitHub PR")
 
@@ -207,7 +207,7 @@ defmodule GiTF.Merge do
     end
   end
 
-  # -- Private: mission merge helpers -------------------------------------------
+  # -- Private: mission sync helpers -------------------------------------------
 
   defp cells_for_quest(mission) do
     ghost_ids =
@@ -215,7 +215,7 @@ defmodule GiTF.Merge do
       |> Enum.map(& &1.ghost_id)
       |> Enum.reject(&is_nil/1)
 
-    Store.filter(:shells, fn c ->
+    Archive.filter(:shells, fn c ->
       c.ghost_id in ghost_ids and c.status == "active"
     end)
   end
@@ -239,15 +239,15 @@ defmodule GiTF.Merge do
 
     results =
       Enum.map(shells, fn shell ->
-        case GiTF.Git.merge(repo_path, shell.branch, no_ff: true) do
+        case GiTF.Git.sync(repo_path, shell.branch, no_ff: true) do
           :ok ->
-            Logger.info("Merged #{shell.branch} into #{quest_branch}")
+            Logger.info("Syncd #{shell.branch} into #{quest_branch}")
             {:ok, shell.branch}
 
           {:error, reason} ->
-            Logger.warning("Failed to merge #{shell.branch}: #{inspect(reason)}")
-            # Abort the failed merge so subsequent merges can proceed
-            GiTF.Git.safe_cmd( ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+            Logger.warning("Failed to sync #{shell.branch}: #{inspect(reason)}")
+            # Abort the failed sync so subsequent merges can proceed
+            GiTF.Git.safe_cmd( ["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
             {:error, shell.branch, reason}
         end
       end)
@@ -259,7 +259,7 @@ defmodule GiTF.Merge do
       {:ok, quest_branch}
     else
       # Roll back to savepoint — none of the merges should persist if any failed
-      Logger.warning("Rolling back mission branch #{quest_branch} to savepoint due to merge failures")
+      Logger.warning("Rolling back mission branch #{quest_branch} to savepoint due to sync failures")
       GiTF.Git.safe_cmd( ["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
       failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
       {:error, {:merge_conflicts, quest_branch, failed_branches}}
@@ -281,16 +281,16 @@ defmodule GiTF.Merge do
   defp cleanup_stale_merge_state(repo_path) do
     merge_head = Path.join([repo_path, ".git", "MERGE_HEAD"])
     if File.exists?(merge_head) do
-      Logger.warning("Stale MERGE_HEAD found in #{repo_path}, aborting interrupted merge")
-      GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+      Logger.warning("Stale MERGE_HEAD found in #{repo_path}, aborting interrupted sync")
+      GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
     end
   rescue
     _ -> :ok
   end
 
   defp rollback_merge(repo_path, original_head) do
-    # First try to abort any in-progress merge
-    GiTF.Git.safe_cmd( ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+    # First try to abort any in-progress sync
+    GiTF.Git.safe_cmd( ["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
 
     # Then restore the original HEAD
     if original_head do

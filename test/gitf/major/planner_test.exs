@@ -2,19 +2,19 @@ defmodule GiTF.Major.PlannerTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Major.Planner
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     # Start store for tests with unique directory
     tmp_dir = System.tmp_dir!() |> Path.join("planner_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({GiTF.Store, data_dir: tmp_dir})
+    start_supervised!({GiTF.Archive, data_dir: tmp_dir})
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     
     # Create test mission and sector
-    {:ok, sector} = Store.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
-    {:ok, mission} = Store.insert(:missions, %{
+    {:ok, sector} = Archive.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
+    {:ok, mission} = Archive.insert(:missions, %{
       name: "test-mission", 
       goal: "Build a test feature",
       sector_id: sector.id
@@ -47,7 +47,7 @@ defmodule GiTF.Major.PlannerTest do
     test "stores plan in mission record", %{mission: mission, research_summary: research} do
       {:ok, _plan} = Planner.generate_plan(mission.id, research)
       
-      updated_quest = Store.get(:missions, mission.id)
+      updated_quest = Archive.get(:missions, mission.id)
       assert updated_quest.implementation_plan != nil
       assert updated_quest.implementation_plan.mission_id == mission.id
     end
@@ -109,7 +109,7 @@ defmodule GiTF.Major.PlannerTest do
       # Find the "Add tests" op which should be verification
       test_job = Enum.find(ops, &String.contains?(&1.title, "tests"))
       if test_job do
-        assert test_job.op_type == :verification
+        assert test_job.op_type == :audit
       end
     end
 

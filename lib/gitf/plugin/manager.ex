@@ -240,7 +240,7 @@ defmodule GiTF.Plugin.Manager do
   defp do_unload(type, name) do
     case GiTF.Plugin.Registry.lookup(type, name) do
       {:ok, module} ->
-        # Call optional shutdown callback
+        # Call optional exfil callback
         if function_exported?(module, :shutdown, 0), do: module.shutdown()
 
         GiTF.Plugin.Registry.unregister(type, name)

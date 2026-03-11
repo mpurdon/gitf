@@ -1,8 +1,8 @@
-defmodule GiTF.DoctorTest do
+defmodule GiTF.MedicTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Doctor
-  alias GiTF.Store
+  alias GiTF.Medic
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -10,14 +10,14 @@ defmodule GiTF.DoctorTest do
     tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok
   end
 
   describe "checks/0" do
     test "returns all check names" do
-      checks = Doctor.checks()
+      checks = Medic.checks()
       assert is_list(checks)
       assert :git_installed in checks
       assert :model_configured in checks
@@ -30,7 +30,7 @@ defmodule GiTF.DoctorTest do
 
   describe "check/1 - git_installed" do
     test "reports ok when git is available" do
-      result = Doctor.check(:git_installed)
+      result = Medic.check(:git_installed)
       # git should be available in CI and dev environments
       assert result.name == :git_installed
       assert result.status == :ok
@@ -40,7 +40,7 @@ defmodule GiTF.DoctorTest do
 
   describe "check/1 - database_ok" do
     test "reports ok when database is accessible" do
-      result = Doctor.check(:database_ok)
+      result = Medic.check(:database_ok)
       assert result.name == :database_ok
       assert result.status == :ok
       assert result.message =~ "accessible"
@@ -49,7 +49,7 @@ defmodule GiTF.DoctorTest do
 
   describe "check/1 - section_initialized" do
     test "returns a check result with name and status" do
-      result = Doctor.check(:gitf_initialized)
+      result = Medic.check(:gitf_initialized)
       assert result.name == :gitf_initialized
       assert result.status in [:ok, :error]
       assert is_binary(result.message)
@@ -58,7 +58,7 @@ defmodule GiTF.DoctorTest do
 
   describe "check/1 - orphan_shells" do
     test "reports ok when no orphan shells exist" do
-      result = Doctor.check(:orphan_shells)
+      result = Medic.check(:orphan_shells)
       assert result.name == :orphan_shells
       assert result.status == :ok
       assert result.message =~ "No orphan"
@@ -67,13 +67,13 @@ defmodule GiTF.DoctorTest do
     test "reports warn when orphan shells exist" do
       # Create a sector, a stopped ghost, and an active shell for that ghost
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "orphan-test-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "orphan-test-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "orphan-ghost", status: "stopped"})
+        Archive.insert(:ghosts, %{name: "orphan-ghost", status: "stopped"})
 
       {:ok, _cell} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           ghost_id: ghost.id,
           sector_id: sector.id,
           worktree_path: "/tmp/fake-worktree",
@@ -81,7 +81,7 @@ defmodule GiTF.DoctorTest do
           status: "active"
         })
 
-      result = Doctor.check(:orphan_shells)
+      result = Medic.check(:orphan_shells)
       assert result.name == :orphan_shells
       assert result.status == :warn
       assert result.fixable == true
@@ -91,16 +91,16 @@ defmodule GiTF.DoctorTest do
 
   describe "check/1 - stale_ghosts" do
     test "reports ok when no stale ghosts exist" do
-      result = Doctor.check(:stale_ghosts)
+      result = Medic.check(:stale_ghosts)
       assert result.name == :stale_ghosts
       assert result.status == :ok
     end
 
     test "reports warn when stale ghosts exist" do
       {:ok, _bee} =
-        Store.insert(:ghosts, %{name: "stale-ghost", status: "starting", pid: nil})
+        Archive.insert(:ghosts, %{name: "stale-ghost", status: "starting", pid: nil})
 
-      result = Doctor.check(:stale_ghosts)
+      result = Medic.check(:stale_ghosts)
       assert result.name == :stale_ghosts
       assert result.status == :warn
       assert result.fixable == true
@@ -111,13 +111,13 @@ defmodule GiTF.DoctorTest do
   describe "fix/1 - orphan_shells" do
     test "cleans up orphan shells" do
       {:ok, sector} =
-        Store.insert(:sectors, %{name: "fix-orphan-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "fix-orphan-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "fix-orphan-ghost", status: "crashed"})
+        Archive.insert(:ghosts, %{name: "fix-orphan-ghost", status: "crashed"})
 
       {:ok, _cell} =
-        Store.insert(:shells, %{
+        Archive.insert(:shells, %{
           ghost_id: ghost.id,
           sector_id: sector.id,
           worktree_path: "/tmp/fake-fix-worktree",
@@ -125,7 +125,7 @@ defmodule GiTF.DoctorTest do
           status: "active"
         })
 
-      result = Doctor.fix(:orphan_shells)
+      result = Medic.fix(:orphan_shells)
       assert result.name == :orphan_shells
       assert result.status == :ok
       assert result.message =~ "Fixed"
@@ -135,15 +135,15 @@ defmodule GiTF.DoctorTest do
   describe "fix/1 - stale_ghosts" do
     test "marks stale ghosts as crashed" do
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "fix-stale-ghost", status: "working", pid: nil})
+        Archive.insert(:ghosts, %{name: "fix-stale-ghost", status: "working", pid: nil})
 
-      result = Doctor.fix(:stale_ghosts)
+      result = Medic.fix(:stale_ghosts)
       assert result.name == :stale_ghosts
       assert result.status == :ok
       assert result.message =~ "Marked"
 
       # Verify the ghost was updated
-      updated = Store.get(:ghosts, ghost.id)
+      updated = Archive.get(:ghosts, ghost.id)
       assert updated.status == "crashed"
     end
   end
@@ -156,7 +156,7 @@ defmodule GiTF.DoctorTest do
           # Remove it so fix can regenerate
           File.rm(queen_md)
 
-          result = Doctor.fix(:major_workspace)
+          result = Medic.fix(:major_workspace)
           assert result.name == :major_workspace
           assert result.status == :ok
           assert result.message =~ "Regenerated"
@@ -177,7 +177,7 @@ defmodule GiTF.DoctorTest do
           # Corrupt the config
           File.write(config_path, "invalid toml content [[[")
 
-          result = Doctor.fix(:config_valid)
+          result = Medic.fix(:config_valid)
           assert result.name == :config_valid
           assert result.status == :ok
           assert result.message =~ "Regenerated"
@@ -194,7 +194,7 @@ defmodule GiTF.DoctorTest do
 
   describe "check/1 - settings_valid" do
     test "reports ok when no settings files exist" do
-      result = Doctor.check(:settings_valid)
+      result = Medic.check(:settings_valid)
       assert result.name == :settings_valid
       # Either :ok (no files to check) or :warn (not in workspace)
       assert result.status in [:ok, :warn]
@@ -211,14 +211,14 @@ defmodule GiTF.DoctorTest do
             "permissions" => %{"allow" => []},
             "hooks" => %{
               "SessionStart" => [
-                %{"type" => "command", "command" => "gitf prime --queen"}
+                %{"type" => "command", "command" => "gitf brief --queen"}
               ]
             }
           }
 
           File.write!(settings_path, Jason.encode!(old_format))
 
-          result = Doctor.check(:settings_valid)
+          result = Medic.check(:settings_valid)
           assert result.name == :settings_valid
           assert result.status == :warn
           assert result.fixable == true
@@ -235,7 +235,7 @@ defmodule GiTF.DoctorTest do
       case GiTF.gitf_dir() do
         {:ok, _path} ->
           # In API mode, settings files are skipped (no CLI process to configure)
-          result = Doctor.fix(:settings_valid)
+          result = Medic.fix(:settings_valid)
           assert result.name == :settings_valid
           assert result.status == :ok
 
@@ -247,7 +247,7 @@ defmodule GiTF.DoctorTest do
 
   describe "fix/1 - unfixable check" do
     test "returns error for non-fixable checks" do
-      result = Doctor.fix(:git_installed)
+      result = Medic.fix(:git_installed)
       assert result.status == :error
       assert result.message =~ "Not fixable"
     end
@@ -255,9 +255,9 @@ defmodule GiTF.DoctorTest do
 
   describe "run_all/0" do
     test "returns results for all checks" do
-      results = Doctor.run_all()
+      results = Medic.run_all()
       assert is_list(results)
-      assert length(results) == length(Doctor.checks())
+      assert length(results) == length(Medic.checks())
 
       Enum.each(results, fn r ->
         assert is_atom(r.name)
@@ -271,9 +271,9 @@ defmodule GiTF.DoctorTest do
   describe "run_all/1 with fix: true" do
     test "auto-fixes fixable issues" do
       {:ok, _bee} =
-        Store.insert(:ghosts, %{name: "autofix-ghost", status: "starting", pid: nil})
+        Archive.insert(:ghosts, %{name: "autofix-ghost", status: "starting", pid: nil})
 
-      results = Doctor.run_all(fix: true)
+      results = Medic.run_all(fix: true)
 
       stale_result = Enum.find(results, &(&1.name == :stale_ghosts))
       assert stale_result.status == :ok

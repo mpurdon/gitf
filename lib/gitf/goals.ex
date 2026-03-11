@@ -4,12 +4,12 @@ defmodule GiTF.Goals do
   Ensures implementations are goal-focused and complete.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc "Validate mission completion against stated goals"
   def validate_quest_completion(mission_id) do
-    mission = Store.get(:missions, mission_id)
-    ops = Store.all(:ops) |> Enum.filter(&(&1.mission_id == mission_id))
+    mission = Archive.get(:missions, mission_id)
+    ops = Archive.all(:ops) |> Enum.filter(&(&1.mission_id == mission_id))
     
     %{
       goal_achieved: analyze_goal_achievement(mission, ops),
@@ -21,8 +21,8 @@ defmodule GiTF.Goals do
 
   @doc "Check if a single op achieves its goal"
   def validate_job(op_id) do
-    op = Store.get(:ops, op_id)
-    mission = Store.get(:missions, op.mission_id)
+    op = Archive.get(:ops, op_id)
+    mission = Archive.get(:missions, op.mission_id)
     
     %{
       goal_met: job_achieves_goal?(op, mission),

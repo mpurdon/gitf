@@ -1,4 +1,4 @@
-defmodule GiTF.Verification do
+defmodule GiTF.Audit do
   @moduledoc """
   Job verification system.
   
@@ -7,7 +7,7 @@ defmodule GiTF.Verification do
   """
 
   require Logger
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.Quality
 
   @doc """
@@ -20,7 +20,7 @@ defmodule GiTF.Verification do
   def verify_job(op_id, opts \\ []) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
          {:ok, shell} <- get_job_cell(op),
-         {:ok, sector} <- Store.fetch(:sectors, op.sector_id) do
+         {:ok, sector} <- Archive.fetch(:sectors, op.sector_id) do
 
       # Check graduated authority — auto-approve eligible ops
       authority_level = GiTF.Authority.verification_level(op)
@@ -87,12 +87,12 @@ defmodule GiTF.Verification do
           |> Map.merge(cross_audit_result)
 
         # Build verification contract and evaluate
-        contract = GiTF.VerificationContract.build_contract(op)
+        contract = GiTF.AuditContract.build_contract(op)
         adjusted_contract = adjust_contract_thresholds(contract, authority_level)
         final_status = evaluate_contract_status(final_result, adjusted_contract)
         final_result = %{final_result | status: final_status}
 
-        # Store result
+        # Archive result
         {:ok, _} = record_result(op_id, final_result)
 
         # Update op
@@ -109,12 +109,12 @@ defmodule GiTF.Verification do
   """
   @spec get_verification_status(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_verification_status(op_id) do
-    case Store.get(:ops, op_id) do
+    case Archive.get(:ops, op_id) do
       nil -> {:error, :not_found}
       op -> 
         {:ok, %{
           status: Map.get(op, :verification_status, "pending"),
-          result: Map.get(op, :verification_result),
+          result: Map.get(op, :audit_result),
           verified_at: Map.get(op, :verified_at)
         }}
     end
@@ -125,21 +125,21 @@ defmodule GiTF.Verification do
   """
   @spec record_result(String.t(), map()) :: {:ok, map()}
   def record_result(op_id, result) do
-    # Store in verification_results collection
+    # Archive in audit_results collection
     record = Map.put(result, :op_id, op_id)
-    {:ok, vr} = Store.insert(:verification_results, record)
+    {:ok, vr} = Archive.insert(:audit_results, record)
     
     # Update op verification status
-    case Store.get(:ops, op_id) do
+    case Archive.get(:ops, op_id) do
       nil -> {:error, :not_found}
       op ->
         verification_status = result.status
         updated = op
         |> Map.put(:verification_status, verification_status)
-        |> Map.put(:verification_result, result[:output])
+        |> Map.put(:audit_result, result[:output])
         |> Map.put(:verified_at, DateTime.utc_now())
         
-        Store.put(:ops, updated)
+        Archive.put(:ops, updated)
         {:ok, vr}
     end
   end
@@ -149,7 +149,7 @@ defmodule GiTF.Verification do
   """
   @spec jobs_needing_verification() :: [map()]
   def jobs_needing_verification do
-    Store.filter(:ops, fn op ->
+    Archive.filter(:ops, fn op ->
       op.status == "done" and 
       Map.get(op, :verification_status, "pending") == "pending"
     end)
@@ -158,7 +158,7 @@ defmodule GiTF.Verification do
   # Private functions
 
   defp get_job_cell(op) do
-    case Store.find_one(:shells, fn c -> 
+    case Archive.find_one(:shells, fn c -> 
       c.ghost_id == op.ghost_id and c.status == "active" 
     end) do
       nil -> {:error, :no_cell}
@@ -175,7 +175,7 @@ defmodule GiTF.Verification do
         stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @validation_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, 0}} -> {:ok, output}
       {:ok, {output, exit_code}} -> {:error, {output, exit_code}}
       nil -> {:error, {"Validation command timed out after #{div(@validation_timeout_ms, 1000)}s", 1}}
@@ -185,18 +185,18 @@ defmodule GiTF.Verification do
   end
 
   defp update_job_verification(op_id, status, result) do
-    case Store.get(:ops, op_id) do
+    case Archive.get(:ops, op_id) do
       nil -> :error
       op ->
         verification_status = if status == :pass, do: "passed", else: "failed"
         
         updated = op
         |> Map.put(:verification_status, verification_status)
-        |> Map.put(:verification_result, result.output)
+        |> Map.put(:audit_result, result.output)
         |> Map.put(:quality_score, result[:quality_score])
         |> Map.put(:verified_at, DateTime.utc_now())
         
-        Store.put(:ops, updated)
+        Archive.put(:ops, updated)
     end
   end
 
@@ -264,8 +264,8 @@ defmodule GiTF.Verification do
   def verify_job!(op_id) do
     case verify_job(op_id) do
       {:ok, :pass, result} -> result
-      {:ok, :fail, result} -> raise "Verification failed for op #{op_id}: #{inspect(result[:output])}"
-      {:error, reason} -> raise "Verification error for op #{op_id}: #{inspect(reason)}"
+      {:ok, :fail, result} -> raise "Audit failed for op #{op_id}: #{inspect(result[:output])}"
+      {:error, reason} -> raise "Audit error for op #{op_id}: #{inspect(reason)}"
     end
   end
 
@@ -278,7 +278,7 @@ defmodule GiTF.Verification do
     if result.status == "failed" do
       "failed"
     else
-      case GiTF.VerificationContract.evaluate(contract, result) do
+      case GiTF.AuditContract.evaluate(contract, result) do
         :pass -> "passed"
         {:fail, _reasons} -> "failed"
       end

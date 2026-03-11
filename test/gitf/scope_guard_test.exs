@@ -2,13 +2,13 @@ defmodule GiTF.ScopeGuardTest do
   use ExUnit.Case, async: false
 
   alias GiTF.ScopeGuard
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-scope-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)
     
@@ -23,7 +23,7 @@ defmodule GiTF.ScopeGuardTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:missions, mission)
+      Archive.insert(:missions, mission)
       
       op = %{
         id: "op-scope",
@@ -33,7 +33,7 @@ defmodule GiTF.ScopeGuardTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       result = ScopeGuard.check_scope("op-scope")
       
@@ -48,7 +48,7 @@ defmodule GiTF.ScopeGuardTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:missions, mission)
+      Archive.insert(:missions, mission)
       
       op = %{
         id: "op-creep",
@@ -58,7 +58,7 @@ defmodule GiTF.ScopeGuardTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:ops, op)
+      Archive.insert(:ops, op)
       
       result = ScopeGuard.check_scope("op-creep")
       

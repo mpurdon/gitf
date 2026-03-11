@@ -80,7 +80,7 @@ defmodule GiTF.Config.Provider do
         max_ghosts: 5,
         max_retries: 3
       },
-      shutdown: %{
+      exfil: %{
         drain_timeout_ms: 5_000
       }
     }

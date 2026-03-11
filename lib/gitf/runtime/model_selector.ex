@@ -6,7 +6,7 @@ defmodule GiTF.Runtime.ModelSelector do
   - Planning/Architecture: Opus (complex reasoning)
   - Implementation: Opus (complex) or Sonnet (standard)
   - Research/Analysis: Haiku (fast, cost-effective)
-  - Verification: Haiku (simple checking)
+  - Audit: Haiku (simple checking)
   - Summarization: Haiku (context compression)
   """
 
@@ -15,7 +15,7 @@ defmodule GiTF.Runtime.ModelSelector do
           | :implementation
           | :research
           | :summarization
-          | :verification
+          | :audit
           | :refactoring
           | :simple_fix
 
@@ -47,7 +47,7 @@ defmodule GiTF.Runtime.ModelSelector do
         strengths: ["balanced performance", "general coding", "moderate complexity"]
       },
       "haiku" => %{
-        capabilities: [:research, :summarization, :simple_fixes, :verification, :analysis],
+        capabilities: [:research, :summarization, :simple_fixes, :audit, :analysis],
         cost_tier: :low,
         context_limit: 200_000,
         strengths: ["fast responses", "simple tasks", "analysis", "cost-effective"]
@@ -81,7 +81,7 @@ defmodule GiTF.Runtime.ModelSelector do
 
   def select_model_for_job(:research, _complexity), do: "haiku"
   def select_model_for_job(:summarization, _complexity), do: "haiku"
-  def select_model_for_job(:verification, _complexity), do: "haiku"
+  def select_model_for_job(:audit, _complexity), do: "haiku"
   def select_model_for_job(:simple_fix, _complexity), do: "haiku"
 
   def select_model_for_job(:refactoring, :complex), do: "opus"
@@ -214,7 +214,7 @@ defmodule GiTF.Runtime.ModelSelector do
   defp op_type_to_capability(:implementation), do: :implementation
   defp op_type_to_capability(:research), do: :research
   defp op_type_to_capability(:summarization), do: :summarization
-  defp op_type_to_capability(:verification), do: :verification
+  defp op_type_to_capability(:audit), do: :audit
   defp op_type_to_capability(:refactoring), do: :refactoring
   defp op_type_to_capability(:simple_fix), do: :simple_fixes
   defp op_type_to_capability(_), do: :implementation

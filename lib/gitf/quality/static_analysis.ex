@@ -26,7 +26,7 @@ defmodule GiTF.Quality.StaticAnalysis do
         cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @analysis_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, _}} -> parse_credo(output)
       nil -> {:ok, %{issues: [], score: 100, tool: "credo", available: false}}
     end
@@ -40,7 +40,7 @@ defmodule GiTF.Quality.StaticAnalysis do
         cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @analysis_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, _}} -> parse_eslint(output)
       nil -> {:ok, %{issues: [], score: 100, tool: "eslint", available: false}}
     end
@@ -54,7 +54,7 @@ defmodule GiTF.Quality.StaticAnalysis do
         cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @analysis_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, _}} -> parse_clippy(output)
       nil -> {:ok, %{issues: [], score: 100, tool: "clippy", available: false}}
     end
@@ -68,7 +68,7 @@ defmodule GiTF.Quality.StaticAnalysis do
         cd: path, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @analysis_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {output, _}} -> parse_pylint(output)
       nil -> {:ok, %{issues: [], score: 100, tool: "pylint", available: false}}
     end

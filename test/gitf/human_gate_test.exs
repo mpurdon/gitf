@@ -2,7 +2,7 @@ defmodule GiTF.HumanGateTest do
   use ExUnit.Case, async: false
 
   alias GiTF.HumanGate
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.Test.StoreHelper
 
   setup do
@@ -25,7 +25,7 @@ defmodule GiTF.HumanGateTest do
     # Create sector
     comb_attrs = Map.get(opts, :sector, %{})
     sector = Map.merge(%{id: sector_id, path: "/tmp/test", name: "test"}, comb_attrs)
-    Store.insert(:sectors, sector)
+    Archive.insert(:sectors, sector)
 
     {:ok, mission} = GiTF.Missions.create(%{goal: goal, sector_id: sector_id})
     mission
@@ -42,7 +42,7 @@ defmodule GiTF.HumanGateTest do
 
     # Set risk_level directly (classifier may override attrs)
     updated = %{op | risk_level: risk}
-    Store.put(:ops, updated)
+    Archive.put(:ops, updated)
     updated
   end
 

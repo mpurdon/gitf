@@ -1,8 +1,8 @@
-defmodule GiTF.PrimeTest do
+defmodule GiTF.BriefTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Prime
-  alias GiTF.Store
+  alias GiTF.Brief
+  alias GiTF.Archive
 
   @tmp_dir System.tmp_dir!()
 
@@ -10,7 +10,7 @@ defmodule GiTF.PrimeTest do
     tmp_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok
   end
@@ -28,11 +28,11 @@ defmodule GiTF.PrimeTest do
     gitf_root
   end
 
-  describe "prime(:major, gitf_root)" do
+  describe "brief(:major, gitf_root)" do
     test "returns QUEEN.md content plus section state summary" do
       gitf_root = create_gitf_workspace()
 
-      assert {:ok, markdown} = Prime.prime(:major, gitf_root)
+      assert {:ok, markdown} = Brief.brief(:major, gitf_root)
       assert markdown =~ "Major Instructions"
       assert markdown =~ "Current GiTF State"
       assert markdown =~ "Active Bees"
@@ -44,16 +44,16 @@ defmodule GiTF.PrimeTest do
       File.mkdir_p!(Path.join(tmp, ".gitf"))
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      assert {:error, :enoent} = Prime.prime(:major, tmp)
+      assert {:error, :enoent} = Brief.brief(:major, tmp)
     end
 
     test "includes active ghost information in state summary" do
       gitf_root = create_gitf_workspace()
 
       # Create a working ghost
-      {:ok, _bee} = Store.insert(:ghosts, %{name: "busy-ghost", status: "working"})
+      {:ok, _bee} = Archive.insert(:ghosts, %{name: "busy-ghost", status: "working"})
 
-      {:ok, markdown} = Prime.prime(:major, gitf_root)
+      {:ok, markdown} = Brief.brief(:major, gitf_root)
       assert markdown =~ "busy-ghost"
     end
 
@@ -61,9 +61,9 @@ defmodule GiTF.PrimeTest do
       gitf_root = create_gitf_workspace()
 
       {:ok, mission} =
-        Store.insert(:missions, %{name: "plan-mission", goal: "Plan something", status: "planning"})
+        Archive.insert(:missions, %{name: "plan-mission", goal: "Plan something", status: "planning"})
 
-      {:ok, markdown} = Prime.prime(:major, gitf_root)
+      {:ok, markdown} = Brief.brief(:major, gitf_root)
       assert markdown =~ "plan-mission"
       assert markdown =~ mission.id
     end
@@ -76,11 +76,11 @@ defmodule GiTF.PrimeTest do
       on_exit(fn -> System.delete_env("GITF_PATH") end)
 
       {:ok, mission} =
-        Store.insert(:missions, %{name: "spec-mission", goal: "Spec something", status: "planning"})
+        Archive.insert(:missions, %{name: "spec-mission", goal: "Spec something", status: "planning"})
 
       GiTF.Specs.write(mission.id, "requirements", "# Requirements\n\n- FR-1: Do the thing")
 
-      {:ok, markdown} = Prime.prime(:major, gitf_root)
+      {:ok, markdown} = Brief.brief(:major, gitf_root)
       assert markdown =~ "Planning Specs: spec-mission"
       assert markdown =~ "Requirements"
       assert markdown =~ "FR-1: Do the thing"
@@ -93,12 +93,12 @@ defmodule GiTF.PrimeTest do
       on_exit(fn -> System.delete_env("GITF_PATH") end)
 
       {:ok, mission} =
-        Store.insert(:missions, %{name: "long-spec", goal: "Long spec", status: "planning"})
+        Archive.insert(:missions, %{name: "long-spec", goal: "Long spec", status: "planning"})
 
       long_content = Enum.map(1..150, fn i -> "Line #{i}" end) |> Enum.join("\n")
       GiTF.Specs.write(mission.id, "requirements", long_content)
 
-      {:ok, markdown} = Prime.prime(:major, gitf_root)
+      {:ok, markdown} = Brief.brief(:major, gitf_root)
       assert markdown =~ "(truncated"
       assert markdown =~ "Line 1"
       # Line 150 should be truncated away
@@ -106,11 +106,11 @@ defmodule GiTF.PrimeTest do
     end
   end
 
-  describe "prime(:ghost, ghost_id)" do
+  describe "brief(:ghost, ghost_id)" do
     test "returns a briefing for an existing ghost" do
-      {:ok, ghost} = Store.insert(:ghosts, %{name: "worker-ghost", status: "starting"})
+      {:ok, ghost} = Archive.insert(:ghosts, %{name: "worker-ghost", status: "starting"})
 
-      assert {:ok, markdown} = Prime.prime(:ghost, ghost.id)
+      assert {:ok, markdown} = Brief.brief(:ghost, ghost.id)
       assert markdown =~ "Bee Briefing"
       assert markdown =~ "worker-ghost"
       assert markdown =~ "Your Job"
@@ -119,13 +119,13 @@ defmodule GiTF.PrimeTest do
     end
 
     test "returns error for nonexistent ghost" do
-      assert {:error, :bee_not_found} = Prime.prime(:ghost, "ghost-000000")
+      assert {:error, :bee_not_found} = Brief.brief(:ghost, "ghost-000000")
     end
 
     test "shows no op when ghost has no assignment" do
-      {:ok, ghost} = Store.insert(:ghosts, %{name: "idle-ghost", status: "starting"})
+      {:ok, ghost} = Archive.insert(:ghosts, %{name: "idle-ghost", status: "starting"})
 
-      {:ok, markdown} = Prime.prime(:ghost, ghost.id)
+      {:ok, markdown} = Brief.brief(:ghost, ghost.id)
       assert markdown =~ "No op assigned"
     end
   end

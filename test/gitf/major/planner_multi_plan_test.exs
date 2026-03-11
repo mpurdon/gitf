@@ -2,21 +2,21 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Major.Planner
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
     tmp_dir = Path.join(System.tmp_dir!(), "planner_multi_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = Archive.start_link(data_dir: tmp_dir)
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    {:ok, sector} = Store.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
+    {:ok, sector} = Archive.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
 
     {:ok, mission} =
-      Store.insert(:missions, %{
+      Archive.insert(:missions, %{
         name: "test-mission",
         goal: "Build a feature",
         sector_id: sector.id,
@@ -147,8 +147,8 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
     end
 
     test "returns next untried candidate", %{mission: mission} do
-      # Store plan candidates on mission
-      quest_record = Store.get(:missions, mission.id)
+      # Archive plan candidates on mission
+      quest_record = Archive.get(:missions, mission.id)
 
       candidates = [
         %{strategy: "minimal", score: 0.6, tasks: [%{"title" => "Minimal task"}]},
@@ -161,7 +161,7 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
         |> Map.put(:plan_candidates, candidates)
         |> Map.put(:tried_plans, [%{strategy: "normal"}])
 
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
 
       {:ok, fallback} = Planner.select_fallback_plan(mission.id)
       # Should return complex (0.7) since normal was tried
@@ -169,7 +169,7 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
     end
 
     test "returns error when all candidates tried", %{mission: mission} do
-      quest_record = Store.get(:missions, mission.id)
+      quest_record = Archive.get(:missions, mission.id)
 
       candidates = [
         %{strategy: "minimal", score: 0.6, tasks: []},
@@ -184,7 +184,7 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
           %{strategy: "normal"}
         ])
 
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
 
       assert {:error, :no_fallback} == Planner.select_fallback_plan(mission.id)
     end
@@ -234,9 +234,9 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
           phase_job: false
         })
 
-      quest_record = Store.get(:missions, mission.id)
+      quest_record = Archive.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "implementation")
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
 
       {:ok, phase} = GiTF.Major.Orchestrator.advance_quest(mission.id)
       assert phase == "implementation"

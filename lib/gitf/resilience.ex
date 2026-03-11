@@ -14,7 +14,7 @@ defmodule GiTF.Resilience do
     case component do
       :model_api -> fallback_model(context)
       :git_operation -> retry_git_operation(context)
-      :verification -> skip_and_flag(context)
+      :audit -> skip_and_flag(context)
       :research_cache -> regenerate_research(context)
       :quality_check -> continue_without_quality(context)
       _ -> {:error, :unhandled_failure}
@@ -55,7 +55,7 @@ defmodule GiTF.Resilience do
     ops = GiTF.Ops.list(mission_id: mission_id)
 
     # Build edges from both op_dependencies collection AND legacy depends_on field
-    stored_deps = GiTF.Store.all(:op_dependencies)
+    stored_deps = GiTF.Archive.all(:op_dependencies)
 
     stored_edges =
       Enum.flat_map(stored_deps, fn dep ->
@@ -150,7 +150,7 @@ defmodule GiTF.Resilience do
     case GiTF.Ops.get(op_id) do
       {:ok, op} ->
         updated = Map.put(op, :needs_review, true)
-        GiTF.Store.put(:ops, updated)
+        GiTF.Archive.put(:ops, updated)
         {:ok, :flagged_for_review}
       
       error -> error

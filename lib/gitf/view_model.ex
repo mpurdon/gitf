@@ -134,13 +134,13 @@ defmodule GiTF.ViewModel do
   end
 
   defp safe_list(collection) do
-    GiTF.Store.all(collection)
+    GiTF.Archive.all(collection)
   rescue
     _ -> []
   end
 
   defp safe_costs do
-    costs = GiTF.Store.all(:costs)
+    costs = GiTF.Archive.all(:costs)
     %{total: Enum.sum(Enum.map(costs, &(&1.total_cost_usd || 0))), count: length(costs)}
   rescue
     _ -> %{total: 0, count: 0}
@@ -156,7 +156,7 @@ defmodule GiTF.ViewModel do
   end
 
   defp publish(state) do
-    # Store for poll-based access (Raylib NIF)
+    # Archive for poll-based access (Raylib NIF)
     :persistent_term.put(@persistent_key, state)
 
     # Broadcast for subscription-based access

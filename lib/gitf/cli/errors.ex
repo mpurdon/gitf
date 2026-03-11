@@ -20,7 +20,7 @@ defmodule GiTF.CLI.Errors do
       2. Or set GITF_PATH to an existing workspace:
          $ export GITF_PATH=~/my-section
 
-    For more help, run: section doctor
+    For more help, run: section medic
     """
   end
 
@@ -134,10 +134,10 @@ defmodule GiTF.CLI.Errors do
 
     Context usage: #{Float.round(pct, 1)}% (threshold: 45%)
 
-    The ghost is approaching context limits and may need a handoff.
+    The ghost is approaching context limits and may need a transfer.
 
-    To create a handoff:
-      $ section handoff create --ghost #{id}
+    To create a transfer:
+      $ section transfer create --ghost #{id}
 
     To check context status:
       $ section ghost context #{id}

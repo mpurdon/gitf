@@ -2,21 +2,21 @@ defmodule GiTF.Major.FastPathTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Major.FastPath
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
     tmp_dir = Path.join(System.tmp_dir!(), "fast_path_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = Archive.start_link(data_dir: tmp_dir)
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    {:ok, sector} = Store.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
+    {:ok, sector} = Archive.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
 
     {:ok, mission} =
-      Store.insert(:missions, %{
+      Archive.insert(:missions, %{
         name: "simple-mission",
         goal: "Fix typo in README",
         sector_id: sector.id,

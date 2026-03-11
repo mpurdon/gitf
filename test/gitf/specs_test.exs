@@ -18,7 +18,7 @@ defmodule GiTF.SpecsTest do
     store_dir = Path.join(gitf_dir, "store")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
 
     on_exit(fn ->
       System.delete_env("GITF_PATH")

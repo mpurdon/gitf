@@ -84,7 +84,7 @@ defmodule GiTF.Client do
 
   # Quest extras
   def quest_report(id), do: get("/api/v1/missions/#{id}/report") |> unwrap_data()
-  def quest_merge(id), do: post("/api/v1/missions/#{id}/merge") |> unwrap_data()
+  def quest_merge(id), do: post("/api/v1/missions/#{id}/sync") |> unwrap_data()
   def quest_spec(id, phase), do: get("/api/v1/missions/#{id}/spec/#{phase}") |> unwrap_data()
   def quest_spec_write(id, phase, content), do: put("/api/v1/missions/#{id}/spec/#{phase}", %{content: content}) |> unwrap_data()
 

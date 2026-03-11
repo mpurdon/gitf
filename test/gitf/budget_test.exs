@@ -2,26 +2,26 @@ defmodule GiTF.BudgetTest do
   use ExUnit.Case, async: false
 
   alias GiTF.{Budget, Costs, Jobs}
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, sector} =
-      Store.insert(:sectors, %{name: "budget-sector-#{:erlang.unique_integer([:positive])}"})
+      Archive.insert(:sectors, %{name: "budget-sector-#{:erlang.unique_integer([:positive])}"})
 
     {:ok, mission} =
-      Store.insert(:missions, %{
+      Archive.insert(:missions, %{
         name: "budget-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
 
     {:ok, ghost} =
-      Store.insert(:ghosts, %{
+      Archive.insert(:ghosts, %{
         name: "budget-ghost-#{:erlang.unique_integer([:positive])}",
         status: "starting"
       })

@@ -1,7 +1,7 @@
 defmodule GiTF.TranscriptWatcherTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.TranscriptWatcher
 
   @tmp_dir System.tmp_dir!()
@@ -12,10 +12,10 @@ defmodule GiTF.TranscriptWatcherTest do
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
+    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
-    {:ok, ghost} = Store.insert(:ghosts, %{name: "watcher-test-ghost", status: "starting"})
+    {:ok, ghost} = Archive.insert(:ghosts, %{name: "watcher-test-ghost", status: "starting"})
 
     # Stop any existing TranscriptWatcher before starting a new one
     case TranscriptWatcher.lookup() do

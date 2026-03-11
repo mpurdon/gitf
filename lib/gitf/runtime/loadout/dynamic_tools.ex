@@ -1,4 +1,4 @@
-defmodule GiTF.Runtime.ToolBox.DynamicTools do
+defmodule GiTF.Runtime.Loadout.DynamicTools do
   @moduledoc """
   Discovers tools from running MCP servers, LSP plugins, and registered
   tool providers. Returns `[ReqLLM.Tool.t()]` that get appended to

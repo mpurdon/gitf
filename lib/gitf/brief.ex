@@ -1,4 +1,4 @@
-defmodule GiTF.Prime do
+defmodule GiTF.Brief do
   @moduledoc """
   Generates context prompts for Claude Code sessions.
 
@@ -10,22 +10,22 @@ defmodule GiTF.Prime do
   Output is Markdown text, ready for Claude to parse.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Primes a Major or Bee with context for a Claude Code session.
+  Briefs a Major or Bee with context for a Claude Code session.
 
-  - `prime(:major, gitf_root)` reads QUEEN.md and appends current section state
-  - `prime(:ghost, ghost_id)` builds a briefing from the ghost's op, shell, and links
+  - `brief(:major, gitf_root)` reads QUEEN.md and appends current section state
+  - `brief(:ghost, ghost_id)` builds a briefing from the ghost's op, shell, and links
 
   Returns `{:ok, markdown}` or `{:error, reason}`.
   """
-  @spec prime(:major | :ghost, String.t()) :: {:ok, String.t()} | {:error, term()}
-  def prime(role, identifier)
+  @spec brief(:major | :ghost, String.t()) :: {:ok, String.t()} | {:error, term()}
+  def brief(role, identifier)
 
-  def prime(:major, gitf_root) do
+  def brief(:major, gitf_root) do
     queen_md_path = Path.join([gitf_root, ".gitf", "major", "QUEEN.md"])
 
     with {:ok, instructions} <- File.read(queen_md_path) do
@@ -34,24 +34,24 @@ defmodule GiTF.Prime do
     end
   end
 
-  def prime(:ghost, ghost_id) do
+  def brief(:ghost, ghost_id) do
     with {:ok, ghost} <- fetch_bee(ghost_id) do
       markdown = build_bee_briefing(ghost)
-      handoff_section = build_handoff_section(ghost_id)
-      {:ok, markdown <> handoff_section}
+      transfer_section = build_handoff_section(ghost_id)
+      {:ok, markdown <> transfer_section}
     end
   end
 
   # -- Private: Major --------------------------------------------------------
 
   defp build_major_state_summary do
-    ghosts = Store.all(:ghosts)
+    ghosts = Archive.all(:ghosts)
     active_ghosts = Enum.filter(ghosts, &(&1.status in ["working", "idle", "starting"]))
 
     pending_quests =
-      Store.filter(:missions, fn q -> q.status in ["pending", "active", "planning"] end)
+      Archive.filter(:missions, fn q -> q.status in ["pending", "active", "planning"] end)
 
-    pending_jobs = Store.filter(:ops, fn j -> j.status == "pending" end)
+    pending_jobs = Archive.filter(:ops, fn j -> j.status == "pending" end)
     recent_waggles = GiTF.Link.list(to: "major", limit: 10)
 
     planning_quests = Enum.filter(pending_quests, &(&1.status == "planning"))
@@ -84,7 +84,7 @@ defmodule GiTF.Prime do
     missions
     |> Enum.map(fn q ->
       comb_label = resolve_comb_label(q[:sector_id])
-      job_count = Store.count(:ops, fn j -> j.mission_id == q.id end)
+      job_count = Archive.count(:ops, fn j -> j.mission_id == q.id end)
       line = "- **#{q.name}** (#{q.id}) [#{q.status}] — #{job_count} op(s)#{comb_label}"
 
       if q[:description] do
@@ -99,7 +99,7 @@ defmodule GiTF.Prime do
   defp resolve_comb_label(nil), do: ""
 
   defp resolve_comb_label(sector_id) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil -> " | sector: #{sector_id}"
       sector -> " | sector: #{sector.name}"
     end
@@ -181,7 +181,7 @@ defmodule GiTF.Prime do
   # -- Private: Bee ----------------------------------------------------------
 
   defp fetch_bee(ghost_id) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil -> {:error, :bee_not_found}
       ghost -> {:ok, ghost}
     end
@@ -226,13 +226,13 @@ defmodule GiTF.Prime do
   defp fetch_job_for_bee(%{op_id: nil}), do: nil
 
   defp fetch_job_for_bee(%{op_id: op_id}) when is_binary(op_id) do
-    Store.get(:ops, op_id)
+    Archive.get(:ops, op_id)
   end
 
   defp fetch_job_for_bee(_bee), do: nil
 
   defp fetch_cell_for_bee(ghost) do
-    Store.filter(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+    Archive.filter(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
     |> List.first()
   end
 
@@ -278,7 +278,7 @@ defmodule GiTF.Prime do
     if Map.get(op, :phase_job, false) do
       ""
     else
-      mission = Store.get(:missions, op.mission_id)
+      mission = Archive.get(:missions, op.mission_id)
 
       if is_nil(mission) or is_nil(Map.get(mission, :artifacts)) or map_size(Map.get(mission, :artifacts, %{})) == 0 do
         ""
@@ -378,18 +378,18 @@ defmodule GiTF.Prime do
   defp get_comb_path(nil), do: nil
 
   defp get_comb_path(sector_id) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil -> nil
       sector -> sector.path
     end
   end
 
-  # -- Private: Handoff ------------------------------------------------------
+  # -- Private: Transfer ------------------------------------------------------
 
   defp build_handoff_section(ghost_id) do
-    case GiTF.Handoff.detect_handoff(ghost_id) do
+    case GiTF.Transfer.detect_handoff(ghost_id) do
       {:ok, link_msg} ->
-        case GiTF.Handoff.resume(ghost_id, link_msg.id) do
+        case GiTF.Transfer.resume(ghost_id, link_msg.id) do
           {:ok, briefing} ->
             "\n\n---\n\n" <> briefing
 

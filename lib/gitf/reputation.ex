@@ -3,11 +3,11 @@ defmodule GiTF.Reputation do
   Reputation system for models.
 
   Computes reputation scores from historical op/mission data and caches
-  them in the Store. Scores go stale after 30 minutes and are lazily
+  them in the Archive. Scores go stale after 30 minutes and are lazily
   recomputed on next access.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @stale_minutes 30
 
@@ -36,7 +36,7 @@ defmodule GiTF.Reputation do
 
   defp compute_and_cache_model_rep(model, op_type, key) do
     ops =
-      Store.filter(:ops, fn j ->
+      Archive.filter(:ops, fn j ->
         normalize_model(j[:assigned_model]) == normalize_model(model) and
           j[:op_type] == op_type
       end)
@@ -140,7 +140,7 @@ defmodule GiTF.Reputation do
     |> Enum.reject(& &1[:phase_job])
     |> Enum.each(fn op ->
       updated = Map.put(op, :regression_detected, true)
-      Store.put(:ops, updated)
+      Archive.put(:ops, updated)
 
       # Invalidate reputation cache for this op's model
       model = normalize_model(op[:assigned_model])
@@ -157,7 +157,7 @@ defmodule GiTF.Reputation do
   # -- Cache Helpers ---------------------------------------------------------
 
   defp get_cached(collection, key) do
-    case Store.get(collection, key) do
+    case Archive.get(collection, key) do
       nil ->
         :stale
 
@@ -175,13 +175,13 @@ defmodule GiTF.Reputation do
 
   defp cache_put(collection, key, data) do
     record = Map.put(data, :id, key)
-    Store.put(collection, record)
+    Archive.put(collection, record)
   rescue
     _ -> :ok
   end
 
   defp invalidate(collection, key) do
-    Store.delete(collection, key)
+    Archive.delete(collection, key)
   rescue
     _ -> :ok
   end

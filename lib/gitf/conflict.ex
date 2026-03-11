@@ -8,7 +8,7 @@ defmodule GiTF.Conflict do
 
   require Logger
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Checks a shell's branch for conflicts against the main branch.
@@ -31,7 +31,7 @@ defmodule GiTF.Conflict do
   """
   @spec check_all_active() :: [tuple()]
   def check_all_active do
-    Store.filter(:shells, fn c -> c.status == "active" end)
+    Archive.filter(:shells, fn c -> c.status == "active" end)
     |> Enum.map(fn shell ->
       case check(shell.id) do
         {:ok, :clean} -> {:ok, shell.id, :clean}
@@ -48,7 +48,7 @@ defmodule GiTF.Conflict do
 
   Strategies:
     * `:rebase` — Fetches latest main and rebases the shell's branch onto it.
-    * `:defer` — Marks the shell as needing manual merge and notifies the Major.
+    * `:defer` — Marks the shell as needing manual sync and notifies the Major.
 
   Returns `{:ok, :resolved}` or `{:error, reason}`.
   """
@@ -96,13 +96,13 @@ defmodule GiTF.Conflict do
   def resolve(shell_id, :defer) do
     case fetch_cell(shell_id) do
       {:ok, shell} ->
-        Store.put(:shells, Map.put(shell, :needs_manual_merge, true))
+        Archive.put(:shells, Map.put(shell, :needs_manual_merge, true))
 
         GiTF.Link.send(
           "system",
           "major",
           "manual_merge_needed",
-          "Cell #{shell_id} deferred for manual merge"
+          "Cell #{shell_id} deferred for manual sync"
         )
 
         {:ok, :resolved}
@@ -207,7 +207,7 @@ defmodule GiTF.Conflict do
   end
 
   defp get_merge_base(repo_path, main_branch) do
-    case GiTF.Git.safe_cmd( ["merge-base", "HEAD", main_branch],
+    case GiTF.Git.safe_cmd( ["sync-base", "HEAD", main_branch],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -217,14 +217,14 @@ defmodule GiTF.Conflict do
   end
 
   defp fetch_cell(shell_id) do
-    case Store.get(:shells, shell_id) do
+    case Archive.get(:shells, shell_id) do
       nil -> {:error, :cell_not_found}
       shell -> {:ok, shell}
     end
   end
 
   defp fetch_comb(sector_id) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
       sector -> {:ok, sector}
     end

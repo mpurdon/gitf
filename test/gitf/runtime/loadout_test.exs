@@ -1,7 +1,7 @@
-defmodule GiTF.Runtime.ToolBoxTest do
+defmodule GiTF.Runtime.LoadoutTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.Runtime.ToolBox
+  alias GiTF.Runtime.Loadout
 
   setup do
     dir = Path.join(System.tmp_dir!(), "toolbox_test_#{:erlang.unique_integer([:positive])}")
@@ -12,7 +12,7 @@ defmodule GiTF.Runtime.ToolBoxTest do
 
   describe "tools/1" do
     test "returns a list of tools for :standard set", %{dir: dir} do
-      tools = ToolBox.tools(working_dir: dir, tool_set: :standard)
+      tools = Loadout.tools(working_dir: dir, tool_set: :standard)
       assert is_list(tools)
       assert length(tools) > 0
 
@@ -29,7 +29,7 @@ defmodule GiTF.Runtime.ToolBoxTest do
     end
 
     test "returns readonly tools for :readonly set", %{dir: dir} do
-      tools = ToolBox.tools(working_dir: dir, tool_set: :readonly)
+      tools = Loadout.tools(working_dir: dir, tool_set: :readonly)
       names = Enum.map(tools, & &1.name)
 
       assert "read_file" in names
@@ -40,7 +40,7 @@ defmodule GiTF.Runtime.ToolBoxTest do
     end
 
     test "returns queen tools for :major set", %{dir: dir} do
-      tools = ToolBox.tools(working_dir: dir, tool_set: :major)
+      tools = Loadout.tools(working_dir: dir, tool_set: :major)
       names = Enum.map(tools, & &1.name)
 
       # Has standard tools
@@ -54,21 +54,21 @@ defmodule GiTF.Runtime.ToolBoxTest do
     end
 
     test "defaults to :standard tool set", %{dir: dir} do
-      standard = ToolBox.tools(working_dir: dir, tool_set: :standard)
-      default = ToolBox.tools(working_dir: dir)
+      standard = Loadout.tools(working_dir: dir, tool_set: :standard)
+      default = Loadout.tools(working_dir: dir)
       assert length(standard) == length(default)
     end
   end
 
   describe "resolve_path/2" do
     test "resolves relative path against working dir", %{dir: dir} do
-      result = ToolBox.resolve_path("foo/bar.ex", dir)
+      result = Loadout.resolve_path("foo/bar.ex", dir)
       assert result == Path.join(dir, "foo/bar.ex")
     end
 
     test "raises on path traversal", %{dir: dir} do
       assert_raise RuntimeError, ~r/traversal detected/, fn ->
-        ToolBox.resolve_path("../../etc/passwd", dir)
+        Loadout.resolve_path("../../etc/passwd", dir)
       end
     end
   end
@@ -78,14 +78,14 @@ defmodule GiTF.Runtime.ToolBoxTest do
       path = Path.join(dir, "hello.txt")
       File.write!(path, "hello world")
 
-      tools = ToolBox.tools(working_dir: dir, tool_set: :readonly)
+      tools = Loadout.tools(working_dir: dir, tool_set: :readonly)
       read_tool = Enum.find(tools, &(&1.name == "read_file"))
 
       assert {:ok, "hello world"} = ReqLLM.Tool.execute(read_tool, %{"path" => "hello.txt"})
     end
 
     test "write_file tool creates a file", %{dir: dir} do
-      tools = ToolBox.tools(working_dir: dir, tool_set: :standard)
+      tools = Loadout.tools(working_dir: dir, tool_set: :standard)
       write_tool = Enum.find(tools, &(&1.name == "write_file"))
 
       assert {:ok, _} = ReqLLM.Tool.execute(write_tool, %{"path" => "new.txt", "content" => "created"})
@@ -96,7 +96,7 @@ defmodule GiTF.Runtime.ToolBoxTest do
       File.write!(Path.join(dir, "a.txt"), "")
       File.write!(Path.join(dir, "b.txt"), "")
 
-      tools = ToolBox.tools(working_dir: dir, tool_set: :readonly)
+      tools = Loadout.tools(working_dir: dir, tool_set: :readonly)
       list_tool = Enum.find(tools, &(&1.name == "list_directory"))
 
       assert {:ok, listing} = ReqLLM.Tool.execute(list_tool, %{})
@@ -105,7 +105,7 @@ defmodule GiTF.Runtime.ToolBoxTest do
     end
 
     test "run_bash tool executes a command", %{dir: dir} do
-      tools = ToolBox.tools(working_dir: dir, tool_set: :standard)
+      tools = Loadout.tools(working_dir: dir, tool_set: :standard)
       bash_tool = Enum.find(tools, &(&1.name == "run_bash"))
 
       assert {:ok, result} = ReqLLM.Tool.execute(bash_tool, %{"command" => "echo hello"})

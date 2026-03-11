@@ -34,7 +34,7 @@ defmodule GiTF.Runtime.AgentLoop do
 
   require Logger
 
-  alias GiTF.Runtime.{LLMClient, ToolBox, ModelResolver, CacheControl}
+  alias GiTF.Runtime.{LLMClient, Loadout, ModelResolver, CacheControl}
 
   @default_max_iterations 50
   @default_max_tokens 16_384
@@ -62,7 +62,7 @@ defmodule GiTF.Runtime.AgentLoop do
 
     tools =
       Keyword.get(opts, :tools) ||
-        ToolBox.tools(
+        Loadout.tools(
           working_dir: working_dir,
           tool_set: Keyword.get(opts, :tool_set, :standard),
           include_dynamic: Keyword.get(opts, :include_dynamic, false)

@@ -11,11 +11,11 @@ defmodule GiTF.Web.GameChannelTest do
   setup_all do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    # Use the app's Store (don't restart it)
-    unless Process.whereis(GiTF.Store) do
+    # Use the app's Archive (don't restart it)
+    unless Process.whereis(GiTF.Archive) do
       tmp_dir = Path.join(System.tmp_dir!(), "game_test_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(tmp_dir)
-      {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
+      {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
     end
 
     # Ensure Web.Endpoint is running with server: false

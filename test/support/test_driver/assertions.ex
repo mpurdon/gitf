@@ -21,7 +21,7 @@ defmodule GiTF.TestDriver.Assertions do
     * `{:quest_completed, mission_id}` — mission status is "completed"
     * `{:quest_failed, mission_id}` — mission status is "failed"
     * `{:bee_stopped, ghost_id}` — ghost status is "stopped" or "crashed"
-    * `{:link_msg, filter}` — a link_msg matching the filter exists in Store
+    * `{:link_msg, filter}` — a link_msg matching the filter exists in Archive
     * `{:event, event_name}` — telemetry event exists in recorder timeline
     * `{:event, event_name, metadata}` — telemetry event with matching metadata
     * `{:store_count, collection, expected}` — collection has expected count
@@ -73,7 +73,7 @@ defmodule GiTF.TestDriver.Assertions do
   end
 
   @doc """
-  Asserts that a link_msg message matching the filter exists in the Store.
+  Asserts that a link_msg message matching the filter exists in the Archive.
 
   ## Filter keys
 
@@ -101,7 +101,7 @@ defmodule GiTF.TestDriver.Assertions do
   end
 
   @doc """
-  Asserts that a Store collection has the expected number of records.
+  Asserts that a Archive collection has the expected number of records.
   """
   @spec assert_store_count(atom(), non_neg_integer(), keyword()) :: :ok
   def assert_store_count(collection, expected, opts \\ []) do
@@ -168,7 +168,7 @@ defmodule GiTF.TestDriver.Assertions do
   end
 
   defp check_condition({:link_msg, filter}) when is_map(filter) do
-    links = GiTF.Store.all(:links)
+    links = GiTF.Archive.all(:links)
 
     Enum.any?(links, fn w ->
       Enum.all?(filter, fn {k, v} -> Map.get(w, k) == v end)
@@ -193,7 +193,7 @@ defmodule GiTF.TestDriver.Assertions do
   end
 
   defp check_condition({:store_count, collection, expected}) do
-    GiTF.Store.count(collection) == expected
+    GiTF.Archive.count(collection) == expected
   rescue
     _ -> false
   end

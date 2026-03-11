@@ -2,12 +2,12 @@ defmodule GiTF.Major.ResearchTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Major.Research
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     # Start store for testing
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: System.tmp_dir!() <> "/test_research_#{:rand.uniform(10000)}")
+    {:ok, _} = Archive.start_link(data_dir: System.tmp_dir!() <> "/test_research_#{:rand.uniform(10000)}")
     
     # Create test directory structure
     test_path = System.tmp_dir!() <> "/test_codebase_#{:rand.uniform(10000)}"
@@ -29,7 +29,7 @@ defmodule GiTF.Major.ResearchTest do
     System.cmd("git", ["commit", "-m", "Initial commit"], cd: test_path)
     
     # Create test sector
-    {:ok, sector} = Store.insert(:sectors, %{
+    {:ok, sector} = Archive.insert(:sectors, %{
       name: "test-sector",
       path: test_path
     })

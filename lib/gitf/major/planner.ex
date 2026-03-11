@@ -6,7 +6,7 @@ defmodule GiTF.Major.Planner do
   with ops, verification criteria, and context estimates.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.Ops.Classifier
 
   @doc """
@@ -27,10 +27,10 @@ defmodule GiTF.Major.Planner do
         simplicity_target: calculate_simplicity_target(plan)
       })
       
-      # Store plan in mission
-      quest_record = Store.get(:missions, mission_id)
+      # Archive plan in mission
+      quest_record = Archive.get(:missions, mission_id)
       updated = Map.put(quest_record, :implementation_plan, enhanced_plan)
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
       
       {:ok, enhanced_plan}
     end
@@ -111,7 +111,7 @@ defmodule GiTF.Major.Planner do
         %{
           title: "Add tests",
           description: "Write comprehensive ExUnit tests",
-          type: :verification,
+          type: :audit,
           complexity: :simple,
           estimated_tokens: 8000,
           verification_criteria: ["All tests pass", "Coverage > 80%"]
@@ -121,7 +121,7 @@ defmodule GiTF.Major.Planner do
         %{
           title: "Add tests",
           description: "Write Jest/Mocha tests",
-          type: :verification,
+          type: :audit,
           complexity: :simple,
           estimated_tokens: 8000,
           verification_criteria: ["All tests pass", "Coverage > 80%"]
@@ -131,7 +131,7 @@ defmodule GiTF.Major.Planner do
         %{
           title: "Add validation",
           description: "Add basic validation and error handling",
-          type: :verification,
+          type: :audit,
           complexity: :simple,
           estimated_tokens: 5000,
           verification_criteria: ["Error handling works", "Input validation"]
@@ -212,12 +212,12 @@ defmodule GiTF.Major.Planner do
                 created_at: DateTime.utc_now()
               }
 
-              # Store as draft on the mission
-              quest_record = Store.get(:missions, mission_id)
+              # Archive as draft on the mission
+              quest_record = Archive.get(:missions, mission_id)
 
               if quest_record do
                 updated = Map.put(quest_record, :draft_plan, plan)
-                Store.put(:missions, updated)
+                Archive.put(:missions, updated)
               end
 
               {:ok, plan}
@@ -369,7 +369,7 @@ defmodule GiTF.Major.Planner do
   """
   @spec create_jobs_from_specs(String.t(), [map()]) :: {:ok, [map()]}
   def create_jobs_from_specs(mission_id, job_specs) do
-    mission = Store.get(:missions, mission_id)
+    mission = Archive.get(:missions, mission_id)
     sector_id = if mission, do: mission.sector_id
 
     {ops, _id_map} =
@@ -542,7 +542,7 @@ defmodule GiTF.Major.Planner do
         # Fall back to single plan
         generate_llm_plan(mission_id, opts)
       else
-        # Store all candidates
+        # Archive all candidates
         GiTF.Missions.store_artifact(mission_id, "plan_candidates", %{
           "candidates" => Enum.map(candidates, fn c ->
             %{
@@ -558,8 +558,8 @@ defmodule GiTF.Major.Planner do
         # Select best by score
         best = Enum.max_by(candidates, & &1.score)
 
-        # Store best plan as draft
-        quest_record = Store.get(:missions, mission_id)
+        # Archive best plan as draft
+        quest_record = Archive.get(:missions, mission_id)
 
         if quest_record do
           updated =
@@ -567,7 +567,7 @@ defmodule GiTF.Major.Planner do
             |> Map.put(:draft_plan, best)
             |> Map.put(:plan_candidates, candidates)
 
-          Store.put(:missions, updated)
+          Archive.put(:missions, updated)
         end
 
         {:ok, best}
@@ -613,7 +613,7 @@ defmodule GiTF.Major.Planner do
   """
   @spec select_fallback_plan(String.t()) :: {:ok, map()} | {:error, :no_fallback}
   def select_fallback_plan(mission_id) do
-    mission = Store.get(:missions, mission_id)
+    mission = Archive.get(:missions, mission_id)
     candidates = Map.get(mission || %{}, :plan_candidates, [])
     tried = Map.get(mission || %{}, :tried_plans, [])
     tried_strategies = Enum.map(tried, & &1[:strategy])
@@ -705,7 +705,7 @@ defmodule GiTF.Major.Planner do
     title = (task["title"] || "") |> String.downcase()
 
     cond do
-      String.contains?(title, "test") -> :verification
+      String.contains?(title, "test") -> :audit
       String.contains?(title, "research") -> :research
       String.contains?(title, "plan") -> :planning
       true -> :implementation

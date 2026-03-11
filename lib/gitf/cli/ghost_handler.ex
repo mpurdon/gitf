@@ -107,7 +107,7 @@ defmodule GiTF.CLI.GhostHandler do
         IO.puts("  Tokens limit: #{stats.tokens_limit || "unknown"}")
         IO.puts("  Percentage:   #{Float.round(stats.percentage * 100, 2)}%")
         IO.puts("  Status:       #{stats.status}")
-        IO.puts("  Needs handoff: #{stats.needs_handoff}")
+        IO.puts("  Needs transfer: #{stats.needs_handoff}")
 
       {:error, :not_found} ->
         Format.error("Bee not found: #{ghost_id}")

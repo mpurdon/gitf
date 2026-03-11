@@ -2,17 +2,17 @@ defmodule GiTF.Runtime.ContextMonitor do
   @moduledoc """
   Monitors and enforces context budget limits for ghosts.
   
-  Tracks token usage per ghost session and triggers automatic handoffs
+  Tracks token usage per ghost session and triggers automatic transfers
   when context usage approaches the configured threshold (default 45%).
   
   ## Thresholds
   
   - Warning: 40% - Log warning, notify via PubSub
-  - Critical: 45% - Trigger automatic handoff
-  - Maximum: 50% - Hard limit, force handoff
+  - Critical: 45% - Trigger automatic transfer
+  - Maximum: 50% - Hard limit, force transfer
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @warning_threshold 0.40
   @critical_threshold 0.45
@@ -21,13 +21,13 @@ defmodule GiTF.Runtime.ContextMonitor do
   @doc """
   Record token usage for a ghost session.
   
-  Updates the ghost's context tracking fields and checks if handoff is needed.
-  Returns {:ok, :normal | :warning | :critical | :handoff_needed}.
+  Updates the ghost's context tracking fields and checks if transfer is needed.
+  Returns {:ok, :normal | :warning | :critical | :transfer_needed}.
   """
   @spec record_usage(String.t(), integer(), integer()) ::
-          {:ok, :normal | :warning | :critical | :handoff_needed} | {:error, term()}
+          {:ok, :normal | :warning | :critical | :transfer_needed} | {:error, term()}
   def record_usage(ghost_id, input_tokens, output_tokens) do
-    with {:ok, ghost} <- Store.fetch(:ghosts, ghost_id),
+    with {:ok, ghost} <- Archive.fetch(:ghosts, ghost_id),
          {:ok, limit} <- get_context_limit(ghost) do
       total_tokens = (ghost.context_tokens_used || 0) + input_tokens + output_tokens
       percentage = total_tokens / limit
@@ -38,7 +38,7 @@ defmodule GiTF.Runtime.ContextMonitor do
         |> Map.put(:context_tokens_limit, limit)
         |> Map.put(:context_percentage, percentage)
 
-      Store.put(:ghosts, updated)
+      Archive.put(:ghosts, updated)
 
       status = determine_status(percentage)
       maybe_broadcast_warning(ghost_id, status, percentage)
@@ -48,11 +48,11 @@ defmodule GiTF.Runtime.ContextMonitor do
   end
 
   @doc """
-  Check if a ghost needs a handoff based on current context usage.
+  Check if a ghost needs a transfer based on current context usage.
   """
   @spec needs_handoff?(String.t()) :: boolean()
   def needs_handoff?(ghost_id) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil -> false
       ghost -> (ghost.context_percentage || 0.0) >= @critical_threshold
     end
@@ -63,7 +63,7 @@ defmodule GiTF.Runtime.ContextMonitor do
   """
   @spec get_usage_percentage(String.t()) :: float()
   def get_usage_percentage(ghost_id) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil -> 0.0
       ghost -> ghost.context_percentage || 0.0
     end
@@ -74,7 +74,7 @@ defmodule GiTF.Runtime.ContextMonitor do
   """
   @spec get_usage_stats(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_usage_stats(ghost_id) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil ->
         {:error, :not_found}
 
@@ -91,13 +91,13 @@ defmodule GiTF.Runtime.ContextMonitor do
   end
 
   @doc """
-  Create a context snapshot for handoff purposes.
+  Create a context snapshot for transfer purposes.
   
   Captures the current state of the ghost's work for context preservation.
   """
   @spec create_snapshot(String.t()) :: {:ok, map()} | {:error, term()}
   def create_snapshot(ghost_id) do
-    with {:ok, ghost} <- Store.fetch(:ghosts, ghost_id),
+    with {:ok, ghost} <- Archive.fetch(:ghosts, ghost_id),
          {:ok, op} <- GiTF.Ops.get(ghost.op_id) do
       snapshot = %{
         id: "snap-#{:erlang.unique_integer([:positive])}",
@@ -111,7 +111,7 @@ defmodule GiTF.Runtime.ContextMonitor do
         inserted_at: DateTime.utc_now()
       }
 
-      Store.insert(:context_snapshots, snapshot)
+      Archive.insert(:context_snapshots, snapshot)
     end
   end
 
@@ -121,7 +121,7 @@ defmodule GiTF.Runtime.ContextMonitor do
   @spec get_latest_snapshot(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_latest_snapshot(ghost_id) do
     snapshots =
-      Store.all(:context_snapshots)
+      Archive.all(:context_snapshots)
       |> Enum.filter(&(&1.ghost_id == ghost_id))
       |> Enum.sort_by(& &1.snapshot_at, {:desc, DateTime})
 
@@ -147,13 +147,13 @@ defmodule GiTF.Runtime.ContextMonitor do
     end
   end
 
-  defp determine_status(percentage) when percentage >= @max_threshold, do: :handoff_needed
+  defp determine_status(percentage) when percentage >= @max_threshold, do: :transfer_needed
   defp determine_status(percentage) when percentage >= @critical_threshold, do: :critical
   defp determine_status(percentage) when percentage >= @warning_threshold, do: :warning
   defp determine_status(_percentage), do: :normal
 
   defp maybe_broadcast_warning(ghost_id, status, percentage)
-       when status in [:warning, :critical, :handoff_needed] do
+       when status in [:warning, :critical, :transfer_needed] do
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
       "ghost:#{ghost_id}",

@@ -23,9 +23,9 @@ defmodule GiTF.Ops.ClassifierTest do
     end
 
     test "classifies verification tasks" do
-      assert Classifier.classify_type("verify the test coverage") == :verification
-      assert Classifier.classify_type("validate the API responses") == :verification
-      assert Classifier.classify_type("check the security") == :verification
+      assert Classifier.classify_type("verify the test coverage") == :audit
+      assert Classifier.classify_type("validate the API responses") == :audit
+      assert Classifier.classify_type("check the security") == :audit
     end
 
     test "classifies refactoring tasks" do

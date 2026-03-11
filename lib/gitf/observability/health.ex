@@ -4,7 +4,7 @@ defmodule GiTF.Observability.Health do
   """
 
   require Logger
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc "Perform health check"
   def check do
@@ -17,7 +17,7 @@ defmodule GiTF.Observability.Health do
       {:model_api, check_model_api()},
       {:git, check_git()},
       {:major, check_major()},
-      {:merge_queue, check_merge_queue()}
+      {:sync_queue, check_sync_queue()}
     ]
 
     status = if Enum.all?(checks, fn {_, s} -> s == :ok end), do: :healthy, else: :degraded
@@ -44,7 +44,7 @@ defmodule GiTF.Observability.Health do
       false
     else
       # Check for zombie: active missions exist but no op activity for 30+ minutes
-      active_quests = Store.filter(:missions, fn q ->
+      active_quests = Archive.filter(:missions, fn q ->
         q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
       end)
 
@@ -53,7 +53,7 @@ defmodule GiTF.Observability.Health do
       else
         # Any op activity in last 30 minutes?
         thirty_min_ago = DateTime.add(DateTime.utc_now(), -1800, :second)
-        recent_activity = Store.filter(:ops, fn j ->
+        recent_activity = Archive.filter(:ops, fn j ->
           updated = j[:updated_at] || j[:created_at]
           updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
         end)
@@ -66,7 +66,7 @@ defmodule GiTF.Observability.Health do
   end
 
   defp check_store do
-    Store.all(:missions)
+    Archive.all(:missions)
     :ok
   rescue
     _ -> :error
@@ -74,14 +74,14 @@ defmodule GiTF.Observability.Health do
 
   defp check_disk do
     gitf_dir =
-      case :persistent_term.get({GiTF.Store, :data_path}, nil) do
+      case :persistent_term.get({GiTF.Archive, :data_path}, nil) do
         nil -> File.cwd!()
         path -> Path.dirname(path)
       end
 
     task = Task.async(fn -> System.cmd("df", ["-k", gitf_dir], stderr_to_stdout: true) end)
 
-    df_result = case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
+    df_result = case Task.yield(task, 5_000) || Task.exfil(task, 1_000) do
       {:ok, result} -> result
       nil -> {"", 1}
     end
@@ -120,7 +120,7 @@ defmodule GiTF.Observability.Health do
   end
 
   defp check_quests do
-    missions = Store.all(:missions)
+    missions = Archive.all(:missions)
 
     stuck =
       Enum.count(missions, fn q ->
@@ -172,8 +172,8 @@ defmodule GiTF.Observability.Health do
     _ -> :warning
   end
 
-  defp check_merge_queue do
-    case GiTF.Merge.Queue.lookup() do
+  defp check_sync_queue do
+    case GiTF.Sync.Queue.lookup() do
       {:ok, pid} ->
         if Process.alive?(pid), do: :ok, else: :error
       :error ->

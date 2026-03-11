@@ -9,7 +9,7 @@ defmodule GiTF.Validator do
 
   require Logger
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
   Validates a completed ghost's work.
@@ -66,7 +66,7 @@ defmodule GiTF.Validator do
       )
     end)
 
-    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, @validation_timeout_ms) || Task.exfil(task, 5_000) do
       {:ok, {_output, 0}} ->
         :ok
 
@@ -142,14 +142,14 @@ defmodule GiTF.Validator do
   # -- Private -----------------------------------------------------------------
 
   defp fetch_cell(shell_id) do
-    case Store.get(:shells, shell_id) do
+    case Archive.get(:shells, shell_id) do
       nil -> {:error, :cell_not_found}
       shell -> {:ok, shell}
     end
   end
 
   defp fetch_comb(sector_id) do
-    case Store.get(:sectors, sector_id) do
+    case Archive.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
       sector -> {:ok, sector}
     end

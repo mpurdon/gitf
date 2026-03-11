@@ -2,13 +2,13 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Plugin.Builtin.ToolProviders.Workspace
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-ws-test-#{:rand.uniform(100_000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
 
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
@@ -43,7 +43,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
     end
 
     test "lists registered sectors" do
-      Store.insert(:sectors, %{id: "sector-ws-1", name: "test-sector", path: "/tmp/test"})
+      Archive.insert(:sectors, %{id: "sector-ws-1", name: "test-sector", path: "/tmp/test"})
 
       tool = find_tool("list_combs")
       {:ok, result} = tool.callback.(%{})
@@ -62,7 +62,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
     end
 
     test "lists shells with ghost assignments" do
-      Store.insert(:shells, %{id: "shell-1", ghost_id: "ghost-abc", path: "/tmp/cell1"})
+      Archive.insert(:shells, %{id: "shell-1", ghost_id: "ghost-abc", path: "/tmp/cell1"})
 
       tool = find_tool("list_cells")
       {:ok, result} = tool.callback.(%{})

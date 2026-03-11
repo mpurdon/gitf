@@ -1,7 +1,7 @@
 defmodule GiTF.Web.Live.Dashboard do
   use Phoenix.LiveView
 
-  alias GiTF.Store
+  alias GiTF.Archive
   alias GiTF.PubSubBridge
 
   @refresh_interval 3_000
@@ -32,12 +32,12 @@ defmodule GiTF.Web.Live.Dashboard do
       |> assign(:events, [])
       |> assign(:health, safe_call(fn -> GiTF.Observability.Health.check() end, %{status: :unknown, checks: %{}, timestamp: DateTime.utc_now()}))
       |> assign(:alerts, safe_call(fn -> GiTF.Observability.Alerts.check_alerts() end, []))
-      |> assign(:merge_queue, safe_call(fn -> GiTF.Merge.Queue.status() end, %{pending: [], active: nil, completed: []}))
+      |> assign(:sync_queue, safe_call(fn -> GiTF.Sync.Queue.status() end, %{pending: [], active: nil, completed: []}))
       |> assign(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, []))
       |> assign(:event_store_events, [])
-      |> assign(:event_types, safe_call(fn -> GiTF.EventStore.event_types() end, []))
+      |> assign(:event_types, safe_call(fn -> GiTF.EventArchive.event_types() end, []))
       |> assign(:agent_identities, safe_call(fn -> GiTF.AgentIdentity.list() end, []))
-      |> assign(:checkpoints, %{})
+      |> assign(:backups, %{})
       |> assign(:budget_status, [])
       |> assign(:event_type_filter, nil)
       |> assign(:selected_model, nil)
@@ -51,7 +51,7 @@ defmodule GiTF.Web.Live.Dashboard do
 
   @impl true
   def handle_event("emergency_stop", _params, socket) do
-    active_ghosts = Store.filter(:ghosts, fn b -> b[:status] == "working" end)
+    active_ghosts = Archive.filter(:ghosts, fn b -> b[:status] == "working" end)
 
     Enum.each(active_ghosts, fn ghost ->
       GiTF.Ghosts.stop(ghost[:id])
@@ -129,7 +129,7 @@ defmodule GiTF.Web.Live.Dashboard do
     socket =
       socket
       |> assign(:event_type_filter, nil)
-      |> assign(:event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 50) end, []))
+      |> assign(:event_store_events, safe_call(fn -> GiTF.EventArchive.list(limit: 50) end, []))
 
     {:noreply, socket}
   end
@@ -145,7 +145,7 @@ defmodule GiTF.Web.Live.Dashboard do
     socket =
       socket
       |> assign(:event_type_filter, type_atom)
-      |> assign(:event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 50, type: type_atom) end, []))
+      |> assign(:event_store_events, safe_call(fn -> GiTF.EventArchive.list(limit: 50, type: type_atom) end, []))
 
     {:noreply, socket}
   end
@@ -157,7 +157,7 @@ defmodule GiTF.Web.Live.Dashboard do
   end
 
   def handle_event("view_quest_timeline", %{"id" => mission_id}, socket) do
-    events = safe_call(fn -> GiTF.EventStore.list(limit: 50, mission_id: mission_id) end, [])
+    events = safe_call(fn -> GiTF.EventArchive.list(limit: 50, mission_id: mission_id) end, [])
 
     socket =
       socket
@@ -200,7 +200,7 @@ defmodule GiTF.Web.Live.Dashboard do
   defp refresh_core(socket) do
     socket
     |> assign_stats()
-    |> assign(:merge_queue, safe_call(fn -> GiTF.Merge.Queue.status() end, socket.assigns.merge_queue))
+    |> assign(:sync_queue, safe_call(fn -> GiTF.Sync.Queue.status() end, socket.assigns.sync_queue))
     |> assign(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, socket.assigns.runs))
     |> assign(:alerts, safe_call(fn -> GiTF.Observability.Alerts.check_alerts() end, socket.assigns.alerts))
   end
@@ -208,11 +208,11 @@ defmodule GiTF.Web.Live.Dashboard do
   defp maybe_refresh_slow(socket, count) when rem(count, 5) == 0 do
     ghosts = socket.assigns.ghosts
 
-    checkpoints =
+    backups =
       ghosts
       |> Enum.filter(&(&1[:status] == "working"))
       |> Enum.reduce(%{}, fn ghost, acc ->
-        case safe_call(fn -> GiTF.Checkpoint.load(ghost[:id]) end, :error) do
+        case safe_call(fn -> GiTF.Backup.load(ghost[:id]) end, :error) do
           {:ok, cp} -> Map.put(acc, ghost[:id], cp)
           _ -> acc
         end
@@ -222,7 +222,7 @@ defmodule GiTF.Web.Live.Dashboard do
     |> assign(:health, safe_call(fn -> GiTF.Observability.Health.check() end, socket.assigns.health))
     |> assign(:agent_identities, safe_call(fn -> GiTF.AgentIdentity.list() end, socket.assigns.agent_identities))
     |> assign(:budget_status, load_budget_status(socket.assigns.missions))
-    |> assign(:checkpoints, checkpoints)
+    |> assign(:backups, backups)
   end
 
   defp maybe_refresh_slow(socket, _count), do: socket
@@ -230,16 +230,16 @@ defmodule GiTF.Web.Live.Dashboard do
   defp maybe_refresh_tab(%{assigns: %{active_tab: :events}} = socket) do
     opts = [limit: 50]
     opts = if socket.assigns.event_type_filter, do: Keyword.put(opts, :type, socket.assigns.event_type_filter), else: opts
-    assign(socket, :event_store_events, safe_call(fn -> GiTF.EventStore.list(opts) end, socket.assigns.event_store_events))
+    assign(socket, :event_store_events, safe_call(fn -> GiTF.EventArchive.list(opts) end, socket.assigns.event_store_events))
   end
 
   defp maybe_refresh_tab(socket), do: socket
 
   defp assign_stats(socket) do
     stats = GiTF.Observability.Metrics.collect_metrics()
-    missions = Store.all(:missions)
-    ops = Store.all(:ops)
-    ghosts = Store.all(:ghosts)
+    missions = Archive.all(:missions)
+    ops = Archive.all(:ops)
+    ghosts = Archive.all(:ghosts)
 
     selected_job =
       case socket.assigns[:selected_op_id] do
@@ -555,7 +555,7 @@ defmodule GiTF.Web.Live.Dashboard do
       {:detail, "Detail"},
       {:pipeline, "Pipeline"},
       {:events, "Events"},
-      {:merges, "Merges"},
+      {:merges, "Syncs"},
       {:models, "Models"}
     ]
 
@@ -573,8 +573,8 @@ defmodule GiTF.Web.Live.Dashboard do
           <%= if id == :events && length(@event_store_events) > 0 do %>
             <span class="ml-1 text-xs text-gray-500">(<%= length(@event_store_events) %>)</span>
           <% end %>
-          <%= if id == :merges && length((@merge_queue[:pending] || [])) > 0 do %>
-            <span class="ml-1 text-xs text-yellow-500">(<%= length(@merge_queue[:pending]) %>)</span>
+          <%= if id == :merges && length((@sync_queue[:pending] || [])) > 0 do %>
+            <span class="ml-1 text-xs text-yellow-500">(<%= length(@sync_queue[:pending]) %>)</span>
           <% end %>
         </button>
       <% end %>
@@ -601,8 +601,8 @@ defmodule GiTF.Web.Live.Dashboard do
   defp render_detail_tab(assigns) do
     ~H"""
     <%= if @selected_job do %>
-      <% stages = job_pipeline_stages(@selected_job, @merge_queue) %>
-      <% checkpoint = @checkpoints[@selected_job[:ghost_id]] %>
+      <% stages = job_pipeline_stages(@selected_job, @sync_queue) %>
+      <% backup = @backups[@selected_job[:ghost_id]] %>
       <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full flex flex-col">
         <div class="bg-gray-700 px-4 py-2 border-b border-gray-600 flex justify-between items-center shrink-0">
           <h3 class="font-bold">
@@ -622,7 +622,7 @@ defmodule GiTF.Web.Live.Dashboard do
           <div class="flex items-center gap-1 text-xs shrink-0">
             <%= for {label, status} <- stages do %>
               <div class={"px-2 py-1 rounded font-mono #{stage_badge(status)}"}><%= label %></div>
-              <%= if label != "Merge" do %>
+              <%= if label != "Sync" do %>
                 <span class="text-gray-600">></span>
               <% end %>
             <% end %>
@@ -661,7 +661,7 @@ defmodule GiTF.Web.Live.Dashboard do
               <span class="text-gray-300 font-mono text-xs"><%= @selected_job[:mission_id] || "—" %></span>
             </div>
             <div>
-              <span class="text-gray-500 block text-xs uppercase">Verification</span>
+              <span class="text-gray-500 block text-xs uppercase">Audit</span>
               <span class={"text-xs font-mono #{verification_color(@selected_job[:verification_status])}"}><%= @selected_job[:verification_status] || "—" %></span>
             </div>
             <div>
@@ -670,22 +670,22 @@ defmodule GiTF.Web.Live.Dashboard do
             </div>
           </div>
 
-          <!-- Checkpoint -->
-          <%= if checkpoint do %>
+          <!-- Backup -->
+          <%= if backup do %>
             <div class="shrink-0 bg-gray-900 rounded p-3">
-              <span class="text-gray-500 text-xs uppercase block mb-2">Checkpoint (iter <%= checkpoint[:iteration] || "?" %>)</span>
+              <span class="text-gray-500 text-xs uppercase block mb-2">Backup (iter <%= backup[:iteration] || "?" %>)</span>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                 <div>
                   <span class="text-gray-500 block">Progress</span>
-                  <span class="text-gray-300"><%= checkpoint[:progress_summary] || "—" %></span>
+                  <span class="text-gray-300"><%= backup[:progress_summary] || "—" %></span>
                 </div>
                 <div>
                   <span class="text-gray-500 block">Files Modified</span>
-                  <span class="text-gray-300"><%= length(checkpoint[:files_modified] || []) %></span>
+                  <span class="text-gray-300"><%= length(backup[:files_modified] || []) %></span>
                 </div>
                 <div>
                   <span class="text-gray-500 block">Context Usage</span>
-                  <% ctx_pct = (checkpoint[:context_usage_pct] || 0) * 100 %>
+                  <% ctx_pct = (backup[:context_usage_pct] || 0) * 100 %>
                   <div class="flex items-center gap-2">
                     <div class="w-16 bg-gray-700 rounded-full h-1.5">
                       <div class={"h-1.5 rounded-full #{if ctx_pct > 80, do: "bg-red-500", else: if(ctx_pct > 60, do: "bg-yellow-500", else: "bg-green-500")}"} style={"width: #{min(ctx_pct, 100)}%"}></div>
@@ -695,7 +695,7 @@ defmodule GiTF.Web.Live.Dashboard do
                 </div>
                 <div>
                   <span class="text-gray-500 block">Errors</span>
-                  <span class={"#{if (checkpoint[:error_count] || 0) > 0, do: "text-red-400", else: "text-gray-300"}"}><%= checkpoint[:error_count] || 0 %></span>
+                  <span class={"#{if (backup[:error_count] || 0) > 0, do: "text-red-400", else: "text-gray-300"}"}><%= backup[:error_count] || 0 %></span>
                 </div>
               </div>
             </div>
@@ -719,11 +719,11 @@ defmodule GiTF.Web.Live.Dashboard do
             </div>
           <% end %>
 
-          <!-- Verification Result -->
-          <%= if @selected_job[:verification_result] do %>
+          <!-- Audit Result -->
+          <%= if @selected_job[:audit_result] do %>
             <div class="shrink-0">
-              <span class="text-gray-500 text-xs uppercase block mb-1">Verification Result</span>
-              <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono text-xs text-gray-300 hive-scrollbar"><%= inspect(@selected_job[:verification_result], pretty: true, limit: :infinity) %></div>
+              <span class="text-gray-500 text-xs uppercase block mb-1">Audit Result</span>
+              <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono text-xs text-gray-300 hive-scrollbar"><%= inspect(@selected_job[:audit_result], pretty: true, limit: :infinity) %></div>
             </div>
           <% end %>
 
@@ -889,7 +889,7 @@ defmodule GiTF.Web.Live.Dashboard do
               <th class="px-3 py-2 text-center">Triage</th>
               <th class="px-3 py-2 text-center">Bee</th>
               <th class="px-3 py-2 text-center">Tachikoma</th>
-              <th class="px-3 py-2 text-center">Merge</th>
+              <th class="px-3 py-2 text-center">Sync</th>
             </tr>
           </thead>
           <tbody>
@@ -897,7 +897,7 @@ defmodule GiTF.Web.Live.Dashboard do
               <tr><td colspan="6" class="px-3 py-8 text-center text-gray-500 italic">No ops in pipeline</td></tr>
             <% end %>
             <%= for op <- @pipeline_jobs do %>
-              <% stages = job_pipeline_stages(op, @merge_queue) %>
+              <% stages = job_pipeline_stages(op, @sync_queue) %>
               <tr class="border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer" phx-click="select_job" phx-value-id={op[:id]}>
                 <td class="px-3 py-2 text-gray-300 truncate max-w-[200px]" title={op[:title]}>
                   <%= String.slice(op[:title] || "untitled", 0, 35) %>
@@ -951,7 +951,7 @@ defmodule GiTF.Web.Live.Dashboard do
     """
   end
 
-  # ── Merges Tab ─────────────────────────────────────────────────────────
+  # ── Syncs Tab ─────────────────────────────────────────────────────────
 
   defp render_merges_tab(assigns) do
     ~H"""
@@ -959,8 +959,8 @@ defmodule GiTF.Web.Live.Dashboard do
       <div class="p-4 space-y-4">
         <!-- Active -->
         <div>
-          <h3 class="text-xs uppercase text-gray-500 mb-2">Active Merge</h3>
-          <%= if active = @merge_queue[:active] do %>
+          <h3 class="text-xs uppercase text-gray-500 mb-2">Active Sync</h3>
+          <%= if active = @sync_queue[:active] do %>
             <div class="bg-gray-900 rounded p-3 border border-blue-800 flex items-center gap-3">
               <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
               <div>
@@ -970,18 +970,18 @@ defmodule GiTF.Web.Live.Dashboard do
               <button phx-click="select_job" phx-value-id={active[:op_id] || active.op_id} class="ml-auto text-xs text-blue-400 hover:text-blue-300">View</button>
             </div>
           <% else %>
-            <p class="text-gray-500 text-sm italic">No active merge</p>
+            <p class="text-gray-500 text-sm italic">No active sync</p>
           <% end %>
         </div>
 
         <!-- Pending -->
         <div>
-          <h3 class="text-xs uppercase text-gray-500 mb-2">Pending (<%= length(@merge_queue[:pending] || []) %>)</h3>
-          <%= if Enum.empty?(@merge_queue[:pending] || []) do %>
+          <h3 class="text-xs uppercase text-gray-500 mb-2">Pending (<%= length(@sync_queue[:pending] || []) %>)</h3>
+          <%= if Enum.empty?(@sync_queue[:pending] || []) do %>
             <p class="text-gray-500 text-sm italic">Queue empty</p>
           <% end %>
           <div class="space-y-1">
-            <%= for {{op_id, shell_id}, idx} <- Enum.with_index(@merge_queue[:pending] || []) do %>
+            <%= for {{op_id, shell_id}, idx} <- Enum.with_index(@sync_queue[:pending] || []) do %>
               <div class="bg-gray-900 rounded px-3 py-2 flex items-center gap-3 text-sm">
                 <span class="text-gray-500 font-mono text-xs w-6"><%= idx + 1 %></span>
                 <span class="text-gray-300 font-mono"><%= short_id(op_id) %></span>
@@ -995,11 +995,11 @@ defmodule GiTF.Web.Live.Dashboard do
         <!-- Completed -->
         <div>
           <h3 class="text-xs uppercase text-gray-500 mb-2">Recent Completed</h3>
-          <%= if Enum.empty?(@merge_queue[:completed] || []) do %>
+          <%= if Enum.empty?(@sync_queue[:completed] || []) do %>
             <p class="text-gray-500 text-sm italic">No completed merges</p>
           <% end %>
           <div class="space-y-1">
-            <%= for item <- @merge_queue[:completed] || [] do %>
+            <%= for item <- @sync_queue[:completed] || [] do %>
               <% {op_id, outcome, timestamp} = item %>
               <div class="bg-gray-900 rounded px-3 py-2 flex items-center gap-3 text-sm">
                 <span class="text-gray-300 font-mono"><%= short_id(op_id) %></span>
@@ -1140,10 +1140,10 @@ defmodule GiTF.Web.Live.Dashboard do
         </span>
       </div>
 
-      <!-- Merge Queue -->
+      <!-- Sync Queue -->
       <div class="flex items-center gap-1 text-gray-400">
-        <span>MQ: <%= length(@merge_queue[:pending] || []) %> pending</span>
-        <%= if active = @merge_queue[:active] do %>
+        <span>MQ: <%= length(@sync_queue[:pending] || []) %> pending</span>
+        <%= if active = @sync_queue[:active] do %>
           <span class="text-blue-400">| merging <%= short_id(active[:op_id] || active.op_id) %></span>
         <% end %>
       </div>
@@ -1153,7 +1153,7 @@ defmodule GiTF.Web.Live.Dashboard do
 
   # ── Helpers ────────────────────────────────────────────────────────────
 
-  defp job_pipeline_stages(op, merge_queue) do
+  defp job_pipeline_stages(op, sync_queue) do
     recon =
       cond do
         op[:skip_scout] == true -> :skip
@@ -1187,17 +1187,17 @@ defmodule GiTF.Web.Live.Dashboard do
         true -> :skip
       end
 
-    merge =
+    sync =
       cond do
         op[:merged_at] != nil -> :done
-        merge_active?(merge_queue, op[:id]) -> :active
-        merge_pending?(merge_queue, op[:id]) -> :pending
-        merge_completed?(merge_queue, op[:id]) -> :done
+        merge_active?(sync_queue, op[:id]) -> :active
+        merge_pending?(sync_queue, op[:id]) -> :pending
+        merge_completed?(sync_queue, op[:id]) -> :done
         ghost == :done && tachikoma in [:done, :skip] -> :pending
         true -> :skip
       end
 
-    [{"Recon", recon}, {"Triage", triage}, {"Bee", ghost}, {"Tachikoma", tachikoma}, {"Merge", merge}]
+    [{"Recon", recon}, {"Triage", triage}, {"Bee", ghost}, {"Tachikoma", tachikoma}, {"Sync", sync}]
   end
 
   defp merge_active?(%{active: nil}, _op_id), do: false

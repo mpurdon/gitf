@@ -6,7 +6,7 @@ defmodule GiTF.Migrations do
   the data structure matches the current version.
   """
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @current_version 5
 
@@ -28,7 +28,7 @@ defmodule GiTF.Migrations do
   Get the current schema version.
   """
   def get_schema_version do
-    case Store.get(:metadata, "schema_version") do
+    case Archive.get(:metadata, "schema_version") do
       nil -> 0
       %{version: version} -> version
     end
@@ -37,12 +37,12 @@ defmodule GiTF.Migrations do
   # Private
 
   defp set_schema_version(version) do
-    Store.put(:metadata, %{id: "schema_version", version: version})
+    Archive.put(:metadata, %{id: "schema_version", version: version})
   end
 
   defp run_migration(1) do
     # Migration 1: Add multi-model support fields to ops
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
 
     Enum.each(ops, fn op ->
       updated =
@@ -55,11 +55,11 @@ defmodule GiTF.Migrations do
         |> Map.put_new(:verification_criteria, [])
         |> Map.put_new(:estimated_context_tokens, nil)
 
-      Store.put(:ops, updated)
+      Archive.put(:ops, updated)
     end)
 
     # Add ghosts model tracking
-    ghosts = Store.all(:ghosts)
+    ghosts = Archive.all(:ghosts)
 
     Enum.each(ghosts, fn ghost ->
       updated =
@@ -69,7 +69,7 @@ defmodule GiTF.Migrations do
         |> Map.put_new(:context_tokens_limit, nil)
         |> Map.put_new(:context_percentage, 0.0)
 
-      Store.put(:ghosts, updated)
+      Archive.put(:ghosts, updated)
     end)
 
     # Initialize context_snapshots collection (empty)
@@ -84,7 +84,7 @@ defmodule GiTF.Migrations do
 
   defp run_migration(3) do
     # Migration 3: Add mission phase tracking fields
-    missions = Store.all(:missions)
+    missions = Archive.all(:missions)
 
     Enum.each(missions, fn mission ->
       updated =
@@ -93,7 +93,7 @@ defmodule GiTF.Migrations do
         |> Map.put_new(:research_summary, nil)
         |> Map.put_new(:implementation_plan, nil)
 
-      Store.put(:missions, updated)
+      Archive.put(:missions, updated)
     end)
 
     # Initialize mission_phase_transitions collection (empty)
@@ -111,19 +111,19 @@ defmodule GiTF.Migrations do
 
   defp run_migration(5) do
     # Migration 5: Add verification fields to ops
-    ops = Store.all(:ops)
+    ops = Archive.all(:ops)
 
     Enum.each(ops, fn op ->
       updated =
         op
         |> Map.put_new(:verification_status, "pending")
-        |> Map.put_new(:verification_result, nil)
+        |> Map.put_new(:audit_result, nil)
         |> Map.put_new(:verified_at, nil)
 
-      Store.put(:ops, updated)
+      Archive.put(:ops, updated)
     end)
 
-    # Initialize verification_results collection (empty)
+    # Initialize audit_results collection (empty)
     :ok
   end
 

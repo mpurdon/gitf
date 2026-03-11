@@ -2,16 +2,16 @@ defmodule GiTF.HumanGate do
   @moduledoc """
   Human-in-the-loop approval gates.
 
-  Provides mandatory human approval before merge for high-criticality missions.
+  Provides mandatory human approval before sync for high-criticality missions.
   Acts as a "liability firebreak" — ensuring a human reviews and signs off
   on high-risk changes before they land.
   """
 
   require Logger
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @doc """
-  Returns true if a mission requires human approval before merge.
+  Returns true if a mission requires human approval before sync.
 
   Criteria:
   - Any non-phase op has `:high` or `:critical` risk level
@@ -23,7 +23,7 @@ defmodule GiTF.HumanGate do
       case Map.get(mission, :sector_id) do
         nil -> false
         sector_id ->
-          case Store.get(:sectors, sector_id) do
+          case Archive.get(:sectors, sector_id) do
             nil -> false
             sector -> Map.get(sector, :require_human_approval, false) == true
           end
@@ -75,7 +75,7 @@ defmodule GiTF.HumanGate do
         requested_at: DateTime.utc_now()
       }
 
-      {:ok, stored} = Store.insert(:approval_requests, request)
+      {:ok, stored} = Archive.insert(:approval_requests, request)
 
       # Send link_msg to queen (best-effort)
       try do
@@ -107,7 +107,7 @@ defmodule GiTF.HumanGate do
   end
 
   @doc """
-  Approves a mission for merge.
+  Approves a mission for sync.
 
   Stores an approval artifact on the mission and updates the approval request status.
   """
@@ -177,14 +177,14 @@ defmodule GiTF.HumanGate do
   """
   @spec pending_approvals() :: [map()]
   def pending_approvals do
-    Store.filter(:approval_requests, fn r -> r.status == "pending" end)
+    Archive.filter(:approval_requests, fn r -> r.status == "pending" end)
     |> Enum.sort_by(& &1.requested_at, {:asc, DateTime})
   end
 
   # -- Private ---------------------------------------------------------------
 
   defp find_request(mission_id) do
-    Store.find_one(:approval_requests, fn r -> r.mission_id == mission_id end)
+    Archive.find_one(:approval_requests, fn r -> r.mission_id == mission_id end)
   end
 
   defp update_request_status(mission_id, status) do
@@ -192,7 +192,7 @@ defmodule GiTF.HumanGate do
       nil -> :ok
       request ->
         updated = Map.put(request, :status, status)
-        Store.put(:approval_requests, updated)
+        Archive.put(:approval_requests, updated)
     end
   end
 end

@@ -32,7 +32,7 @@ defmodule GiTF.Ghost.Worker do
   use GenServer
   require Logger
 
-  alias GiTF.Store
+  alias GiTF.Archive
 
   @registry GiTF.Registry
 
@@ -141,7 +141,7 @@ defmodule GiTF.Ghost.Worker do
       output: [],
       parsed_events: [],
       opts: opts,
-      checkpoint_timer: schedule_checkpoint()
+      backup_timer: schedule_checkpoint()
     }
 
     {:ok, state, {:continue, :provision}}
@@ -260,28 +260,28 @@ defmodule GiTF.Ghost.Worker do
     {:noreply, state}
   end
 
-  def handle_info(:checkpoint, state) do
+  def handle_info(:backup, state) do
     if state.status == :running do
-      checkpoint_data = build_checkpoint_data(state)
-      GiTF.Checkpoint.save(state.ghost_id, checkpoint_data)
+      backup_data = build_checkpoint_data(state)
+      GiTF.Backup.save(state.ghost_id, backup_data)
     end
 
-    {:noreply, %{state | checkpoint_timer: schedule_checkpoint()}}
+    {:noreply, %{state | backup_timer: schedule_checkpoint()}}
   end
 
   def handle_info(:context_handoff, %{status: :running} = state) do
-    Logger.info("Bee #{state.ghost_id} initiating proactive context handoff")
+    Logger.info("Bee #{state.ghost_id} initiating proactive context transfer")
 
-    # Create handoff with current state
-    GiTF.Handoff.create(state.ghost_id)
+    # Create transfer with current state
+    GiTF.Transfer.create(state.ghost_id)
 
     # Stop the current process (port/task)
     state = do_stop(state)
 
-    # Reset the op to pending so it can be re-spawned with handoff context
+    # Reset the op to pending so it can be re-spawned with transfer context
     case GiTF.Ops.get(state.op_id) do
       {:ok, op} ->
-        Store.put(:ops, %{op | status: "pending"})
+        Archive.put(:ops, %{op | status: "pending"})
       _ ->
         :ok
     end
@@ -341,19 +341,19 @@ defmodule GiTF.Ghost.Worker do
 
   @impl true
   def terminate(_reason, state) do
-    # If ghost was actively running, preserve context via checkpoint + handoff
+    # If ghost was actively running, preserve context via backup + transfer
     if state.status == :running do
       try do
-        # Save final checkpoint so handoff has latest progress
-        checkpoint_data = build_checkpoint_data(state)
-        GiTF.Checkpoint.save(state.ghost_id, checkpoint_data)
+        # Save final backup so transfer has latest progress
+        backup_data = build_checkpoint_data(state)
+        GiTF.Backup.save(state.ghost_id, backup_data)
 
-        # Create handoff so replacement ghost has context
-        GiTF.Handoff.create(state.ghost_id)
-        Logger.info("Bee #{state.ghost_id} crash handoff saved")
+        # Create transfer so replacement ghost has context
+        GiTF.Transfer.create(state.ghost_id)
+        Logger.info("Bee #{state.ghost_id} crash transfer saved")
       rescue
         e ->
-          Logger.debug("Crash handoff failed for ghost #{state.ghost_id}: #{inspect(e)}")
+          Logger.debug("Crash transfer failed for ghost #{state.ghost_id}: #{inspect(e)}")
       end
     end
 
@@ -362,9 +362,9 @@ defmodule GiTF.Ghost.Worker do
       update_ghost_status(state.ghost_id, "crashed")
     end
 
-    # Shutdown API task if running (allow 2s for graceful cleanup)
+    # Exfil API task if running (allow 2s for graceful cleanup)
     if state.task != nil do
-      Task.shutdown(state.task, 2_000)
+      Task.exfil(state.task, 2_000)
     end
 
     # Close CLI port if running
@@ -513,7 +513,7 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp update_bee_working(state, shell) do
-    case Store.get(:ghosts, state.ghost_id) do
+    case Archive.get(:ghosts, state.ghost_id) do
       nil ->
         {:error, :bee_not_found}
 
@@ -521,7 +521,7 @@ defmodule GiTF.Ghost.Worker do
         updated =
           Map.merge(ghost, %{status: "working", shell_path: shell.worktree_path, pid: inspect(self())})
 
-        Store.put(:ghosts, updated)
+        Archive.put(:ghosts, updated)
         :ok
     end
   end
@@ -547,7 +547,7 @@ defmodule GiTF.Ghost.Worker do
   defp spawn_process_with_timeout(state, shell) do
     task = Task.async(fn -> spawn_process(state, shell) end)
 
-    case Task.yield(task, @spawn_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+    case Task.yield(task, @spawn_timeout_ms) || Task.exfil(task, :brutal_kill) do
       {:ok, result} -> result
       nil ->
         Logger.error("Bee #{state.ghost_id} spawn timed out after #{@spawn_timeout_ms}ms")
@@ -561,7 +561,7 @@ defmodule GiTF.Ghost.Worker do
 
     # Get the assigned model from the ghost record
     model =
-      case Store.get(:ghosts, state.ghost_id) do
+      case Archive.get(:ghosts, state.ghost_id) do
         %{assigned_model: model} when is_binary(model) -> model
         _ -> nil
       end
@@ -786,7 +786,7 @@ defmodule GiTF.Ghost.Worker do
         GiTF.Link.send(state.ghost_id, "major", "scout_complete", body)
 
       is_phase_job ->
-        # Phase ops link_msg Major directly — no verification/merge needed
+        # Phase ops link_msg Major directly — no verification/sync needed
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
         body = "Job #{state.op_id} completed successfully (phase: #{op.phase})"
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
@@ -799,8 +799,8 @@ defmodule GiTF.Ghost.Worker do
 
       true ->
         # Standard ops: broadcast to Tachikoma for independent verification.
-        # The Tachikoma verifies, then forwards to MergeQueue on pass.
-        # Do NOT link_msg Major here — the MergeQueue will link_msg "job_merged" after merge.
+        # The Tachikoma verifies, then forwards to SyncQueue on pass.
+        # Do NOT link_msg Major here — the SyncQueue will link_msg "job_merged" after sync.
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "tachikoma:review",
@@ -841,7 +841,7 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp record_files_changed(state) do
-    case Store.get(:shells, state.shell_id) do
+    case Archive.get(:shells, state.shell_id) do
       %{worktree_path: path} when is_binary(path) ->
         case GiTF.Git.safe_cmd( ["diff", "--name-only", "HEAD~1..HEAD"],
                cd: path, stderr_to_stdout: true) do
@@ -850,7 +850,7 @@ defmodule GiTF.Ghost.Worker do
 
             case GiTF.Ops.get(state.op_id) do
               {:ok, op} ->
-                Store.put(:ops, Map.merge(op, %{
+                Archive.put(:ops, Map.merge(op, %{
                   files_changed: length(files),
                   changed_files: files
                 }))
@@ -905,7 +905,7 @@ defmodule GiTF.Ghost.Worker do
     case GiTF.Ops.get(state.op_id) do
       {:ok, op} ->
         # Standard sector-level agent
-        case Store.get(:sectors, shell.sector_id) do
+        case Archive.get(:sectors, shell.sector_id) do
           nil ->
             :ok
 
@@ -948,12 +948,12 @@ defmodule GiTF.Ghost.Worker do
 
       if input > 0 or output > 0 do
         case GiTF.Runtime.ContextMonitor.record_usage(ghost_id, input, output) do
-          {:ok, :handoff_needed} ->
-            Logger.warning("Bee #{ghost_id} needs handoff - context at critical level, triggering")
+          {:ok, :transfer_needed} ->
+            Logger.warning("Bee #{ghost_id} needs transfer - context at critical level, triggering")
             send(self(), :context_handoff)
 
           {:ok, :critical} ->
-            Logger.warning("Bee #{ghost_id} context usage critical, triggering handoff")
+            Logger.warning("Bee #{ghost_id} context usage critical, triggering transfer")
             send(self(), :context_handoff)
 
           {:ok, :warning} ->
@@ -976,7 +976,7 @@ defmodule GiTF.Ghost.Worker do
       :no_fallback
     else
       current_model =
-        case Store.get(:ghosts, state.ghost_id) do
+        case Archive.get(:ghosts, state.ghost_id) do
           %{assigned_model: m} when is_binary(m) -> m
           _ -> nil
         end
@@ -985,13 +985,13 @@ defmodule GiTF.Ghost.Worker do
 
       if fallback do
         # Update ghost record with fallback model
-        case Store.get(:ghosts, state.ghost_id) do
+        case Archive.get(:ghosts, state.ghost_id) do
           nil -> :no_fallback
-          ghost -> Store.put(:ghosts, %{ghost | assigned_model: fallback})
+          ghost -> Archive.put(:ghosts, %{ghost | assigned_model: fallback})
         end
 
         # Re-spawn the API task with fallback model
-        case Store.get(:shells, state.shell_id) do
+        case Archive.get(:shells, state.shell_id) do
           %{worktree_path: path} ->
             prompt = build_prompt(state)
             task = Task.async(fn ->
@@ -1018,7 +1018,7 @@ defmodule GiTF.Ghost.Worker do
 
   defp do_stop(state) do
     if state.task != nil do
-      Task.shutdown(state.task, 5_000)
+      Task.exfil(state.task, 5_000)
     end
 
     if state.port != nil and port_alive?(state.port) do
@@ -1032,9 +1032,9 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp update_ghost_status(ghost_id, status) do
-    case Store.get(:ghosts, ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
       nil -> :ok
-      ghost -> Store.put(:ghosts, %{ghost | status: status})
+      ghost -> Archive.put(:ghosts, %{ghost | status: status})
     end
   end
 
@@ -1045,7 +1045,7 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp schedule_checkpoint do
-    Process.send_after(self(), :checkpoint, 30_000)
+    Process.send_after(self(), :backup, 30_000)
   end
 
   defp build_checkpoint_data(state) do
@@ -1170,7 +1170,7 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp rollback_cell_for_bee(ghost_id) do
-    case Store.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
+    case Archive.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> :ok
       shell -> rollback_cell(shell.id)
     end

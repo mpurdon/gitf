@@ -2,13 +2,13 @@ defmodule GiTF.Intelligence.RetryFeedbackTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Intelligence.{FailureAnalysis, Retry}
-  alias GiTF.Store
+  alias GiTF.Archive
 
   setup do
     store_dir = Path.join(System.tmp_dir!(), "section-retry-fb-test-#{:rand.uniform(100_000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Store, data_dir: store_dir})
+    start_supervised!({Archive, data_dir: store_dir})
 
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
@@ -75,12 +75,12 @@ defmodule GiTF.Intelligence.RetryFeedbackTest do
       description: "Test",
       status: "failed",
       error_message: opts[:error_message] || "",
-      verification_result: opts[:verification_result] || "",
+      audit_result: opts[:audit_result] || "",
       created_at: DateTime.utc_now(),
       updated_at: DateTime.utc_now()
     }
 
-    Store.insert(:ops, op)
+    Archive.insert(:ops, op)
     op
   end
 end

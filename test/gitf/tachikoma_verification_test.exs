@@ -1,14 +1,14 @@
-defmodule GiTF.TachikomaVerificationTest do
+defmodule GiTF.TachikomaAuditTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.{Store, Tachikoma}
+  alias GiTF.{Archive, Tachikoma}
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
     # Restart store for testing
     GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: System.tmp_dir!())
+    {:ok, _} = Archive.start_link(data_dir: System.tmp_dir!())
 
     # Stop any existing tachikoma (e.g. started by Major during test setup)
     case Registry.lookup(GiTF.Registry, :tachikoma) do
@@ -52,7 +52,7 @@ defmodule GiTF.TachikomaVerificationTest do
       # Should return a list of results (may be empty)
       assert is_list(results)
 
-      # Verification checking should not cause errors
+      # Audit checking should not cause errors
       assert Process.alive?(pid)
       GenServer.stop(pid)
     end
@@ -74,7 +74,7 @@ defmodule GiTF.TachikomaVerificationTest do
     test "tachikoma patrol handles verification gracefully" do
       Process.flag(:trap_exit, true)
       # Create a op that needs verification
-      {:ok, _job} = Store.insert(:ops, %{
+      {:ok, _job} = Archive.insert(:ops, %{
         title: "Test op",
         status: "done",
         verification_status: "pending"

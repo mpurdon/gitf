@@ -46,7 +46,7 @@ defmodule GiTF.Web.GameChannel do
     Logger.warning("Emergency Stop received from Game Client")
     
     # Kill active ghosts
-    active_ghosts = GiTF.Store.filter(:ghosts, fn b -> b.status == "working" end)
+    active_ghosts = GiTF.Archive.filter(:ghosts, fn b -> b.status == "working" end)
     Enum.each(active_ghosts, fn ghost -> GiTF.Ghosts.stop(ghost.id) end)
     
     {:reply, :ok, socket}
@@ -77,9 +77,9 @@ defmodule GiTF.Web.GameChannel do
   def handle_info(:send_initial_state, socket) do
     # Snapshot of the world
     state = %{
-      missions: GiTF.Store.all(:missions),
-      ghosts: GiTF.Store.all(:ghosts),
-      sectors: GiTF.Store.all(:sectors)
+      missions: GiTF.Archive.all(:missions),
+      ghosts: GiTF.Archive.all(:ghosts),
+      sectors: GiTF.Archive.all(:sectors)
     }
     
     push(socket, "world_state", state)

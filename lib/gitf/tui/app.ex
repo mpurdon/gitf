@@ -51,10 +51,10 @@ defmodule GiTF.TUI.App do
       ops: [],
       health: %{status: :unknown, checks: %{}, timestamp: nil},
       alerts: [],
-      merge_queue: %{pending: [], active: nil, completed: []},
+      sync_queue: %{pending: [], active: nil, completed: []},
       runs: [],
       budget_status: [],
-      checkpoints: %{},
+      backups: %{},
       agent_identities: [],
       event_store_events: [],
       stats: nil,
@@ -217,10 +217,10 @@ defmodule GiTF.TUI.App do
     |> maybe_refresh_events(count)
   end
 
-  # Every tick: merge queue, runs
+  # Every tick: sync queue, runs
   defp refresh_fast(model) do
     model
-    |> Map.put(:merge_queue, safe_call(fn -> GiTF.Merge.Queue.status() end, model.merge_queue))
+    |> Map.put(:sync_queue, safe_call(fn -> GiTF.Sync.Queue.status() end, model.sync_queue))
     |> Map.put(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, model.runs))
   end
 
@@ -233,16 +233,16 @@ defmodule GiTF.TUI.App do
 
   defp maybe_refresh_medium(model, _count), do: model
 
-  # Every 20th tick (~10s): health, identities, budget, checkpoints
+  # Every 20th tick (~10s): health, identities, budget, backups
   defp maybe_refresh_slow(model, count) when rem(count, 20) == 0 do
     ghosts = model.activity.ghosts
     missions = model.activity.missions
 
-    checkpoints =
+    backups =
       ghosts
       |> Enum.filter(&(&1[:status] == "working"))
       |> Enum.reduce(%{}, fn ghost, acc ->
-        case safe_call(fn -> GiTF.Checkpoint.load(ghost[:id]) end, :error) do
+        case safe_call(fn -> GiTF.Backup.load(ghost[:id]) end, :error) do
           {:ok, cp} -> Map.put(acc, ghost[:id], cp)
           _ -> acc
         end
@@ -253,7 +253,7 @@ defmodule GiTF.TUI.App do
     model
     |> Map.put(:health, safe_call(fn -> GiTF.Observability.Health.check() end, model.health))
     |> Map.put(:agent_identities, safe_call(fn -> GiTF.AgentIdentity.list() end, model.agent_identities))
-    |> Map.put(:checkpoints, checkpoints)
+    |> Map.put(:backups, backups)
     |> Map.put(:budget_status, budget_status)
   end
 
@@ -261,7 +261,7 @@ defmodule GiTF.TUI.App do
 
   # Events: only when events panel is active, every 6th tick
   defp maybe_refresh_events(%{right_panel: :events} = model, count) when rem(count, 6) == 0 do
-    Map.put(model, :event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 30) end, model.event_store_events))
+    Map.put(model, :event_store_events, safe_call(fn -> GiTF.EventArchive.list(limit: 30) end, model.event_store_events))
   end
 
   defp maybe_refresh_events(model, _count), do: model
@@ -338,7 +338,7 @@ defmodule GiTF.TUI.App do
               GiTF.Client.select_plan_candidate(mission_id, strategy)
             else
               # Local mode: find candidate from mission record
-              quest_record = GiTF.Store.get(:missions, mission_id)
+              quest_record = GiTF.Archive.get(:missions, mission_id)
               candidates = if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
 
               case Enum.find(candidates, fn c -> (c[:strategy] || c.strategy) == strategy end) do
@@ -346,7 +346,7 @@ defmodule GiTF.TUI.App do
                 candidate ->
                   if quest_record do
                     updated = Map.put(quest_record, :draft_plan, candidate)
-                    GiTF.Store.put(:missions, updated)
+                    GiTF.Archive.put(:missions, updated)
                   end
                   {:ok, candidate}
               end
@@ -463,9 +463,9 @@ defmodule GiTF.TUI.App do
   end
 
   defp build_system_prompt(cwd) do
-    ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
-    missions = try do GiTF.Store.all(:missions) rescue _ -> [] end
-    ops = try do GiTF.Store.all(:ops) rescue _ -> [] end
+    ghosts = try do GiTF.Archive.all(:ghosts) rescue _ -> [] end
+    missions = try do GiTF.Archive.all(:missions) rescue _ -> [] end
+    ops = try do GiTF.Archive.all(:ops) rescue _ -> [] end
 
     # Only show active ghosts in context — crashed/stopped are noise
     active_ghosts = Enum.filter(ghosts, fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
@@ -663,9 +663,9 @@ defmodule GiTF.TUI.App do
   defp parse_plan_block(_), do: :no_plan
 
   defp refresh_activity(model) do
-    ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
-    missions = try do GiTF.Store.all(:missions) rescue _ -> [] end
-    ops = try do GiTF.Store.all(:ops) rescue _ -> [] end
+    ghosts = try do GiTF.Archive.all(:ghosts) rescue _ -> [] end
+    missions = try do GiTF.Archive.all(:missions) rescue _ -> [] end
+    ops = try do GiTF.Archive.all(:ops) rescue _ -> [] end
 
     # Reap dead ghosts — detect ghosts marked "working" but actually finished/dead
     # Returns list of {ghost_id, :done | :failed, summary} events
@@ -684,7 +684,7 @@ defmodule GiTF.TUI.App do
     end)
 
     # Re-read after reaping
-    ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
+    ghosts = try do GiTF.Archive.all(:ghosts) rescue _ -> [] end
 
     # Build op_id -> mission_id lookup
     job_quest_map = Map.new(ops, fn j -> {j[:id], j[:mission_id]} end)
@@ -829,7 +829,7 @@ defmodule GiTF.TUI.App do
   defp mark_bee_done(ghost) do
     try do
       updated = Map.put(ghost, :status, "stopped")
-      GiTF.Store.put(:ghosts, updated)
+      GiTF.Archive.put(:ghosts, updated)
 
       if ghost[:op_id] do
         GiTF.Ops.complete(ghost[:op_id])
@@ -856,7 +856,7 @@ defmodule GiTF.TUI.App do
   defp mark_bee_failed(ghost, reason) do
     try do
       updated = Map.put(ghost, :status, "crashed")
-      GiTF.Store.put(:ghosts, updated)
+      GiTF.Archive.put(:ghosts, updated)
 
       if ghost[:op_id] do
         GiTF.Ops.fail(ghost[:op_id])
@@ -952,7 +952,7 @@ defmodule GiTF.TUI.App do
         :activity -> Views.Activity.render(model)
         :pipeline -> Views.Pipeline.render(model)
         :events -> Views.Events.render(model)
-        :merges -> Views.Merges.render(model)
+        :merges -> Views.Syncs.render(model)
         :models -> Views.Models.render(model)
         _ -> Views.Activity.render(model)
       end
@@ -962,7 +962,7 @@ defmodule GiTF.TUI.App do
   defp status_bar(model) do
     health = model[:health] || %{checks: %{}}
     alerts = model[:alerts] || []
-    mq = model[:merge_queue] || %{pending: [], active: nil}
+    mq = model[:sync_queue] || %{pending: [], active: nil}
     stats = model[:stats]
 
     alert_count = length(alerts)

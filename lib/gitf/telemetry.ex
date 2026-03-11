@@ -40,10 +40,10 @@ defmodule GiTF.Telemetry do
     [:gitf, :plugin, :loaded],
     [:gitf, :plugin, :unloaded],
     [:gitf, :alert, :raised],
-    [:gitf, :merge, :exhausted],
-    [:gitf, :merge, :tier_failed],
-    [:gitf, :merge, :crashed],
-    [:gitf, :merge, :timeout],
+    [:gitf, :sync, :exhausted],
+    [:gitf, :sync, :tier_failed],
+    [:gitf, :sync, :crashed],
+    [:gitf, :sync, :timeout],
     [:gitf, :health, :checked],
     [:gitf, :store, :data_loss],
     [:gitf, :store, :write_error],
@@ -89,7 +89,7 @@ defmodule GiTF.Telemetry do
     try do
       case map_event(event, measurements, metadata) do
         nil -> :ok
-        {type, entity_id, data, meta} -> GiTF.EventStore.record(type, entity_id, data, meta)
+        {type, entity_id, data, meta} -> GiTF.EventArchive.record(type, entity_id, data, meta)
       end
     rescue
       _ -> :ok
