@@ -64,8 +64,8 @@ defmodule GiTF.QuickStart do
   @doc """
   Generates a CLAUDE.md for a sector that includes section-specific instructions.
 
-  The generated markdown tells a ghost how to communicate with the queen
-  and other ghosts via link_msg messages.
+  The generated markdown tells a ghost how to communicate with the major
+  and other ghosts via link messages.
   """
   @spec generate_comb_claude_md(String.t(), String.t()) :: String.t()
   def generate_comb_claude_md(sector_name, sector_path) do
@@ -77,28 +77,28 @@ defmodule GiTF.QuickStart do
 
     ## Communication
 
-    Use link_msg messages to communicate with the queen and other ghosts:
+    Use link messages to communicate with the major and other ghosts:
 
     ```bash
     # Report op completion
-    section link_msg send --to queen --subject "job_complete" --body "Summary of what you did"
+    gitf link send --to major --subject "op_complete" --body "Summary of what you did"
 
     # Report a blocker
-    section link_msg send --to queen --subject "job_blocked" --body "What is blocking you"
+    gitf link send --to major --subject "op_blocked" --body "What is blocking you"
 
     # Send a message to another ghost
-    section link_msg send --to <ghost-id> --subject "question" --body "Your question"
+    gitf link send --to <ghost-id> --subject "question" --body "Your question"
 
     # Check for new messages
-    section link_msg list --to <your-ghost-id>
+    gitf link list --to <your-ghost-id>
     ```
 
     ## Rules
 
     - Complete your assigned op and nothing else.
     - Do NOT modify files outside your worktree at `#{sector_path}`.
-    - When done, always notify the queen.
-    - If blocked, notify the queen immediately rather than guessing.
+    - When done, always notify the major.
+    - If blocked, notify the major immediately rather than guessing.
     - Keep your commits focused and well-described.
     """
   end

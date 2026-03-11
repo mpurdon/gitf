@@ -115,11 +115,11 @@ defmodule GiTF.QuickStartTest do
       md = QuickStart.generate_comb_claude_md("my-project", "/path/to/my-project")
 
       assert md =~ "my-project"
-      assert md =~ "link_msg"
+      assert md =~ "link"
       assert md =~ "major"
       assert md =~ "/path/to/my-project"
-      assert md =~ "job_complete"
-      assert md =~ "job_blocked"
+      assert md =~ "op_complete"
+      assert md =~ "op_blocked"
     end
   end
 
