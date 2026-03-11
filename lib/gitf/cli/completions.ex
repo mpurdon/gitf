@@ -8,7 +8,7 @@ defmodule GiTF.CLI.Completions do
 
   @command_tree %{
     "quest" => ~w(new list plan start status show report merge close kill),
-    "bee" => ~w(list spawn stop context revive status),
+    "ghost" => ~w(list spawn stop context revive status),
     "comb" => ~w(add list use show remove),
     "job" => ~w(show reset kill),
     "plugin" => ~w(list install remove),
@@ -22,7 +22,7 @@ defmodule GiTF.CLI.Completions do
   }
 
   @top_commands ~w(
-    quest bee comb job jobs plugin doctor dashboard costs status version
+    quest ghost comb job jobs plugin doctor dashboard costs status version
     init server queen onboard verify quality intelligence heal optimize
     deadlock monitor accept scope prime quickref drone budget watch
     validate handoff conflict github cell waggle completions

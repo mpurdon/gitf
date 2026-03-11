@@ -1,6 +1,6 @@
 defmodule GiTF.Quality.Security do
   @moduledoc """
-  Security scanning for bee worktrees.
+  Security scanning for ghost worktrees.
   """
 
   @doc """

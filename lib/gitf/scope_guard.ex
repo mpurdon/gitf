@@ -1,7 +1,7 @@
 defmodule GiTF.ScopeGuard do
   @moduledoc """
   Prevents scope creep and over-engineering.
-  Ensures bees stay focused on the stated goal.
+  Ensures ghosts stay focused on the stated goal.
   """
 
   alias GiTF.Store

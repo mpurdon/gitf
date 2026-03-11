@@ -3,14 +3,14 @@ defmodule GiTF.Major.PhasePrompts do
   Pure functions that build prompts for each orchestration phase.
 
   Each prompt provides context from prior phases and specifies the exact
-  JSON output format expected. Phase bees are instructed to output ONLY
+  JSON output format expected. Phase ghosts are instructed to output ONLY
   a JSON object fenced in ```json blocks.
   """
 
   @doc """
   Builds the research phase prompt.
 
-  Instructs the bee to analyze the codebase and output structured findings.
+  Instructs the ghost to analyze the codebase and output structured findings.
   """
   @spec research_prompt(map(), map() | nil) :: String.t()
   def research_prompt(quest, comb) do

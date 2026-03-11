@@ -49,7 +49,7 @@ defmodule GiTF.Dashboard.WagglesLive do
 
       <div class="panel">
         <%= if @waggles == [] do %>
-          <div class="empty">No waggle messages found. Messages appear here as bees and the Major communicate.</div>
+          <div class="empty">No waggle messages found. Messages appear here as ghosts and the Major communicate.</div>
         <% else %>
           <table>
             <thead>

@@ -181,11 +181,11 @@ defmodule GiTF.TestDriver.Recorder do
     {:noreply, %{state | timeline: [entry | state.timeline]}}
   end
 
-  def handle_info({:bee_progress, bee_id, data}, state) do
+  def handle_info({:bee_progress, ghost_id, data}, state) do
     entry = %{
       type: :pubsub,
       event: :bee_progress,
-      data: Map.put(data, :bee_id, bee_id),
+      data: Map.put(data, :ghost_id, ghost_id),
       at_us: System.monotonic_time(:microsecond)
     }
 
@@ -212,7 +212,7 @@ defmodule GiTF.TestDriver.Recorder do
   # -- Private: Store snapshotting ---------------------------------------------
 
   defp take_store_snapshot do
-    collections = [:quests, :jobs, :bees, :waggles, :costs, :cells, :combs]
+    collections = [:quests, :jobs, :ghosts, :waggles, :costs, :cells, :combs]
 
     Map.new(collections, fn col ->
       records =

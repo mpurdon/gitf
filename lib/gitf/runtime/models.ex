@@ -233,7 +233,7 @@ defmodule GiTF.Runtime.Models do
   # -- Settings ----------------------------------------------------------------
 
   @doc """
-  Returns workspace setup map for a bee or queen, or nil if the plugin
+  Returns workspace setup map for a ghost or queen, or nil if the plugin
   doesn't provide workspace configuration.
   """
   @spec workspace_setup(String.t(), String.t(), keyword()) :: map() | nil

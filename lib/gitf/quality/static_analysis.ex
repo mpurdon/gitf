@@ -1,6 +1,6 @@
 defmodule GiTF.Quality.StaticAnalysis do
   @moduledoc """
-  Runs static analysis tools on bee worktrees.
+  Runs static analysis tools on ghost worktrees.
   """
 
   @doc """

@@ -1,6 +1,6 @@
 defmodule GiTF.Checkpoint do
   @moduledoc """
-  Structured checkpointing for bee state persistence.
+  Structured checkpointing for ghost state persistence.
 
   Provides richer state snapshots than waggle-based handoffs by capturing
   progress summaries, files modified, pending work, tool call counts, and
@@ -23,7 +23,7 @@ defmodule GiTF.Checkpoint do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Saves a checkpoint for a bee.
+  Saves a checkpoint for a ghost.
 
   Creates a new append-only record with the given data. Accepts a map with
   optional keys: `:progress_summary`, `:files_modified`, `:pending_work`,
@@ -32,41 +32,41 @@ defmodule GiTF.Checkpoint do
   Returns `{:ok, checkpoint}`.
   """
   @spec save(String.t(), map()) :: {:ok, map()}
-  def save(bee_id, data) when is_binary(bee_id) and is_map(data) do
+  def save(ghost_id, data) when is_binary(ghost_id) and is_map(data) do
     data
     |> Map.take(@checkpoint_keys)
-    |> Map.put(:bee_id, bee_id)
+    |> Map.put(:ghost_id, ghost_id)
     |> Map.put(:saved_at, DateTime.utc_now() |> DateTime.truncate(:second))
     |> then(&Store.insert(@collection, &1))
   end
 
   @doc """
-  Loads the most recent checkpoint for a bee.
+  Loads the most recent checkpoint for a ghost.
 
   Returns `{:ok, checkpoint}` or `{:error, :not_found}`.
   """
   @spec load(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def load(bee_id) when is_binary(bee_id) do
-    case latest_checkpoint(bee_id) do
+  def load(ghost_id) when is_binary(ghost_id) do
+    case latest_checkpoint(ghost_id) do
       nil -> {:error, :not_found}
       checkpoint -> {:ok, checkpoint}
     end
   end
 
   @doc """
-  Returns all checkpoints for a bee, sorted by timestamp ascending.
+  Returns all checkpoints for a ghost, sorted by timestamp ascending.
   """
   @spec history(String.t()) :: [map()]
-  def history(bee_id) when is_binary(bee_id) do
-    Store.filter(@collection, &(&1.bee_id == bee_id))
+  def history(ghost_id) when is_binary(ghost_id) do
+    Store.filter(@collection, &(&1.ghost_id == ghost_id))
     |> Enum.sort_by(& &1.saved_at, {:asc, DateTime})
   end
 
   @doc """
-  Builds a markdown prompt for injecting into a replacement bee's context.
+  Builds a markdown prompt for injecting into a replacement ghost's context.
 
   Takes a checkpoint map and produces a structured resume briefing that
-  gives the new bee enough context to continue where the previous one
+  gives the new ghost enough context to continue where the previous one
   left off.
   """
   @spec build_resume_prompt(map()) :: String.t()
@@ -89,16 +89,16 @@ defmodule GiTF.Checkpoint do
   end
 
   @doc """
-  Keeps only the N most recent checkpoints for a bee, deleting the rest.
+  Keeps only the N most recent checkpoints for a ghost, deleting the rest.
 
   Returns the count of deleted checkpoints.
   """
   @spec cleanup(String.t(), keyword()) :: non_neg_integer()
-  def cleanup(bee_id, opts) when is_binary(bee_id) do
+  def cleanup(ghost_id, opts) when is_binary(ghost_id) do
     keep = Keyword.fetch!(opts, :keep)
 
     checkpoints =
-      Store.filter(@collection, &(&1.bee_id == bee_id))
+      Store.filter(@collection, &(&1.ghost_id == ghost_id))
       |> Enum.sort_by(& &1.saved_at, {:desc, DateTime})
 
     to_delete = Enum.drop(checkpoints, keep)
@@ -109,8 +109,8 @@ defmodule GiTF.Checkpoint do
 
   # -- Private ---------------------------------------------------------------
 
-  defp latest_checkpoint(bee_id) do
-    Store.filter(@collection, &(&1.bee_id == bee_id))
+  defp latest_checkpoint(ghost_id) do
+    Store.filter(@collection, &(&1.ghost_id == ghost_id))
     |> Enum.sort_by(& &1.saved_at, {:desc, DateTime})
     |> List.first()
   end

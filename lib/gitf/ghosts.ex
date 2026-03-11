@@ -1,9 +1,9 @@
-defmodule GiTF.Bees do
+defmodule GiTF.Ghosts do
   @moduledoc """
-  Context module for managing bee agents.
+  Context module for managing ghost agents.
 
-  Provides the public API for spawning, listing, and stopping bees. This
-  module coordinates between the Bee.Worker GenServer (runtime lifecycle),
+  Provides the public API for spawning, listing, and stopping ghosts. This
+  module coordinates between the Ghost.Worker GenServer (runtime lifecycle),
   the Store (persistence), and the CombSupervisor (process supervision).
 
   This is a context module: thin orchestration layer over store records
@@ -15,11 +15,11 @@ defmodule GiTF.Bees do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Spawns a new bee to work on a job.
+  Spawns a new ghost to work on a job.
 
-  1. Creates a bee record in the store
-  2. Assigns the job to the bee
-  3. Starts a Bee.Worker under CombSupervisor
+  1. Creates a ghost record in the store
+  2. Assigns the job to the ghost
+  3. Starts a Ghost.Worker under CombSupervisor
 
   ## Options
 
@@ -27,46 +27,46 @@ defmodule GiTF.Bees do
     * `:prompt` - explicit prompt (overrides job description)
     * `:claude_executable` - path to executable (for testing)
 
-  Returns `{:ok, bee}` or `{:error, reason}`.
+  Returns `{:ok, ghost}` or `{:error, reason}`.
   """
   @spec spawn(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def spawn(job_id, comb_id, gitf_root, opts \\ []) do
-    name = Keyword.get(opts, :name, generate_bee_name())
+    name = Keyword.get(opts, :name, generate_ghost_name())
 
-    # Atomic check: reject if job already has a bee assigned (prevents duplicate spawning)
+    # Atomic check: reject if job already has a ghost assigned (prevents duplicate spawning)
     with :ok <- check_not_already_assigned(job_id),
          :ok <- check_job_ready(job_id),
-         {:ok, bee} <- create_bee_record(name, job_id),
-         :ok <- assign_job(job_id, bee.id),
-         {:ok, _pid} <- start_worker(bee.id, job_id, comb_id, gitf_root, opts) do
-      GiTF.Telemetry.emit([:gitf, :bee, :spawned], %{}, %{
-        bee_id: bee.id,
+         {:ok, ghost} <- create_ghost_record(name, job_id),
+         :ok <- assign_job(job_id, ghost.id),
+         {:ok, _pid} <- start_worker(ghost.id, job_id, comb_id, gitf_root, opts) do
+      GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{
+        ghost_id: ghost.id,
         job_id: job_id,
         comb_id: comb_id
       })
 
-      {:ok, bee}
+      {:ok, ghost}
     else
       {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
-  Spawns a bee as a detached OS process (for CLI use).
+  Spawns a ghost as a detached OS process (for CLI use).
 
   Unlike `spawn/4`, this does NOT start a Worker GenServer. Instead it:
-  1. Creates a bee record and assigns the job
+  1. Creates a ghost record and assigns the job
   2. Creates a cell (git worktree) directly
-  3. Updates bee status to "working"
-  4. Generates settings for the bee
+  3. Updates ghost status to "working"
+  4. Generates settings for the ghost
   5. Spawns Claude as a detached OS process via a wrapper script
 
   The wrapper script runs Claude headless, then calls `gitf` CLI to
-  update the bee/job status when Claude exits. This avoids keeping
+  update the ghost/job status when Claude exits. This avoids keeping
   the escript alive (which would block the store file).
 
-  Returns `{:ok, bee}` or `{:error, reason}`.
+  Returns `{:ok, ghost}` or `{:error, reason}`.
   """
   @spec spawn_detached(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
@@ -80,58 +80,58 @@ defmodule GiTF.Bees do
   end
 
   defp spawn_detached_cli(job_id, comb_id, gitf_root, opts) do
-    name = Keyword.get(opts, :name, generate_bee_name())
+    name = Keyword.get(opts, :name, generate_ghost_name())
 
     with :ok <- check_job_ready(job_id),
-         {:ok, bee} <- create_bee_record(name, job_id),
-         :ok <- assign_job(job_id, bee.id),
-         {:ok, cell} <- GiTF.Cell.create(comb_id, bee.id, gitf_root: gitf_root),
-         :ok <- update_bee_working(bee.id, cell),
+         {:ok, ghost} <- create_ghost_record(name, job_id),
+         :ok <- assign_job(job_id, ghost.id),
+         {:ok, cell} <- GiTF.Cell.create(comb_id, ghost.id, gitf_root: gitf_root),
+         :ok <- update_bee_working(ghost.id, cell),
          :ok <- maybe_transition_job(job_id),
          :ok <- maybe_ensure_agent(job_id, comb_id, cell),
          :ok <- write_pre_dispatch(cell.worktree_path, job_id),
-         {:ok, _os_pid} <- spawn_model_detached(bee.id, job_id, cell, gitf_root) do
-      {:ok, bee}
+         {:ok, _os_pid} <- spawn_model_detached(ghost.id, job_id, cell, gitf_root) do
+      {:ok, ghost}
     else
       {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
-  Revives a dead bee by spawning a new bee into its existing worktree.
+  Revives a dead ghost by spawning a new ghost into its existing worktree.
 
-  The dead bee must be "stopped" or "crashed". Its cell and worktree are
-  reassigned to the new bee, which receives a prompt instructing it to
+  The dead ghost must be "stopped" or "crashed". Its cell and worktree are
+  reassigned to the new ghost, which receives a prompt instructing it to
   finalize the existing work rather than starting over.
 
-  Returns `{:ok, new_bee}` or `{:error, reason}`.
+  Returns `{:ok, new_ghost}` or `{:error, reason}`.
   """
   @spec revive(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def revive(dead_bee_id, gitf_root, opts \\ []) do
-    with {:ok, dead_bee} <- get(dead_bee_id),
+  def revive(dead_ghost_id, gitf_root, opts \\ []) do
+    with {:ok, dead_bee} <- get(dead_ghost_id),
          :ok <- validate_dead(dead_bee),
-         {:ok, cell} <- find_active_cell(dead_bee_id),
+         {:ok, cell} <- find_active_cell(dead_ghost_id),
          :ok <- validate_worktree_exists(cell),
          {:ok, job} <- GiTF.Jobs.get(dead_bee.job_id),
-         {:ok, new_bee} <-
-           create_bee_record(Keyword.get(opts, :name, generate_bee_name()), dead_bee.job_id),
-         {:ok, _cell} <- GiTF.Cell.adopt(cell.id, new_bee.id),
-         :ok <- revive_job(job, new_bee.id),
+         {:ok, new_ghost} <-
+           create_ghost_record(Keyword.get(opts, :name, generate_ghost_name()), dead_bee.job_id),
+         {:ok, _cell} <- GiTF.Cell.adopt(cell.id, new_ghost.id),
+         :ok <- revive_job(job, new_ghost.id),
          prompt = build_revive_prompt(job),
          {:ok, _pid} <-
            start_worker(
-             new_bee.id,
+             new_ghost.id,
              job.id,
              cell.comb_id,
              gitf_root,
              Keyword.merge(opts, revive: true, cell_id: cell.id, prompt: prompt)
            ) do
-      {:ok, new_bee}
+      {:ok, new_ghost}
     end
   end
 
   @doc """
-  Lists bees with optional filters.
+  Lists ghosts with optional filters.
 
   ## Options
 
@@ -139,42 +139,42 @@ defmodule GiTF.Bees do
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    bees = Store.all(:bees)
+    ghosts = Store.all(:ghosts)
 
-    bees =
+    ghosts =
       case Keyword.get(opts, :status) do
-        nil -> bees
-        status -> Enum.filter(bees, &(&1.status == status))
+        nil -> ghosts
+        status -> Enum.filter(ghosts, &(&1.status == status))
       end
 
-    Enum.sort_by(bees, & &1.inserted_at, {:desc, DateTime})
+    Enum.sort_by(ghosts, & &1.inserted_at, {:desc, DateTime})
   end
 
   @doc """
-  Gets a bee by ID.
+  Gets a ghost by ID.
 
-  Returns `{:ok, bee}` or `{:error, :not_found}`.
+  Returns `{:ok, ghost}` or `{:error, :not_found}`.
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get(bee_id) do
-    Store.fetch(:bees, bee_id)
+  def get(ghost_id) do
+    Store.fetch(:ghosts, ghost_id)
   end
 
   @doc """
-  Gracefully stops a running bee worker.
+  Gracefully stops a running ghost worker.
 
   Returns `:ok` or `{:error, :not_found}` if the worker process is not running.
   """
   @spec stop(String.t()) :: :ok | {:error, :not_found}
-  def stop(bee_id) do
-    GiTF.Bee.Worker.stop(bee_id)
+  def stop(ghost_id) do
+    GiTF.Ghost.Worker.stop(ghost_id)
   end
 
   # -- Private helpers ---------------------------------------------------------
 
   defp check_not_already_assigned(job_id) do
     case GiTF.Jobs.get(job_id) do
-      {:ok, %{bee_id: bee_id}} when is_binary(bee_id) and bee_id != "" ->
+      {:ok, %{ghost_id: ghost_id}} when is_binary(ghost_id) and ghost_id != "" ->
         {:error, :already_assigned}
 
       _ ->
@@ -186,7 +186,7 @@ defmodule GiTF.Bees do
     if GiTF.Jobs.ready?(job_id), do: :ok, else: {:error, :blocked}
   end
 
-  defp create_bee_record(name, job_id) do
+  defp create_ghost_record(name, job_id) do
     # Get job to determine model assignment
     model =
       case GiTF.Jobs.get(job_id) do
@@ -209,29 +209,29 @@ defmodule GiTF.Bees do
       context_percentage: 0.0
     }
 
-    Store.insert(:bees, record)
+    Store.insert(:ghosts, record)
   end
 
-  defp assign_job(job_id, bee_id) do
-    case GiTF.Jobs.assign(job_id, bee_id) do
+  defp assign_job(job_id, ghost_id) do
+    case GiTF.Jobs.assign(job_id, ghost_id) do
       {:ok, _job} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp start_worker(bee_id, job_id, comb_id, gitf_root, opts) do
+  defp start_worker(ghost_id, job_id, comb_id, gitf_root, opts) do
     child_opts =
       [
-        bee_id: bee_id,
+        ghost_id: ghost_id,
         job_id: job_id,
         comb_id: comb_id,
         gitf_root: gitf_root
       ] ++ Keyword.take(opts, [:prompt, :claude_executable])
 
-    GiTF.CombSupervisor.start_child({GiTF.Bee.Worker, child_opts})
+    GiTF.CombSupervisor.start_child({GiTF.Ghost.Worker, child_opts})
   end
 
-  defp generate_bee_name do
+  defp generate_ghost_name do
     adjectives = ~w(swift bright keen bold calm sharp)
     nouns = ~w(scout worker forager builder dancer)
 
@@ -242,14 +242,14 @@ defmodule GiTF.Bees do
     "#{adj}-#{noun}-#{suffix}"
   end
 
-  defp update_bee_working(bee_id, cell) do
-    case Store.get(:bees, bee_id) do
+  defp update_bee_working(ghost_id, cell) do
+    case Store.get(:ghosts, ghost_id) do
       nil ->
         {:error, :bee_not_found}
 
-      bee ->
-        updated = Map.merge(bee, %{status: "working", cell_path: cell.worktree_path, pid: nil})
-        Store.put(:bees, updated)
+      ghost ->
+        updated = Map.merge(ghost, %{status: "working", cell_path: cell.worktree_path, pid: nil})
+        Store.put(:ghosts, updated)
         :ok
     end
   end
@@ -309,7 +309,7 @@ defmodule GiTF.Bees do
     end
   end
 
-  defp spawn_model_detached(bee_id, job_id, cell, gitf_root) do
+  defp spawn_model_detached(ghost_id, job_id, cell, gitf_root) do
     with {:ok, model_path} <- GiTF.Runtime.Models.find_executable(),
          {:ok, prompt} <- build_job_prompt(job_id),
          {:ok, plugin} <- GiTF.Runtime.Models.resolve_plugin() do
@@ -334,12 +334,12 @@ defmodule GiTF.Bees do
       # Write a wrapper script that runs the model and updates section on exit
       script_dir = Path.join([gitf_root, ".gitf", "run"])
       File.mkdir_p!(script_dir)
-      script_path = Path.join(script_dir, "#{bee_id}.sh")
-      log_path = Path.join(script_dir, "#{bee_id}.log")
+      script_path = Path.join(script_dir, "#{ghost_id}.sh")
+      log_path = Path.join(script_dir, "#{ghost_id}.log")
 
       section_path = System.find_executable("gitf") || "gitf"
 
-      # When spawned from a running server, tell the bee's section CLI calls
+      # When spawned from a running server, tell the ghost's section CLI calls
       # to use remote mode so they don't try to boot a second server.
       server_export =
         case GiTF.Web.Endpoint.config(:http) do
@@ -358,9 +358,9 @@ defmodule GiTF.Bees do
       #{sandboxed_cmd_line} > #{escape_shell(log_path)} 2>&1
       EXIT_CODE=$?
       if [ $EXIT_CODE -eq 0 ]; then
-        #{escape_shell(section_path)} bee complete #{escape_shell(bee_id)}
+        #{escape_shell(section_path)} ghost complete #{escape_shell(ghost_id)}
       else
-        #{escape_shell(section_path)} bee fail #{escape_shell(bee_id)} --reason "Exit code $EXIT_CODE"
+        #{escape_shell(section_path)} ghost fail #{escape_shell(ghost_id)} --reason "Exit code $EXIT_CODE"
       fi
       """
 
@@ -449,8 +449,8 @@ defmodule GiTF.Bees do
   defp validate_dead(%{status: status}) when status in ["stopped", "crashed"], do: :ok
   defp validate_dead(_bee), do: {:error, :bee_still_active}
 
-  defp find_active_cell(bee_id) do
-    case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+  defp find_active_cell(ghost_id) do
+    case Store.find_one(:cells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> {:error, :no_active_cell}
       cell -> {:ok, cell}
     end
@@ -460,18 +460,18 @@ defmodule GiTF.Bees do
     if File.dir?(path), do: :ok, else: {:error, :worktree_not_found}
   end
 
-  defp revive_job(%{status: "failed"} = job, new_bee_id) do
-    case GiTF.Jobs.revive(job.id, new_bee_id) do
+  defp revive_job(%{status: "failed"} = job, new_ghost_id) do
+    case GiTF.Jobs.revive(job.id, new_ghost_id) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp revive_job(%{status: "done"}, _new_bee_id), do: :ok
+  defp revive_job(%{status: "done"}, _new_ghost_id), do: :ok
 
-  defp revive_job(job, new_bee_id) do
-    # running or assigned — just update the bee_id
-    Store.put(:jobs, %{job | bee_id: new_bee_id})
+  defp revive_job(job, new_ghost_id) do
+    # running or assigned — just update the ghost_id
+    Store.put(:jobs, %{job | ghost_id: new_ghost_id})
     :ok
   end
 

@@ -12,7 +12,7 @@ defmodule GiTF.ViewModel do
   ## Topics consumed
 
       "link:major"    — waggle events
-      "section:progress"   — bee progress updates
+      "section:progress"   — ghost progress updates
       "section:system"     — system events
       "section:intent"     — intent events (for tracking)
 
@@ -82,8 +82,8 @@ defmodule GiTF.ViewModel do
     {:noreply, state}
   end
 
-  def handle_info({:bee_progress, bee_id, entry}, state) do
-    progress = Map.put(state.bee_progress, bee_id, entry)
+  def handle_info({:bee_progress, ghost_id, entry}, state) do
+    progress = Map.put(state.bee_progress, ghost_id, entry)
     state = %{state | bee_progress: progress, updated_at: now()}
     publish(state)
     {:noreply, state}
@@ -111,7 +111,7 @@ defmodule GiTF.ViewModel do
 
   defp empty_snapshot do
     %{
-      bees: [],
+      ghosts: [],
       quests: [],
       jobs: [],
       bee_progress: %{},
@@ -125,7 +125,7 @@ defmodule GiTF.ViewModel do
   defp refresh_from_store(state) do
     %{
       state
-      | bees: safe_list(:bees),
+      | ghosts: safe_list(:ghosts),
         quests: safe_list(:quests),
         jobs: safe_list(:jobs),
         costs: safe_costs(),

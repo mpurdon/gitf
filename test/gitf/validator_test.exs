@@ -59,7 +59,7 @@ defmodule GiTF.ValidatorTest do
       cell = %{
         id: "cel-test",
         worktree_path: tmp_dir,
-        bee_id: "bee-1",
+        ghost_id: "ghost-1",
         comb_id: "cmb-1",
         branch: "test",
         status: "active"
@@ -78,7 +78,7 @@ defmodule GiTF.ValidatorTest do
       cell = %{
         id: "cel-test",
         worktree_path: tmp_dir,
-        bee_id: "bee-1",
+        ghost_id: "ghost-1",
         comb_id: "cmb-1",
         branch: "test",
         status: "active"

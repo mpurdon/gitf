@@ -54,7 +54,7 @@ defmodule GiTF.PubSubBridge do
 
   @doc false
   def handle_event(event_name, measurements, metadata, _config) do
-    # Convert event parts to a dot-separated string, e.g. "section.bee.spawned"
+    # Convert event parts to a dot-separated string, e.g. "section.ghost.spawned"
     event_string = Enum.join(event_name, ".")
     
     payload = %{

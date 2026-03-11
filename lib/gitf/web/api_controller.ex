@@ -374,45 +374,45 @@ defmodule GiTF.Web.ApiController do
   # -- Bees --------------------------------------------------------------------
 
   def list_bees(conn, params) do
-    bees = GiTF.Bees.list()
+    ghosts = GiTF.Ghosts.list()
 
-    bees =
+    ghosts =
       if params["all"] == "true" do
-        bees
+        ghosts
       else
         case params["status"] do
-          nil -> Enum.reject(bees, &(&1.status in ["stopped", "crashed"]))
-          status -> Enum.filter(bees, &(&1.status == status))
+          nil -> Enum.reject(ghosts, &(&1.status in ["stopped", "crashed"]))
+          status -> Enum.filter(ghosts, &(&1.status == status))
         end
       end
 
-    json(conn, %{data: Enum.map(bees, &serialize_bee/1)})
+    json(conn, %{data: Enum.map(ghosts, &serialize_bee/1)})
   end
 
-  def stop_bee(conn, %{"id" => id}) do
-    case GiTF.Bees.stop(id) do
+  def stop_ghost(conn, %{"id" => id}) do
+    case GiTF.Ghosts.stop(id) do
       :ok -> json(conn, %{data: %{stopped: true}})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
-  def complete_bee(conn, %{"id" => bee_id}) do
-    case GiTF.Bees.get(bee_id) do
-      {:ok, bee} ->
-        GiTF.Store.put(:bees, %{bee | status: "stopped"})
+  def complete_bee(conn, %{"id" => ghost_id}) do
+    case GiTF.Ghosts.get(ghost_id) do
+      {:ok, ghost} ->
+        GiTF.Store.put(:ghosts, %{ghost | status: "stopped"})
 
-        if bee[:job_id] do
-          # For phase jobs, extract artifact from the bee's log before completing
-          maybe_collect_phase_artifact(bee_id, bee[:job_id])
+        if ghost[:job_id] do
+          # For phase jobs, extract artifact from the ghost's log before completing
+          maybe_collect_phase_artifact(ghost_id, ghost[:job_id])
 
-          GiTF.Jobs.complete(bee[:job_id])
-          GiTF.Jobs.unblock_dependents(bee[:job_id])
+          GiTF.Jobs.complete(ghost[:job_id])
+          GiTF.Jobs.unblock_dependents(ghost[:job_id])
 
           GiTF.Waggle.send(
-            bee_id,
+            ghost_id,
             "major",
             "job_complete",
-            "Job #{bee[:job_id]} completed successfully"
+            "Job #{ghost[:job_id]} completed successfully"
           )
         end
 
@@ -423,16 +423,16 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
-  def fail_bee(conn, %{"id" => bee_id} = params) do
+  def fail_bee(conn, %{"id" => ghost_id} = params) do
     reason = params["reason"] || "unknown"
 
-    case GiTF.Bees.get(bee_id) do
-      {:ok, bee} ->
-        GiTF.Store.put(:bees, %{bee | status: "crashed"})
+    case GiTF.Ghosts.get(ghost_id) do
+      {:ok, ghost} ->
+        GiTF.Store.put(:ghosts, %{ghost | status: "crashed"})
 
-        if bee[:job_id] do
-          GiTF.Jobs.fail(bee[:job_id])
-          GiTF.Waggle.send(bee_id, "major", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
+        if ghost[:job_id] do
+          GiTF.Jobs.fail(ghost[:job_id])
+          GiTF.Waggle.send(ghost_id, "major", "job_failed", "Job #{ghost[:job_id]} failed: #{reason}")
         end
 
         json(conn, %{data: %{failed: true}})
@@ -508,10 +508,10 @@ defmodule GiTF.Web.ApiController do
   end
 
   def record_cost(conn, params) do
-    bee_id = params["bee_id"]
+    ghost_id = params["ghost_id"]
 
-    if is_nil(bee_id) do
-      error(conn, 422, "bee_id is required")
+    if is_nil(ghost_id) do
+      error(conn, 422, "ghost_id is required")
     else
       attrs =
         %{
@@ -526,12 +526,12 @@ defmodule GiTF.Web.ApiController do
           if params["category"], do: Map.put(a, :category, params["category"]), else: a
         end)
 
-      {:ok, cost} = GiTF.Costs.record(bee_id, attrs)
+      {:ok, cost} = GiTF.Costs.record(ghost_id, attrs)
 
       json(conn, %{
         data: %{
           id: cost.id,
-          bee_id: cost.bee_id,
+          ghost_id: cost.ghost_id,
           cost_usd: cost.cost_usd,
           input_tokens: cost.input_tokens,
           output_tokens: cost.output_tokens,
@@ -557,12 +557,12 @@ defmodule GiTF.Web.ApiController do
     |> json(%{error: message})
   end
 
-  defp maybe_collect_phase_artifact(bee_id, job_id) do
+  defp maybe_collect_phase_artifact(ghost_id, job_id) do
     with {:ok, job} <- GiTF.Jobs.get(job_id),
          true <- Map.get(job, :phase_job, false),
          phase when is_binary(phase) <- Map.get(job, :phase) do
-      # Read the bee's log file and extract the JSON artifact
-      case find_bee_log(bee_id) do
+      # Read the ghost's log file and extract the JSON artifact
+      case find_bee_log(ghost_id) do
         {:ok, log_content} ->
           # Parse stream-json events to extract assistant text
           events =
@@ -595,10 +595,10 @@ defmodule GiTF.Web.ApiController do
     _ -> :ok
   end
 
-  defp find_bee_log(bee_id) do
+  defp find_bee_log(ghost_id) do
     case GiTF.gitf_dir() do
       {:ok, gitf_root} ->
-        log_path = Path.join([gitf_root, ".gitf", "run", "#{bee_id}.log"])
+        log_path = Path.join([gitf_root, ".gitf", "run", "#{ghost_id}.log"])
 
         if File.exists?(log_path) do
           File.read(log_path)
@@ -647,7 +647,7 @@ defmodule GiTF.Web.ApiController do
       status: j.status,
       quest_id: j.quest_id,
       comb_id: j[:comb_id],
-      bee_id: j[:bee_id],
+      ghost_id: j[:ghost_id],
       description: j[:description],
       inserted_at: to_string(j[:inserted_at])
     }

@@ -92,7 +92,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   defp list_cells_tool do
     ReqLLM.Tool.new!(
       name: "list_cells",
-      description: "List active cells (worktrees) with their bee assignments.",
+      description: "List active cells (worktrees) with their ghost assignments.",
       callback: fn _args -> list_cells() end
     )
   end
@@ -105,9 +105,9 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
     else
       lines =
         Enum.map(cells, fn c ->
-          bee = Map.get(c, :bee_id, "unassigned")
+          ghost = Map.get(c, :ghost_id, "unassigned")
           path = Map.get(c, :path, "unknown")
-          "#{c.id}: bee=#{bee} path=#{path}"
+          "#{c.id}: ghost=#{ghost} path=#{path}"
         end)
 
       {:ok, Enum.join(lines, "\n")}

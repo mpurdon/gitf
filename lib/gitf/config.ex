@@ -3,12 +3,12 @@ defmodule GiTF.Config do
   Reads, writes, and provides defaults for the `.gitf/config.toml` configuration file.
 
   The config is a small TOML file that lives inside the `.gitf/` directory and
-  controls section-wide settings such as maximum concurrent bees and cost thresholds.
+  controls section-wide settings such as maximum concurrent ghosts and cost thresholds.
   """
 
   @default_config %{
     "gitf" => %{"version" => GiTF.version()},
-    "major" => %{"max_bees" => 5},
+    "major" => %{"max_ghosts" => 5},
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
@@ -22,7 +22,7 @@ defmodule GiTF.Config do
   ## Examples
 
       iex> config = GiTF.Config.default_config()
-      iex> config["major"]["max_bees"]
+      iex> config["major"]["max_ghosts"]
       5
   """
   @spec default_config() :: map()
@@ -83,7 +83,7 @@ defmodule GiTF.Config do
   end
 
   defp config_lookup(config, :api_key), do: get_in(config, ["server", "api_key"])
-  defp config_lookup(config, :max_bees), do: get_in(config, ["major", "max_bees"])
+  defp config_lookup(config, :max_ghosts), do: get_in(config, ["major", "max_ghosts"])
   defp config_lookup(config, :budget_usd), do: get_in(config, ["costs", "budget_usd"])
   defp config_lookup(_config, _key), do: nil
 

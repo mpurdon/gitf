@@ -18,11 +18,11 @@ defmodule GiTF.Prime do
   Primes a Major or Bee with context for a Claude Code session.
 
   - `prime(:major, gitf_root)` reads QUEEN.md and appends current section state
-  - `prime(:bee, bee_id)` builds a briefing from the bee's job, cell, and waggles
+  - `prime(:ghost, ghost_id)` builds a briefing from the ghost's job, cell, and waggles
 
   Returns `{:ok, markdown}` or `{:error, reason}`.
   """
-  @spec prime(:major | :bee, String.t()) :: {:ok, String.t()} | {:error, term()}
+  @spec prime(:major | :ghost, String.t()) :: {:ok, String.t()} | {:error, term()}
   def prime(role, identifier)
 
   def prime(:major, gitf_root) do
@@ -34,10 +34,10 @@ defmodule GiTF.Prime do
     end
   end
 
-  def prime(:bee, bee_id) do
-    with {:ok, bee} <- fetch_bee(bee_id) do
-      markdown = build_bee_briefing(bee)
-      handoff_section = build_handoff_section(bee_id)
+  def prime(:ghost, ghost_id) do
+    with {:ok, ghost} <- fetch_bee(ghost_id) do
+      markdown = build_bee_briefing(ghost)
+      handoff_section = build_handoff_section(ghost_id)
       {:ok, markdown <> handoff_section}
     end
   end
@@ -45,8 +45,8 @@ defmodule GiTF.Prime do
   # -- Private: Major --------------------------------------------------------
 
   defp build_major_state_summary do
-    bees = Store.all(:bees)
-    active_bees = Enum.filter(bees, &(&1.status in ["working", "idle", "starting"]))
+    ghosts = Store.all(:ghosts)
+    active_ghosts = Enum.filter(ghosts, &(&1.status in ["working", "idle", "starting"]))
 
     pending_quests =
       Store.filter(:quests, fn q -> q.status in ["pending", "active", "planning"] end)
@@ -65,8 +65,8 @@ defmodule GiTF.Prime do
       format_quests(pending_quests),
       "",
       quest_specs_section,
-      "### Active Bees (#{length(active_bees)})",
-      format_bees(active_bees),
+      "### Active Bees (#{length(active_ghosts)})",
+      format_bees(active_ghosts),
       "",
       "### Pending Jobs (#{length(pending_jobs)})",
       format_jobs(pending_jobs),
@@ -107,8 +107,8 @@ defmodule GiTF.Prime do
 
   defp format_bees([]), do: "None."
 
-  defp format_bees(bees) do
-    bees
+  defp format_bees(ghosts) do
+    ghosts
     |> Enum.map(fn b -> "- **#{b.name}** (#{b.id}): #{b.status}" end)
     |> Enum.join("\n")
   end
@@ -180,22 +180,22 @@ defmodule GiTF.Prime do
 
   # -- Private: Bee ----------------------------------------------------------
 
-  defp fetch_bee(bee_id) do
-    case Store.get(:bees, bee_id) do
+  defp fetch_bee(ghost_id) do
+    case Store.get(:ghosts, ghost_id) do
       nil -> {:error, :bee_not_found}
-      bee -> {:ok, bee}
+      ghost -> {:ok, ghost}
     end
   end
 
-  defp build_bee_briefing(bee) do
-    job = fetch_job_for_bee(bee)
-    cell = fetch_cell_for_bee(bee)
-    waggles = GiTF.Waggle.list_unread(bee.id)
+  defp build_bee_briefing(ghost) do
+    job = fetch_job_for_bee(ghost)
+    cell = fetch_cell_for_bee(ghost)
+    waggles = GiTF.Waggle.list_unread(ghost.id)
 
     quest_context = build_quest_context(job)
 
     sections = [
-      "# Bee Briefing: #{bee.name} (#{bee.id})",
+      "# Bee Briefing: #{ghost.name} (#{ghost.id})",
       "",
       "## Your Job",
       format_job_detail(job),
@@ -231,8 +231,8 @@ defmodule GiTF.Prime do
 
   defp fetch_job_for_bee(_bee), do: nil
 
-  defp fetch_cell_for_bee(bee) do
-    Store.filter(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
+  defp fetch_cell_for_bee(ghost) do
+    Store.filter(:cells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
     |> List.first()
   end
 
@@ -266,7 +266,7 @@ defmodule GiTF.Prime do
 
   defp friction_rules(job) do
     risk_level = Map.get(job, :risk_level, :low)
-    GiTF.Bee.CognitiveFriction.friction_instructions(risk_level)
+    GiTF.Ghost.CognitiveFriction.friction_instructions(risk_level)
   end
 
   # -- Private: Quest Context ------------------------------------------------
@@ -386,10 +386,10 @@ defmodule GiTF.Prime do
 
   # -- Private: Handoff ------------------------------------------------------
 
-  defp build_handoff_section(bee_id) do
-    case GiTF.Handoff.detect_handoff(bee_id) do
+  defp build_handoff_section(ghost_id) do
+    case GiTF.Handoff.detect_handoff(ghost_id) do
       {:ok, waggle} ->
-        case GiTF.Handoff.resume(bee_id, waggle.id) do
+        case GiTF.Handoff.resume(ghost_id, waggle.id) do
           {:ok, briefing} ->
             "\n\n---\n\n" <> briefing
 

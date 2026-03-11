@@ -1,6 +1,6 @@
 defmodule GiTF.TUI.Views.Activity do
   @moduledoc """
-  Renders the activity panel with quests, phase progress, their bees,
+  Renders the activity panel with quests, phase progress, their ghosts,
   budget info, checkpoints, and active runs.
   """
   import Ratatouille.View
@@ -9,13 +9,13 @@ defmodule GiTF.TUI.Views.Activity do
 
   def render(model) do
     %{activity: activity} = model
-    bees_by_quest = Enum.group_by(activity.bees, fn b -> b[:quest_id] end)
+    bees_by_quest = Enum.group_by(activity.ghosts, fn b -> b[:quest_id] end)
     budget_status = model[:budget_status] || []
     checkpoints = model[:checkpoints] || %{}
     runs = model[:runs] || []
 
     panel title: "Activity [F1]", height: :fill do
-      if Enum.empty?(activity.quests) and Enum.empty?(activity.bees) do
+      if Enum.empty?(activity.quests) and Enum.empty?(activity.ghosts) do
         label(content: "Idle")
       else
         render_quests(activity.quests, bees_by_quest, activity.bee_logs, budget_status, checkpoints) ++
@@ -48,7 +48,7 @@ defmodule GiTF.TUI.Views.Activity do
     end)
   end
 
-  defp render_phase_tracker(current_phase, artifacts, bees, bee_logs, checkpoints) do
+  defp render_phase_tracker(current_phase, artifacts, ghosts, bee_logs, checkpoints) do
     Enum.flat_map(@phases, fn phase ->
       {marker, color} =
         cond do
@@ -64,18 +64,18 @@ defmodule GiTF.TUI.Views.Activity do
         end
       ]
 
-      # Show active bees under the current phase
+      # Show active ghosts under the current phase
       bee_labels =
         if phase == to_s(current_phase) do
-          Enum.flat_map(bees, fn bee ->
-            bee_id = to_s(bee[:id])
-            status = to_s(bee[:status] || bee[:state])
-            log_lines = Map.get(bee_logs, bee[:id], [])
-            checkpoint = Map.get(checkpoints, bee[:id])
+          Enum.flat_map(ghosts, fn ghost ->
+            ghost_id = to_s(ghost[:id])
+            status = to_s(ghost[:status] || ghost[:state])
+            log_lines = Map.get(bee_logs, ghost[:id], [])
+            checkpoint = Map.get(checkpoints, ghost[:id])
 
             [
               label do
-                text(content: "   #{bee_id}", color: :cyan)
+                text(content: "   #{ghost_id}", color: :cyan)
                 text(content: " [#{status}]", color: status_color(status))
               end
             ] ++
@@ -122,20 +122,20 @@ defmodule GiTF.TUI.Views.Activity do
   defp render_orphan_bees(bees_by_quest, bee_logs, checkpoints) do
     case Map.get(bees_by_quest, nil, []) do
       [] -> []
-      bees -> render_bees(bees, bee_logs, "", checkpoints)
+      ghosts -> render_bees(ghosts, bee_logs, "", checkpoints)
     end
   end
 
-  defp render_bees(bees, bee_logs, indent, checkpoints) do
-    Enum.flat_map(bees, fn bee ->
-      bee_id = to_s(bee[:id])
-      status = to_s(bee[:status] || bee[:state])
-      log_lines = Map.get(bee_logs, bee[:id], [])
-      checkpoint = Map.get(checkpoints, bee[:id])
+  defp render_bees(ghosts, bee_logs, indent, checkpoints) do
+    Enum.flat_map(ghosts, fn ghost ->
+      ghost_id = to_s(ghost[:id])
+      status = to_s(ghost[:status] || ghost[:state])
+      log_lines = Map.get(bee_logs, ghost[:id], [])
+      checkpoint = Map.get(checkpoints, ghost[:id])
 
       [
         label do
-          text(content: indent <> bee_id, color: :cyan)
+          text(content: indent <> ghost_id, color: :cyan)
           text(content: " [#{status}]", color: status_color(status))
         end
       ] ++

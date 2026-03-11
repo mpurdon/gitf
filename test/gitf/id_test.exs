@@ -3,14 +3,14 @@ defmodule GiTF.IDTest do
 
   describe "generate/1" do
     test "produces an ID with the correct prefix" do
-      for prefix <- ~w(bee job qst cmb cel wag cst)a do
+      for prefix <- ~w(ghost job qst cmb cel wag cst)a do
         id = GiTF.ID.generate(prefix)
         assert String.starts_with?(id, "#{prefix}-"), "expected #{id} to start with #{prefix}-"
       end
     end
 
     test "produces a 6-character lowercase hex suffix" do
-      id = GiTF.ID.generate(:bee)
+      id = GiTF.ID.generate(:ghost)
       [_prefix, suffix] = String.split(id, "-", parts: 2)
 
       assert String.length(suffix) == 6

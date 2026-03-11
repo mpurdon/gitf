@@ -2,7 +2,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   @moduledoc """
   Main dashboard overview showing key metrics at a glance.
 
-  Displays active bee count, quest count, total cost, and recent
+  Displays active ghost count, quest count, total cost, and recent
   waggle messages. Subscribes to PubSub for live updates when new
   waggles arrive.
   """
@@ -33,16 +33,16 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   defp assign_data(socket) do
-    bees = GiTF.Bees.list()
+    ghosts = GiTF.Ghosts.list()
     quests = GiTF.Quests.list()
     cost_summary = GiTF.Costs.summary()
     recent_waggles = GiTF.Waggle.list(limit: 5)
 
-    active_bees = Enum.count(bees, &(Map.get(&1, :status) in ["working", "starting"]))
+    active_ghosts = Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
     active_quests = Enum.count(quests, &(Map.get(&1, :status) == "active"))
     
     # Context monitoring
-    bees_with_context = Enum.filter(bees, &Map.has_key?(&1, :context_percentage))
+    bees_with_context = Enum.filter(ghosts, &Map.has_key?(&1, :context_percentage))
     avg_context = if bees_with_context != [] do
       Enum.sum(Enum.map(bees_with_context, &(&1.context_percentage || 0.0))) / length(bees_with_context)
     else
@@ -64,8 +64,8 @@ defmodule GiTF.Dashboard.OverviewLive do
     socket
     |> assign(:page_title, "Overview")
     |> assign(:current_path, "/")
-    |> assign(:bee_count, length(bees))
-    |> assign(:active_bees, active_bees)
+    |> assign(:ghost_count, length(ghosts))
+    |> assign(:active_ghosts, active_ghosts)
     |> assign(:quest_count, length(quests))
     |> assign(:active_quests, active_quests)
     |> assign(:total_cost, cost_summary.total_cost)
@@ -98,8 +98,8 @@ defmodule GiTF.Dashboard.OverviewLive do
       <div class="cards">
         <div class="card">
           <div class="card-label">Total Bees</div>
-          <div class="card-value blue">{@bee_count}</div>
-          <div class="card-label" style="margin-top:0.25rem">{@active_bees} active</div>
+          <div class="card-value blue">{@ghost_count}</div>
+          <div class="card-label" style="margin-top:0.25rem">{@active_ghosts} active</div>
         </div>
         <div class="card">
           <div class="card-label">Quests</div>
@@ -125,7 +125,7 @@ defmodule GiTF.Dashboard.OverviewLive do
             {Float.round(@avg_context, 1)}%
           </div>
           <div class="card-label" style="margin-top:0.25rem">
-            {if @high_context_bees > 0, do: "#{@high_context_bees} bees >40%", else: "all bees healthy"}
+            {if @high_context_bees > 0, do: "#{@high_context_bees} ghosts >40%", else: "all ghosts healthy"}
           </div>
         </div>
         <div class="card">

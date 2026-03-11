@@ -462,7 +462,7 @@ defmodule GiTF.Store do
   end
 
   defp collection_prefix(:combs), do: :cmb
-  defp collection_prefix(:bees), do: :bee
+  defp collection_prefix(:ghosts), do: :ghost
   defp collection_prefix(:jobs), do: :job
   defp collection_prefix(:quests), do: :qst
   defp collection_prefix(:waggles), do: :wag

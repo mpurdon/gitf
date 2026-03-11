@@ -275,7 +275,7 @@ defmodule GiTF.Merge.Resolver do
           GiTF.Waggle.send("merge_resolver", "major", "reimagine_job_created",
             "Created conflict resolution job #{reimagine_job.id} for #{job_id}")
 
-          # The re-imagine job will go through the full bee → drone → merge pipeline
+          # The re-imagine job will go through the full ghost → drone → merge pipeline
           {:error, {:reimagined, reimagine_job.id}}
 
         {:error, reason} ->
@@ -302,7 +302,7 @@ defmodule GiTF.Merge.Resolver do
           end
 
         file_only_touched_by_branch?(repo, file, cell.branch, target) ->
-          # Accept incoming (the bee's version) for files only this branch touched
+          # Accept incoming (the ghost's version) for files only this branch touched
           case GiTF.Git.safe_cmd( ["checkout", "--theirs", "--", file],
                  cd: repo, stderr_to_stdout: true) do
             {_, 0} ->

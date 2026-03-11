@@ -51,10 +51,10 @@ defmodule GiTF.Web.Live.Dashboard do
 
   @impl true
   def handle_event("emergency_stop", _params, socket) do
-    active_bees = Store.filter(:bees, fn b -> b[:status] == "working" end)
+    active_ghosts = Store.filter(:ghosts, fn b -> b[:status] == "working" end)
 
-    Enum.each(active_bees, fn bee ->
-      GiTF.Bees.stop(bee[:id])
+    Enum.each(active_ghosts, fn ghost ->
+      GiTF.Ghosts.stop(ghost[:id])
     end)
 
     GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
@@ -206,14 +206,14 @@ defmodule GiTF.Web.Live.Dashboard do
   end
 
   defp maybe_refresh_slow(socket, count) when rem(count, 5) == 0 do
-    bees = socket.assigns.bees
+    ghosts = socket.assigns.ghosts
 
     checkpoints =
-      bees
+      ghosts
       |> Enum.filter(&(&1[:status] == "working"))
-      |> Enum.reduce(%{}, fn bee, acc ->
-        case safe_call(fn -> GiTF.Checkpoint.load(bee[:id]) end, :error) do
-          {:ok, cp} -> Map.put(acc, bee[:id], cp)
+      |> Enum.reduce(%{}, fn ghost, acc ->
+        case safe_call(fn -> GiTF.Checkpoint.load(ghost[:id]) end, :error) do
+          {:ok, cp} -> Map.put(acc, ghost[:id], cp)
           _ -> acc
         end
       end)
@@ -239,7 +239,7 @@ defmodule GiTF.Web.Live.Dashboard do
     stats = GiTF.Observability.Metrics.collect_metrics()
     quests = Store.all(:quests)
     jobs = Store.all(:jobs)
-    bees = Store.all(:bees)
+    ghosts = Store.all(:ghosts)
 
     selected_job =
       case socket.assigns[:selected_job_id] do
@@ -257,7 +257,7 @@ defmodule GiTF.Web.Live.Dashboard do
     |> assign(:stats, stats)
     |> assign(:quests, quests)
     |> assign(:jobs, jobs)
-    |> assign(:bees, bees)
+    |> assign(:ghosts, ghosts)
     |> assign(:selected_job, selected_job)
     |> assign(:selected_quest, selected_quest)
   end
@@ -359,7 +359,7 @@ defmodule GiTF.Web.Live.Dashboard do
             SYSTEM HALTED - RESET
           </button>
         <% else %>
-          <button phx-click="emergency_stop" data-confirm="Are you sure? This kills all active bees." class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg border-2 border-red-800">
+          <button phx-click="emergency_stop" data-confirm="Are you sure? This kills all active ghosts." class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg border-2 border-red-800">
             E-STOP
           </button>
         <% end %>
@@ -383,7 +383,7 @@ defmodule GiTF.Web.Live.Dashboard do
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
       <div class="bg-gray-800 p-3 rounded-lg shadow border border-gray-700">
         <h3 class="text-gray-400 text-xs uppercase">Active Bees</h3>
-        <p class="text-3xl font-mono text-blue-400"><%= @stats.bees.active %></p>
+        <p class="text-3xl font-mono text-blue-400"><%= @stats.ghosts.active %></p>
       </div>
       <div class="bg-gray-800 p-3 rounded-lg shadow border border-gray-700">
         <h3 class="text-gray-400 text-xs uppercase">Jobs</h3>
@@ -471,19 +471,19 @@ defmodule GiTF.Web.Live.Dashboard do
       <div class="p-3 text-sm">
         <div class="flex justify-between mb-1">
           <span class="text-gray-400">Active</span>
-          <span class="text-blue-400 font-mono"><%= @stats.bees.active %></span>
+          <span class="text-blue-400 font-mono"><%= @stats.ghosts.active %></span>
         </div>
         <div class="flex justify-between mb-1">
           <span class="text-gray-400">Idle</span>
-          <span class="text-gray-300 font-mono"><%= @stats.bees.idle %></span>
+          <span class="text-gray-300 font-mono"><%= @stats.ghosts.idle %></span>
         </div>
         <div class="flex justify-between mb-1">
           <span class="text-gray-400">Stopped</span>
-          <span class="text-gray-500 font-mono"><%= @stats.bees.stopped %></span>
+          <span class="text-gray-500 font-mono"><%= @stats.ghosts.stopped %></span>
         </div>
         <div class="flex justify-between pt-2 border-t border-gray-700">
           <span class="text-gray-400">Total</span>
-          <span class="text-white font-mono"><%= @stats.bees.total %></span>
+          <span class="text-white font-mono"><%= @stats.ghosts.total %></span>
         </div>
         <div class="mt-2 pt-2 border-t border-gray-700">
           <span class="text-gray-500 text-xs">Memory: <%= Float.round(@stats.system.memory_mb, 1) %> MB</span>
@@ -602,7 +602,7 @@ defmodule GiTF.Web.Live.Dashboard do
     ~H"""
     <%= if @selected_job do %>
       <% stages = job_pipeline_stages(@selected_job, @merge_queue) %>
-      <% checkpoint = @checkpoints[@selected_job[:bee_id]] %>
+      <% checkpoint = @checkpoints[@selected_job[:ghost_id]] %>
       <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full flex flex-col">
         <div class="bg-gray-700 px-4 py-2 border-b border-gray-600 flex justify-between items-center shrink-0">
           <h3 class="font-bold">
@@ -613,7 +613,7 @@ defmodule GiTF.Web.Live.Dashboard do
             <%= if @selected_job[:status] in ["failed"] do %>
               <button phx-click="retry_job" phx-value-id={@selected_job[:id]} class="text-xs px-3 py-1 rounded bg-yellow-700 hover:bg-yellow-600 text-white font-bold">Retry</button>
             <% end %>
-            <button phx-click="kill_job" phx-value-id={@selected_job[:id]} data-confirm="Kill this job and clean up its bee/cell?" class="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-bold">Kill</button>
+            <button phx-click="kill_job" phx-value-id={@selected_job[:id]} data-confirm="Kill this job and clean up its ghost/cell?" class="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-bold">Kill</button>
             <button phx-click="close_job_detail" class="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-600">✕</button>
           </div>
         </div>
@@ -654,7 +654,7 @@ defmodule GiTF.Web.Live.Dashboard do
             </div>
             <div>
               <span class="text-gray-500 block text-xs uppercase">Bee</span>
-              <span class="text-gray-300 font-mono text-xs"><%= @selected_job[:bee_id] || "unassigned" %></span>
+              <span class="text-gray-300 font-mono text-xs"><%= @selected_job[:ghost_id] || "unassigned" %></span>
             </div>
             <div>
               <span class="text-gray-500 block text-xs uppercase">Quest</span>
@@ -1167,7 +1167,7 @@ defmodule GiTF.Web.Live.Dashboard do
         _ -> :done
       end
 
-    bee =
+    ghost =
       case job[:status] do
         "pending" -> :pending
         "assigned" -> :pending
@@ -1193,11 +1193,11 @@ defmodule GiTF.Web.Live.Dashboard do
         merge_active?(merge_queue, job[:id]) -> :active
         merge_pending?(merge_queue, job[:id]) -> :pending
         merge_completed?(merge_queue, job[:id]) -> :done
-        bee == :done && drone in [:done, :skip] -> :pending
+        ghost == :done && drone in [:done, :skip] -> :pending
         true -> :skip
       end
 
-    [{"Scout", scout}, {"Triage", triage}, {"Bee", bee}, {"Drone", drone}, {"Merge", merge}]
+    [{"Scout", scout}, {"Triage", triage}, {"Bee", ghost}, {"Drone", drone}, {"Merge", merge}]
   end
 
   defp merge_active?(%{active: nil}, _job_id), do: false

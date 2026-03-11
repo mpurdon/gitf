@@ -68,17 +68,17 @@ defmodule GiTF.CLI.Errors do
     """
   end
 
-  def format_error(:bee_not_found, %{bee_id: id}) do
+  def format_error(:bee_not_found, %{ghost_id: id}) do
     """
     Error: Bee not found: #{id}
 
-    The bee may have already stopped or crashed.
+    The ghost may have already stopped or crashed.
 
-    To see active bees:
-      $ section bee list
+    To see active ghosts:
+      $ section ghost list
 
-    To spawn a new bee:
-      $ section bee spawn --job <job-id> --comb <comb-id>
+    To spawn a new ghost:
+      $ section ghost spawn --job <job-id> --comb <comb-id>
     """
   end
 
@@ -124,23 +124,23 @@ defmodule GiTF.CLI.Errors do
       $ section jobs show #{id}
 
     To retry with fixes:
-      $ section bee revive --id <bee-id>
+      $ section ghost revive --id <ghost-id>
     """
   end
 
-  def format_error(:context_overflow, %{bee_id: id, percentage: pct}) do
+  def format_error(:context_overflow, %{ghost_id: id, percentage: pct}) do
     """
     Warning: Bee context usage critical: #{id}
 
     Context usage: #{Float.round(pct, 1)}% (threshold: 45%)
 
-    The bee is approaching context limits and may need a handoff.
+    The ghost is approaching context limits and may need a handoff.
 
     To create a handoff:
-      $ section handoff create --bee #{id}
+      $ section handoff create --ghost #{id}
 
     To check context status:
-      $ section bee context #{id}
+      $ section ghost context #{id}
     """
   end
 

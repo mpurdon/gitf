@@ -138,7 +138,7 @@ defmodule GiTF.CombTest do
       refute File.dir?(dir)
     end
 
-    test "updates cell worktree_path and bee cell_path when path changes", %{tmp: tmp} do
+    test "updates cell worktree_path and ghost cell_path when path changes", %{tmp: tmp} do
       dir = Path.join(tmp, "repo")
       File.mkdir_p!(dir)
       {:ok, comb} = Comb.add(dir, name: "repo")
@@ -147,18 +147,18 @@ defmodule GiTF.CombTest do
       {:ok, cell} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: "bee-1",
+          ghost_id: "ghost-1",
           branch: "feat",
-          worktree_path: Path.join(dir, "worktrees/bee-1"),
+          worktree_path: Path.join(dir, "worktrees/ghost-1"),
           status: "active"
         })
 
-      # Create a bee with a cell_path under the comb
-      {:ok, bee} =
-        Store.insert(:bees, %{
+      # Create a ghost with a cell_path under the comb
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{
           name: "worker",
           status: "running",
-          cell_path: Path.join(dir, "worktrees/bee-1"),
+          cell_path: Path.join(dir, "worktrees/ghost-1"),
           job_id: nil
         })
 
@@ -166,10 +166,10 @@ defmodule GiTF.CombTest do
 
       new_dir = Path.join(tmp, "renamed-repo")
       updated_cell = Store.get(:cells, cell.id)
-      assert updated_cell.worktree_path == Path.join(new_dir, "worktrees/bee-1")
+      assert updated_cell.worktree_path == Path.join(new_dir, "worktrees/ghost-1")
 
-      updated_bee = Store.get(:bees, bee.id)
-      assert updated_bee.cell_path == Path.join(new_dir, "worktrees/bee-1")
+      updated_bee = Store.get(:ghosts, ghost.id)
+      assert updated_bee.cell_path == Path.join(new_dir, "worktrees/ghost-1")
     end
 
     test "does NOT move directory when basename doesn't match old name", %{tmp: tmp} do

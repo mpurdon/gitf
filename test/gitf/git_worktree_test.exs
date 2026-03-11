@@ -42,20 +42,20 @@ defmodule GiTF.Git.WorktreeTest do
   describe "worktree_add/3" do
     test "creates a new worktree with a new branch" do
       repo = create_temp_git_repo()
-      wt_path = Path.join(repo, "bees/bee-test1")
+      wt_path = Path.join(repo, "ghosts/ghost-test1")
 
-      assert {:ok, ^wt_path} = Git.worktree_add(repo, wt_path, "bee/bee-test1")
+      assert {:ok, ^wt_path} = Git.worktree_add(repo, wt_path, "ghost/ghost-test1")
       assert File.dir?(wt_path)
       assert File.exists?(Path.join(wt_path, "README.md"))
     end
 
     test "returns error when branch already exists" do
       repo = create_temp_git_repo()
-      wt1 = Path.join(repo, "bees/bee-dup1")
-      wt2 = Path.join(repo, "bees/bee-dup2")
+      wt1 = Path.join(repo, "ghosts/ghost-dup1")
+      wt2 = Path.join(repo, "ghosts/ghost-dup2")
 
-      {:ok, _} = Git.worktree_add(repo, wt1, "bee/dup-branch")
-      assert {:error, msg} = Git.worktree_add(repo, wt2, "bee/dup-branch")
+      {:ok, _} = Git.worktree_add(repo, wt1, "ghost/dup-branch")
+      assert {:error, msg} = Git.worktree_add(repo, wt2, "ghost/dup-branch")
       assert is_binary(msg)
     end
   end
@@ -63,8 +63,8 @@ defmodule GiTF.Git.WorktreeTest do
   describe "worktree_remove/3" do
     test "removes an existing worktree" do
       repo = create_temp_git_repo()
-      wt_path = Path.join(repo, "bees/bee-remove")
-      {:ok, _} = Git.worktree_add(repo, wt_path, "bee/bee-remove")
+      wt_path = Path.join(repo, "ghosts/ghost-remove")
+      {:ok, _} = Git.worktree_add(repo, wt_path, "ghost/ghost-remove")
 
       assert :ok = Git.worktree_remove(repo, wt_path)
       refute File.dir?(wt_path)
@@ -87,8 +87,8 @@ defmodule GiTF.Git.WorktreeTest do
 
     test "includes additional worktrees" do
       repo = create_temp_git_repo()
-      wt_path = Path.join(repo, "bees/bee-listed")
-      {:ok, _} = Git.worktree_add(repo, wt_path, "bee/bee-listed")
+      wt_path = Path.join(repo, "ghosts/ghost-listed")
+      {:ok, _} = Git.worktree_add(repo, wt_path, "ghost/ghost-listed")
 
       assert {:ok, worktrees} = Git.worktree_list(repo)
       assert length(worktrees) == 2
@@ -99,14 +99,14 @@ defmodule GiTF.Git.WorktreeTest do
 
     test "parses branch information" do
       repo = create_temp_git_repo()
-      wt_path = Path.join(repo, "bees/bee-branch")
-      {:ok, _} = Git.worktree_add(repo, wt_path, "bee/bee-branch")
+      wt_path = Path.join(repo, "ghosts/ghost-branch")
+      {:ok, _} = Git.worktree_add(repo, wt_path, "ghost/ghost-branch")
 
       {:ok, worktrees} = Git.worktree_list(repo)
       wt = Enum.find(worktrees, &(&1.path == wt_path))
 
       assert wt != nil, "expected to find worktree at #{wt_path}"
-      assert wt.branch == "refs/heads/bee/bee-branch"
+      assert wt.branch == "refs/heads/ghost/ghost-branch"
       assert is_binary(wt.head)
     end
   end
@@ -115,11 +115,11 @@ defmodule GiTF.Git.WorktreeTest do
     test "deletes a branch that is not checked out" do
       repo = create_temp_git_repo()
       # Create and remove a worktree so the branch exists but is not checked out
-      wt_path = Path.join(repo, "bees/bee-delb")
-      {:ok, _} = Git.worktree_add(repo, wt_path, "bee/bee-delb")
+      wt_path = Path.join(repo, "ghosts/ghost-delb")
+      {:ok, _} = Git.worktree_add(repo, wt_path, "ghost/ghost-delb")
       :ok = Git.worktree_remove(repo, wt_path)
 
-      assert :ok = Git.branch_delete(repo, "bee/bee-delb")
+      assert :ok = Git.branch_delete(repo, "ghost/ghost-delb")
     end
 
     test "returns error for non-existent branch" do

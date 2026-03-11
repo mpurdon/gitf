@@ -1,6 +1,6 @@
 defmodule GiTF.Quality.Performance do
   @moduledoc """
-  Performance benchmarking for bee worktrees.
+  Performance benchmarking for ghost worktrees.
   """
 
   @doc """

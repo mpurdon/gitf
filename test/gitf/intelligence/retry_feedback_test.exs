@@ -48,10 +48,10 @@ defmodule GiTF.Intelligence.RetryFeedbackTest do
     test "feedback is threaded to retry job metadata" do
       job = insert_failed_job("job-fb-4", error_message: "timeout occurred")
 
-      {:ok, new_job} = Retry.retry_with_strategy(job.id, "bee was stuck in a loop")
+      {:ok, new_job} = Retry.retry_with_strategy(job.id, "ghost was stuck in a loop")
 
       assert new_job.retry_of == job.id
-      assert new_job.retry_metadata[:feedback] == "bee was stuck in a loop"
+      assert new_job.retry_metadata[:feedback] == "ghost was stuck in a loop"
     end
 
     test "nil feedback is stored as nil in metadata" do

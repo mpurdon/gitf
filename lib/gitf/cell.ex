@@ -1,8 +1,8 @@
 defmodule GiTF.Cell do
   @moduledoc """
-  Context module for managing cells -- git worktrees assigned to bees.
+  Context module for managing cells -- git worktrees assigned to ghosts.
 
-  A cell provides an isolated working directory for a bee by creating a git
+  A cell provides an isolated working directory for a ghost by creating a git
   worktree from a comb's repository.
   """
 
@@ -12,21 +12,21 @@ defmodule GiTF.Cell do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Creates a new cell (git worktree) for a bee within a comb.
+  Creates a new cell (git worktree) for a ghost within a comb.
 
   Returns `{:ok, cell}` or `{:error, reason}`.
   """
   @spec create(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def create(comb_id, bee_id, opts \\ []) do
-    branch = Keyword.get(opts, :branch, "bee/#{bee_id}")
+  def create(comb_id, ghost_id, opts \\ []) do
+    branch = Keyword.get(opts, :branch, "ghost/#{ghost_id}")
     gitf_root = Keyword.get(opts, :gitf_root)
 
     with {:ok, comb} <- GiTF.Comb.get(comb_id),
          :ok <- validate_comb_path(comb),
-         worktree_path = build_worktree_path(comb.path, bee_id),
+         worktree_path = build_worktree_path(comb.path, ghost_id),
          {:ok, _path} <- Git.worktree_add(comb.path, worktree_path, branch),
-         :ok <- maybe_generate_settings(bee_id, gitf_root, worktree_path),
-         {:ok, cell} <- insert_cell(comb_id, bee_id, worktree_path, branch) do
+         :ok <- maybe_generate_settings(ghost_id, gitf_root, worktree_path),
+         {:ok, cell} <- insert_cell(comb_id, ghost_id, worktree_path, branch) do
       {:ok, cell}
     end
   end
@@ -85,23 +85,23 @@ defmodule GiTF.Cell do
   end
 
   @doc """
-  Reassigns a cell to a new bee without touching the worktree or branch on disk.
+  Reassigns a cell to a new ghost without touching the worktree or branch on disk.
 
   Returns `{:ok, cell}` or `{:error, :not_found}`.
   """
   @spec adopt(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def adopt(cell_id, new_bee_id) do
+  def adopt(cell_id, new_ghost_id) do
     with {:ok, cell} <- get(cell_id) do
-      updated = %{cell | bee_id: new_bee_id}
+      updated = %{cell | ghost_id: new_ghost_id}
       Store.put(:cells, updated)
     end
   end
 
   @doc """
-  Finds cells whose associated bee no longer exists or has stopped.
+  Finds cells whose associated ghost no longer exists or has stopped.
 
   Returns orphaned cells that are still marked "active" but have no
-  corresponding active bee record.
+  corresponding active ghost record.
   """
   @spec cleanup_orphans() :: {:ok, non_neg_integer()}
   def cleanup_orphans do
@@ -112,9 +112,9 @@ defmodule GiTF.Cell do
     orphan_count =
       Enum.count(active_cells, fn cell ->
         orphan? =
-          case Store.get(:bees, cell.bee_id) do
+          case Store.get(:ghosts, cell.ghost_id) do
             nil -> true
-            bee -> bee.status in ["stopped", "crashed"]
+            ghost -> ghost.status in ["stopped", "crashed"]
           end
 
         if orphan? do
@@ -149,14 +149,14 @@ defmodule GiTF.Cell do
   defp validate_comb_path(%{path: path}) when is_binary(path), do: :ok
   defp validate_comb_path(_comb), do: {:error, :comb_has_no_path}
 
-  defp build_worktree_path(comb_path, bee_id) do
-    Path.join([comb_path, "bees", bee_id])
+  defp build_worktree_path(comb_path, ghost_id) do
+    Path.join([comb_path, "ghosts", ghost_id])
   end
 
-  defp insert_cell(comb_id, bee_id, worktree_path, branch) do
+  defp insert_cell(comb_id, ghost_id, worktree_path, branch) do
     record = %{
       comb_id: comb_id,
-      bee_id: bee_id,
+      ghost_id: ghost_id,
       worktree_path: worktree_path,
       branch: branch,
       status: "active",
@@ -186,9 +186,9 @@ defmodule GiTF.Cell do
     Store.put(:cells, updated)
   end
 
-  defp maybe_generate_settings(_bee_id, nil, _worktree_path), do: :ok
+  defp maybe_generate_settings(_ghost_id, nil, _worktree_path), do: :ok
 
-  defp maybe_generate_settings(bee_id, gitf_root, worktree_path) do
-    GiTF.Runtime.Settings.generate(bee_id, gitf_root, worktree_path)
+  defp maybe_generate_settings(ghost_id, gitf_root, worktree_path) do
+    GiTF.Runtime.Settings.generate(ghost_id, gitf_root, worktree_path)
   end
 end

@@ -15,7 +15,7 @@ defmodule GiTF.TranscriptWatcherTest do
     {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
-    {:ok, bee} = Store.insert(:bees, %{name: "watcher-test-bee", status: "starting"})
+    {:ok, ghost} = Store.insert(:ghosts, %{name: "watcher-test-ghost", status: "starting"})
 
     # Stop any existing TranscriptWatcher before starting a new one
     case TranscriptWatcher.lookup() do
@@ -32,7 +32,7 @@ defmodule GiTF.TranscriptWatcherTest do
     {:ok, pid} = TranscriptWatcher.start_link(poll_interval: 100)
     on_exit(fn -> safe_stop(pid) end)
 
-    %{bee: bee, watcher_pid: pid}
+    %{ghost: ghost, watcher_pid: pid}
   end
 
   defp safe_stop(pid) do
@@ -54,19 +54,19 @@ defmodule GiTF.TranscriptWatcherTest do
   end
 
   describe "watch/2 and unwatch/1" do
-    test "adds and removes a bee from the watch list", %{bee: bee} do
+    test "adds and removes a ghost from the watch list", %{ghost: ghost} do
       path = create_transcript_file([])
 
-      assert :ok = TranscriptWatcher.watch(bee.id, path)
-      assert :ok = TranscriptWatcher.unwatch(bee.id)
+      assert :ok = TranscriptWatcher.watch(ghost.id, path)
+      assert :ok = TranscriptWatcher.unwatch(ghost.id)
     end
   end
 
   describe "polling" do
-    test "detects new transcript entries and records costs", %{bee: bee} do
+    test "detects new transcript entries and records costs", %{ghost: ghost} do
       path = create_transcript_file([])
 
-      :ok = TranscriptWatcher.watch(bee.id, path)
+      :ok = TranscriptWatcher.watch(ghost.id, path)
 
       # Write a cost entry to the transcript
       entry = %{
@@ -83,14 +83,14 @@ defmodule GiTF.TranscriptWatcherTest do
       # Wait for at least one poll cycle
       Process.sleep(250)
 
-      costs = GiTF.Costs.for_bee(bee.id)
+      costs = GiTF.Costs.for_bee(ghost.id)
       assert length(costs) >= 1
       assert hd(costs).input_tokens == 1000
     end
   end
 
   describe "final_parse/2" do
-    test "performs a one-time full parse of a transcript", %{bee: bee} do
+    test "performs a one-time full parse of a transcript", %{ghost: ghost} do
       entries = [
         %{
           "type" => "result",
@@ -106,15 +106,15 @@ defmodule GiTF.TranscriptWatcherTest do
 
       path = create_transcript_file(entries)
 
-      TranscriptWatcher.final_parse(bee.id, path)
+      TranscriptWatcher.final_parse(ghost.id, path)
 
-      costs = GiTF.Costs.for_bee(bee.id)
+      costs = GiTF.Costs.for_bee(ghost.id)
       assert length(costs) == 2
     end
 
-    test "handles missing file gracefully", %{bee: bee} do
+    test "handles missing file gracefully", %{ghost: ghost} do
       # Should not crash
-      assert :ok = TranscriptWatcher.final_parse(bee.id, "/nonexistent/transcript.jsonl")
+      assert :ok = TranscriptWatcher.final_parse(ghost.id, "/nonexistent/transcript.jsonl")
     end
   end
 

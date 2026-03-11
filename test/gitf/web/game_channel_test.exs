@@ -62,15 +62,15 @@ defmodule GiTF.Web.GameChannelTest do
   end
 
   test "receives initial world state on join", %{socket: _socket} do
-    assert_push "world_state", %{quests: _, bees: _, combs: _}
+    assert_push "world_state", %{quests: _, ghosts: _, combs: _}
   end
 
   test "receives section events", %{socket: _socket} do
     # Emit a fake telemetry event
-    GiTF.Telemetry.emit([:gitf, :bee, :spawned], %{}, %{bee_id: "test-bee"})
+    GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{ghost_id: "test-ghost"})
 
     # Assert pushed to channel
-    assert_push "gitf_event", %{type: "section.bee.spawned", data: %{bee_id: "test-bee"}}
+    assert_push "gitf_event", %{type: "section.ghost.spawned", data: %{ghost_id: "test-ghost"}}
   end
 
   test "can spawn quest via command", %{socket: socket} do

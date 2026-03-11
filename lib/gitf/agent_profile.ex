@@ -1,14 +1,14 @@
 defmodule GiTF.AgentProfile do
   @moduledoc """
-  Manages expert agent profiles for bee workers.
+  Manages expert agent profiles for ghost workers.
 
-  Before a bee starts work, this module checks if the comb has a Claude
+  Before a ghost starts work, this module checks if the comb has a Claude
   agent file matching the job's technology. If not, it generates one using
   Claude to create an expert profile.
 
   Agent files are stored per-comb in `<comb_path>/.claude/agents/` and are
   discovered automatically by Claude Code at runtime. Once generated, they
-  are cached (the file persists) and reused by all bees on that comb.
+  are cached (the file persists) and reused by all ghosts on that comb.
   """
 
   alias GiTF.AgentProfile.FailureModes
@@ -297,7 +297,7 @@ defmodule GiTF.AgentProfile do
   Copies all agent profiles from a comb's agents directory into a worktree.
 
   Claude Code discovers agents from `.claude/agents/` relative to the git root.
-  Since bee worktrees have their own git root, agents generated at the comb level
+  Since ghost worktrees have their own git root, agents generated at the comb level
   must be copied into each worktree for Claude to discover them.
   """
   @spec install_agents(String.t(), String.t()) :: :ok

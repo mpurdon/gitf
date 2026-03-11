@@ -5,10 +5,10 @@ defmodule GiTF.Major.Orchestrator do
   Manages the full phase pipeline:
   pending → research → requirements → design → review → planning → implementation → validation → completed
 
-  Each phase spawns a bee that produces a structured JSON artifact stored
-  on the quest record. When a phase bee's "job_complete" waggle arrives,
+  Each phase spawns a ghost that produces a structured JSON artifact stored
+  on the quest record. When a phase ghost's "job_complete" waggle arrives,
   the Major calls `advance_quest`, which checks for the artifact and
-  spawns the next phase's bee.
+  spawns the next phase's ghost.
   """
 
   require Logger
@@ -75,7 +75,7 @@ defmodule GiTF.Major.Orchestrator do
   @doc """
   Advance quest to next phase if current phase is complete.
 
-  Called by the Major when a bee completes. Checks if the current phase's
+  Called by the Major when a ghost completes. Checks if the current phase's
   artifact exists, and if so, transitions to the next phase.
   """
   @spec advance_quest(String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -172,7 +172,7 @@ defmodule GiTF.Major.Orchestrator do
       with {:ok, _} <- GiTF.Quests.transition_phase(quest.id, "research", "Quest started") do
         comb = Store.get(:combs, comb_id)
         prompt = PhasePrompts.research_prompt(quest, comb)
-        spawn_phase_bee(quest, "research", prompt, model: "sonnet")
+        spawn_phase_ghost(quest, "research", prompt, model: "sonnet")
         {:ok, "research"}
       end
     end
@@ -183,7 +183,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Quests.transition_phase(quest.id, "requirements", "Research complete") do
       prompt = PhasePrompts.requirements_prompt(quest, research)
-      spawn_phase_bee(quest, "requirements", prompt, model: "sonnet")
+      spawn_phase_ghost(quest, "requirements", prompt, model: "sonnet")
       {:ok, "requirements"}
     end
   end
@@ -210,7 +210,7 @@ defmodule GiTF.Major.Orchestrator do
           PhasePrompts.design_prompt(quest, requirements, research, extra_instructions)
         end
 
-      spawn_phase_bee(quest, "design", prompt, model: "opus")
+      spawn_phase_ghost(quest, "design", prompt, model: "opus")
 
       {:ok, "design"}
     end
@@ -223,7 +223,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Quests.transition_phase(quest.id, "review", "Design complete") do
       prompt = PhasePrompts.review_prompt(quest, design, requirements, research)
-      spawn_phase_bee(quest, "review", prompt, model: "opus")
+      spawn_phase_ghost(quest, "review", prompt, model: "opus")
       {:ok, "review"}
     end
   end
@@ -235,7 +235,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Quests.transition_phase(quest.id, "planning", "Review approved") do
       prompt = PhasePrompts.planning_prompt(quest, design, requirements, review)
-      spawn_phase_bee(quest, "planning", prompt, model: "sonnet")
+      spawn_phase_ghost(quest, "planning", prompt, model: "sonnet")
       {:ok, "planning"}
     end
   end
@@ -284,7 +284,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Quests.transition_phase(quest.id, "validation", "Implementation complete") do
       prompt = PhasePrompts.validation_prompt(quest, all_artifacts)
-      spawn_phase_bee(quest, "validation", prompt, model: "sonnet")
+      spawn_phase_ghost(quest, "validation", prompt, model: "sonnet")
       {:ok, "validation"}
     end
   end
@@ -424,7 +424,7 @@ defmodule GiTF.Major.Orchestrator do
         age = DateTime.diff(DateTime.utc_now(), phase_start.inserted_at, :second)
 
         if age > @phase_timeout_seconds do
-          # Check if there's already a running phase bee to avoid duplicate spawning
+          # Check if there's already a running phase ghost to avoid duplicate spawning
           running_phase_job = Store.find_one(:jobs, fn j ->
             j.quest_id == quest.id and
               j[:job_type] == "phase" and
@@ -433,10 +433,10 @@ defmodule GiTF.Major.Orchestrator do
           end)
 
           running_worker = if running_phase_job do
-            case running_phase_job[:bee_id] do
+            case running_phase_job[:ghost_id] do
               nil -> false
-              bee_id ->
-                case GiTF.Bee.Worker.lookup(bee_id) do
+              ghost_id ->
+                case GiTF.Ghost.Worker.lookup(ghost_id) do
                   {:ok, pid} -> Process.alive?(pid)
                   :error -> false
                 end
@@ -448,7 +448,7 @@ defmodule GiTF.Major.Orchestrator do
           if running_worker do
             Logger.debug("Quest #{quest.id} phase #{phase} has running worker, skipping re-spawn")
           else
-            Logger.warning("Quest #{quest.id} stuck in #{phase} for #{age}s, re-spawning phase bee")
+            Logger.warning("Quest #{quest.id} stuck in #{phase} for #{age}s, re-spawning phase ghost")
             # Fail any stale phase jobs first
             if running_phase_job do
               GiTF.Jobs.fail(running_phase_job.id)
@@ -458,10 +458,10 @@ defmodule GiTF.Major.Orchestrator do
 
             case rebuild_phase_prompt(quest, phase) do
               {prompt, model} ->
-                spawn_phase_bee(quest, phase, prompt, model: model)
+                spawn_phase_ghost(quest, phase, prompt, model: model)
 
               nil ->
-                Logger.info("Phase #{phase} doesn't use phase bees, attempting advancement")
+                Logger.info("Phase #{phase} doesn't use phase ghosts, attempting advancement")
                 advance_quest(quest.id)
             end
           end
@@ -506,7 +506,7 @@ defmodule GiTF.Major.Orchestrator do
         {PhasePrompts.validation_prompt(quest, all_artifacts), "sonnet"}
 
       phase when phase in ["implementation", "merge", "awaiting_approval"] ->
-        # These phases don't use phase bees — handled by job spawning,
+        # These phases don't use phase ghosts — handled by job spawning,
         # merge queue, or user approval respectively. No prompt rebuild needed.
         nil
 
@@ -836,7 +836,7 @@ defmodule GiTF.Major.Orchestrator do
 
   # -- Bee Spawning ------------------------------------------------------------
 
-  defp spawn_phase_bee(quest, phase, prompt, opts) do
+  defp spawn_phase_ghost(quest, phase, prompt, opts) do
     model = Keyword.get(opts, :model, "sonnet")
 
     # Create a phase job
@@ -855,21 +855,21 @@ defmodule GiTF.Major.Orchestrator do
         # Record which job serves which phase
         GiTF.Quests.record_phase_job(quest.id, phase, job.id)
 
-        # Spawn the bee
+        # Spawn the ghost
         case GiTF.gitf_dir() do
           {:ok, gitf_root} ->
-            case GiTF.Bees.spawn_detached(job.id, quest.comb_id, gitf_root, prompt: prompt) do
-              {:ok, bee} ->
-                Logger.info("Phase bee #{bee.id} spawned for #{phase} phase of quest #{quest.id}")
-                {:ok, bee}
+            case GiTF.Ghosts.spawn_detached(job.id, quest.comb_id, gitf_root, prompt: prompt) do
+              {:ok, ghost} ->
+                Logger.info("Phase ghost #{ghost.id} spawned for #{phase} phase of quest #{quest.id}")
+                {:ok, ghost}
 
               {:error, reason} ->
-                Logger.error("Failed to spawn #{phase} phase bee: #{inspect(reason)}")
+                Logger.error("Failed to spawn #{phase} phase ghost: #{inspect(reason)}")
                 {:error, reason}
             end
 
           {:error, reason} ->
-            Logger.error("Cannot spawn phase bee — no gitf root: #{inspect(reason)}")
+            Logger.error("Cannot spawn phase ghost — no gitf root: #{inspect(reason)}")
             {:error, :no_gitf_root}
         end
 
@@ -887,7 +887,7 @@ defmodule GiTF.Major.Orchestrator do
         |> Enum.filter(&(&1.status == "pending"))
         |> Enum.filter(&GiTF.Jobs.ready?(&1.id))
         |> Enum.each(fn job ->
-          case GiTF.Bees.spawn_detached(job.id, job.comb_id, gitf_root) do
+          case GiTF.Ghosts.spawn_detached(job.id, job.comb_id, gitf_root) do
             {:ok, _bee} -> :ok
             {:error, _reason} -> :ok
           end

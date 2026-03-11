@@ -2,7 +2,7 @@ defmodule GiTF.Jobs do
   @moduledoc """
   Context module for job lifecycle management.
 
-  A job is a unit of work assigned to a bee within a quest. This module
+  A job is a unit of work assigned to a ghost within a quest. This module
   enforces valid status transitions -- the state machine that governs how
   a job moves from pending through to done or failed.
 
@@ -41,7 +41,7 @@ defmodule GiTF.Jobs do
   Creates a new job.
 
   Required attrs: `title`, `quest_id`, `comb_id`.
-  Optional: `description`, `status`, `bee_id`.
+  Optional: `description`, `status`, `ghost_id`.
 
   Returns `{:ok, job}` or `{:error, reason}`.
   """
@@ -70,7 +70,7 @@ defmodule GiTF.Jobs do
         status: attrs[:status] || attrs["status"] || "pending",
         quest_id: attrs[:quest_id] || attrs["quest_id"],
         comb_id: attrs[:comb_id] || attrs["comb_id"],
-        bee_id: attrs[:bee_id] || attrs["bee_id"],
+        ghost_id: attrs[:ghost_id] || attrs["ghost_id"],
         # Multi-model support fields
         job_type: classification.job_type,
         complexity: classification.complexity,
@@ -109,15 +109,15 @@ defmodule GiTF.Jobs do
   end
 
   @doc """
-  Assigns a job to a bee.
+  Assigns a job to a ghost.
 
   Transitions: pending -> assigned.
   """
   @spec assign(String.t(), String.t()) :: {:ok, map()} | {:error, atom()}
-  def assign(job_id, bee_id) do
+  def assign(job_id, ghost_id) do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, :assign) do
-      updated = %{job | status: next_status, bee_id: bee_id}
+      updated = %{job | status: next_status, ghost_id: ghost_id}
       Store.put(:jobs, updated)
     end
   end
@@ -150,7 +150,7 @@ defmodule GiTF.Jobs do
   Creates a retry job copying attrs from the original, with `retry_of` linkage.
 
   Increments retry_count. Appends failure feedback to the description so the
-  next bee has context on what went wrong. Returns `{:ok, new_job}` or
+  next ghost has context on what went wrong. Returns `{:ok, new_job}` or
   `{:error, reason}`.
 
   ## Options
@@ -198,9 +198,9 @@ defmodule GiTF.Jobs do
   @doc """
   Resets a failed job back to pending so it can be retried.
 
-  Transitions: failed -> pending. Also stops the assigned bee,
-  cleans up its cell/worktree, and clears the bee_id assignment
-  so the job can be assigned to a fresh bee.
+  Transitions: failed -> pending. Also stops the assigned ghost,
+  cleans up its cell/worktree, and clears the ghost_id assignment
+  so the job can be assigned to a fresh ghost.
   
   Optionally appends feedback to the job description.
   """
@@ -208,7 +208,7 @@ defmodule GiTF.Jobs do
   def reset(job_id, feedback \\ nil) do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, :reset) do
-      cleanup_bee_and_cell(job.bee_id)
+      cleanup_bee_and_cell(job.ghost_id)
       
       new_description = 
         if feedback do
@@ -218,41 +218,41 @@ defmodule GiTF.Jobs do
         end
 
       retry_count = Map.get(job, :retry_count, 0) + 1
-      updated = %{job | status: next_status, bee_id: nil, retry_count: retry_count, description: new_description}
+      updated = %{job | status: next_status, ghost_id: nil, retry_count: retry_count, description: new_description}
       Store.put(:jobs, updated)
     end
   end
 
   @doc """
-  Revives a failed job by assigning it to a new bee.
+  Revives a failed job by assigning it to a new ghost.
 
   Transitions: failed -> running. Unlike `reset`, this does NOT clean up
-  the old cell/worktree — the new bee reuses the existing worktree.
+  the old cell/worktree — the new ghost reuses the existing worktree.
   """
   @spec revive(String.t(), String.t()) :: {:ok, map()} | {:error, atom()}
-  def revive(job_id, bee_id) do
+  def revive(job_id, ghost_id) do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, :revive) do
-      updated = %{job | status: next_status, bee_id: bee_id}
+      updated = %{job | status: next_status, ghost_id: ghost_id}
       Store.put(:jobs, updated)
     end
   end
 
   defp cleanup_bee_and_cell(nil), do: :ok
 
-  defp cleanup_bee_and_cell(bee_id) do
-    # Stop the bee worker process if running
-    GiTF.Bees.stop(bee_id)
+  defp cleanup_bee_and_cell(ghost_id) do
+    # Stop the ghost worker process if running
+    GiTF.Ghosts.stop(ghost_id)
 
-    # Find and remove the bee's active cell (worktree + branch)
-    case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+    # Find and remove the ghost's active cell (worktree + branch)
+    case Store.find_one(:cells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> :ok
       cell -> GiTF.Cell.remove(cell.id, force: true)
     end
 
-    # Mark bee as stopped
-    case GiTF.Bees.get(bee_id) do
-      {:ok, bee} -> Store.put(:bees, %{bee | status: "stopped"})
+    # Mark ghost as stopped
+    case GiTF.Ghosts.get(ghost_id) do
+      {:ok, ghost} -> Store.put(:ghosts, %{ghost | status: "stopped"})
       _ -> :ok
     end
 
@@ -260,7 +260,7 @@ defmodule GiTF.Jobs do
   end
 
   @doc """
-  Kills a job: stops its bee, removes its cell/worktree, deletes all
+  Kills a job: stops its ghost, removes its cell/worktree, deletes all
   dependencies, and removes the job record from the store.
 
   Returns `:ok` or `{:error, :not_found}`.
@@ -269,7 +269,7 @@ defmodule GiTF.Jobs do
   def kill(job_id) do
     case get(job_id) do
       {:ok, job} ->
-        cleanup_bee_and_cell(job[:bee_id])
+        cleanup_bee_and_cell(job[:ghost_id])
 
         # Remove dependencies in both directions
         Store.filter(:job_dependencies, fn d ->
@@ -292,7 +292,7 @@ defmodule GiTF.Jobs do
 
     * `:quest_id` - filter by quest
     * `:status` - filter by status
-    * `:bee_id` - filter by assigned bee
+    * `:ghost_id` - filter by assigned ghost
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
@@ -311,9 +311,9 @@ defmodule GiTF.Jobs do
       end
 
     jobs =
-      case Keyword.get(opts, :bee_id) do
+      case Keyword.get(opts, :ghost_id) do
         nil -> jobs
-        v -> Enum.filter(jobs, &(Map.get(&1, :bee_id) == v))
+        v -> Enum.filter(jobs, &(Map.get(&1, :ghost_id) == v))
       end
 
     Enum.sort_by(jobs, & &1.inserted_at, {:desc, DateTime})
@@ -468,7 +468,7 @@ defmodule GiTF.Jobs do
   to pending if all their dependencies are resolved (done or failed).
 
   If a dependency failed, appends failure context to the dependent's description
-  so the bee knows a prerequisite didn't complete.
+  so the ghost knows a prerequisite didn't complete.
   """
   @spec unblock_dependents(String.t()) :: :ok
   def unblock_dependents(job_id) do

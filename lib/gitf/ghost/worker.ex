@@ -1,8 +1,8 @@
-defmodule GiTF.Bee.Worker do
+defmodule GiTF.Ghost.Worker do
   @moduledoc """
-  GenServer managing a single bee's lifecycle.
+  GenServer managing a single ghost's lifecycle.
 
-  Each bee is a Claude Code agent working on one job within a comb.
+  Each ghost is a Claude Code agent working on one job within a comb.
   The Worker provisions an isolated worktree (cell), spawns Claude
   headless with the job prompt, and reports results back to the Major
   via waggle messages.
@@ -20,13 +20,13 @@ defmodule GiTF.Bee.Worker do
 
   ## Registration
 
-  Workers register via `GiTF.Registry` under `{:bee, bee_id}` for
-  easy lookup and to prevent duplicate workers for the same bee.
+  Workers register via `GiTF.Registry` under `{:ghost, ghost_id}` for
+  easy lookup and to prevent duplicate workers for the same ghost.
 
   ## Restart strategy
 
   Workers use `restart: :temporary` because the Major decides whether
-  and how to retry failed bees -- not the supervisor.
+  and how to retry failed ghosts -- not the supervisor.
   """
 
   use GenServer
@@ -39,7 +39,7 @@ defmodule GiTF.Bee.Worker do
   # -- Types -------------------------------------------------------------------
 
   @type state :: %{
-          bee_id: String.t(),
+          ghost_id: String.t(),
           job_id: String.t(),
           comb_id: String.t(),
           cell_id: String.t() | nil,
@@ -55,10 +55,10 @@ defmodule GiTF.Bee.Worker do
   # -- Child spec --------------------------------------------------------------
 
   def child_spec(opts) do
-    bee_id = Keyword.fetch!(opts, :bee_id)
+    ghost_id = Keyword.fetch!(opts, :ghost_id)
 
     %{
-      id: {__MODULE__, bee_id},
+      id: {__MODULE__, ghost_id},
       start: {__MODULE__, :start_link, [opts]},
       restart: :temporary,
       type: :worker
@@ -72,7 +72,7 @@ defmodule GiTF.Bee.Worker do
 
   ## Required options
 
-    * `:bee_id` - the bee's database ID
+    * `:ghost_id` - the ghost's database ID
     * `:job_id` - the job being worked on
     * `:comb_id` - the comb (repository) to work in
     * `:gitf_root` - the gitf workspace root directory
@@ -84,33 +84,33 @@ defmodule GiTF.Bee.Worker do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
-    bee_id = Keyword.fetch!(opts, :bee_id)
-    name = via(bee_id)
+    ghost_id = Keyword.fetch!(opts, :ghost_id)
+    name = via(ghost_id)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Returns the current status of a bee worker by bee_id."
+  @doc "Returns the current status of a ghost worker by ghost_id."
   @spec status(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def status(bee_id) do
-    case lookup(bee_id) do
+  def status(ghost_id) do
+    case lookup(ghost_id) do
       {:ok, pid} -> {:ok, GenServer.call(pid, :status)}
       :error -> {:error, :not_found}
     end
   end
 
-  @doc "Gracefully stops a bee worker."
+  @doc "Gracefully stops a ghost worker."
   @spec stop(String.t()) :: :ok | {:error, :not_found}
-  def stop(bee_id) do
-    case lookup(bee_id) do
+  def stop(ghost_id) do
+    case lookup(ghost_id) do
       {:ok, pid} -> GenServer.call(pid, :stop)
       :error -> {:error, :not_found}
     end
   end
 
-  @doc "Looks up a bee worker PID via the Registry."
+  @doc "Looks up a ghost worker PID via the Registry."
   @spec lookup(String.t()) :: {:ok, pid()} | :error
-  def lookup(bee_id) do
-    case Registry.lookup(@registry, {:bee, bee_id}) do
+  def lookup(ghost_id) do
+    case Registry.lookup(@registry, {:ghost, ghost_id}) do
       [{pid, _}] -> {:ok, pid}
       [] -> :error
     end
@@ -120,16 +120,16 @@ defmodule GiTF.Bee.Worker do
 
   @impl true
   def init(opts) do
-    bee_id = Keyword.fetch!(opts, :bee_id)
+    ghost_id = Keyword.fetch!(opts, :ghost_id)
     job_id = Keyword.fetch!(opts, :job_id)
     comb_id = Keyword.fetch!(opts, :comb_id)
     gitf_root = Keyword.fetch!(opts, :gitf_root)
 
     # Set correlation IDs for structured logging
-    GiTF.Logger.set_bee_context(bee_id, job_id)
+    GiTF.Logger.set_bee_context(ghost_id, job_id)
 
     state = %{
-      bee_id: bee_id,
+      ghost_id: ghost_id,
       job_id: job_id,
       comb_id: comb_id,
       cell_id: nil,
@@ -154,9 +154,9 @@ defmodule GiTF.Bee.Worker do
         {:noreply, updated_state}
 
       {:error, reason} ->
-        Logger.error("Bee #{state.bee_id} failed to provision: #{inspect(reason)}")
-        GiTF.Telemetry.emit([:gitf, :bee, :provision_failed], %{}, %{
-          bee_id: state.bee_id,
+        Logger.error("Bee #{state.ghost_id} failed to provision: #{inspect(reason)}")
+        GiTF.Telemetry.emit([:gitf, :ghost, :provision_failed], %{}, %{
+          ghost_id: state.ghost_id,
           job_id: state.job_id,
           reason: inspect(reason)
         })
@@ -168,7 +168,7 @@ defmodule GiTF.Bee.Worker do
   @impl true
   def handle_call(:status, _from, state) do
     reply = %{
-      bee_id: state.bee_id,
+      ghost_id: state.ghost_id,
       job_id: state.job_id,
       comb_id: state.comb_id,
       cell_id: state.cell_id,
@@ -186,23 +186,23 @@ defmodule GiTF.Bee.Worker do
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     events = GiTF.Runtime.Models.parse_output(data)
-    update_progress(state.bee_id, events)
+    update_progress(state.ghost_id, events)
     
     # Track context usage from events
-    track_context_usage(state.bee_id, events)
+    track_context_usage(state.ghost_id, events)
 
     {:noreply,
      %{state | output: [state.output, data], parsed_events: Enum.reverse(events) ++ state.parsed_events}}
   end
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
-    Logger.info("Bee #{state.bee_id} completed successfully")
+    Logger.info("Bee #{state.ghost_id} completed successfully")
     mark_success(state)
     {:stop, :normal, %{state | status: :done, port: nil}}
   end
 
   def handle_info({port, {:exit_status, exit_code}}, %{port: port} = state) do
-    Logger.warning("Bee #{state.bee_id} exited with status #{exit_code}")
+    Logger.warning("Bee #{state.ghost_id} exited with status #{exit_code}")
     output = IO.iodata_to_binary(state.output)
     mark_failed(state, "Exit code #{exit_code}: #{String.slice(output, 0, 500)}")
     {:stop, :normal, %{state | status: :failed, port: nil}}
@@ -213,7 +213,7 @@ defmodule GiTF.Bee.Worker do
   def handle_info({ref, {:ok, result}}, %{task: %Task{ref: ref}} = state) do
     # Task completed successfully — treat like exit_status 0
     Process.demonitor(ref, [:flush])
-    Logger.info("Bee #{state.bee_id} API task completed successfully")
+    Logger.info("Bee #{state.ghost_id} API task completed successfully")
 
     # Convert agent loop result to parsed events + output
     events = Map.get(result, :events, [])
@@ -231,12 +231,12 @@ defmodule GiTF.Bee.Worker do
 
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    Logger.warning("Bee #{state.bee_id} API task failed: #{inspect(reason)}")
+    Logger.warning("Bee #{state.ghost_id} API task failed: #{inspect(reason)}")
 
     # Try model fallback before giving up
     case maybe_fallback_model(state) do
       {:ok, new_task, fallback_model} ->
-        Logger.info("Bee #{state.bee_id} falling back to model #{fallback_model}")
+        Logger.info("Bee #{state.ghost_id} falling back to model #{fallback_model}")
         {:noreply, %{state | task: new_task, fallback_attempted: true}}
 
       :no_fallback ->
@@ -249,31 +249,31 @@ defmodule GiTF.Bee.Worker do
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     # Task process crashed
-    Logger.error("Bee #{state.bee_id} API task crashed: #{inspect(reason)}")
+    Logger.error("Bee #{state.ghost_id} API task crashed: #{inspect(reason)}")
     mark_failed(state, "Task crash: #{inspect(reason)}")
     {:stop, :normal, %{state | status: :failed, task: nil}}
   end
 
-  def handle_info({:agent_progress, bee_id, event}, state) when bee_id == state.bee_id do
+  def handle_info({:agent_progress, ghost_id, event}, state) when ghost_id == state.ghost_id do
     progress = format_agent_progress(event)
-    GiTF.Progress.update(state.bee_id, progress)
+    GiTF.Progress.update(state.ghost_id, progress)
     {:noreply, state}
   end
 
   def handle_info(:checkpoint, state) do
     if state.status == :running do
       checkpoint_data = build_checkpoint_data(state)
-      GiTF.Checkpoint.save(state.bee_id, checkpoint_data)
+      GiTF.Checkpoint.save(state.ghost_id, checkpoint_data)
     end
 
     {:noreply, %{state | checkpoint_timer: schedule_checkpoint()}}
   end
 
   def handle_info(:context_handoff, %{status: :running} = state) do
-    Logger.info("Bee #{state.bee_id} initiating proactive context handoff")
+    Logger.info("Bee #{state.ghost_id} initiating proactive context handoff")
 
     # Create handoff with current state
-    GiTF.Handoff.create(state.bee_id)
+    GiTF.Handoff.create(state.ghost_id)
 
     # Stop the current process (port/task)
     state = do_stop(state)
@@ -286,12 +286,12 @@ defmodule GiTF.Bee.Worker do
         :ok
     end
 
-    # Notify Major that bee handed off — Major's job spawner will pick it up
+    # Notify Major that ghost handed off — Major's job spawner will pick it up
     GiTF.Waggle.send(
-      state.bee_id,
+      state.ghost_id,
       "major",
       "context_handoff",
-      "Bee #{state.bee_id} handed off job #{state.job_id} due to context exhaustion"
+      "Bee #{state.ghost_id} handed off job #{state.job_id} due to context exhaustion"
     )
 
     {:stop, :normal, %{state | status: :done}}
@@ -314,17 +314,17 @@ defmodule GiTF.Bee.Worker do
 
     cond do
       not alive? ->
-        Logger.warning("Beacon check failed: bee #{state.bee_id} process is dead after 10s")
+        Logger.warning("Beacon check failed: ghost #{state.ghost_id} process is dead after 10s")
         mark_failed(state, "Process died within 10 seconds of spawning")
         {:stop, :normal, %{state | status: :failed}}
 
       not has_output? ->
-        Logger.warning("Beacon check: bee #{state.bee_id} alive but no output after 10s")
+        Logger.warning("Beacon check: ghost #{state.ghost_id} alive but no output after 10s")
         # Process is alive but silent -- not fatal, just log a warning
         {:noreply, state}
 
       true ->
-        Logger.debug("Beacon check passed for bee #{state.bee_id}")
+        Logger.debug("Beacon check passed for ghost #{state.ghost_id}")
         {:noreply, state}
     end
   end
@@ -335,31 +335,31 @@ defmodule GiTF.Bee.Worker do
   end
 
   def handle_info(msg, state) do
-    Logger.debug("Bee #{state.bee_id} received unexpected message: #{inspect(msg)}")
+    Logger.debug("Bee #{state.ghost_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
   @impl true
   def terminate(_reason, state) do
-    # If bee was actively running, preserve context via checkpoint + handoff
+    # If ghost was actively running, preserve context via checkpoint + handoff
     if state.status == :running do
       try do
         # Save final checkpoint so handoff has latest progress
         checkpoint_data = build_checkpoint_data(state)
-        GiTF.Checkpoint.save(state.bee_id, checkpoint_data)
+        GiTF.Checkpoint.save(state.ghost_id, checkpoint_data)
 
-        # Create handoff so replacement bee has context
-        GiTF.Handoff.create(state.bee_id)
-        Logger.info("Bee #{state.bee_id} crash handoff saved")
+        # Create handoff so replacement ghost has context
+        GiTF.Handoff.create(state.ghost_id)
+        Logger.info("Bee #{state.ghost_id} crash handoff saved")
       rescue
         e ->
-          Logger.debug("Crash handoff failed for bee #{state.bee_id}: #{inspect(e)}")
+          Logger.debug("Crash handoff failed for ghost #{state.ghost_id}: #{inspect(e)}")
       end
     end
 
-    # Mark bee as crashed if still in an active state
+    # Mark ghost as crashed if still in an active state
     if state.status in [:provisioning, :running] do
-      update_bee_status(state.bee_id, "crashed")
+      update_ghost_status(state.ghost_id, "crashed")
     end
 
     # Shutdown API task if running (allow 2s for graceful cleanup)
@@ -436,7 +436,7 @@ defmodule GiTF.Bee.Worker do
     is_phase_job =
       case GiTF.Jobs.get(state.job_id) do
         {:ok, job} ->
-          GiTF.Logger.set_bee_context(state.bee_id, state.job_id, job.quest_id)
+          GiTF.Logger.set_bee_context(state.ghost_id, state.job_id, job.quest_id)
           Map.get(job, :phase_job, false)
 
         _ ->
@@ -472,7 +472,7 @@ defmodule GiTF.Bee.Worker do
 
         {:error, reason} ->
           # Rollback: clean up the cell/worktree on spawn failure
-          Logger.warning("Spawn failed for bee #{state.bee_id}, rolling back cell #{cell.id}")
+          Logger.warning("Spawn failed for ghost #{state.ghost_id}, rolling back cell #{cell.id}")
           rollback_cell(cell.id)
           {:error, reason}
       end
@@ -481,8 +481,8 @@ defmodule GiTF.Bee.Worker do
         # If cell was created but a later step failed, attempt cleanup.
         # We check whether cell_id is set by looking at state -- if create_cell
         # succeeded but a subsequent step failed, the cell variable is not in scope
-        # here, so we look it up by bee_id.
-        rollback_cell_for_bee(state.bee_id)
+        # here, so we look it up by ghost_id.
+        rollback_cell_for_bee(state.ghost_id)
         err
     end
   end
@@ -502,7 +502,7 @@ defmodule GiTF.Bee.Worker do
   end
 
   defp create_cell(state) do
-    GiTF.Cell.create(state.comb_id, state.bee_id, gitf_root: state.gitf_root)
+    GiTF.Cell.create(state.comb_id, state.ghost_id, gitf_root: state.gitf_root)
   end
 
   defp role_for_job(job_id) do
@@ -513,15 +513,15 @@ defmodule GiTF.Bee.Worker do
   end
 
   defp update_bee_working(state, cell) do
-    case Store.get(:bees, state.bee_id) do
+    case Store.get(:ghosts, state.ghost_id) do
       nil ->
         {:error, :bee_not_found}
 
-      bee ->
+      ghost ->
         updated =
-          Map.merge(bee, %{status: "working", cell_path: cell.worktree_path, pid: inspect(self())})
+          Map.merge(ghost, %{status: "working", cell_path: cell.worktree_path, pid: inspect(self())})
 
-        Store.put(:bees, updated)
+        Store.put(:ghosts, updated)
         :ok
     end
   end
@@ -550,7 +550,7 @@ defmodule GiTF.Bee.Worker do
     case Task.yield(task, @spawn_timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} -> result
       nil ->
-        Logger.error("Bee #{state.bee_id} spawn timed out after #{@spawn_timeout_ms}ms")
+        Logger.error("Bee #{state.ghost_id} spawn timed out after #{@spawn_timeout_ms}ms")
         {:error, :spawn_timeout}
     end
   end
@@ -559,9 +559,9 @@ defmodule GiTF.Bee.Worker do
     prompt = build_prompt(state)
     executable = Keyword.get(state.opts, :claude_executable)
 
-    # Get the assigned model from the bee record
+    # Get the assigned model from the ghost record
     model =
-      case Store.get(:bees, state.bee_id) do
+      case Store.get(:ghosts, state.ghost_id) do
         %{assigned_model: model} when is_binary(model) -> model
         _ -> nil
       end
@@ -590,7 +590,7 @@ defmodule GiTF.Bee.Worker do
   end
 
   defp spawn_api_task(prompt, working_dir, spawn_opts, state) do
-    bee_id = state.bee_id
+    ghost_id = state.ghost_id
 
     # Determine tool_set based on phase job type
     tool_set =
@@ -607,7 +607,7 @@ defmodule GiTF.Bee.Worker do
       |> Keyword.put(:tool_set, tool_set)
       |> Keyword.put(:include_dynamic, true)
       |> Keyword.put(:on_progress, fn event ->
-        send(self(), {:agent_progress, bee_id, event})
+        send(self(), {:agent_progress, ghost_id, event})
       end)
 
     task = Task.async(fn ->
@@ -736,7 +736,7 @@ defmodule GiTF.Bee.Worker do
   # -- Private: completion handling --------------------------------------------
 
   defp mark_success(state) do
-    update_bee_status(state.bee_id, "stopped")
+    update_ghost_status(state.ghost_id, "stopped")
 
     case GiTF.Jobs.get(state.job_id) do
       {:ok, %{status: "done"}} ->
@@ -747,8 +747,8 @@ defmodule GiTF.Bee.Worker do
         GiTF.Jobs.unblock_dependents(state.job_id)
     end
 
-    GiTF.Telemetry.emit([:gitf, :bee, :completed], %{}, %{
-      bee_id: state.bee_id,
+    GiTF.Telemetry.emit([:gitf, :ghost, :completed], %{}, %{
+      ghost_id: state.ghost_id,
       job_id: state.job_id
     })
 
@@ -783,18 +783,18 @@ defmodule GiTF.Bee.Worker do
           output: output
         })
 
-        GiTF.Waggle.send(state.bee_id, "major", "scout_complete", body)
+        GiTF.Waggle.send(state.ghost_id, "major", "scout_complete", body)
 
       is_phase_job ->
         # Phase jobs waggle Major directly — no verification/merge needed
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
         body = "Job #{state.job_id} completed successfully (phase: #{job.phase})"
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
-        GiTF.Waggle.send(state.bee_id, "major", "job_complete", body)
+        GiTF.Waggle.send(state.ghost_id, "major", "job_complete", body)
 
       skip_verification ->
         # Simple jobs skip drone verification, go straight to Major
-        GiTF.Waggle.send(state.bee_id, "major", "job_complete",
+        GiTF.Waggle.send(state.ghost_id, "major", "job_complete",
           "Job #{state.job_id} completed (skip_verification)")
 
       true ->
@@ -804,11 +804,11 @@ defmodule GiTF.Bee.Worker do
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "drone:review",
-          {:review_job, state.job_id, state.bee_id, state.cell_id}
+          {:review_job, state.job_id, state.ghost_id, state.cell_id}
         )
     end
 
-    GiTF.Progress.clear(state.bee_id)
+    GiTF.Progress.clear(state.ghost_id)
   end
 
   defp collect_phase_output(state, job) do
@@ -873,19 +873,19 @@ defmodule GiTF.Bee.Worker do
   end
 
   defp mark_failed(state, reason) do
-    update_bee_status(state.bee_id, "crashed")
+    update_ghost_status(state.ghost_id, "crashed")
     GiTF.Jobs.fail(state.job_id)
 
-    GiTF.Telemetry.emit([:gitf, :bee, :failed], %{}, %{
-      bee_id: state.bee_id,
+    GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
+      ghost_id: state.ghost_id,
       error: reason
     })
 
     record_costs_from_events(state)
-    GiTF.Progress.clear(state.bee_id)
+    GiTF.Progress.clear(state.ghost_id)
 
     GiTF.Waggle.send(
-      state.bee_id,
+      state.ghost_id,
       "major",
       "job_failed",
       "Job #{state.job_id} failed: #{reason}"
@@ -897,7 +897,7 @@ defmodule GiTF.Bee.Worker do
     |> Enum.reverse()
     |> GiTF.Runtime.Models.extract_costs()
     |> Enum.each(fn cost_data ->
-      GiTF.Costs.record(state.bee_id, cost_data)
+      GiTF.Costs.record(state.ghost_id, cost_data)
     end)
   end
 
@@ -927,18 +927,18 @@ defmodule GiTF.Bee.Worker do
     end
   end
 
-  defp update_progress(bee_id, events) do
+  defp update_progress(ghost_id, events) do
     GiTF.Runtime.Models.progress_from_events(events)
     |> Enum.each(fn progress ->
-      GiTF.Progress.update(bee_id, progress)
+      GiTF.Progress.update(ghost_id, progress)
     end)
   rescue
     e ->
-      Logger.debug("Progress update failed for bee #{bee_id}: #{inspect(e)}")
+      Logger.debug("Progress update failed for ghost #{ghost_id}: #{inspect(e)}")
       :ok
   end
 
-  defp track_context_usage(bee_id, events) do
+  defp track_context_usage(ghost_id, events) do
     # Extract token usage from events
     costs = GiTF.Runtime.Models.extract_costs(events)
 
@@ -947,17 +947,17 @@ defmodule GiTF.Bee.Worker do
       output = cost["output_tokens"] || cost[:output_tokens] || 0
 
       if input > 0 or output > 0 do
-        case GiTF.Runtime.ContextMonitor.record_usage(bee_id, input, output) do
+        case GiTF.Runtime.ContextMonitor.record_usage(ghost_id, input, output) do
           {:ok, :handoff_needed} ->
-            Logger.warning("Bee #{bee_id} needs handoff - context at critical level, triggering")
+            Logger.warning("Bee #{ghost_id} needs handoff - context at critical level, triggering")
             send(self(), :context_handoff)
 
           {:ok, :critical} ->
-            Logger.warning("Bee #{bee_id} context usage critical, triggering handoff")
+            Logger.warning("Bee #{ghost_id} context usage critical, triggering handoff")
             send(self(), :context_handoff)
 
           {:ok, :warning} ->
-            Logger.info("Bee #{bee_id} context usage warning")
+            Logger.info("Bee #{ghost_id} context usage warning")
 
           _ ->
             :ok
@@ -966,7 +966,7 @@ defmodule GiTF.Bee.Worker do
     end)
   rescue
     error ->
-      Logger.debug("Failed to track context usage for bee #{bee_id}: #{inspect(error)}")
+      Logger.debug("Failed to track context usage for ghost #{ghost_id}: #{inspect(error)}")
       :ok
   end
 
@@ -976,7 +976,7 @@ defmodule GiTF.Bee.Worker do
       :no_fallback
     else
       current_model =
-        case Store.get(:bees, state.bee_id) do
+        case Store.get(:ghosts, state.ghost_id) do
           %{assigned_model: m} when is_binary(m) -> m
           _ -> nil
         end
@@ -984,10 +984,10 @@ defmodule GiTF.Bee.Worker do
       fallback = if current_model, do: GiTF.Runtime.ModelResolver.fallback(current_model)
 
       if fallback do
-        # Update bee record with fallback model
-        case Store.get(:bees, state.bee_id) do
+        # Update ghost record with fallback model
+        case Store.get(:ghosts, state.ghost_id) do
           nil -> :no_fallback
-          bee -> Store.put(:bees, %{bee | assigned_model: fallback})
+          ghost -> Store.put(:ghosts, %{ghost | assigned_model: fallback})
         end
 
         # Re-spawn the API task with fallback model
@@ -1025,16 +1025,16 @@ defmodule GiTF.Bee.Worker do
       Port.close(state.port)
     end
 
-    update_bee_status(state.bee_id, "stopped")
+    update_ghost_status(state.ghost_id, "stopped")
     %{state | status: :done, port: nil, task: nil}
   rescue
     ArgumentError -> %{state | status: :done, port: nil, task: nil}
   end
 
-  defp update_bee_status(bee_id, status) do
-    case Store.get(:bees, bee_id) do
+  defp update_ghost_status(ghost_id, status) do
+    case Store.get(:ghosts, ghost_id) do
       nil -> :ok
-      bee -> Store.put(:bees, %{bee | status: status})
+      ghost -> Store.put(:ghosts, %{ghost | status: status})
     end
   end
 
@@ -1090,8 +1090,8 @@ defmodule GiTF.Bee.Worker do
     }
   end
 
-  defp via(bee_id) do
-    {:via, Registry, {@registry, {:bee, bee_id}}}
+  defp via(ghost_id) do
+    {:via, Registry, {@registry, {:ghost, ghost_id}}}
   end
 
   # -- Private: pre-dispatch instructions -------------------------------------
@@ -1169,8 +1169,8 @@ defmodule GiTF.Bee.Worker do
       :ok
   end
 
-  defp rollback_cell_for_bee(bee_id) do
-    case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+  defp rollback_cell_for_bee(ghost_id) do
+    case Store.find_one(:cells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> :ok
       cell -> rollback_cell(cell.id)
     end

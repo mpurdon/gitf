@@ -2,7 +2,7 @@ defmodule GiTF.Run do
   @moduledoc """
   Context module for coordinated run management.
 
-  A run represents a single execution attempt of a quest -- all the bees
+  A run represents a single execution attempt of a quest -- all the ghosts
   spawned to work on its jobs during one pass. Tracking runs lets the Major
   know when every job in a batch has finished (completed or failed) so it
   can trigger quest completion or the next phase automatically.
@@ -29,7 +29,7 @@ defmodule GiTF.Run do
       status: "active",
       started_at: DateTime.utc_now(),
       completed_at: nil,
-      bee_ids: [],
+      ghost_ids: [],
       job_ids: job_ids,
       total_jobs: length(job_ids),
       completed_jobs: 0,
@@ -40,18 +40,18 @@ defmodule GiTF.Run do
   end
 
   @doc """
-  Appends a bee ID to the run's bee list.
+  Appends a ghost ID to the run's ghost list.
 
   Returns `{:ok, run}` or `{:error, :not_found}`.
   """
   @spec add_bee(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def add_bee(run_id, bee_id) do
+  def add_bee(run_id, ghost_id) do
     case Store.get(:runs, run_id) do
       nil ->
         {:error, :not_found}
 
       run ->
-        updated = %{run | bee_ids: Enum.uniq([bee_id | run.bee_ids])}
+        updated = %{run | ghost_ids: Enum.uniq([ghost_id | run.ghost_ids])}
         Store.put(:runs, updated)
     end
   end
@@ -168,10 +168,10 @@ defmodule GiTF.Run do
   end
 
   @doc """
-  Checks whether all bees in a run have stopped working.
+  Checks whether all ghosts in a run have stopped working.
 
-  Returns `true` if every bee in the run is in "stopped", "crashed", or
-  has no active worker process. Returns `false` if any bee is still working.
+  Returns `true` if every ghost in the run is in "stopped", "crashed", or
+  has no active worker process. Returns `false` if any ghost is still working.
   """
   @spec all_idle?(String.t()) :: boolean()
   def all_idle?(run_id) do
@@ -180,8 +180,8 @@ defmodule GiTF.Run do
         true
 
       run ->
-        Enum.all?(run.bee_ids, fn bee_id ->
-          case Store.get(:bees, bee_id) do
+        Enum.all?(run.ghost_ids, fn ghost_id ->
+          case Store.get(:ghosts, ghost_id) do
             nil -> true
             %{status: status} -> status in ["stopped", "crashed", "done"]
           end

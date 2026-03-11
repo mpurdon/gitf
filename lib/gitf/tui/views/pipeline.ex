@@ -69,7 +69,7 @@ defmodule GiTF.TUI.Views.Pipeline do
 
     triage = if job[:complexity], do: :done, else: :skip
 
-    bee =
+    ghost =
       case job[:status] do
         "running" -> :active
         "done" -> :done
@@ -94,11 +94,11 @@ defmodule GiTF.TUI.Views.Pipeline do
         in_active?(mq, job[:id]) -> :active
         in_pending?(mq, job[:id]) -> :pending
         in_completed?(mq, job[:id]) -> :done
-        bee == :done && drone in [:done, :skip] -> :pending
+        ghost == :done && drone in [:done, :skip] -> :pending
         true -> :skip
       end
 
-    {scout, triage, bee, drone, merge}
+    {scout, triage, ghost, drone, merge}
   end
 
   defp in_active?(%{active: nil}, _), do: false

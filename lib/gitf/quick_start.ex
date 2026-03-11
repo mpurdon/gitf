@@ -64,20 +64,20 @@ defmodule GiTF.QuickStart do
   @doc """
   Generates a CLAUDE.md for a comb that includes section-specific instructions.
 
-  The generated markdown tells a bee how to communicate with the queen
-  and other bees via waggle messages.
+  The generated markdown tells a ghost how to communicate with the queen
+  and other ghosts via waggle messages.
   """
   @spec generate_comb_claude_md(String.t(), String.t()) :: String.t()
   def generate_comb_claude_md(comb_name, comb_path) do
     """
     # #{comb_name} - GiTF Worker Instructions
 
-    You are a bee working on the **#{comb_name}** codebase.
+    You are a ghost working on the **#{comb_name}** codebase.
     Your workspace is at: `#{comb_path}`
 
     ## Communication
 
-    Use waggle messages to communicate with the queen and other bees:
+    Use waggle messages to communicate with the queen and other ghosts:
 
     ```bash
     # Report job completion
@@ -86,11 +86,11 @@ defmodule GiTF.QuickStart do
     # Report a blocker
     section waggle send --to queen --subject "job_blocked" --body "What is blocking you"
 
-    # Send a message to another bee
-    section waggle send --to <bee-id> --subject "question" --body "Your question"
+    # Send a message to another ghost
+    section waggle send --to <ghost-id> --subject "question" --body "Your question"
 
     # Check for new messages
-    section waggle list --to <your-bee-id>
+    section waggle list --to <your-ghost-id>
     ```
 
     ## Rules

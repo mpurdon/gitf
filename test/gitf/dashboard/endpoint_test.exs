@@ -51,8 +51,8 @@ defmodule GiTF.Dashboard.EndpointTest do
       assert String.contains?(conn.resp_body, "Quests")
     end
 
-    test "serves the bees page at /bees" do
-      conn = request(:get, "/bees")
+    test "serves the ghosts page at /ghosts" do
+      conn = request(:get, "/ghosts")
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, "Bee Agents")
@@ -101,7 +101,7 @@ defmodule GiTF.Dashboard.EndpointTest do
 
       assert "/" in paths
       assert "/quests" in paths
-      assert "/bees" in paths
+      assert "/ghosts" in paths
       assert "/costs" in paths
       assert "/waggles" in paths
     end

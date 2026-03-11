@@ -62,10 +62,10 @@ defmodule GiTF.Web.Router do
     delete "/jobs/:id", ApiController, :kill_job
 
     # Bees
-    get "/bees", ApiController, :list_bees
-    post "/bees/:id/stop", ApiController, :stop_bee
-    post "/bees/:id/complete", ApiController, :complete_bee
-    post "/bees/:id/fail", ApiController, :fail_bee
+    get "/ghosts", ApiController, :list_bees
+    post "/ghosts/:id/stop", ApiController, :stop_ghost
+    post "/ghosts/:id/complete", ApiController, :complete_bee
+    post "/ghosts/:id/fail", ApiController, :fail_bee
 
     # Combs
     post "/combs", ApiController, :add_comb

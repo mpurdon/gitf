@@ -133,7 +133,7 @@ defmodule GiTF.Dashboard.QuestsLive do
                                       <span class="badge badge-grey">-</span>
                                     <% end %>
                                   </td>
-                                  <td style="font-family:monospace; font-size:0.8rem">{job.bee_id || "-"}</td>
+                                  <td style="font-family:monospace; font-size:0.8rem">{job.ghost_id || "-"}</td>
                                 </tr>
                               <% end %>
                             </tbody>

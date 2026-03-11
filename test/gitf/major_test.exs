@@ -9,7 +9,7 @@ defmodule GiTF.MajorTest do
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    # Ensure CombSupervisor is running (needed for bee spawning during retry)
+    # Ensure CombSupervisor is running (needed for ghost spawning during retry)
     unless Process.whereis(GiTF.CombSupervisor) do
       DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.CombSupervisor)
     end
@@ -83,9 +83,9 @@ defmodule GiTF.MajorTest do
     test "returns current state map", %{gitf_root: gitf_root} do
       status = Major.status()
       assert status.status == :idle
-      assert status.active_bees == %{}
+      assert status.active_ghosts == %{}
       assert status.gitf_root == gitf_root
-      assert status.max_bees == 5
+      assert status.max_ghosts == 5
     end
   end
 
@@ -117,13 +117,13 @@ defmodule GiTF.MajorTest do
   end
 
   describe "handle_info/2 waggle handling" do
-    test "handles job_complete waggle by removing bee from active_bees" do
+    test "handles job_complete waggle by removing ghost from active_ghosts" do
       Major.start_session()
 
       # Simulate receiving a waggle message directly (plain map now)
       waggle = %{
         id: "wag-test1",
-        from: "bee-abc123",
+        from: "ghost-abc123",
         to: "major",
         subject: "job_complete",
         body: "Finished the task",
@@ -136,7 +136,7 @@ defmodule GiTF.MajorTest do
       Process.sleep(10)
 
       status = Major.status()
-      refute Map.has_key?(status.active_bees, "bee-abc123")
+      refute Map.has_key?(status.active_ghosts, "ghost-abc123")
     end
 
     test "handles job_failed waggle" do
@@ -144,7 +144,7 @@ defmodule GiTF.MajorTest do
 
       waggle = %{
         id: "wag-test2",
-        from: "bee-def456",
+        from: "ghost-def456",
         to: "major",
         subject: "job_failed",
         body: "Could not compile",
@@ -183,21 +183,21 @@ defmodule GiTF.MajorTest do
           comb_id: comb.id
         })
 
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "retry-test-bee", status: "starting", job_id: job.id})
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "retry-test-ghost", status: "starting", job_id: job.id})
 
       # Move job through states to failed
-      {:ok, _} = GiTF.Jobs.assign(job.id, bee.id)
+      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.fail(job.id)
 
       Major.start_session()
 
-      # Simulate the failed waggle -- retry will attempt to spawn a bee
+      # Simulate the failed waggle -- retry will attempt to spawn a ghost
       # which may fail (no worktree), but the retry count should still be tracked
       waggle = %{
         id: "wag-retry-1",
-        from: bee.id,
+        from: ghost.id,
         to: "major",
         subject: "job_failed",
         body: "Job failed",
@@ -212,7 +212,7 @@ defmodule GiTF.MajorTest do
     end
 
     test "updates quest status to completed on job_complete" do
-      # Create records: comb, quest, job (done), bee
+      # Create records: comb, quest, job (done), ghost
       {:ok, comb} =
         Store.insert(:combs, %{name: "quest-adv-comb-#{:erlang.unique_integer([:positive])}"})
 
@@ -229,11 +229,11 @@ defmodule GiTF.MajorTest do
           comb_id: comb.id
         })
 
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "adv-bee", status: "working", job_id: job.id})
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "adv-ghost", status: "working", job_id: job.id})
 
       # Move job to "done" state
-      {:ok, _} = GiTF.Jobs.assign(job.id, bee.id)
+      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.complete(job.id)
 
@@ -241,7 +241,7 @@ defmodule GiTF.MajorTest do
 
       waggle = %{
         id: "wag-adv-1",
-        from: bee.id,
+        from: ghost.id,
         to: "major",
         subject: "job_complete",
         body: "Done",
@@ -284,10 +284,10 @@ defmodule GiTF.MajorTest do
           comb_id: comb.id
         })
 
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "wag-bee", status: "working", job_id: job.id})
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "wag-ghost", status: "working", job_id: job.id})
 
-      {:ok, _} = GiTF.Jobs.assign(job.id, bee.id)
+      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.complete(job.id)
 
@@ -295,7 +295,7 @@ defmodule GiTF.MajorTest do
 
       waggle = %{
         id: "wag-complete-1",
-        from: bee.id,
+        from: ghost.id,
         to: "major",
         subject: "job_complete",
         body: "Done",
@@ -317,7 +317,7 @@ defmodule GiTF.MajorTest do
       end
     end
 
-    test "attempts to spawn bee for next pending job after completion" do
+    test "attempts to spawn ghost for next pending job after completion" do
       {:ok, comb} =
         Store.insert(:combs, %{name: "spawn-comb-#{:erlang.unique_integer([:positive])}"})
 
@@ -344,11 +344,11 @@ defmodule GiTF.MajorTest do
       # job_2 depends on job_1
       {:ok, _dep} = GiTF.Jobs.add_dependency(job_2.id, job_1.id)
 
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "spawn-bee", status: "working", job_id: job_1.id})
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "spawn-ghost", status: "working", job_id: job_1.id})
 
       # Complete job_1
-      {:ok, _} = GiTF.Jobs.assign(job_1.id, bee.id)
+      {:ok, _} = GiTF.Jobs.assign(job_1.id, ghost.id)
       {:ok, _} = GiTF.Jobs.start(job_1.id)
       {:ok, _} = GiTF.Jobs.complete(job_1.id)
 
@@ -356,7 +356,7 @@ defmodule GiTF.MajorTest do
 
       waggle = %{
         id: "wag-spawn-1",
-        from: bee.id,
+        from: ghost.id,
         to: "major",
         subject: "job_complete",
         body: "Done",
@@ -391,15 +391,15 @@ defmodule GiTF.MajorTest do
           comb_id: comb.id
         })
 
-      {:ok, bee} =
-        Store.insert(:bees, %{
-          name: "exhaust-bee",
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{
+          name: "exhaust-ghost",
           status: "working",
           job_id: job.id
         })
 
       # Move job to failed state
-      {:ok, _} = GiTF.Jobs.assign(job.id, bee.id)
+      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.fail(job.id)
 
@@ -412,7 +412,7 @@ defmodule GiTF.MajorTest do
 
       waggle = %{
         id: "wag-exhaust-1",
-        from: bee.id,
+        from: ghost.id,
         to: "major",
         subject: "validation_failed",
         body: "Failed again",
@@ -445,10 +445,10 @@ defmodule GiTF.MajorTest do
           comb_id: comb.id
         })
 
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "val-bee", status: "working", job_id: job.id})
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "val-ghost", status: "working", job_id: job.id})
 
-      {:ok, _} = GiTF.Jobs.assign(job.id, bee.id)
+      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.fail(job.id)
 
@@ -456,7 +456,7 @@ defmodule GiTF.MajorTest do
 
       waggle = %{
         id: "wag-val-1",
-        from: bee.id,
+        from: ghost.id,
         to: "major",
         subject: "validation_failed",
         body: "Tests did not pass",

@@ -2,7 +2,7 @@ defmodule GiTF.Triage do
   @moduledoc """
   Categorizes jobs by complexity and determines what pipeline they need.
 
-  Every job flows through triage before a bee is spawned. The triage result
+  Every job flows through triage before a ghost is spawned. The triage result
   determines whether the job needs scouting (read-only codebase analysis),
   drone verification, and which model tier to use.
 

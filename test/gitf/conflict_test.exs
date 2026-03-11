@@ -30,19 +30,19 @@ defmodule GiTF.ConflictTest do
         path: tmp_dir
       })
 
-    {:ok, bee} =
-      Store.insert(:bees, %{
-        name: "conflict-bee-#{:erlang.unique_integer([:positive])}",
+    {:ok, ghost} =
+      Store.insert(:ghosts, %{
+        name: "conflict-ghost-#{:erlang.unique_integer([:positive])}",
         status: "starting"
       })
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 
-    %{comb: comb, bee: bee, tmp_dir: tmp_dir}
+    %{comb: comb, ghost: ghost, tmp_dir: tmp_dir}
   end
 
   describe "check/1" do
-    test "returns clean when no conflicts exist", %{comb: comb, bee: bee, tmp_dir: tmp_dir} do
+    test "returns clean when no conflicts exist", %{comb: comb, ghost: ghost, tmp_dir: tmp_dir} do
       # Create a branch with non-conflicting changes
       System.cmd("git", ["checkout", "-b", "test-branch"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "new_file.txt"), "new content")
@@ -53,7 +53,7 @@ defmodule GiTF.ConflictTest do
       {:ok, cell} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           branch: "test-branch",
           worktree_path: tmp_dir,
           status: "active"
@@ -78,11 +78,11 @@ defmodule GiTF.ConflictTest do
       assert {:error, :cell_not_found} = Conflict.resolve("cel-nonexistent", :rebase)
     end
 
-    test "defer strategy marks cell for manual merge", %{comb: comb, bee: bee, tmp_dir: tmp_dir} do
+    test "defer strategy marks cell for manual merge", %{comb: comb, ghost: ghost, tmp_dir: tmp_dir} do
       {:ok, cell} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           branch: "test-branch",
           worktree_path: tmp_dir,
           status: "active"
@@ -95,7 +95,7 @@ defmodule GiTF.ConflictTest do
       assert updated_cell.needs_manual_merge == true
     end
 
-    test "rebase strategy on clean branch succeeds", %{comb: comb, bee: bee, tmp_dir: tmp_dir} do
+    test "rebase strategy on clean branch succeeds", %{comb: comb, ghost: ghost, tmp_dir: tmp_dir} do
       # Create a feature branch
       System.cmd("git", ["checkout", "-b", "feature-branch"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "feature.txt"), "feature content")
@@ -105,7 +105,7 @@ defmodule GiTF.ConflictTest do
       {:ok, cell} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           branch: "feature-branch",
           worktree_path: tmp_dir,
           status: "active"
@@ -130,13 +130,13 @@ defmodule GiTF.ConflictTest do
       System.cmd("git", ["commit", "-m", "add file_b"], cd: tmp_dir)
       System.cmd("git", ["checkout", "main"], cd: tmp_dir)
 
-      {:ok, bee_a} = Store.insert(:bees, %{name: "bee-a", status: "working"})
-      {:ok, bee_b} = Store.insert(:bees, %{name: "bee-b", status: "working"})
+      {:ok, bee_a} = Store.insert(:ghosts, %{name: "ghost-a", status: "working"})
+      {:ok, bee_b} = Store.insert(:ghosts, %{name: "ghost-b", status: "working"})
 
       {:ok, cell_a} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: bee_a.id,
+          ghost_id: bee_a.id,
           branch: "branch-a",
           worktree_path: tmp_dir,
           status: "active"
@@ -145,7 +145,7 @@ defmodule GiTF.ConflictTest do
       {:ok, cell_b} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: bee_b.id,
+          ghost_id: bee_b.id,
           branch: "branch-b",
           worktree_path: tmp_dir,
           status: "active"
@@ -168,13 +168,13 @@ defmodule GiTF.ConflictTest do
       System.cmd("git", ["commit", "-m", "modify readme d"], cd: tmp_dir)
       System.cmd("git", ["checkout", "main"], cd: tmp_dir)
 
-      {:ok, bee_c} = Store.insert(:bees, %{name: "bee-c", status: "working"})
-      {:ok, bee_d} = Store.insert(:bees, %{name: "bee-d", status: "working"})
+      {:ok, bee_c} = Store.insert(:ghosts, %{name: "ghost-c", status: "working"})
+      {:ok, bee_d} = Store.insert(:ghosts, %{name: "ghost-d", status: "working"})
 
       {:ok, cell_c} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: bee_c.id,
+          ghost_id: bee_c.id,
           branch: "branch-c",
           worktree_path: tmp_dir,
           status: "active"
@@ -183,7 +183,7 @@ defmodule GiTF.ConflictTest do
       {:ok, cell_d} =
         Store.insert(:cells, %{
           comb_id: comb.id,
-          bee_id: bee_d.id,
+          ghost_id: bee_d.id,
           branch: "branch-d",
           worktree_path: tmp_dir,
           status: "active"

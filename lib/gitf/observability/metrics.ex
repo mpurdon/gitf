@@ -79,9 +79,9 @@ defmodule GiTF.Observability.Metrics do
   @spec attach_handlers() :: :ok
   def attach_handlers do
     events = [
-      [:gitf, :bee, :spawned],
-      [:gitf, :bee, :completed],
-      [:gitf, :bee, :failed],
+      [:gitf, :ghost, :spawned],
+      [:gitf, :ghost, :completed],
+      [:gitf, :ghost, :failed],
       [:gitf, :job, :completed],
       [:gitf, :token, :consumed]
     ]
@@ -91,15 +91,15 @@ defmodule GiTF.Observability.Metrics do
   end
 
   @doc false
-  def handle_telemetry([:gitf, :bee, :spawned], _measurements, _meta, _config) do
+  def handle_telemetry([:gitf, :ghost, :spawned], _measurements, _meta, _config) do
     record(:bees_spawned, 1)
   end
 
-  def handle_telemetry([:gitf, :bee, :completed], %{duration_ms: ms}, _meta, _config) do
+  def handle_telemetry([:gitf, :ghost, :completed], %{duration_ms: ms}, _meta, _config) do
     record(:bee_duration_ms, ms)
   end
 
-  def handle_telemetry([:gitf, :bee, :failed], _measurements, _meta, _config) do
+  def handle_telemetry([:gitf, :ghost, :failed], _measurements, _meta, _config) do
     record(:bees_failed, 1)
   end
 
@@ -122,7 +122,7 @@ defmodule GiTF.Observability.Metrics do
       system: system_metrics(),
       quests: quest_metrics(),
       jobs: job_metrics(),
-      bees: bee_metrics(),
+      ghosts: bee_metrics(),
       quality: quality_metrics(),
       costs: cost_metrics()
     }
@@ -137,8 +137,8 @@ defmodule GiTF.Observability.Metrics do
       "gitf_quests_active #{metrics.quests.active}",
       "gitf_quests_completed #{metrics.quests.completed}",
       "gitf_quests_failed #{metrics.quests.failed}",
-      "gitf_bees_active #{metrics.bees.active}",
-      "gitf_bees_idle #{metrics.bees.idle}",
+      "gitf_bees_active #{metrics.ghosts.active}",
+      "gitf_bees_idle #{metrics.ghosts.idle}",
       "gitf_quality_score_avg #{metrics.quality.average}",
       "gitf_cost_total_usd #{metrics.costs.total}",
       "gitf_cost_trend #{trend(:cost_usd)}"
@@ -163,8 +163,8 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp system_metrics do
-    bees = Store.all(:bees)
-    workers = Enum.count(bees, &(Map.get(&1, :status) in ["working", "starting"]))
+    ghosts = Store.all(:ghosts)
+    workers = Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
 
     %{
       uptime: System.monotonic_time(:second),
@@ -197,13 +197,13 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp bee_metrics do
-    bees = Store.all(:bees)
+    ghosts = Store.all(:ghosts)
 
     %{
-      total: length(bees),
-      active: Enum.count(bees, &(Map.get(&1, :status) in ["working", "starting"])),
-      idle: Enum.count(bees, &(Map.get(&1, :status) == "idle")),
-      stopped: Enum.count(bees, &(Map.get(&1, :status) in ["stopped", "crashed"]))
+      total: length(ghosts),
+      active: Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"])),
+      idle: Enum.count(ghosts, &(Map.get(&1, :status) == "idle")),
+      stopped: Enum.count(ghosts, &(Map.get(&1, :status) in ["stopped", "crashed"]))
     }
   end
 

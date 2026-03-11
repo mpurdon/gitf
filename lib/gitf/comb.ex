@@ -127,7 +127,7 @@ defmodule GiTF.Comb do
   Renames a comb and updates all stored path references.
 
   If the comb directory exists on disk and its basename matches the old name,
-  the directory is also renamed and all cell/bee paths are updated.
+  the directory is also renamed and all cell/ghost paths are updated.
 
   Returns `{:ok, updated_comb}` or `{:error, reason}`.
   """
@@ -244,12 +244,12 @@ defmodule GiTF.Comb do
       Store.put(:cells, %{cell | worktree_path: updated_path})
     end)
 
-    Store.filter(:bees, fn b ->
+    Store.filter(:ghosts, fn b ->
       is_binary(b[:cell_path]) && String.starts_with?(b.cell_path, old_path)
     end)
-    |> Enum.each(fn bee ->
-      updated_path = String.replace_prefix(bee.cell_path, old_path, new_path)
-      Store.put(:bees, %{bee | cell_path: updated_path})
+    |> Enum.each(fn ghost ->
+      updated_path = String.replace_prefix(ghost.cell_path, old_path, new_path)
+      Store.put(:ghosts, %{ghost | cell_path: updated_path})
     end)
   end
 end

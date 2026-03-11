@@ -33,19 +33,19 @@ defmodule GiTF.MergeTest do
         comb_id: comb.id
       })
 
-    {:ok, bee} =
-      Store.insert(:bees, %{name: "merge-bee", status: "working", job_id: job.id})
+    {:ok, ghost} =
+      Store.insert(:ghosts, %{name: "merge-ghost", status: "working", job_id: job.id})
 
     {:ok, cell} =
       Store.insert(:cells, %{
-        bee_id: bee.id,
+        ghost_id: ghost.id,
         comb_id: comb.id,
         worktree_path: "/tmp/merge-worktree",
-        branch: "bee/#{bee.id}",
+        branch: "ghost/#{ghost.id}",
         status: "active"
       })
 
-    %{comb: comb, quest: quest, job: job, bee: bee, cell: cell}
+    %{comb: comb, quest: quest, job: job, ghost: ghost, cell: cell}
   end
 
   describe "merge_back/1 with manual strategy" do
@@ -66,10 +66,10 @@ defmodule GiTF.MergeTest do
       # Create a cell pointing to this comb
       {:ok, pr_cell} =
         Store.insert(:cells, %{
-          bee_id: ctx.bee.id,
+          ghost_id: ctx.ghost.id,
           comb_id: pr_comb.id,
           worktree_path: "/tmp/pr-worktree",
-          branch: "bee/pr-test",
+          branch: "ghost/pr-test",
           status: "active"
         })
 
@@ -105,10 +105,10 @@ defmodule GiTF.MergeTest do
 
       {:ok, auto_cell} =
         Store.insert(:cells, %{
-          bee_id: ctx.bee.id,
+          ghost_id: ctx.ghost.id,
           comb_id: auto_comb.id,
           worktree_path: "/tmp/nonexistent-worktree",
-          branch: "bee/auto-test",
+          branch: "ghost/auto-test",
           status: "active"
         })
 

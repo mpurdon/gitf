@@ -19,21 +19,21 @@ defmodule GiTF.VerificationTest do
       quest_id: quest.id,
       comb_id: comb.id
     })
-    {:ok, bee} = Store.insert(:bees, %{name: "test-bee", status: "stopped"})
+    {:ok, ghost} = Store.insert(:ghosts, %{name: "test-ghost", status: "stopped"})
     {:ok, cell} = Store.insert(:cells, %{
-      bee_id: bee.id,
+      ghost_id: ghost.id,
       comb_id: comb.id,
       worktree_path: "/tmp/test-cell",
       branch: "test-branch",
       status: "active"
     })
 
-    # Assign job to bee and complete it
-    {:ok, job} = Jobs.assign(job.id, bee.id)
+    # Assign job to ghost and complete it
+    {:ok, job} = Jobs.assign(job.id, ghost.id)
     {:ok, job} = Jobs.start(job.id)
     {:ok, job} = Jobs.complete(job.id)
 
-    %{job: job, comb: comb, cell: cell, bee: bee}
+    %{job: job, comb: comb, cell: cell, ghost: ghost}
   end
 
   test "get_verification_status returns pending for new job", %{job: job} do

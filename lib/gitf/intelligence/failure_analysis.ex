@@ -173,7 +173,7 @@ defmodule GiTF.Intelligence.FailureAnalysis do
         ["Resolve conflicts manually", "Rebase on latest", "Retry with fresh worktree"]
       
       :unknown ->
-        ["Review error logs", "Check bee status", "Retry with different model"]
+        ["Review error logs", "Check ghost status", "Retry with different model"]
     end
     
     # Add pattern-based suggestions

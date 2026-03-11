@@ -24,7 +24,7 @@ defmodule GiTF.DoctorTest do
       assert :database_ok in checks
       assert :settings_valid in checks
       assert :orphan_cells in checks
-      assert :stale_bees in checks
+      assert :stale_ghosts in checks
     end
   end
 
@@ -65,19 +65,19 @@ defmodule GiTF.DoctorTest do
     end
 
     test "reports warn when orphan cells exist" do
-      # Create a comb, a stopped bee, and an active cell for that bee
+      # Create a comb, a stopped ghost, and an active cell for that ghost
       {:ok, comb} =
         Store.insert(:combs, %{name: "orphan-test-comb-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "orphan-bee", status: "stopped"})
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "orphan-ghost", status: "stopped"})
 
       {:ok, _cell} =
         Store.insert(:cells, %{
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           comb_id: comb.id,
           worktree_path: "/tmp/fake-worktree",
-          branch: "bee/#{bee.id}",
+          branch: "ghost/#{ghost.id}",
           status: "active"
         })
 
@@ -89,22 +89,22 @@ defmodule GiTF.DoctorTest do
     end
   end
 
-  describe "check/1 - stale_bees" do
-    test "reports ok when no stale bees exist" do
-      result = Doctor.check(:stale_bees)
-      assert result.name == :stale_bees
+  describe "check/1 - stale_ghosts" do
+    test "reports ok when no stale ghosts exist" do
+      result = Doctor.check(:stale_ghosts)
+      assert result.name == :stale_ghosts
       assert result.status == :ok
     end
 
-    test "reports warn when stale bees exist" do
+    test "reports warn when stale ghosts exist" do
       {:ok, _bee} =
-        Store.insert(:bees, %{name: "stale-bee", status: "starting", pid: nil})
+        Store.insert(:ghosts, %{name: "stale-ghost", status: "starting", pid: nil})
 
-      result = Doctor.check(:stale_bees)
-      assert result.name == :stale_bees
+      result = Doctor.check(:stale_ghosts)
+      assert result.name == :stale_ghosts
       assert result.status == :warn
       assert result.fixable == true
-      assert result.message =~ "stale bee"
+      assert result.message =~ "stale ghost"
     end
   end
 
@@ -113,15 +113,15 @@ defmodule GiTF.DoctorTest do
       {:ok, comb} =
         Store.insert(:combs, %{name: "fix-orphan-comb-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "fix-orphan-bee", status: "crashed"})
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "fix-orphan-ghost", status: "crashed"})
 
       {:ok, _cell} =
         Store.insert(:cells, %{
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           comb_id: comb.id,
           worktree_path: "/tmp/fake-fix-worktree",
-          branch: "bee/#{bee.id}",
+          branch: "ghost/#{ghost.id}",
           status: "active"
         })
 
@@ -132,18 +132,18 @@ defmodule GiTF.DoctorTest do
     end
   end
 
-  describe "fix/1 - stale_bees" do
-    test "marks stale bees as crashed" do
-      {:ok, bee} =
-        Store.insert(:bees, %{name: "fix-stale-bee", status: "working", pid: nil})
+  describe "fix/1 - stale_ghosts" do
+    test "marks stale ghosts as crashed" do
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{name: "fix-stale-ghost", status: "working", pid: nil})
 
-      result = Doctor.fix(:stale_bees)
-      assert result.name == :stale_bees
+      result = Doctor.fix(:stale_ghosts)
+      assert result.name == :stale_ghosts
       assert result.status == :ok
       assert result.message =~ "Marked"
 
-      # Verify the bee was updated
-      updated = Store.get(:bees, bee.id)
+      # Verify the ghost was updated
+      updated = Store.get(:ghosts, ghost.id)
       assert updated.status == "crashed"
     end
   end
@@ -271,11 +271,11 @@ defmodule GiTF.DoctorTest do
   describe "run_all/1 with fix: true" do
     test "auto-fixes fixable issues" do
       {:ok, _bee} =
-        Store.insert(:bees, %{name: "autofix-bee", status: "starting", pid: nil})
+        Store.insert(:ghosts, %{name: "autofix-ghost", status: "starting", pid: nil})
 
       results = Doctor.run_all(fix: true)
 
-      stale_result = Enum.find(results, &(&1.name == :stale_bees))
+      stale_result = Enum.find(results, &(&1.name == :stale_ghosts))
       assert stale_result.status == :ok
     end
   end

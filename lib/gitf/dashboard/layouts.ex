@@ -147,7 +147,7 @@ defmodule GiTF.Dashboard.Layouts do
           .waggle-subject { font-weight: 500; color: #c9d1d9; }
           .waggle-unread .waggle-subject { color: #f0f6fc; font-weight: 600; }
 
-          /* -- Pulse animation for working bees ------------------------------ */
+          /* -- Pulse animation for working ghosts ------------------------------ */
           @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
           .pulse { animation: pulse 2s ease-in-out infinite; }
 
@@ -198,7 +198,7 @@ defmodule GiTF.Dashboard.Layouts do
       <div class="nav-links">
         <a href="/" class={if @current_path == "/", do: "active"}>Overview</a>
         <a href="/quests" class={if @current_path == "/quests", do: "active"}>Quests</a>
-        <a href="/bees" class={if @current_path == "/bees", do: "active"}>Bees</a>
+        <a href="/ghosts" class={if @current_path == "/ghosts", do: "active"}>Bees</a>
         <a href="/costs" class={if @current_path == "/costs", do: "active"}>Costs</a>
         <a href="/waggles" class={if @current_path == "/waggles", do: "active"}>Waggles</a>
       </div>

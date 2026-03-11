@@ -4,15 +4,15 @@ defmodule GiTF.Telemetry do
 
   Events emitted throughout the system:
 
-    [:gitf, :bee, :spawned]       - measurements: %{}, metadata: %{bee_id, job_id, comb_id}
-    [:gitf, :bee, :completed]     - measurements: %{duration_ms}, metadata: %{bee_id, job_id}
-    [:gitf, :bee, :failed]        - measurements: %{duration_ms}, metadata: %{bee_id, error}
+    [:gitf, :ghost, :spawned]       - measurements: %{}, metadata: %{ghost_id, job_id, comb_id}
+    [:gitf, :ghost, :completed]     - measurements: %{duration_ms}, metadata: %{ghost_id, job_id}
+    [:gitf, :ghost, :failed]        - measurements: %{duration_ms}, metadata: %{ghost_id, error}
     [:gitf, :job, :started]       - measurements: %{}, metadata: %{job_id, quest_id}
     [:gitf, :job, :completed]     - measurements: %{}, metadata: %{job_id, quest_id}
     [:gitf, :quest, :created]     - measurements: %{}, metadata: %{quest_id, name}
     [:gitf, :quest, :completed]   - measurements: %{}, metadata: %{quest_id, name}
     [:gitf, :waggle, :sent]       - measurements: %{}, metadata: %{from, to, subject}
-    [:gitf, :token, :consumed]    - measurements: %{input, output, cost}, metadata: %{model, bee_id}
+    [:gitf, :token, :consumed]    - measurements: %{input, output, cost}, metadata: %{model, ghost_id}
     [:gitf, :plugin, :loaded]     - measurements: %{}, metadata: %{type, name, module}
     [:gitf, :plugin, :unloaded]   - measurements: %{}, metadata: %{type, name}
 
@@ -27,10 +27,10 @@ defmodule GiTF.Telemetry do
   require Logger
 
   @events [
-    [:gitf, :bee, :spawned],
-    [:gitf, :bee, :completed],
-    [:gitf, :bee, :failed],
-    [:gitf, :bee, :provision_failed],
+    [:gitf, :ghost, :spawned],
+    [:gitf, :ghost, :completed],
+    [:gitf, :ghost, :failed],
+    [:gitf, :ghost, :provision_failed],
     [:gitf, :job, :started],
     [:gitf, :job, :completed],
     [:gitf, :quest, :created],
@@ -96,18 +96,18 @@ defmodule GiTF.Telemetry do
     end
   end
 
-  defp map_event([:gitf, :bee, :spawned], measurements, meta) do
-    {:bee_spawned, Map.get(meta, :bee_id, "unknown"), measurements,
+  defp map_event([:gitf, :ghost, :spawned], measurements, meta) do
+    {:bee_spawned, Map.get(meta, :ghost_id, "unknown"), measurements,
      %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
   end
 
-  defp map_event([:gitf, :bee, :completed], measurements, meta) do
-    {:bee_completed, Map.get(meta, :bee_id, "unknown"), measurements,
+  defp map_event([:gitf, :ghost, :completed], measurements, meta) do
+    {:bee_completed, Map.get(meta, :ghost_id, "unknown"), measurements,
      %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
   end
 
-  defp map_event([:gitf, :bee, :failed], measurements, meta) do
-    {:bee_failed, Map.get(meta, :bee_id, "unknown"),
+  defp map_event([:gitf, :ghost, :failed], measurements, meta) do
+    {:bee_failed, Map.get(meta, :ghost_id, "unknown"),
      Map.merge(measurements, %{error: meta[:error]}),
      %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
   end

@@ -32,7 +32,7 @@ defmodule GiTF.Doctor do
     :config_valid,
     :settings_valid,
     :orphan_cells,
-    :stale_bees,
+    :stale_ghosts,
     :major_workspace,
     :disk_space
   ]
@@ -73,7 +73,7 @@ defmodule GiTF.Doctor do
   def check(:config_valid), do: check_config_valid()
   def check(:settings_valid), do: check_settings_valid()
   def check(:orphan_cells), do: check_orphan_cells()
-  def check(:stale_bees), do: check_stale_bees()
+  def check(:stale_ghosts), do: check_stale_ghosts()
   def check(:major_workspace), do: check_major_workspace()
   def check(:disk_space), do: check_disk_space()
 
@@ -85,7 +85,7 @@ defmodule GiTF.Doctor do
   """
   @spec fix(atom()) :: check_result()
   def fix(:orphan_cells), do: fix_orphan_cells()
-  def fix(:stale_bees), do: fix_stale_bees()
+  def fix(:stale_ghosts), do: fix_stale_ghosts()
   def fix(:major_workspace), do: fix_major_workspace()
   def fix(:config_valid), do: fix_config_valid()
   def fix(:settings_valid), do: fix_settings_valid()
@@ -181,7 +181,7 @@ defmodule GiTF.Doctor do
   end
 
   defp check_database_ok do
-    Store.count(:bees)
+    Store.count(:ghosts)
     result(:database_ok, :ok, "Store is accessible")
   rescue
     e ->
@@ -259,15 +259,15 @@ defmodule GiTF.Doctor do
     end
   end
 
-  defp check_stale_bees do
-    count = count_stale_bees()
+  defp check_stale_ghosts do
+    count = count_stale_ghosts()
 
     case count do
       0 ->
-        result(:stale_bees, :ok, "No stale bees", false)
+        result(:stale_ghosts, :ok, "No stale ghosts", false)
 
       n ->
-        result(:stale_bees, :warn, "#{n} stale bee(s) found", true)
+        result(:stale_ghosts, :warn, "#{n} stale ghost(s) found", true)
     end
   end
 
@@ -323,22 +323,22 @@ defmodule GiTF.Doctor do
     end
   end
 
-  defp fix_stale_bees do
+  defp fix_stale_ghosts do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     count =
       Store.update_matching(
-        :bees,
+        :ghosts,
         fn b -> b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid)) end,
         fn b -> %{b | status: "crashed", updated_at: now} end
       )
 
     case count do
       0 ->
-        result(:stale_bees, :ok, "No stale bees to fix", false)
+        result(:stale_ghosts, :ok, "No stale ghosts to fix", false)
 
       n ->
-        result(:stale_bees, :ok, "Marked #{n} stale bee(s) as crashed", false)
+        result(:stale_ghosts, :ok, "Marked #{n} stale ghost(s) as crashed", false)
     end
   end
 
@@ -407,11 +407,11 @@ defmodule GiTF.Doctor do
 
         regenerated =
           Enum.reduce(active_cells, regenerated, fn cell, acc ->
-            bee_id = cell.bee_id
+            ghost_id = cell.ghost_id
             worktree = cell.worktree_path
 
-            if bee_id && worktree && File.dir?(worktree) do
-              case GiTF.Runtime.Settings.generate(bee_id, path, worktree) do
+            if ghost_id && worktree && File.dir?(worktree) do
+              case GiTF.Runtime.Settings.generate(ghost_id, path, worktree) do
                 :ok -> acc + 1
                 _ -> acc
               end
@@ -443,17 +443,17 @@ defmodule GiTF.Doctor do
     active_cells = Store.filter(:cells, fn c -> c.status == "active" end)
 
     Enum.count(active_cells, fn cell ->
-      case Store.get(:bees, cell.bee_id) do
+      case Store.get(:ghosts, cell.ghost_id) do
         nil -> true
-        bee -> bee.status in ["stopped", "crashed"]
+        ghost -> ghost.status in ["stopped", "crashed"]
       end
     end)
   rescue
     _ -> 0
   end
 
-  defp count_stale_bees do
-    Store.count(:bees, fn b ->
+  defp count_stale_ghosts do
+    Store.count(:ghosts, fn b ->
       b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid))
     end)
   rescue

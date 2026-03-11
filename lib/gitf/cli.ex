@@ -260,7 +260,7 @@ defmodule GiTF.CLI do
 
   @handlers [
     GiTF.CLI.QuestHandler,
-    GiTF.CLI.BeeHandler
+    GiTF.CLI.GhostHandler
   ]
 
   defp handler_helpers do
@@ -844,7 +844,7 @@ defmodule GiTF.CLI do
         Format.info("System Status:")
         IO.puts("  Health: #{status.health.status}")
         IO.puts("  Quests: #{status.metrics.quests.active} active, #{status.metrics.quests.completed} completed")
-        IO.puts("  Bees: #{status.metrics.bees.active} active")
+        IO.puts("  Bees: #{status.metrics.ghosts.active} active")
         IO.puts("  Quality: #{Float.round(status.metrics.quality.average, 1)}")
         IO.puts("  Cost: $#{Float.round(status.metrics.costs.total, 2)}")
         
@@ -1260,14 +1260,14 @@ defmodule GiTF.CLI do
   defp dispatch([:cell, :list], _result) do
     case GiTF.Cell.list(status: "active") do
       [] ->
-        Format.info("No active cells. Use `gitf shell list` after spawning a bee.")
+        Format.info("No active cells. Use `gitf shell list` after spawning a ghost.")
 
       cells ->
         headers = ["ID", "Bee ID", "Comb ID", "Branch", "Path"]
 
         rows =
           Enum.map(cells, fn c ->
-            [c.id, c.bee_id, c.comb_id, c.branch, c.worktree_path]
+            [c.id, c.ghost_id, c.comb_id, c.branch, c.worktree_path]
           end)
 
         Format.table(headers, rows)
@@ -1285,22 +1285,22 @@ defmodule GiTF.CLI do
   end
 
   defp dispatch([:prime], result) do
-    bee_id = result_get(result, :options, :bee)
+    ghost_id = result_get(result, :options, :ghost)
     queen? = result_get(result, :flags, :major) || false
 
     if GiTF.Client.remote?() do
-      # In remote mode, prime is a no-op — the bee works without local context injection
+      # In remote mode, prime is a no-op — the ghost works without local context injection
       :ok
     else
       cond do
         queen? ->
           do_prime_major()
 
-        is_binary(bee_id) ->
-          do_prime_bee(bee_id)
+        is_binary(ghost_id) ->
+          do_prime_bee(ghost_id)
 
         true ->
-          Format.error("Specify --queen or --bee <id>")
+          Format.error("Specify --queen or --ghost <id>")
       end
     end
   end
@@ -1341,26 +1341,26 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:bee, :list], _result) do
-    bees =
+  defp dispatch([:ghost, :list], _result) do
+    ghosts =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_bees() do
           {:ok, b} -> b
           {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
         end
       else
-        GiTF.Bees.list()
+        GiTF.Ghosts.list()
       end
 
-    case bees do
+    case ghosts do
       [] ->
-        Format.info("No bees. Bees are spawned when the Major assigns jobs.")
+        Format.info("No ghosts. Bees are spawned when the Major assigns jobs.")
 
-      bees ->
+      ghosts ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]
 
         rows =
-          Enum.map(bees, fn b ->
+          Enum.map(ghosts, fn b ->
             context_pct =
               case b[:context_percentage] do
                 nil -> "-"
@@ -1375,7 +1375,7 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:bee, :spawn], result) do
+  defp dispatch([:ghost, :spawn], result) do
     job_id = result_get(result, :options, :job)
     name = result_get(result, :options, :name)
 
@@ -1385,12 +1385,12 @@ defmodule GiTF.CLI do
              {:ok, comb} <- GiTF.Comb.get(comb_id) do
           opts = if name, do: [name: name], else: []
 
-          case GiTF.Bees.spawn_detached(job_id, comb.id, gitf_root, opts) do
-            {:ok, bee} ->
-              Format.success("Bee \"#{bee.name}\" spawned (#{bee.id})")
+          case GiTF.Ghosts.spawn_detached(job_id, comb.id, gitf_root, opts) do
+            {:ok, ghost} ->
+              Format.success("Bee \"#{ghost.name}\" spawned (#{ghost.id})")
 
             {:error, reason} ->
-              Format.error("Failed to spawn bee: #{inspect(reason)}")
+              Format.error("Failed to spawn ghost: #{inspect(reason)}")
           end
         else
           {:error, :not_in_gitf} ->
@@ -1408,91 +1408,91 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:bee, :stop], result) do
-    bee_id = result_get(result, :options, :id)
+  defp dispatch([:ghost, :stop], result) do
+    ghost_id = result_get(result, :options, :id)
 
     stop_result =
       if GiTF.Client.remote?(),
-        do: GiTF.Client.stop_bee(bee_id),
-        else: GiTF.Bees.stop(bee_id)
+        do: GiTF.Client.stop_ghost(ghost_id),
+        else: GiTF.Ghosts.stop(ghost_id)
 
     case stop_result do
       :ok ->
-        Format.success("Bee #{bee_id} stopped.")
+        Format.success("Bee #{ghost_id} stopped.")
 
       {:error, :not_found} ->
-        show_not_found_error(:bee, bee_id)
+        show_not_found_error(:ghost, ghost_id)
     end
   end
 
-  defp dispatch([:bee, :complete], result) do
-    bee_id = result_get(result, :args, :bee_id)
+  defp dispatch([:ghost, :complete], result) do
+    ghost_id = result_get(result, :args, :ghost_id)
 
     if GiTF.Client.remote?() do
-      case GiTF.Client.complete_bee(bee_id) do
-        :ok -> Format.success("Bee #{bee_id} marked as completed.")
+      case GiTF.Client.complete_bee(ghost_id) do
+        :ok -> Format.success("Bee #{ghost_id} marked as completed.")
         {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
       end
     else
-      case GiTF.Bees.get(bee_id) do
-        {:ok, bee} ->
-          GiTF.Store.put(:bees, %{bee | status: "stopped"})
+      case GiTF.Ghosts.get(ghost_id) do
+        {:ok, ghost} ->
+          GiTF.Store.put(:ghosts, %{ghost | status: "stopped"})
 
-          if bee.job_id do
-            GiTF.Jobs.complete(bee.job_id)
-            GiTF.Jobs.unblock_dependents(bee.job_id)
+          if ghost.job_id do
+            GiTF.Jobs.complete(ghost.job_id)
+            GiTF.Jobs.unblock_dependents(ghost.job_id)
 
             GiTF.Waggle.send(
-              bee_id,
+              ghost_id,
               "major",
               "job_complete",
-              "Job #{bee.job_id} completed successfully"
+              "Job #{ghost.job_id} completed successfully"
             )
           end
 
-          Format.success("Bee #{bee_id} marked as completed.")
+          Format.success("Bee #{ghost_id} marked as completed.")
 
         {:error, _} ->
-          show_not_found_error(:bee, bee_id)
+          show_not_found_error(:ghost, ghost_id)
       end
     end
   end
 
-  defp dispatch([:bee, :fail], result) do
-    bee_id = result_get(result, :args, :bee_id)
+  defp dispatch([:ghost, :fail], result) do
+    ghost_id = result_get(result, :args, :ghost_id)
     reason = result_get(result, :options, :reason) || "unknown"
 
     if GiTF.Client.remote?() do
-      case GiTF.Client.fail_bee(bee_id, reason) do
-        :ok -> Format.success("Bee #{bee_id} marked as failed: #{reason}")
+      case GiTF.Client.fail_bee(ghost_id, reason) do
+        :ok -> Format.success("Bee #{ghost_id} marked as failed: #{reason}")
         {:error, err} -> Format.error("Failed: #{inspect(err)}")
       end
     else
-      case GiTF.Bees.get(bee_id) do
-        {:ok, bee} ->
-          GiTF.Store.put(:bees, %{bee | status: "crashed"})
+      case GiTF.Ghosts.get(ghost_id) do
+        {:ok, ghost} ->
+          GiTF.Store.put(:ghosts, %{ghost | status: "crashed"})
 
-          if bee.job_id do
-            GiTF.Jobs.fail(bee.job_id)
-            GiTF.Waggle.send(bee_id, "major", "job_failed", "Job #{bee.job_id} failed: #{reason}")
+          if ghost.job_id do
+            GiTF.Jobs.fail(ghost.job_id)
+            GiTF.Waggle.send(ghost_id, "major", "job_failed", "Job #{ghost.job_id} failed: #{reason}")
           end
 
-          Format.success("Bee #{bee_id} marked as failed: #{reason}")
+          Format.success("Bee #{ghost_id} marked as failed: #{reason}")
 
         {:error, _} ->
-          show_not_found_error(:bee, bee_id)
+          show_not_found_error(:ghost, ghost_id)
       end
     end
   end
 
-  defp dispatch([:bee, :revive], result) do
-    dead_bee_id = result_get(result, :args, :bee_id)
+  defp dispatch([:ghost, :revive], result) do
+    dead_ghost_id = result_get(result, :args, :ghost_id)
 
     with {:ok, gitf_root} <- GiTF.gitf_dir() do
-      case GiTF.Bees.revive(dead_bee_id, gitf_root) do
-        {:ok, bee} ->
+      case GiTF.Ghosts.revive(dead_ghost_id, gitf_root) do
+        {:ok, ghost} ->
           Format.success(
-            "Revived into bee \"#{bee.name}\" (#{bee.id}) using #{dead_bee_id}'s worktree"
+            "Revived into ghost \"#{ghost.name}\" (#{ghost.id}) using #{dead_ghost_id}'s worktree"
           )
 
         {:error, reason} ->
@@ -1504,12 +1504,12 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:bee, :context], result) do
-    bee_id = result_get(result, :args, :bee_id)
+  defp dispatch([:ghost, :context], result) do
+    ghost_id = result_get(result, :args, :ghost_id)
 
-    case GiTF.Runtime.ContextMonitor.get_usage_stats(bee_id) do
+    case GiTF.Runtime.ContextMonitor.get_usage_stats(ghost_id) do
       {:ok, stats} ->
-        IO.puts("Bee: #{bee_id}")
+        IO.puts("Bee: #{ghost_id}")
         IO.puts("Context Usage:")
         IO.puts("  Tokens used:  #{stats.tokens_used}")
         IO.puts("  Tokens limit: #{stats.tokens_limit || "unknown"}")
@@ -1518,11 +1518,11 @@ defmodule GiTF.CLI do
         IO.puts("  Needs handoff: #{stats.needs_handoff}")
 
         if stats.needs_handoff do
-          Format.error("\n⚠️  This bee needs a handoff - context usage is critical!")
+          Format.error("\n⚠️  This ghost needs a handoff - context usage is critical!")
         end
 
       {:error, :not_found} ->
-        show_not_found_error(:bee, bee_id)
+        show_not_found_error(:ghost, ghost_id)
     end
   end
 
@@ -1553,13 +1553,13 @@ defmodule GiTF.CLI do
 
     if GiTF.Client.remote?() do
       case GiTF.Client.quest_merge(id) do
-        {:ok, data} -> Format.success("All bee branches merged into #{data[:branch] || "quest branch"}")
+        {:ok, data} -> Format.success("All ghost branches merged into #{data[:branch] || "quest branch"}")
         {:error, reason} -> Format.error("Quest merge failed: #{format_error(reason)}")
       end
     else
       case GiTF.Merge.merge_quest(id) do
         {:ok, branch} ->
-          Format.success("All bee branches merged into #{branch}")
+          Format.success("All ghost branches merged into #{branch}")
 
         {:error, :not_found} ->
           show_not_found_error(:quest, id)
@@ -1747,7 +1747,7 @@ defmodule GiTF.CLI do
 
             rows =
               Enum.map(jobs, fn j ->
-                [j.id, j.title, j.status, j[:bee_id] || "-"]
+                [j.id, j.title, j.status, j[:ghost_id] || "-"]
               end)
 
             Format.table(headers, rows)
@@ -1778,7 +1778,7 @@ defmodule GiTF.CLI do
 
         rows =
           Enum.map(jobs, fn j ->
-            [j.id, j.title, j.status, j[:quest_id], j[:bee_id] || "-"]
+            [j.id, j.title, j.status, j[:quest_id], j[:ghost_id] || "-"]
           end)
 
         Format.table(headers, rows)
@@ -1800,7 +1800,7 @@ defmodule GiTF.CLI do
         IO.puts("Status:      #{job.status}")
         IO.puts("Quest ID:    #{job[:quest_id]}")
         IO.puts("Comb ID:     #{job[:comb_id]}")
-        IO.puts("Bee ID:      #{job[:bee_id] || "-"}")
+        IO.puts("Bee ID:      #{job[:ghost_id] || "-"}")
         IO.puts("Created:     #{job[:inserted_at]}")
         IO.puts("")
 
@@ -1925,14 +1925,14 @@ defmodule GiTF.CLI do
 
     by_bee = summary[:by_bee] || %{}
     if map_size(by_bee) > 0 do
-      IO.puts("By bee:")
+      IO.puts("By ghost:")
       headers = ["Bee ID", "Cost", "Input Tokens", "Output Tokens"]
 
       rows =
-        Enum.map(by_bee, fn {bee_id, data} ->
+        Enum.map(by_bee, fn {ghost_id, data} ->
           cost = (data[:cost] || 0.0) / 1
           [
-            bee_id,
+            ghost_id,
             "$#{:erlang.float_to_binary(cost, decimals: 4)}",
             "#{data[:input_tokens] || 0}",
             "#{data[:output_tokens] || 0}"
@@ -1945,17 +1945,17 @@ defmodule GiTF.CLI do
 
   defp dispatch([:costs, :record], result) do
     if GiTF.Client.remote?() do
-      bee_id = result_get(result, :options, :bee)
+      ghost_id = result_get(result, :options, :ghost)
       input = result_get(result, :options, :input)
       output = result_get(result, :options, :output)
       model = result_get(result, :options, :model)
 
-      if is_nil(bee_id) or is_nil(input) or is_nil(output) do
-        Format.error("--bee, --input, and --output are required (or use --queen)")
+      if is_nil(ghost_id) or is_nil(input) or is_nil(output) do
+        Format.error("--ghost, --input, and --output are required (or use --queen)")
       else
         attrs = %{input_tokens: input, output_tokens: output, model: model}
 
-        case GiTF.Client.record_cost(bee_id, attrs) do
+        case GiTF.Client.record_cost(ghost_id, attrs) do
           {:ok, cost} ->
             Format.success("Cost recorded: $#{cost[:cost_usd]} (#{cost[:id]})")
 
@@ -1969,16 +1969,16 @@ defmodule GiTF.CLI do
       if queen? do
         record_major_costs()
       else
-        bee_id = result_get(result, :options, :bee)
+        ghost_id = result_get(result, :options, :ghost)
         input = result_get(result, :options, :input)
         output = result_get(result, :options, :output)
         model = result_get(result, :options, :model)
 
-        if is_nil(bee_id) or is_nil(input) or is_nil(output) do
-          Format.error("--bee, --input, and --output are required (or use --queen)")
+        if is_nil(ghost_id) or is_nil(input) or is_nil(output) do
+          Format.error("--ghost, --input, and --output are required (or use --queen)")
         else
           attrs = %{input_tokens: input, output_tokens: output, model: model}
-          {:ok, cost} = GiTF.Costs.record(bee_id, attrs)
+          {:ok, cost} = GiTF.Costs.record(ghost_id, attrs)
 
           Format.success(
             "Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
@@ -2019,14 +2019,14 @@ defmodule GiTF.CLI do
   end
 
   defp dispatch([:handoff, :create], result) do
-    bee_id = result_get(result, :options, :bee)
+    ghost_id = result_get(result, :options, :ghost)
 
-    case GiTF.Handoff.create(bee_id) do
+    case GiTF.Handoff.create(ghost_id) do
       {:ok, waggle} ->
-        Format.success("Handoff created for #{bee_id} (waggle #{waggle.id})")
+        Format.success("Handoff created for #{ghost_id} (waggle #{waggle.id})")
 
       {:error, :bee_not_found} ->
-        show_not_found_error(:bee, bee_id)
+        show_not_found_error(:ghost, ghost_id)
 
       {:error, reason} ->
         Format.error("Handoff failed: #{inspect(reason)}")
@@ -2034,9 +2034,9 @@ defmodule GiTF.CLI do
   end
 
   defp dispatch([:handoff, :show], result) do
-    bee_id = result_get(result, :options, :bee)
+    ghost_id = result_get(result, :options, :ghost)
 
-    case GiTF.Handoff.detect_handoff(bee_id) do
+    case GiTF.Handoff.detect_handoff(ghost_id) do
       {:ok, waggle} ->
         IO.puts("Handoff waggle: #{waggle.id}")
         IO.puts("Created: #{waggle.inserted_at}")
@@ -2044,7 +2044,7 @@ defmodule GiTF.CLI do
         IO.puts(waggle.body || "(empty)")
 
       {:error, :no_handoff} ->
-        Format.info("No handoff found for #{bee_id}")
+        Format.info("No handoff found for #{ghost_id}")
     end
   end
 
@@ -2183,23 +2183,23 @@ defmodule GiTF.CLI do
 
   defp dispatch([:watch], _result) do
     GiTF.Progress.init()
-    Format.info("Watching bee progress... (Ctrl+C to stop)")
+    Format.info("Watching ghost progress... (Ctrl+C to stop)")
 
     Stream.repeatedly(fn ->
       entries = GiTF.Progress.all()
 
       IO.write(IO.ANSI.clear() <> IO.ANSI.home())
-      IO.puts("GiTF Progress (#{length(entries)} active bees)")
+      IO.puts("GiTF Progress (#{length(entries)} active ghosts)")
       IO.puts(String.duplicate("-", 60))
 
       if entries == [] do
-        IO.puts("No active bees.")
+        IO.puts("No active ghosts.")
       else
         Enum.each(entries, fn entry ->
-          bee = entry[:bee_id] || "?"
+          ghost = entry[:ghost_id] || "?"
           tool = entry[:tool] || "-"
           msg = entry[:message] || ""
-          IO.puts("#{bee}  #{tool}  #{String.slice(msg, 0, 50)}")
+          IO.puts("#{ghost}  #{tool}  #{String.slice(msg, 0, 50)}")
         end)
       end
 
@@ -2211,13 +2211,13 @@ defmodule GiTF.CLI do
   # -- Phase 4: Conflict check ------------------------------------------------
 
   defp dispatch([:conflict, :check], result) do
-    bee_id = result_get(result, :options, :bee)
+    ghost_id = result_get(result, :options, :ghost)
 
-    if bee_id do
-      case GiTF.Bees.get(bee_id) do
-        {:ok, bee} ->
+    if ghost_id do
+      case GiTF.Ghosts.get(ghost_id) do
+        {:ok, ghost} ->
           cell =
-            GiTF.Store.find_one(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
+            GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
 
           if cell do
             case GiTF.Conflict.check(cell.id) do
@@ -2229,11 +2229,11 @@ defmodule GiTF.CLI do
                 Enum.each(files, fn f -> IO.puts("  #{f}") end)
             end
           else
-            Format.info("No active cell for bee #{bee_id}")
+            Format.info("No active cell for ghost #{ghost_id}")
           end
 
         {:error, :not_found} ->
-          show_not_found_error(:bee, bee_id)
+          show_not_found_error(:ghost, ghost_id)
       end
     else
       results = GiTF.Conflict.check_all_active()
@@ -2255,16 +2255,16 @@ defmodule GiTF.CLI do
   # -- Phase 5: Validate ------------------------------------------------------
 
   defp dispatch([:validate], result) do
-    bee_id = result_get(result, :options, :bee)
+    ghost_id = result_get(result, :options, :ghost)
 
-    with {:ok, bee} <- GiTF.Bees.get(bee_id),
-         {:ok, job} <- GiTF.Jobs.get(bee.job_id) do
-      cell = GiTF.Store.find_one(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
+    with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
+         {:ok, job} <- GiTF.Jobs.get(ghost.job_id) do
+      cell = GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
 
       if cell do
-        Format.info("Running validation for bee #{bee_id}...")
+        Format.info("Running validation for ghost #{ghost_id}...")
 
-        case GiTF.Validator.validate(bee_id, job, cell.id) do
+        case GiTF.Validator.validate(ghost_id, job, cell.id) do
           {:ok, :pass} ->
             Format.success("Validation passed.")
 
@@ -2280,10 +2280,10 @@ defmodule GiTF.CLI do
             end
         end
       else
-        Format.info("No active cell for bee #{bee_id}")
+        Format.info("No active cell for ghost #{ghost_id}")
       end
     else
-      {:error, :not_found} -> Format.error("Bee or job not found: #{bee_id}")
+      {:error, :not_found} -> Format.error("Bee or job not found: #{ghost_id}")
       {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
     end
   end
@@ -2291,16 +2291,16 @@ defmodule GiTF.CLI do
   # -- Phase 6: GitHub ---------------------------------------------------------
 
   defp dispatch([:github, :pr], result) do
-    bee_id = result_get(result, :options, :bee)
+    ghost_id = result_get(result, :options, :ghost)
 
-    with {:ok, bee} <- GiTF.Bees.get(bee_id),
-         {:ok, job} <- GiTF.Jobs.get(bee.job_id) do
-      cell = GiTF.Store.find_one(:cells, fn c -> c.bee_id == bee.id end)
+    with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
+         {:ok, job} <- GiTF.Jobs.get(ghost.job_id) do
+      cell = GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id end)
       comb = cell && GiTF.Store.get(:combs, cell.comb_id)
 
       cond do
         is_nil(cell) ->
-          Format.error("No cell found for bee #{bee_id}")
+          Format.error("No cell found for ghost #{ghost_id}")
 
         is_nil(comb) ->
           show_not_found_error(:comb, "unknown")
@@ -2317,7 +2317,7 @@ defmodule GiTF.CLI do
           end
       end
     else
-      {:error, :not_found} -> Format.error("Bee or job not found: #{bee_id}")
+      {:error, :not_found} -> Format.error("Bee or job not found: #{ghost_id}")
       {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
     end
   end
@@ -2563,8 +2563,8 @@ defmodule GiTF.CLI do
   def format_error(reason), do: inspect(reason)
 
   # Uses CLI.Errors for rich, contextual not-found messages with suggestions.
-  defp show_not_found_error(:bee, id),
-    do: IO.puts(GiTF.CLI.Errors.format_error(:bee_not_found, %{bee_id: id}))
+  defp show_not_found_error(:ghost, id),
+    do: IO.puts(GiTF.CLI.Errors.format_error(:bee_not_found, %{ghost_id: id}))
 
   defp show_not_found_error(:quest, id),
     do: IO.puts(GiTF.CLI.Errors.format_error(:quest_not_found, %{quest_id: id}))
@@ -2606,10 +2606,10 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp do_prime_bee(bee_id) do
-    case GiTF.Prime.prime(:bee, bee_id) do
+  defp do_prime_bee(ghost_id) do
+    case GiTF.Prime.prime(:ghost, ghost_id) do
       {:ok, markdown} -> IO.puts(markdown)
-      {:error, :bee_not_found} -> show_not_found_error(:bee, bee_id)
+      {:error, :bee_not_found} -> show_not_found_error(:ghost, ghost_id)
       {:error, reason} -> Format.error("Prime failed: #{inspect(reason)}")
     end
   end
@@ -2808,22 +2808,22 @@ defmodule GiTF.CLI do
           name: "major",
           about: "Start the queen orchestrator for a quest"
         ],
-        bee: [
-          name: "bee",
-          about: "Manage bee worker agents",
+        ghost: [
+          name: "ghost",
+          about: "Manage ghost worker agents",
           subcommands: [
             list: [
               name: "list",
-              about: "List all bees and their status"
+              about: "List all ghosts and their status"
             ],
             spawn: [
               name: "spawn",
-              about: "Spawn a new bee to work on a job",
+              about: "Spawn a new ghost to work on a job",
               options: [
                 job: [
                   short: "-j",
                   long: "--job",
-                  help: "Job ID to assign to the bee",
+                  help: "Job ID to assign to the ghost",
                   parser: :string,
                   required: true
                 ],
@@ -2837,7 +2837,7 @@ defmodule GiTF.CLI do
                 name: [
                   short: "-n",
                   long: "--name",
-                  help: "Custom name for the bee",
+                  help: "Custom name for the ghost",
                   parser: :string,
                   required: false
                 ]
@@ -2845,7 +2845,7 @@ defmodule GiTF.CLI do
             ],
             stop: [
               name: "stop",
-              about: "Stop a running bee",
+              about: "Stop a running ghost",
               options: [
                 id: [
                   long: "--id",
@@ -2857,9 +2857,9 @@ defmodule GiTF.CLI do
             ],
             complete: [
               name: "complete",
-              about: "Mark a bee as completed (used by wrapper scripts)",
+              about: "Mark a ghost as completed (used by wrapper scripts)",
               args: [
-                bee_id: [
+                ghost_id: [
                   value_name: "BEE_ID",
                   help: "Bee ID to mark as completed",
                   required: true,
@@ -2869,9 +2869,9 @@ defmodule GiTF.CLI do
             ],
             fail: [
               name: "fail",
-              about: "Mark a bee as failed (used by wrapper scripts)",
+              about: "Mark a ghost as failed (used by wrapper scripts)",
               args: [
-                bee_id: [
+                ghost_id: [
                   value_name: "BEE_ID",
                   help: "Bee ID to mark as failed",
                   required: true,
@@ -2890,11 +2890,11 @@ defmodule GiTF.CLI do
             revive: [
               name: "revive",
               about:
-                "Revive a dead bee — spawn a new bee into its existing worktree to finish the work",
+                "Revive a dead ghost — spawn a new ghost into its existing worktree to finish the work",
               args: [
-                bee_id: [
+                ghost_id: [
                   value_name: "BEE_ID",
-                  help: "ID of the dead bee whose worktree to reuse",
+                  help: "ID of the dead ghost whose worktree to reuse",
                   required: true,
                   parser: :string
                 ]
@@ -2902,9 +2902,9 @@ defmodule GiTF.CLI do
             ],
             context: [
               name: "context",
-              about: "Show context usage statistics for a bee",
+              about: "Show context usage statistics for a ghost",
               args: [
-                bee_id: [
+                ghost_id: [
                   value_name: "BEE_ID",
                   help: "Bee ID to check context usage",
                   required: true,
@@ -2969,7 +2969,7 @@ defmodule GiTF.CLI do
             ],
             merge: [
               name: "merge",
-              about: "Merge all completed bee branches into a quest branch",
+              about: "Merge all completed ghost branches into a quest branch",
               args: [
                 id: [
                   value_name: "ID",
@@ -3292,9 +3292,9 @@ defmodule GiTF.CLI do
                 ]
               ],
               options: [
-                bee: [
+                ghost: [
                   short: "-b",
-                  long: "--bee",
+                  long: "--ghost",
                   help: "Bee ID to record costs for",
                   parser: :string,
                   required: false
@@ -3579,15 +3579,15 @@ defmodule GiTF.CLI do
         ],
         handoff: [
           name: "handoff",
-          about: "Manage context-preserving bee handoffs",
+          about: "Manage context-preserving ghost handoffs",
           subcommands: [
             create: [
               name: "create",
-              about: "Create a handoff for a bee",
+              about: "Create a handoff for a ghost",
               options: [
-                bee: [
+                ghost: [
                   short: "-b",
-                  long: "--bee",
+                  long: "--ghost",
                   help: "Bee ID to create handoff for",
                   parser: :string,
                   required: true
@@ -3596,11 +3596,11 @@ defmodule GiTF.CLI do
             ],
             show: [
               name: "show",
-              about: "Show handoff context for a bee",
+              about: "Show handoff context for a ghost",
               options: [
-                bee: [
+                ghost: [
                   short: "-b",
-                  long: "--bee",
+                  long: "--ghost",
                   help: "Bee ID to show handoff for",
                   parser: :string,
                   required: true
@@ -3619,9 +3619,9 @@ defmodule GiTF.CLI do
             ]
           ],
           options: [
-            bee: [
+            ghost: [
               short: "-b",
-              long: "--bee",
+              long: "--ghost",
               help: "Bee ID to prime with job context",
               parser: :string,
               required: false
@@ -3643,7 +3643,7 @@ defmodule GiTF.CLI do
         ],
         watch: [
           name: "watch",
-          about: "Watch real-time bee progress"
+          about: "Watch real-time ghost progress"
         ],
         conflict: [
           name: "conflict",
@@ -3653,9 +3653,9 @@ defmodule GiTF.CLI do
               name: "check",
               about: "Check for merge conflicts in active cells",
               options: [
-                bee: [
+                ghost: [
                   short: "-b",
-                  long: "--bee",
+                  long: "--ghost",
                   help: "Bee ID to check (optional, checks all if omitted)",
                   parser: :string,
                   required: false
@@ -3666,11 +3666,11 @@ defmodule GiTF.CLI do
         ],
         validate: [
           name: "validate",
-          about: "Run validation on a bee's completed work",
+          about: "Run validation on a ghost's completed work",
           options: [
-            bee: [
+            ghost: [
               short: "-b",
-              long: "--bee",
+              long: "--ghost",
               help: "Bee ID to validate",
               parser: :string,
               required: true
@@ -3683,11 +3683,11 @@ defmodule GiTF.CLI do
           subcommands: [
             pr: [
               name: "pr",
-              about: "Create a GitHub PR for a bee's work",
+              about: "Create a GitHub PR for a ghost's work",
               options: [
-                bee: [
+                ghost: [
                   short: "-b",
-                  long: "--bee",
+                  long: "--ghost",
                   help: "Bee ID to create PR for",
                   parser: :string,
                   required: true

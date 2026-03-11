@@ -20,7 +20,7 @@ defmodule GiTF.TestDriver.Assertions do
     * `{:job_failed, job_id}` — job status is "failed"
     * `{:quest_completed, quest_id}` — quest status is "completed"
     * `{:quest_failed, quest_id}` — quest status is "failed"
-    * `{:bee_stopped, bee_id}` — bee status is "stopped" or "crashed"
+    * `{:bee_stopped, ghost_id}` — ghost status is "stopped" or "crashed"
     * `{:waggle, filter}` — a waggle matching the filter exists in Store
     * `{:event, event_name}` — telemetry event exists in recorder timeline
     * `{:event, event_name, metadata}` — telemetry event with matching metadata
@@ -160,8 +160,8 @@ defmodule GiTF.TestDriver.Assertions do
     end
   end
 
-  defp check_condition({:bee_stopped, bee_id}) do
-    case GiTF.Bees.get(bee_id) do
+  defp check_condition({:bee_stopped, ghost_id}) do
+    case GiTF.Ghosts.get(ghost_id) do
       {:ok, %{status: status}} when status in ["stopped", "crashed"] -> true
       _ -> false
     end
@@ -249,7 +249,7 @@ defmodule GiTF.TestDriver.Assertions do
       :id,
       :subject,
       :from,
-      :bee_id,
+      :ghost_id,
       :job_id,
       :status,
       :metadata,

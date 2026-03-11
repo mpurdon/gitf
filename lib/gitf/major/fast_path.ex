@@ -4,7 +4,7 @@ defmodule GiTF.Major.FastPath do
 
   Trivial quests (typo fixes, doc updates, version bumps, simple renames) skip
   research → requirements → design → review → planning and go straight to
-  implementation with a single job and a single bee.
+  implementation with a single job and a single ghost.
   """
 
   require Logger
@@ -42,7 +42,7 @@ defmodule GiTF.Major.FastPath do
 
   @doc """
   Executes the fast path: transitions directly to implementation, creates
-  a single job, and spawns a single bee.
+  a single job, and spawns a single ghost.
 
   Returns `{:ok, "implementation"}` or `{:error, reason}`.
   """
@@ -64,15 +64,15 @@ defmodule GiTF.Major.FastPath do
         {:ok, job} ->
           Logger.info("Fast path: created job #{job.id} for quest #{quest_id}")
 
-          # Spawn a bee for the job
+          # Spawn a ghost for the job
           case GiTF.gitf_dir() do
             {:ok, gitf_root} ->
-              case GiTF.Bees.spawn_detached(job.id, quest.comb_id, gitf_root) do
-                {:ok, bee} ->
-                  Logger.info("Fast path: spawned bee #{bee.id} for quest #{quest_id}")
+              case GiTF.Ghosts.spawn_detached(job.id, quest.comb_id, gitf_root) do
+                {:ok, ghost} ->
+                  Logger.info("Fast path: spawned ghost #{ghost.id} for quest #{quest_id}")
 
                 {:error, reason} ->
-                  Logger.warning("Fast path: bee spawn failed: #{inspect(reason)}")
+                  Logger.warning("Fast path: ghost spawn failed: #{inspect(reason)}")
               end
 
             {:error, _} ->

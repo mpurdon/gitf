@@ -59,7 +59,7 @@ defmodule GiTF.Budget do
     end
   end
 
-  @doc "Returns total USD spent for all bees in a quest."
+  @doc "Returns total USD spent for all ghosts in a quest."
   @spec spent_for(String.t()) :: float()
   def spent_for(quest_id) do
     quest_id

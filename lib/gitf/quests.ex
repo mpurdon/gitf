@@ -111,7 +111,7 @@ defmodule GiTF.Quests do
   end
 
   @doc """
-  Kills a quest: kills all its jobs (stopping bees, removing cells),
+  Kills a quest: kills all its jobs (stopping ghosts, removing cells),
   removes all job dependencies, deletes all jobs, then deletes the quest.
 
   Returns `:ok` or `{:error, :not_found}`.
@@ -132,17 +132,17 @@ defmodule GiTF.Quests do
   end
 
   @doc """
-  Closes a quest: removes all associated bee cells/worktrees, then marks status as "closed".
+  Closes a quest: removes all associated ghost cells/worktrees, then marks status as "closed".
 
   Returns `{:ok, quest}` or `{:error, :not_found}`.
   """
   @spec close(String.t()) :: {:ok, map()} | {:error, :not_found}
   def close(quest_id) do
     with {:ok, quest} <- get(quest_id) do
-      bee_ids = quest.jobs |> Enum.map(& &1.bee_id) |> Enum.reject(&is_nil/1)
+      ghost_ids = quest.jobs |> Enum.map(& &1.ghost_id) |> Enum.reject(&is_nil/1)
 
-      Enum.each(bee_ids, fn bee_id ->
-        case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+      Enum.each(ghost_ids, fn ghost_id ->
+        case Store.find_one(:cells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
           nil -> :ok
           cell -> GiTF.Cell.remove(cell.id, force: true)
         end

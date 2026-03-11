@@ -27,16 +27,16 @@ defmodule GiTF.Autonomy do
     
     recommendations = []
     
-    # Check bee utilization
+    # Check ghost utilization
     recommendations = if metrics.bee_utilization < 0.5 do
-      [{:reduce_bees, "Low utilization, consider reducing active bees"} | recommendations]
+      [{:reduce_bees, "Low utilization, consider reducing active ghosts"} | recommendations]
     else
       recommendations
     end
     
     # Check queue depth
     recommendations = if metrics.pending_jobs > 10 do
-      [{:increase_bees, "High queue depth, consider spawning more bees"} | recommendations]
+      [{:increase_bees, "High queue depth, consider spawning more ghosts"} | recommendations]
     else
       recommendations
     end
@@ -114,18 +114,18 @@ defmodule GiTF.Autonomy do
   # Private functions
 
   defp cleanup_orphaned_processes do
-    # Check for bees without active jobs
-    bees = Store.all(:bees)
+    # Check for ghosts without active jobs
+    ghosts = Store.all(:ghosts)
     
-    orphaned = Enum.filter(bees, fn bee ->
-      bee.status == "active" and
-      not has_active_job?(bee.id)
+    orphaned = Enum.filter(ghosts, fn ghost ->
+      ghost.status == "active" and
+      not has_active_job?(ghost.id)
     end)
     
     if length(orphaned) > 0 do
-      Enum.each(orphaned, fn bee ->
-        Logger.info("Cleaning up orphaned bee: #{bee.id}")
-        GiTF.Bees.stop(bee.id)
+      Enum.each(orphaned, fn ghost ->
+        Logger.info("Cleaning up orphaned ghost: #{ghost.id}")
+        GiTF.Ghosts.stop(ghost.id)
       end)
       
       {:cleaned_orphaned_bees, length(orphaned)}
@@ -140,7 +140,7 @@ defmodule GiTF.Autonomy do
     
     inconsistent = Enum.filter(jobs, fn job ->
       job.status == "running" and
-      not has_active_bee?(job.bee_id)
+      not has_active_bee?(job.ghost_id)
     end)
     
     if length(inconsistent) > 0 do
@@ -201,31 +201,31 @@ defmodule GiTF.Autonomy do
     end
   end
 
-  defp has_active_job?(bee_id) do
+  defp has_active_job?(ghost_id) do
     Store.all(:jobs)
     |> Enum.any?(fn job ->
-      job.bee_id == bee_id and job.status in ["pending", "running"]
+      job.ghost_id == ghost_id and job.status in ["pending", "running"]
     end)
   end
 
-  defp has_active_bee?(bee_id) do
-    case Store.get(:bees, bee_id) do
+  defp has_active_bee?(ghost_id) do
+    case Store.get(:ghosts, ghost_id) do
       nil -> false
-      bee -> bee.status == "active"
+      ghost -> ghost.status == "active"
     end
   end
 
   defp collect_metrics do
-    bees = Store.all(:bees)
+    ghosts = Store.all(:ghosts)
     jobs = Store.all(:jobs)
     
-    active_bees = Enum.count(bees, &(&1.status == "active"))
+    active_ghosts = Enum.count(ghosts, &(&1.status == "active"))
     pending_jobs = Enum.count(jobs, &(&1.status == "pending"))
     
     # Simple utilization calculation
-    bee_utilization = if active_bees > 0 do
+    bee_utilization = if active_ghosts > 0 do
       running_jobs = Enum.count(jobs, &(&1.status == "running"))
-      running_jobs / active_bees
+      running_jobs / active_ghosts
     else
       0
     end
@@ -233,7 +233,7 @@ defmodule GiTF.Autonomy do
     %{
       bee_utilization: bee_utilization,
       pending_jobs: pending_jobs,
-      active_bees: active_bees,
+      active_ghosts: active_ghosts,
       cost_trend: GiTF.Observability.Metrics.trend(:cost_usd)
     }
   end

@@ -20,18 +20,18 @@ defmodule GiTF.BudgetTest do
         status: "pending"
       })
 
-    {:ok, bee} =
-      Store.insert(:bees, %{
-        name: "budget-bee-#{:erlang.unique_integer([:positive])}",
+    {:ok, ghost} =
+      Store.insert(:ghosts, %{
+        name: "budget-ghost-#{:erlang.unique_integer([:positive])}",
         status: "starting"
       })
 
     {:ok, job} =
       Jobs.create(%{title: "budget job", quest_id: quest.id, comb_id: comb.id})
 
-    {:ok, _} = Jobs.assign(job.id, bee.id)
+    {:ok, _} = Jobs.assign(job.id, ghost.id)
 
-    %{comb: comb, quest: quest, bee: bee, job: job}
+    %{comb: comb, quest: quest, ghost: ghost, job: job}
   end
 
   describe "spent_for/1" do
@@ -39,9 +39,9 @@ defmodule GiTF.BudgetTest do
       assert Budget.spent_for(quest.id) == 0.0
     end
 
-    test "sums costs for quest's bees", %{quest: quest, bee: bee} do
+    test "sums costs for quest's ghosts", %{quest: quest, ghost: ghost} do
       {:ok, _} =
-        Costs.record(bee.id, %{
+        Costs.record(ghost.id, %{
           input_tokens: 1000,
           output_tokens: 500,
           model: "claude-sonnet-4-20250514"
@@ -58,9 +58,9 @@ defmodule GiTF.BudgetTest do
       assert remaining > 0
     end
 
-    test "returns error when budget exceeded", %{quest: quest, bee: bee} do
+    test "returns error when budget exceeded", %{quest: quest, ghost: ghost} do
       # Record a huge cost to exceed budget
-      {:ok, _} = Costs.record(bee.id, %{input_tokens: 0, output_tokens: 0, cost_usd: 999.0})
+      {:ok, _} = Costs.record(ghost.id, %{input_tokens: 0, output_tokens: 0, cost_usd: 999.0})
 
       assert {:error, :budget_exceeded, spent} = Budget.check(quest.id)
       assert spent >= 999.0
@@ -72,8 +72,8 @@ defmodule GiTF.BudgetTest do
       assert Budget.exceeded?(quest.id) == false
     end
 
-    test "returns true when over budget", %{quest: quest, bee: bee} do
-      {:ok, _} = Costs.record(bee.id, %{input_tokens: 0, output_tokens: 0, cost_usd: 999.0})
+    test "returns true when over budget", %{quest: quest, ghost: ghost} do
+      {:ok, _} = Costs.record(ghost.id, %{input_tokens: 0, output_tokens: 0, cost_usd: 999.0})
       assert Budget.exceeded?(quest.id) == true
     end
   end

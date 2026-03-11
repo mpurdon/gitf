@@ -2,7 +2,7 @@ defmodule GiTF.Costs do
   @moduledoc """
   Context module for token usage and cost tracking.
 
-  Records per-bee cost data extracted from Claude Code transcripts and
+  Records per-ghost cost data extracted from Claude Code transcripts and
   provides aggregation queries for reporting.
   """
 
@@ -13,7 +13,7 @@ defmodule GiTF.Costs do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Records a cost entry for a bee.
+  Records a cost entry for a ghost.
 
   Automatically calculates `cost_usd` from token counts and model if not
   already provided. Sets `recorded_at` to now if not provided.
@@ -21,17 +21,17 @@ defmodule GiTF.Costs do
   Returns `{:ok, cost}` or `{:error, reason}`.
   """
   @spec record(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def record(bee_id, attrs) do
+  def record(ghost_id, attrs) do
     attrs =
       attrs
-      |> Map.put(:bee_id, bee_id)
+      |> Map.put(:ghost_id, ghost_id)
       |> maybe_set_recorded_at()
       |> maybe_calculate_cost()
 
-    category = attrs[:category] || derive_category(attrs[:bee_id])
+    category = attrs[:category] || derive_category(attrs[:ghost_id])
 
     record = %{
-      bee_id: attrs[:bee_id],
+      ghost_id: attrs[:ghost_id],
       input_tokens: attrs[:input_tokens] || 0,
       output_tokens: attrs[:output_tokens] || 0,
       cache_read_tokens: attrs[:cache_read_tokens] || 0,
@@ -51,36 +51,36 @@ defmodule GiTF.Costs do
       cost: cost.cost_usd
     }, %{
       model: cost.model,
-      bee_id: cost.bee_id
+      ghost_id: cost.ghost_id
     })
 
     {:ok, cost}
   end
 
-  @doc "Returns all cost records for a given bee."
+  @doc "Returns all cost records for a given ghost."
   @spec for_bee(String.t()) :: [map()]
-  def for_bee(bee_id) do
-    Store.filter(:costs, fn c -> c.bee_id == bee_id end)
+  def for_bee(ghost_id) do
+    Store.filter(:costs, fn c -> c.ghost_id == ghost_id end)
     |> Enum.sort_by(& &1.recorded_at, {:desc, DateTime})
   end
 
   @doc """
-  Returns all cost records for bees participating in a quest.
+  Returns all cost records for ghosts participating in a quest.
   """
   @spec for_quest(String.t()) :: [map()]
   def for_quest(quest_id) do
-    bee_ids =
+    ghost_ids =
       GiTF.Jobs.list(quest_id: quest_id)
-      |> Enum.map(& &1.bee_id)
+      |> Enum.map(& &1.ghost_id)
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
 
-    case bee_ids do
+    case ghost_ids do
       [] ->
         []
 
       ids ->
-        Store.filter(:costs, fn c -> c.bee_id in ids end)
+        Store.filter(:costs, fn c -> c.ghost_id in ids end)
         |> Enum.sort_by(& &1.recorded_at, {:desc, DateTime})
     end
   end
@@ -105,7 +105,7 @@ defmodule GiTF.Costs do
       total_input_tokens: costs |> Enum.map(&Map.get(&1, :input_tokens, 0)) |> Enum.sum(),
       total_output_tokens: costs |> Enum.map(&Map.get(&1, :output_tokens, 0)) |> Enum.sum(),
       by_model: group_costs_by(costs, &Map.get(&1, :model)),
-      by_bee: group_costs_by(costs, &Map.get(&1, :bee_id)),
+      by_bee: group_costs_by(costs, &Map.get(&1, :ghost_id)),
       by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown"))
     }
   end
@@ -139,9 +139,9 @@ defmodule GiTF.Costs do
 
   defp derive_category("major"), do: "orchestration"
 
-  defp derive_category(bee_id) when is_binary(bee_id) do
-    with {:ok, bee} <- GiTF.Bees.get(bee_id),
-         job_id when is_binary(job_id) <- Map.get(bee, :job_id),
+  defp derive_category(ghost_id) when is_binary(ghost_id) do
+    with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
+         job_id when is_binary(job_id) <- Map.get(ghost, :job_id),
          {:ok, job} <- GiTF.Jobs.get(job_id) do
       cond do
         Map.get(job, :phase_job, false) and job[:phase] in @planning_phases ->

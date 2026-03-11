@@ -14,10 +14,10 @@ defmodule GiTF.WaggleTest do
 
   describe "send/5" do
     test "persists a waggle message to the database" do
-      assert {:ok, waggle} = Waggle.send("major", "bee-abc123", "Do work", "Build the feature")
+      assert {:ok, waggle} = Waggle.send("major", "ghost-abc123", "Do work", "Build the feature")
 
       assert waggle.from == "major"
-      assert waggle.to == "bee-abc123"
+      assert waggle.to == "ghost-abc123"
       assert waggle.subject == "Do work"
       assert waggle.body == "Build the feature"
       assert waggle.read == false
@@ -26,7 +26,7 @@ defmodule GiTF.WaggleTest do
 
     test "accepts optional metadata" do
       assert {:ok, waggle} =
-               Waggle.send("bee-a", "major", "Done", "Finished", ~s({"pr": 42}))
+               Waggle.send("ghost-a", "major", "Done", "Finished", ~s({"pr": 42}))
 
       assert waggle.metadata == ~s({"pr": 42})
     end
@@ -34,25 +34,25 @@ defmodule GiTF.WaggleTest do
 
   describe "list/1" do
     test "returns all messages with no filters" do
-      {:ok, _} = Waggle.send("major", "bee-a", "Task 1", "Body 1")
-      {:ok, _} = Waggle.send("major", "bee-b", "Task 2", "Body 2")
+      {:ok, _} = Waggle.send("major", "ghost-a", "Task 1", "Body 1")
+      {:ok, _} = Waggle.send("major", "ghost-b", "Task 2", "Body 2")
 
       waggles = Waggle.list()
       assert length(waggles) == 2
     end
 
     test "filters by recipient" do
-      {:ok, _} = Waggle.send("major", "bee-a", "For A", "Body")
-      {:ok, _} = Waggle.send("major", "bee-b", "For B", "Body")
+      {:ok, _} = Waggle.send("major", "ghost-a", "For A", "Body")
+      {:ok, _} = Waggle.send("major", "ghost-b", "For B", "Body")
 
-      waggles = Waggle.list(to: "bee-a")
+      waggles = Waggle.list(to: "ghost-a")
       assert length(waggles) == 1
-      assert hd(waggles).to == "bee-a"
+      assert hd(waggles).to == "ghost-a"
     end
 
     test "filters by sender" do
-      {:ok, _} = Waggle.send("major", "bee-a", "From queen", "Body")
-      {:ok, _} = Waggle.send("bee-a", "major", "From bee", "Body")
+      {:ok, _} = Waggle.send("major", "ghost-a", "From queen", "Body")
+      {:ok, _} = Waggle.send("ghost-a", "major", "From ghost", "Body")
 
       waggles = Waggle.list(from: "major")
       assert length(waggles) == 1
@@ -60,8 +60,8 @@ defmodule GiTF.WaggleTest do
     end
 
     test "filters by read status" do
-      {:ok, w} = Waggle.send("major", "bee-a", "Read me", "Body")
-      {:ok, _} = Waggle.send("major", "bee-b", "Unread", "Body")
+      {:ok, w} = Waggle.send("major", "ghost-a", "Read me", "Body")
+      {:ok, _} = Waggle.send("major", "ghost-b", "Unread", "Body")
 
       Waggle.mark_read(w.id)
 
@@ -73,13 +73,13 @@ defmodule GiTF.WaggleTest do
 
   describe "list_unread/1" do
     test "returns only unread messages for a given recipient" do
-      {:ok, w1} = Waggle.send("major", "bee-a", "First", "Body")
-      {:ok, _} = Waggle.send("major", "bee-a", "Second", "Body")
-      {:ok, _} = Waggle.send("major", "bee-b", "Other", "Body")
+      {:ok, w1} = Waggle.send("major", "ghost-a", "First", "Body")
+      {:ok, _} = Waggle.send("major", "ghost-a", "Second", "Body")
+      {:ok, _} = Waggle.send("major", "ghost-b", "Other", "Body")
 
       Waggle.mark_read(w1.id)
 
-      unread = Waggle.list_unread("bee-a")
+      unread = Waggle.list_unread("ghost-a")
       assert length(unread) == 1
       assert hd(unread).subject == "Second"
     end
@@ -87,7 +87,7 @@ defmodule GiTF.WaggleTest do
 
   describe "mark_read/1" do
     test "marks a message as read" do
-      {:ok, waggle} = Waggle.send("major", "bee-a", "Read me", "Body")
+      {:ok, waggle} = Waggle.send("major", "ghost-a", "Read me", "Body")
       assert waggle.read == false
 
       assert {:ok, updated} = Waggle.mark_read(waggle.id)
@@ -112,8 +112,8 @@ defmodule GiTF.Waggle.TopicTest do
       assert Waggle.topic(:major, nil) == "link:major"
     end
 
-    test "builds bee topic with ID" do
-      assert Waggle.topic(:bee, "bee-abc123") == "waggle:bee:bee-abc123"
+    test "builds ghost topic with ID" do
+      assert Waggle.topic(:ghost, "ghost-abc123") == "waggle:ghost:ghost-abc123"
     end
 
     test "builds comb topic with name" do

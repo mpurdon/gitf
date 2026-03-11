@@ -1,15 +1,15 @@
 defmodule GiTF.Runtime.Settings do
   @moduledoc """
-  Generates `.claude/settings.json` for bee working directories.
+  Generates `.claude/settings.json` for ghost working directories.
 
-  Each bee needs a settings file that wires Claude Code's hook system into
-  the section. The `SessionStart` hook primes the bee with its job context,
+  Each ghost needs a settings file that wires Claude Code's hook system into
+  the section. The `SessionStart` hook primes the ghost with its job context,
   and the `Stop` hook records cost data back to the section database.
 
   In API mode, no settings file is needed (no CLI process to configure),
   so generation is skipped.
 
-  This is a pure data-transformation module: takes a bee ID and gitf root,
+  This is a pure data-transformation module: takes a ghost ID and gitf root,
   produces a JSON file on disk.
   """
 
@@ -18,18 +18,18 @@ defmodule GiTF.Runtime.Settings do
 
   The settings configure Claude Code hooks:
 
-  - `SessionStart`: runs `gitf prime --bee <bee_id>` to inject context
-  - `Stop`: runs `gitf costs record --bee <bee_id>` to capture cost data
+  - `SessionStart`: runs `gitf prime --ghost <ghost_id>` to inject context
+  - `Stop`: runs `gitf costs record --ghost <ghost_id>` to capture cost data
 
   Returns `:ok` on success or `{:error, reason}` on failure.
   """
   @spec generate(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  def generate(bee_id, gitf_root, working_dir) do
+  def generate(ghost_id, gitf_root, working_dir) do
     if GiTF.Runtime.ModelResolver.api_mode?() do
       # API mode: no CLI process, no settings file needed
       :ok
     else
-      case GiTF.Runtime.Models.workspace_setup(bee_id, gitf_root) do
+      case GiTF.Runtime.Models.workspace_setup(ghost_id, gitf_root) do
         nil ->
           :ok
 
@@ -45,7 +45,7 @@ defmodule GiTF.Runtime.Settings do
   Useful for testing or inspection.
   """
   @spec build_settings(String.t(), String.t(), keyword()) :: map()
-  def build_settings(bee_id, gitf_root, opts \\ []) do
+  def build_settings(ghost_id, gitf_root, opts \\ []) do
     gitf_bin = gitf_binary_path(gitf_root)
     env_prefix = server_env_prefix()
     risk_level = Keyword.get(opts, :risk_level, :low)
@@ -59,7 +59,7 @@ defmodule GiTF.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} prime --bee #{bee_id}"}
+              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} prime --ghost #{ghost_id}"}
             ]
           }
         ],
@@ -67,7 +67,7 @@ defmodule GiTF.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} costs record --bee #{bee_id}"}
+              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} costs record --ghost #{ghost_id}"}
             ]
           }
         ]
@@ -78,7 +78,7 @@ defmodule GiTF.Runtime.Settings do
   @doc """
   Builds settings for the Major's interactive Claude session.
 
-  Includes the same tool permissions as bee settings, plus hooks for
+  Includes the same tool permissions as ghost settings, plus hooks for
   queen-specific priming and cost recording.
   """
   @spec build_major_settings(String.t()) :: map()
@@ -132,23 +132,23 @@ defmodule GiTF.Runtime.Settings do
   end
 
   @doc """
-  Generates settings for a bee's cell worktree.
+  Generates settings for a ghost's cell worktree.
 
   Writes both `.claude/settings.json` (local settings) and
   `.claude/settings.json` at the project level within the worktree.
-  This is called during cell provisioning to ensure the bee has
+  This is called during cell provisioning to ensure the ghost has
   proper permissions before Claude launches.
   """
   @spec generate_for_cell(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  def generate_for_cell(bee_id, gitf_root, worktree_path) do
-    generate(bee_id, gitf_root, worktree_path)
+  def generate_for_cell(ghost_id, gitf_root, worktree_path) do
+    generate(ghost_id, gitf_root, worktree_path)
   end
 
   # -- Role-based settings.local.json -----------------------------------------
 
   @doc """
   Generates a `.claude/settings.local.json` file that restricts tool access
-  based on the bee's role.
+  based on the ghost's role.
 
   Scouts get read-only access, builders get full access with safety rails,
   and reviewers get read plus test-runner access.

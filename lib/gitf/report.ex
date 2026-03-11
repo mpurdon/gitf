@@ -1,9 +1,9 @@
 defmodule GiTF.Report do
   @moduledoc """
-  Generates quest performance reports from store data and bee log files.
+  Generates quest performance reports from store data and ghost log files.
 
   Parses stream-json logs to extract token usage and cost, combines with
-  job/bee timing data from the store, and produces a formatted summary.
+  job/ghost timing data from the store, and produces a formatted summary.
   """
 
   alias GiTF.Runtime.StreamParser
@@ -16,7 +16,7 @@ defmodule GiTF.Report do
 
   Returns `{:ok, report}` where report is a map with:
   - `:quest` - the quest record
-  - `:jobs` - list of job details with timing and bee info
+  - `:jobs` - list of job details with timing and ghost info
   - `:tokens` - aggregate token usage
   - `:cost` - aggregate cost
   - `:timing` - wall clock start/end/duration
@@ -61,18 +61,18 @@ defmodule GiTF.Report do
 
   defp enrich_jobs(jobs, gitf_root) do
     Enum.map(jobs, fn job ->
-      bee = if job.bee_id, do: Store.get(:bees, job.bee_id)
-      log_tokens = parse_bee_log(job.bee_id, gitf_root)
+      ghost = if job.ghost_id, do: Store.get(:ghosts, job.ghost_id)
+      log_tokens = parse_bee_log(job.ghost_id, gitf_root)
 
       %{
         job_id: job.id,
         title: job.title,
         status: job.status,
-        bee_id: job.bee_id,
-        bee_name: bee && (bee[:name] || job.bee_id),
-        started_at: bee && bee[:inserted_at],
-        completed_at: bee && bee[:updated_at],
-        duration: compute_duration(bee),
+        ghost_id: job.ghost_id,
+        ghost_name: ghost && (ghost[:name] || job.ghost_id),
+        started_at: ghost && ghost[:inserted_at],
+        completed_at: ghost && ghost[:updated_at],
+        duration: compute_duration(ghost),
         tokens: log_tokens
       }
     end)
@@ -80,8 +80,8 @@ defmodule GiTF.Report do
 
   defp parse_bee_log(nil, _gitf_root), do: empty_tokens()
 
-  defp parse_bee_log(bee_id, gitf_root) do
-    log_path = Path.join([gitf_root, ".gitf", "run", "#{bee_id}.log"])
+  defp parse_bee_log(ghost_id, gitf_root) do
+    log_path = Path.join([gitf_root, ".gitf", "run", "#{ghost_id}.log"])
 
     case File.read(log_path) do
       {:ok, content} ->
@@ -109,8 +109,8 @@ defmodule GiTF.Report do
 
   defp compute_duration(nil), do: nil
 
-  defp compute_duration(bee) do
-    case {bee[:inserted_at], bee[:updated_at]} do
+  defp compute_duration(ghost) do
+    case {ghost[:inserted_at], ghost[:updated_at]} do
       {%DateTime{} = start, %DateTime{} = stop} ->
         DateTime.diff(stop, start, :second)
 
@@ -183,7 +183,7 @@ defmodule GiTF.Report do
 
           %{
             title: j.title || "-",
-            bee: j.bee_name || "-",
+            ghost: j.ghost_name || "-",
             status: j.status,
             duration: duration_str,
             parallel: if(parallel == [], do: "-", else: Enum.join(parallel, ", "))
@@ -194,7 +194,7 @@ defmodule GiTF.Report do
 
       rows =
         Enum.map(job_data, fn j ->
-          [j.title, j.bee, j.status, j.duration, j.parallel]
+          [j.title, j.ghost, j.status, j.duration, j.parallel]
         end)
 
       timing = report.timing
@@ -240,12 +240,12 @@ defmodule GiTF.Report do
     done = Enum.count(jobs, &(&1.status == "done"))
     failed = Enum.count(jobs, &(&1.status == "failed"))
 
-    bee_ids = jobs |> Enum.map(& &1.bee_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+    ghost_ids = jobs |> Enum.map(& &1.ghost_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
     lines = [
       "Summary",
       "  #{total} jobs, #{done} completed, #{failed} failed",
-      "  #{length(bee_ids)} bees spawned"
+      "  #{length(ghost_ids)} ghosts spawned"
     ]
 
     Enum.join(lines, "\n") <> "\n"

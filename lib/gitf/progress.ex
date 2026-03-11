@@ -1,8 +1,8 @@
 defmodule GiTF.Progress do
   @moduledoc """
-  Real-time progress tracking for active bees via ETS.
+  Real-time progress tracking for active ghosts via ETS.
 
-  Stores the latest activity for each bee (tool use, assistant message, etc.)
+  Stores the latest activity for each ghost (tool use, assistant message, etc.)
   and broadcasts updates via PubSub. Pure context module backed by ETS.
   """
 
@@ -18,13 +18,13 @@ defmodule GiTF.Progress do
     ArgumentError -> :ok
   end
 
-  @doc "Updates progress data for a bee."
+  @doc "Updates progress data for a ghost."
   @spec update(String.t(), map()) :: :ok
-  def update(bee_id, data) when is_binary(bee_id) and is_map(data) do
-    entry = Map.merge(data, %{bee_id: bee_id, updated_at: System.monotonic_time(:millisecond)})
-    :ets.insert(@table, {bee_id, entry})
+  def update(ghost_id, data) when is_binary(ghost_id) and is_map(data) do
+    entry = Map.merge(data, %{ghost_id: ghost_id, updated_at: System.monotonic_time(:millisecond)})
+    :ets.insert(@table, {ghost_id, entry})
 
-    Phoenix.PubSub.broadcast(GiTF.PubSub, @pubsub_topic, {:bee_progress, bee_id, entry})
+    Phoenix.PubSub.broadcast(GiTF.PubSub, @pubsub_topic, {:bee_progress, ghost_id, entry})
     :ok
   rescue
     e in ArgumentError ->
@@ -33,14 +33,14 @@ defmodule GiTF.Progress do
 
     e ->
       require Logger
-      Logger.error("Progress broadcast failed for #{bee_id}: #{Exception.message(e)}")
+      Logger.error("Progress broadcast failed for #{ghost_id}: #{Exception.message(e)}")
       :ok
   end
 
-  @doc "Returns current progress for a bee, or nil."
+  @doc "Returns current progress for a ghost, or nil."
   @spec get(String.t()) :: map() | nil
-  def get(bee_id) do
-    case :ets.lookup(@table, bee_id) do
+  def get(ghost_id) do
+    case :ets.lookup(@table, ghost_id) do
       [{_key, data}] -> data
       [] -> nil
     end
@@ -57,10 +57,10 @@ defmodule GiTF.Progress do
     ArgumentError -> []
   end
 
-  @doc "Clears progress for a bee (when it finishes)."
+  @doc "Clears progress for a ghost (when it finishes)."
   @spec clear(String.t()) :: :ok
-  def clear(bee_id) do
-    :ets.delete(@table, bee_id)
+  def clear(ghost_id) do
+    :ets.delete(@table, ghost_id)
     :ok
   rescue
     ArgumentError -> :ok

@@ -1,22 +1,22 @@
 defmodule GiTF.Plugin.Builtin.Commands.Bee do
-  @moduledoc "Built-in /bee command. List, spawn, and stop bees."
+  @moduledoc "Built-in /ghost command. List, spawn, and stop ghosts."
 
   use GiTF.Plugin, type: :command
 
   @impl true
-  def name, do: "bee"
+  def name, do: "ghost"
 
   @impl true
-  def description, do: "Manage bees (list, spawn, stop)"
+  def description, do: "Manage ghosts (list, spawn, stop)"
 
   @impl true
   def execute(args, ctx) do
     case String.trim(args) |> String.split(" ", parts: 3) do
       ["list" | _] -> do_list(ctx)
       ["spawn", "--job", job_id] -> do_spawn(job_id, ctx)
-      ["spawn" | _] -> send_output(ctx, "Usage: /bee spawn --job <job_id>")
-      ["stop", bee_id] -> do_stop(bee_id, ctx)
-      ["stop" | _] -> send_output(ctx, "Usage: /bee stop <bee_id>")
+      ["spawn" | _] -> send_output(ctx, "Usage: /ghost spawn --job <job_id>")
+      ["stop", ghost_id] -> do_stop(ghost_id, ctx)
+      ["stop" | _] -> send_output(ctx, "Usage: /ghost stop <ghost_id>")
       [other | _] -> send_output(ctx, "Unknown subcommand: #{other}. Try: list, spawn, stop")
       _ -> do_list(ctx)
     end
@@ -31,13 +31,13 @@ defmodule GiTF.Plugin.Builtin.Commands.Bee do
   end
 
   defp do_list(ctx) do
-    case GiTF.Bees.list() do
+    case GiTF.Ghosts.list() do
       [] ->
-        send_output(ctx, "No bees. Bees are spawned when jobs are assigned.")
+        send_output(ctx, "No ghosts. Bees are spawned when jobs are assigned.")
 
-      bees ->
+      ghosts ->
         lines =
-          Enum.map(bees, fn b ->
+          Enum.map(ghosts, fn b ->
             "  #{b.id}  #{b.name}  [#{b.status}]  #{b.job_id || "-"}"
           end)
 
@@ -49,9 +49,9 @@ defmodule GiTF.Plugin.Builtin.Commands.Bee do
     with {:ok, gitf_root} <- GiTF.gitf_dir(),
          {:ok, job} <- GiTF.Jobs.get(job_id),
          comb_id when is_binary(comb_id) <- job.comb_id do
-      case GiTF.Bees.spawn_detached(job_id, comb_id, gitf_root) do
-        {:ok, bee} ->
-          send_output(ctx, "Bee \"#{bee.name}\" spawned (#{bee.id})")
+      case GiTF.Ghosts.spawn_detached(job_id, comb_id, gitf_root) do
+        {:ok, ghost} ->
+          send_output(ctx, "Bee \"#{ghost.name}\" spawned (#{ghost.id})")
 
         {:error, reason} ->
           send_output(ctx, "Failed to spawn: #{inspect(reason)}")
@@ -62,10 +62,10 @@ defmodule GiTF.Plugin.Builtin.Commands.Bee do
     end
   end
 
-  defp do_stop(bee_id, ctx) do
-    case GiTF.Bees.stop(bee_id) do
-      :ok -> send_output(ctx, "Bee #{bee_id} stopped.")
-      {:error, :not_found} -> send_output(ctx, "Bee not found: #{bee_id}")
+  defp do_stop(ghost_id, ctx) do
+    case GiTF.Ghosts.stop(ghost_id) do
+      :ok -> send_output(ctx, "Bee #{ghost_id} stopped.")
+      {:error, :not_found} -> send_output(ctx, "Bee not found: #{ghost_id}")
     end
   end
 

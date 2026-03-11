@@ -34,7 +34,7 @@ defmodule GiTF.GitHubTest do
       cell = %{
         id: "cel-1",
         branch: "b",
-        bee_id: "bee-1",
+        ghost_id: "ghost-1",
         comb_id: "cmb-1",
         worktree_path: "/tmp",
         status: "active"

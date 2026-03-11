@@ -72,7 +72,7 @@ defmodule GiTF.Runtime.Claude do
   end
 
   @doc """
-  Spawns Claude in headless mode for a Bee.
+  Spawns Claude in headless mode for a Ghost.
 
   Sends a prompt via `--print` flag (or stdin) and collects output.
   Claude runs to completion and the port closes when done.
@@ -86,7 +86,7 @@ defmodule GiTF.Runtime.Claude do
       args = build_headless_args(prompt, opts)
 
       # Always clear CLAUDECODE to prevent "nested session" errors when
-      # bees are spawned from within a Claude Code session (e.g. the TUI).
+      # ghosts are spawned from within a Claude Code session (e.g. the TUI).
       env = [{~c"CLAUDECODE", false} | build_env(opts)]
 
       port =

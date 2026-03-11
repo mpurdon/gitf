@@ -20,10 +20,10 @@ defmodule GiTF.CellTest do
     {:ok, comb} =
       GiTF.Comb.add(repo_path, name: "cell-test-comb-#{:erlang.unique_integer([:positive])}")
 
-    # Create a bee record
-    {:ok, bee} = Store.insert(:bees, %{name: "test-bee", status: "starting"})
+    # Create a ghost record
+    {:ok, ghost} = Store.insert(:ghosts, %{name: "test-ghost", status: "starting"})
 
-    %{comb: comb, bee: bee, repo_path: repo_path}
+    %{comb: comb, ghost: ghost, repo_path: repo_path}
   end
 
   defp create_temp_git_repo do
@@ -54,30 +54,30 @@ defmodule GiTF.CellTest do
   end
 
   describe "create/3" do
-    test "creates a cell with worktree and database record", %{comb: comb, bee: bee} do
-      assert {:ok, cell} = Cell.create(comb.id, bee.id)
+    test "creates a cell with worktree and database record", %{comb: comb, ghost: ghost} do
+      assert {:ok, cell} = Cell.create(comb.id, ghost.id)
 
       assert cell.comb_id == comb.id
-      assert cell.bee_id == bee.id
-      assert cell.branch == "bee/#{bee.id}"
+      assert cell.ghost_id == ghost.id
+      assert cell.branch == "ghost/#{ghost.id}"
       assert cell.status == "active"
       assert String.starts_with?(cell.id, "cel-")
 
-      expected_path = Path.join([comb.path, "bees", bee.id])
+      expected_path = Path.join([comb.path, "ghosts", ghost.id])
       assert cell.worktree_path == expected_path
       assert File.dir?(expected_path)
     end
 
-    test "accepts custom branch name", %{comb: comb, bee: bee} do
-      assert {:ok, cell} = Cell.create(comb.id, bee.id, branch: "feature/custom")
+    test "accepts custom branch name", %{comb: comb, ghost: ghost} do
+      assert {:ok, cell} = Cell.create(comb.id, ghost.id, branch: "feature/custom")
       assert cell.branch == "feature/custom"
     end
 
-    test "returns error for nonexistent comb", %{bee: bee} do
-      assert {:error, :not_found} = Cell.create("cmb-000000", bee.id)
+    test "returns error for nonexistent comb", %{ghost: ghost} do
+      assert {:error, :not_found} = Cell.create("cmb-000000", ghost.id)
     end
 
-    test "returns error for comb without a path", %{bee: bee} do
+    test "returns error for comb without a path", %{ghost: ghost} do
       # Insert a comb with nil path
       {:ok, remote_comb} =
         Store.insert(:combs, %{
@@ -86,13 +86,13 @@ defmodule GiTF.CellTest do
           path: nil
         })
 
-      assert {:error, :comb_has_no_path} = Cell.create(remote_comb.id, bee.id)
+      assert {:error, :comb_has_no_path} = Cell.create(remote_comb.id, ghost.id)
     end
   end
 
   describe "get/1" do
-    test "retrieves a cell by ID", %{comb: comb, bee: bee} do
-      {:ok, created} = Cell.create(comb.id, bee.id)
+    test "retrieves a cell by ID", %{comb: comb, ghost: ghost} do
+      {:ok, created} = Cell.create(comb.id, ghost.id)
       assert {:ok, found} = Cell.get(created.id)
       assert found.id == created.id
     end
@@ -103,23 +103,23 @@ defmodule GiTF.CellTest do
   end
 
   describe "list/1" do
-    test "lists all cells", %{comb: comb, bee: bee} do
-      {:ok, _} = Cell.create(comb.id, bee.id)
+    test "lists all cells", %{comb: comb, ghost: ghost} do
+      {:ok, _} = Cell.create(comb.id, ghost.id)
 
       cells = Cell.list()
       assert length(cells) >= 1
     end
 
-    test "filters by comb_id", %{comb: comb, bee: bee} do
-      {:ok, _} = Cell.create(comb.id, bee.id)
+    test "filters by comb_id", %{comb: comb, ghost: ghost} do
+      {:ok, _} = Cell.create(comb.id, ghost.id)
 
       cells = Cell.list(comb_id: comb.id)
       assert length(cells) >= 1
       assert Enum.all?(cells, &(&1.comb_id == comb.id))
     end
 
-    test "filters by status", %{comb: comb, bee: bee} do
-      {:ok, _} = Cell.create(comb.id, bee.id)
+    test "filters by status", %{comb: comb, ghost: ghost} do
+      {:ok, _} = Cell.create(comb.id, ghost.id)
 
       active = Cell.list(status: "active")
       assert length(active) >= 1
@@ -131,8 +131,8 @@ defmodule GiTF.CellTest do
   end
 
   describe "remove/2" do
-    test "removes worktree and marks record as removed", %{comb: comb, bee: bee} do
-      {:ok, cell} = Cell.create(comb.id, bee.id)
+    test "removes worktree and marks record as removed", %{comb: comb, ghost: ghost} do
+      {:ok, cell} = Cell.create(comb.id, ghost.id)
       assert File.dir?(cell.worktree_path)
 
       assert {:ok, removed} = Cell.remove(cell.id)
@@ -147,19 +147,19 @@ defmodule GiTF.CellTest do
   end
 
   describe "cleanup_orphans/0" do
-    test "marks cells as removed when bee is stopped", %{comb: comb} do
-      # Create a bee that is stopped
-      {:ok, stopped_bee} = Store.insert(:bees, %{name: "stopped-bee", status: "stopped"})
+    test "marks cells as removed when ghost is stopped", %{comb: comb} do
+      # Create a ghost that is stopped
+      {:ok, stopped_bee} = Store.insert(:ghosts, %{name: "stopped-ghost", status: "stopped"})
 
-      {:ok, _cell} = Cell.create(comb.id, stopped_bee.id)
+      {:ok, _cell} = Cell.create(comb.id, stopped_ghost.id)
 
       assert {:ok, count} = Cell.cleanup_orphans()
       assert count >= 1
     end
 
-    test "does not touch cells with active bees", %{comb: comb, bee: bee} do
-      # bee defaults to "starting" status which is active
-      {:ok, cell} = Cell.create(comb.id, bee.id)
+    test "does not touch cells with active ghosts", %{comb: comb, ghost: ghost} do
+      # ghost defaults to "starting" status which is active
+      {:ok, cell} = Cell.create(comb.id, ghost.id)
 
       {:ok, _count} = Cell.cleanup_orphans()
 

@@ -1,13 +1,13 @@
 defmodule GiTF.E2E.ConcurrentBeesTest do
   use GiTF.TestDriver.Scenario
 
-  scenario "three concurrent bees all complete without store corruption" do
+  scenario "three concurrent ghosts all complete without store corruption" do
     {:ok, env, comb} = Harness.add_comb(env)
 
     {:ok, quest, [job1, job2, job3]} =
       Harness.create_quest(env,
         comb_id: comb.id,
-        goal: "Concurrent bees test",
+        goal: "Concurrent ghosts test",
         jobs: [
           %{title: "Concurrent task 1"},
           %{title: "Concurrent task 2"},
@@ -15,7 +15,7 @@ defmodule GiTF.E2E.ConcurrentBeesTest do
         ]
       )
 
-    # Spawn all three bees at once with staggered delays
+    # Spawn all three ghosts at once with staggered delays
     {:ok, bee1} = Harness.spawn_mock_bee(env, job1.id, comb.id, delay_ms: 200)
     {:ok, bee2} = Harness.spawn_mock_bee(env, job2.id, comb.id, delay_ms: 400)
     {:ok, bee3} = Harness.spawn_mock_bee(env, job3.id, comb.id, delay_ms: 600)
@@ -25,7 +25,7 @@ defmodule GiTF.E2E.ConcurrentBeesTest do
     await({:job_done, job2.id}, timeout: 15_000)
     await({:job_done, job3.id}, timeout: 15_000)
 
-    # All bees should be stopped
+    # All ghosts should be stopped
     await({:bee_stopped, bee1.id}, timeout: 5_000)
     await({:bee_stopped, bee2.id}, timeout: 5_000)
     await({:bee_stopped, bee3.id}, timeout: 5_000)
@@ -41,12 +41,12 @@ defmodule GiTF.E2E.ConcurrentBeesTest do
 
     # Wait for waggle messages — they arrive after the validation pipeline
     # in mark_success (may involve git diff + Claude validation)
-    bee_ids = [bee1.id, bee2.id, bee3.id]
+    ghost_ids = [bee1.id, bee2.id, bee3.id]
 
     await(
       fn ->
         all_waggles = GiTF.Store.all(:waggles)
-        bee_waggles = Enum.filter(all_waggles, &(&1.from in bee_ids))
+        bee_waggles = Enum.filter(all_waggles, &(&1.from in ghost_ids))
         length(bee_waggles) >= 3
       end,
       timeout: 15_000
@@ -58,7 +58,7 @@ defmodule GiTF.E2E.ConcurrentBeesTest do
     assert final_quest.status == "completed"
   end
 
-  scenario "concurrent bees produce separate cost records" do
+  scenario "concurrent ghosts produce separate cost records" do
     {:ok, env, comb} = Harness.add_comb(env)
 
     {:ok, _quest, [job1, job2]} =
@@ -92,7 +92,7 @@ defmodule GiTF.E2E.ConcurrentBeesTest do
     # Brief pause for async cost recording to flush
     Process.sleep(100)
 
-    # Each bee should have its own cost records, not mixed
+    # Each ghost should have its own cost records, not mixed
     costs1 = GiTF.Costs.for_bee(bee1.id)
     costs2 = GiTF.Costs.for_bee(bee2.id)
 

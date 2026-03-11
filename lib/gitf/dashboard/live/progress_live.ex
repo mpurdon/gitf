@@ -1,5 +1,5 @@
 defmodule GiTF.Dashboard.ProgressLive do
-  @moduledoc "LiveView showing real-time bee progress from ETS."
+  @moduledoc "LiveView showing real-time ghost progress from ETS."
 
   use Phoenix.LiveView
 
@@ -21,7 +21,7 @@ defmodule GiTF.Dashboard.ProgressLive do
   end
 
   @impl true
-  def handle_info({:bee_progress, _bee_id, _data}, socket) do
+  def handle_info({:bee_progress, _ghost_id, _data}, socket) do
     {:noreply, assign(socket, :entries, GiTF.Progress.all())}
   end
 
@@ -39,7 +39,7 @@ defmodule GiTF.Dashboard.ProgressLive do
       <h1 class="page-title">Bee Progress</h1>
 
       <%= if @entries == [] do %>
-        <div class="empty">No active bees.</div>
+        <div class="empty">No active ghosts.</div>
       <% else %>
         <table class="data-table">
           <thead>
@@ -53,7 +53,7 @@ defmodule GiTF.Dashboard.ProgressLive do
           <tbody>
             <%= for entry <- @entries do %>
               <tr>
-                <td>{entry[:bee_id] || "-"}</td>
+                <td>{entry[:ghost_id] || "-"}</td>
                 <td>{entry[:tool] || "-"}</td>
                 <td>{entry[:file] || "-"}</td>
                 <td>{entry[:message] || "-"}</td>

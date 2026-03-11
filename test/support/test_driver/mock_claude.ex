@@ -5,7 +5,7 @@ defmodule GiTF.TestDriver.MockClaude do
   Scripts emit valid stream-json matching `GiTF.Runtime.StreamParser.parse_chunk/1`
   format, with configurable exit codes, output content, and delays.
 
-  The mock scripts are used via the `claude_executable` option in `GiTF.Bee.Worker`
+  The mock scripts are used via the `claude_executable` option in `GiTF.Ghost.Worker`
   to test the full Worker -> Port -> StreamParser pipeline without calling real Claude.
   """
 

@@ -2,9 +2,9 @@ defmodule GiTF.Budget.Watchdog do
   @moduledoc """
   Active budget enforcement for the GiTF.
 
-  Periodically checks the accumulated cost of all active Quests and Bees.
+  Periodically checks the accumulated cost of all active Quests and Ghosts.
   If a budget is exceeded, it:
-  1. Pauses the quest (stops active bees, preserves state).
+  1. Pauses the quest (stops active ghosts, preserves state).
   2. Attempts auto-escalation (25% budget increase, up to 2x original).
   3. Resumes the quest if budget is expanded.
   4. Emits a high-priority alert.
@@ -105,9 +105,9 @@ defmodule GiTF.Budget.Watchdog do
   defp pause_quest(quest, spent) do
     quest_id = quest.id
 
-    # Stop active bees but don't fail their jobs (they can resume)
-    active_bees =
-      Store.filter(:bees, fn b ->
+    # Stop active ghosts but don't fail their jobs (they can resume)
+    active_ghosts =
+      Store.filter(:ghosts, fn b ->
         b.job_id != nil and b.status == "working"
       end)
       |> Enum.filter(fn b ->
@@ -117,16 +117,16 @@ defmodule GiTF.Budget.Watchdog do
         end
       end)
 
-    Enum.each(active_bees, fn bee ->
-      Logger.warning("Watchdog killing bee #{bee.id} (Quest #{quest_id} over budget)")
+    Enum.each(active_ghosts, fn ghost ->
+      Logger.warning("Watchdog killing ghost #{ghost.id} (Quest #{quest_id} over budget)")
       # Create handoff before stopping so work isn't lost
       try do
-        GiTF.Handoff.create(bee.id)
+        GiTF.Handoff.create(ghost.id)
       rescue
         _ -> :ok
       end
-      # Force-kill: GenServer.call(:stop) can hang if bee is stuck
-      case GiTF.Bee.Worker.lookup(bee.id) do
+      # Force-kill: GenServer.call(:stop) can hang if ghost is stuck
+      case GiTF.Ghost.Worker.lookup(ghost.id) do
         {:ok, pid} ->
           # Give 2s for graceful stop, then kill
           try do

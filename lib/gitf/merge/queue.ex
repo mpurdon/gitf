@@ -210,7 +210,7 @@ defmodule GiTF.Merge.Queue do
       end)
       |> Enum.flat_map(fn job ->
         case GiTF.Store.find_one(:cells, fn c ->
-               c.bee_id == job.bee_id and c.status == "active"
+               c.ghost_id == job.ghost_id and c.status == "active"
              end) do
           nil -> []
           cell -> [{job.id, cell.id}]

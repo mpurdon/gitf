@@ -15,31 +15,31 @@ defmodule GiTF.Runtime.SettingsTest do
 
   describe "build_settings/2" do
     test "produces a map with SessionStart and Stop hooks" do
-      settings = Settings.build_settings("bee-abc123", "/home/user/hive")
+      settings = Settings.build_settings("ghost-abc123", "/home/user/hive")
 
       assert %{"hooks" => hooks} = settings
       assert Map.has_key?(hooks, "SessionStart")
       assert Map.has_key?(hooks, "Stop")
     end
 
-    test "SessionStart hook runs section prime with the bee ID" do
-      settings = Settings.build_settings("bee-abc123", "/tmp/test-gitf")
+    test "SessionStart hook runs section prime with the ghost ID" do
+      settings = Settings.build_settings("ghost-abc123", "/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["SessionStart"]
       assert hook["type"] == "command"
-      assert hook["command"] =~ "prime --bee bee-abc123"
+      assert hook["command"] =~ "prime --ghost ghost-abc123"
     end
 
-    test "Stop hook runs section costs record with the bee ID" do
-      settings = Settings.build_settings("bee-abc123", "/tmp/test-gitf")
+    test "Stop hook runs section costs record with the ghost ID" do
+      settings = Settings.build_settings("ghost-abc123", "/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["Stop"]
       assert hook["type"] == "command"
-      assert hook["command"] =~ "costs record --bee bee-abc123"
+      assert hook["command"] =~ "costs record --ghost ghost-abc123"
     end
 
     test "includes permissions with allowed tools" do
-      settings = Settings.build_settings("bee-abc123", "/tmp/test-gitf")
+      settings = Settings.build_settings("ghost-abc123", "/tmp/test-gitf")
 
       assert %{"permissions" => %{"allow" => tools}} = settings
       assert is_list(tools)
@@ -53,7 +53,7 @@ defmodule GiTF.Runtime.SettingsTest do
     end
 
     test "allowed tools include the section binary" do
-      settings = Settings.build_settings("bee-abc123", "/tmp/test-gitf")
+      settings = Settings.build_settings("ghost-abc123", "/tmp/test-gitf")
 
       tools = settings["permissions"]["allow"]
       assert Enum.any?(tools, &String.contains?(&1, "gitf"))
@@ -108,7 +108,7 @@ defmodule GiTF.Runtime.SettingsTest do
       working_dir = tmp_workspace()
 
       # In API mode, no CLI settings file is needed
-      assert :ok = Settings.generate("bee-test1", "/tmp/hive-root", working_dir)
+      assert :ok = Settings.generate("ghost-test1", "/tmp/hive-root", working_dir)
 
       settings_path = Path.join([working_dir, ".claude", "settings.json"])
       refute File.exists?(settings_path)
@@ -120,7 +120,7 @@ defmodule GiTF.Runtime.SettingsTest do
 
       refute File.dir?(claude_dir)
 
-      :ok = Settings.generate("bee-test2", "/tmp/hive-root", working_dir)
+      :ok = Settings.generate("ghost-test2", "/tmp/hive-root", working_dir)
 
       refute File.dir?(claude_dir)
     end

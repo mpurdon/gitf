@@ -159,7 +159,7 @@ defmodule GiTF.Verification do
 
   defp get_job_cell(job) do
     case Store.find_one(:cells, fn c -> 
-      c.bee_id == job.bee_id and c.status == "active" 
+      c.ghost_id == job.ghost_id and c.status == "active" 
     end) do
       nil -> {:error, :no_cell}
       cell -> {:ok, cell}

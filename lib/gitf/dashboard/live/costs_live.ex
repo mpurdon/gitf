@@ -3,7 +3,7 @@ defmodule GiTF.Dashboard.CostsLive do
   Cost tracking page.
 
   Displays aggregate cost statistics -- total spend, token counts,
-  breakdowns by model and by bee. Uses `GiTF.Costs.summary/0` as its
+  breakdowns by model and by ghost. Uses `GiTF.Costs.summary/0` as its
   sole data source, keeping the LiveView thin and the data
   transformation in the context module where it belongs.
   """
@@ -152,9 +152,9 @@ defmodule GiTF.Dashboard.CostsLive do
               </tr>
             </thead>
             <tbody>
-              <%= for {bee_id, data} <- @summary.by_bee do %>
+              <%= for {ghost_id, data} <- @summary.by_bee do %>
                 <tr>
-                  <td style="font-family:monospace; font-size:0.8rem">{bee_id}</td>
+                  <td style="font-family:monospace; font-size:0.8rem">{ghost_id}</td>
                   <td style="text-align:right; font-family:monospace">{format_cost(data.cost)}</td>
                   <td style="text-align:right; font-family:monospace">{format_tokens(data.input_tokens)}</td>
                   <td style="text-align:right; font-family:monospace">{format_tokens(data.output_tokens)}</td>

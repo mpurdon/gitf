@@ -41,13 +41,13 @@ defmodule GiTF.E2E.CostTrackingTest do
     assert cost.model == "claude-sonnet-4-20250514"
   end
 
-  scenario "cost summary aggregates across bees" do
+  scenario "cost summary aggregates across ghosts" do
     {:ok, env, comb} = Harness.add_comb(env)
 
     {:ok, _quest, [job1, job2]} =
       Harness.create_quest(env,
         comb_id: comb.id,
-        goal: "Multi-bee cost test",
+        goal: "Multi-ghost cost test",
         jobs: [
           %{title: "Cost task 1"},
           %{title: "Cost task 2"}
@@ -81,7 +81,7 @@ defmodule GiTF.E2E.CostTrackingTest do
     assert summary.total_input_tokens >= 300
     assert summary.total_output_tokens >= 150
 
-    # by_bee should have entries for both bees
+    # by_bee should have entries for both ghosts
     assert Map.has_key?(summary.by_bee, bee1.id) or map_size(summary.by_bee) >= 2
   end
 end

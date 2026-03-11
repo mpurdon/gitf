@@ -173,7 +173,7 @@ defmodule GiTF.QuestsTest do
       assert fetched.status == "closed"
     end
 
-    test "closes quest with jobs that have no bees", %{comb: comb} do
+    test "closes quest with jobs that have no ghosts", %{comb: comb} do
       {:ok, quest} = Quests.create(%{goal: "Quest with unassigned jobs"})
 
       {:ok, _job} =
@@ -183,26 +183,26 @@ defmodule GiTF.QuestsTest do
       assert closed.status == "closed"
     end
 
-    test "attempts to remove active cells for assigned bees", %{comb: comb} do
-      {:ok, quest} = Quests.create(%{goal: "Quest with bees"})
+    test "attempts to remove active cells for assigned ghosts", %{comb: comb} do
+      {:ok, quest} = Quests.create(%{goal: "Quest with ghosts"})
 
       {:ok, job} =
         GiTF.Jobs.create(%{
-          title: "Job with bee",
+          title: "Job with ghost",
           quest_id: quest.id,
           comb_id: comb.id,
           status: "done"
         })
 
-      {:ok, bee} = Store.insert(:bees, %{name: "test-bee", job_id: job.id, status: "stopped"})
-      GiTF.Jobs.assign(job.id, bee.id)
+      {:ok, ghost} = Store.insert(:ghosts, %{name: "test-ghost", job_id: job.id, status: "stopped"})
+      GiTF.Jobs.assign(job.id, ghost.id)
 
       {:ok, _cell} =
         Store.insert(:cells, %{
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           comb_id: comb.id,
-          worktree_path: "/tmp/fake-worktree-#{bee.id}",
-          branch: "bee/#{bee.id}",
+          worktree_path: "/tmp/fake-worktree-#{ghost.id}",
+          branch: "ghost/#{ghost.id}",
           status: "active"
         })
 

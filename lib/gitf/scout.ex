@@ -1,11 +1,11 @@
 defmodule GiTF.Scout do
   @moduledoc """
-  Scouts are read-only bees that examine the codebase before implementation.
+  Scouts are read-only ghosts that examine the codebase before implementation.
 
-  When triage flags a job as complex, a scout bee is spawned first to
+  When triage flags a job as complex, a scout ghost is spawned first to
   analyze the codebase, identify relevant files, note patterns and risks,
   and produce structured findings. These findings are injected into the
-  parent job's description before the implementation bee starts.
+  parent job's description before the implementation ghost starts.
 
   This is a pure context module -- no process state, just data transformations.
   """
@@ -28,7 +28,7 @@ defmodule GiTF.Scout do
   end
 
   @doc """
-  Builds the prompt for a scout bee.
+  Builds the prompt for a scout ghost.
 
   Instructs the scout to examine the codebase relevant to the job,
   identify key files, note patterns/conventions, flag risks, assess
@@ -49,7 +49,7 @@ defmodule GiTF.Scout do
 
     """
     You are a Scout — a read-only analyst. Your job is to examine the codebase \
-    and produce a structured report for the implementation bee that will follow you.
+    and produce a structured report for the implementation ghost that will follow you.
 
     DO NOT modify any files. Only read and analyze.
 
@@ -88,7 +88,7 @@ defmodule GiTF.Scout do
     with justification.
 
     ## Recommended Approach
-    Step-by-step implementation plan the bee should follow.
+    Step-by-step implementation plan the ghost should follow.
     """
   end
 

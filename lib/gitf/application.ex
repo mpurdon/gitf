@@ -126,8 +126,8 @@ defmodule GiTF.Application do
           end
 
         warnings =
-          if get_in(config, ["major", "max_bees"]) == nil do
-            ["queen.max_bees not set (defaulting to 5)" | warnings]
+          if get_in(config, ["major", "max_ghosts"]) == nil do
+            ["queen.max_ghosts not set (defaulting to 5)" | warnings]
           else
             warnings
           end
@@ -181,7 +181,7 @@ defmodule GiTF.Application do
     })
 
     # Configure Elixir Logger to forward metadata keys
-    Logger.configure(metadata: [:bee_id, :job_id, :quest_id, :comb_id, :component])
+    Logger.configure(metadata: [:ghost_id, :job_id, :quest_id, :comb_id, :component])
 
     :logger.remove_handler(:default)
   end

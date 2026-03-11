@@ -1,6 +1,6 @@
 defmodule GiTF.Validator do
   @moduledoc """
-  Validates bee output after completion.
+  Validates ghost output after completion.
 
   Runs an optional custom validation command (e.g. `mix test`) and
   optionally a headless Claude assessment of the diff against the
@@ -12,7 +12,7 @@ defmodule GiTF.Validator do
   alias GiTF.Store
 
   @doc """
-  Validates a completed bee's work.
+  Validates a completed ghost's work.
 
   1. Runs `validation_command` in the cell worktree if the comb has one.
   2. Runs headless Claude validation to assess the diff.
@@ -21,7 +21,7 @@ defmodule GiTF.Validator do
   """
   @spec validate(String.t(), map(), String.t()) ::
           {:ok, atom()} | {:error, term()} | {:error, term(), term()}
-  def validate(_bee_id, job, cell_id) do
+  def validate(_ghost_id, job, cell_id) do
     with {:ok, cell} <- fetch_cell(cell_id),
          {:ok, comb} <- fetch_comb(cell.comb_id) do
       results = []

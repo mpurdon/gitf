@@ -29,13 +29,13 @@ defmodule GiTF.JobsDepTest do
   end
 
   defp create_bee do
-    {:ok, bee} =
-      Store.insert(:bees, %{
-        name: "test-bee-#{:erlang.unique_integer([:positive])}",
+    {:ok, ghost} =
+      Store.insert(:ghosts, %{
+        name: "test-ghost-#{:erlang.unique_integer([:positive])}",
         status: "starting"
       })
 
-    bee
+    ghost
   end
 
   describe "add_dependency/2" do
@@ -127,13 +127,13 @@ defmodule GiTF.JobsDepTest do
     end
 
     test "returns true when all dependencies are done", %{quest: q, comb: c} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, _} = Jobs.add_dependency(b.id, a.id)
 
       # Complete job A
-      {:ok, _} = Jobs.assign(a.id, bee.id)
+      {:ok, _} = Jobs.assign(a.id, ghost.id)
       {:ok, _} = Jobs.start(a.id)
       {:ok, _} = Jobs.complete(a.id)
 
@@ -143,14 +143,14 @@ defmodule GiTF.JobsDepTest do
 
   describe "unblock_dependents/1" do
     test "unblocks blocked dependents when all deps done", %{quest: q, comb: c} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, _} = Jobs.add_dependency(b.id, a.id)
       {:ok, _} = Jobs.block(b.id)
 
       # Complete A
-      {:ok, _} = Jobs.assign(a.id, bee.id)
+      {:ok, _} = Jobs.assign(a.id, ghost.id)
       {:ok, _} = Jobs.start(a.id)
       {:ok, _} = Jobs.complete(a.id)
 
@@ -161,7 +161,7 @@ defmodule GiTF.JobsDepTest do
     end
 
     test "does not unblock when other deps remain", %{quest: q, comb: c} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, cc} = create_job(q, c, "C")
@@ -171,7 +171,7 @@ defmodule GiTF.JobsDepTest do
       {:ok, _} = Jobs.block(cc.id)
 
       # Complete only A
-      {:ok, _} = Jobs.assign(a.id, bee.id)
+      {:ok, _} = Jobs.assign(a.id, ghost.id)
       {:ok, _} = Jobs.start(a.id)
       {:ok, _} = Jobs.complete(a.id)
 
@@ -183,12 +183,12 @@ defmodule GiTF.JobsDepTest do
   end
 
   describe "blocked spawn rejection" do
-    test "Bees.spawn returns :blocked when deps not ready", %{quest: q, comb: c} do
+    test "Ghosts.spawn returns :blocked when deps not ready", %{quest: q, comb: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, _} = Jobs.add_dependency(b.id, a.id)
 
-      assert {:error, :blocked} = GiTF.Bees.spawn(b.id, c.id, "/tmp/fake_gitf")
+      assert {:error, :blocked} = GiTF.Ghosts.spawn(b.id, c.id, "/tmp/fake_gitf")
     end
   end
 end

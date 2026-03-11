@@ -26,7 +26,7 @@ defmodule GiTF.Web.GameChannel do
   
   Supported commands:
   - `spawn_quest`: Create a new work order.
-  - `emergency_stop`: Kill all active bees.
+  - `emergency_stop`: Kill all active ghosts.
   """
   @impl true
   def handle_in("spawn_quest", %{"goal" => goal} = payload, socket) do
@@ -45,9 +45,9 @@ defmodule GiTF.Web.GameChannel do
   def handle_in("emergency_stop", _payload, socket) do
     Logger.warning("Emergency Stop received from Game Client")
     
-    # Kill active bees
-    active_bees = GiTF.Store.filter(:bees, fn b -> b.status == "working" end)
-    Enum.each(active_bees, fn bee -> GiTF.Bees.stop(bee.id) end)
+    # Kill active ghosts
+    active_ghosts = GiTF.Store.filter(:ghosts, fn b -> b.status == "working" end)
+    Enum.each(active_ghosts, fn ghost -> GiTF.Ghosts.stop(ghost.id) end)
     
     {:reply, :ok, socket}
   end
@@ -60,7 +60,7 @@ defmodule GiTF.Web.GameChannel do
   """
   @impl true
   def handle_info({:gitf_event, payload}, socket) do
-    # payload is %{event: "section.bee.spawned", measurements: %{}, metadata: %{...}}
+    # payload is %{event: "section.ghost.spawned", measurements: %{}, metadata: %{...}}
     
     # Simplify for the game client
     game_event = %{
@@ -78,7 +78,7 @@ defmodule GiTF.Web.GameChannel do
     # Snapshot of the world
     state = %{
       quests: GiTF.Store.all(:quests),
-      bees: GiTF.Store.all(:bees),
+      ghosts: GiTF.Store.all(:ghosts),
       combs: GiTF.Store.all(:combs)
     }
     

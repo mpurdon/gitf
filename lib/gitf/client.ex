@@ -67,10 +67,10 @@ defmodule GiTF.Client do
   def reset_job(id), do: post("/api/v1/jobs/#{id}/reset") |> unwrap_data()
 
   # Bees
-  def list_bees, do: get("/api/v1/bees") |> unwrap_data()
-  def stop_bee(id), do: post("/api/v1/bees/#{id}/stop") |> unwrap_ok()
-  def complete_bee(id), do: post("/api/v1/bees/#{id}/complete") |> unwrap_ok()
-  def fail_bee(id, reason \\ "unknown"), do: post("/api/v1/bees/#{id}/fail", %{reason: reason}) |> unwrap_ok()
+  def list_bees, do: get("/api/v1/ghosts") |> unwrap_data()
+  def stop_ghost(id), do: post("/api/v1/ghosts/#{id}/stop") |> unwrap_ok()
+  def complete_bee(id), do: post("/api/v1/ghosts/#{id}/complete") |> unwrap_ok()
+  def fail_bee(id, reason \\ "unknown"), do: post("/api/v1/ghosts/#{id}/fail", %{reason: reason}) |> unwrap_ok()
 
   # Combs
   def add_comb(path_or_url, opts \\ []) do
@@ -97,7 +97,7 @@ defmodule GiTF.Client do
 
   # Costs
   def costs_summary, do: get("/api/v1/costs/summary") |> unwrap_data()
-  def record_cost(bee_id, attrs), do: post("/api/v1/costs/record", Map.put(attrs, :bee_id, bee_id)) |> unwrap_data()
+  def record_cost(ghost_id, attrs), do: post("/api/v1/costs/record", Map.put(attrs, :ghost_id, ghost_id)) |> unwrap_data()
 
   # Health check
   def ping do

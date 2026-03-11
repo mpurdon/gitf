@@ -1,8 +1,8 @@
-defmodule GiTF.Bee.CognitiveFriction do
+defmodule GiTF.Ghost.CognitiveFriction do
   @moduledoc """
-  Dynamic cognitive friction for bees.
+  Dynamic cognitive friction for ghosts.
 
-  Adjusts how much a bee must "think before acting" based on job risk level.
+  Adjusts how much a ghost must "think before acting" based on job risk level.
   High-risk jobs get mandatory confirmation prompts; low-risk jobs get
   streamlined instructions with no extra friction.
   """
@@ -10,7 +10,7 @@ defmodule GiTF.Bee.CognitiveFriction do
   @doc """
   Returns extra priming instructions based on risk level.
 
-  Appended to the bee's Rules section during priming so the bee
+  Appended to the ghost's Rules section during priming so the ghost
   adjusts its behaviour to match the risk of the job.
   """
   @spec friction_instructions(atom()) :: String.t()

@@ -22,7 +22,7 @@ defmodule GiTF.ObservabilityTest do
       
       assert Map.has_key?(metrics, :system)
       assert Map.has_key?(metrics, :quests)
-      assert Map.has_key?(metrics, :bees)
+      assert Map.has_key?(metrics, :ghosts)
       assert Map.has_key?(metrics, :quality)
       assert Map.has_key?(metrics, :costs)
     end

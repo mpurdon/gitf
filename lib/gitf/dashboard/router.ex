@@ -19,7 +19,7 @@ defmodule GiTF.Dashboard.Router do
 
     live("/", OverviewLive)
     live("/quests", QuestsLive)
-    live("/bees", BeesLive)
+    live("/ghosts", GhostsLive)
     live("/costs", CostsLive)
     live("/waggles", WagglesLive)
     live("/progress", ProgressLive)

@@ -6,7 +6,7 @@ defmodule GiTF.Shutdown do
   1. Notify channels ("gitf shutting down")
   2. Drain in-flight waggles
   3. Save Store state
-  4. Stop bees gracefully (SIGTERM to Claude ports, wait timeout)
+  4. Stop ghosts gracefully (SIGTERM to Claude ports, wait timeout)
   5. Stop Major
   6. Close TUI
   7. Exit
@@ -71,7 +71,7 @@ defmodule GiTF.Shutdown do
     # 2. Mark running jobs as stopped (preserves state for resume)
     mark_jobs_stopped()
 
-    # 3. Save checkpoints for active bees
+    # 3. Save checkpoints for active ghosts
     save_active_checkpoints()
 
     # 4. Flush Store to ensure all state is persisted before stopping processes
@@ -80,8 +80,8 @@ defmodule GiTF.Shutdown do
     # 5. Drain waggles (wait for in-flight to complete)
     drain_waggles(drain_timeout)
 
-    # 6. Stop bees (parallel with per-bee timeout)
-    stop_bees(drain_timeout)
+    # 6. Stop ghosts (parallel with per-ghost timeout)
+    stop_ghosts(drain_timeout)
 
     # 7. Stop Major
     stop_major()
@@ -103,10 +103,10 @@ defmodule GiTF.Shutdown do
   end
 
   defp save_active_checkpoints do
-    GiTF.Store.filter(:bees, fn b -> b.status == "working" end)
-    |> Enum.each(fn bee ->
+    GiTF.Store.filter(:ghosts, fn b -> b.status == "working" end)
+    |> Enum.each(fn ghost ->
       try do
-        GiTF.Handoff.create(bee.id)
+        GiTF.Handoff.create(ghost.id)
       rescue
         _ -> :ok
       end
@@ -120,7 +120,7 @@ defmodule GiTF.Shutdown do
     Process.sleep(timeout)
   end
 
-  defp stop_bees(timeout) do
+  defp stop_ghosts(timeout) do
     case Process.whereis(GiTF.CombSupervisor) do
       nil ->
         :ok
@@ -128,7 +128,7 @@ defmodule GiTF.Shutdown do
       _pid ->
         children = DynamicSupervisor.which_children(GiTF.CombSupervisor)
 
-        # Stop bees in parallel with per-bee timeout to prevent one hung bee
+        # Stop ghosts in parallel with per-ghost timeout to prevent one hung ghost
         # from blocking shutdown of all others
         tasks =
           Enum.map(children, fn {_, pid, _, _} ->

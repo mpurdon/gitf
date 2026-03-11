@@ -9,7 +9,7 @@ defmodule GiTF.TranscriptWatcher do
   ## State
 
       %{
-        watched_bees: %{bee_id => %{path: String.t(), offset: non_neg_integer()}},
+        watched_bees: %{ghost_id => %{path: String.t(), offset: non_neg_integer()}},
         poll_interval: pos_integer()
       }
 
@@ -36,43 +36,43 @@ defmodule GiTF.TranscriptWatcher do
   end
 
   @doc """
-  Begins watching a transcript file for a given bee.
+  Begins watching a transcript file for a given ghost.
 
   New cost entries will be parsed and recorded to the database
   on each poll cycle.
   """
   @spec watch(String.t(), String.t()) :: :ok
-  def watch(bee_id, transcript_path) do
+  def watch(ghost_id, transcript_path) do
     case lookup() do
-      {:ok, pid} -> GenServer.call(pid, {:watch, bee_id, transcript_path})
+      {:ok, pid} -> GenServer.call(pid, {:watch, ghost_id, transcript_path})
       :error -> :ok
     end
   end
 
   @doc """
-  Stops watching the transcript file for a given bee.
+  Stops watching the transcript file for a given ghost.
   """
   @spec unwatch(String.t()) :: :ok
-  def unwatch(bee_id) do
+  def unwatch(ghost_id) do
     case lookup() do
-      {:ok, pid} -> GenServer.call(pid, {:unwatch, bee_id})
+      {:ok, pid} -> GenServer.call(pid, {:unwatch, ghost_id})
       :error -> :ok
     end
   end
 
   @doc """
-  Performs a one-time parse of a transcript file for a bee.
+  Performs a one-time parse of a transcript file for a ghost.
 
   Reads the entire file, extracts cost entries, and records them.
-  Useful for a final sweep after a bee completes its work.
+  Useful for a final sweep after a ghost completes its work.
   """
   @spec final_parse(String.t(), String.t()) :: :ok
-  def final_parse(bee_id, transcript_path) do
+  def final_parse(ghost_id, transcript_path) do
     case GiTF.Transcript.parse_file(transcript_path) do
       {:ok, entries} ->
         entries
         |> GiTF.Transcript.extract_costs()
-        |> Enum.each(&record_cost(bee_id, &1))
+        |> Enum.each(&record_cost(ghost_id, &1))
 
       {:error, _reason} ->
         :ok
@@ -104,14 +104,14 @@ defmodule GiTF.TranscriptWatcher do
   end
 
   @impl true
-  def handle_call({:watch, bee_id, path}, _from, state) do
+  def handle_call({:watch, ghost_id, path}, _from, state) do
     watch_entry = %{path: path, offset: 0}
-    watched = Map.put(state.watched_bees, bee_id, watch_entry)
+    watched = Map.put(state.watched_bees, ghost_id, watch_entry)
     {:reply, :ok, %{state | watched_bees: watched}}
   end
 
-  def handle_call({:unwatch, bee_id}, _from, state) do
-    watched = Map.delete(state.watched_bees, bee_id)
+  def handle_call({:unwatch, ghost_id}, _from, state) do
+    watched = Map.delete(state.watched_bees, ghost_id)
     {:reply, :ok, %{state | watched_bees: watched}}
   end
 
@@ -133,21 +133,21 @@ defmodule GiTF.TranscriptWatcher do
   end
 
   defp poll_all(watched_bees) do
-    Map.new(watched_bees, fn {bee_id, entry} ->
-      {bee_id, poll_bee(bee_id, entry)}
+    Map.new(watched_bees, fn {ghost_id, entry} ->
+      {ghost_id, poll_bee(ghost_id, entry)}
     end)
   end
 
-  defp poll_bee(bee_id, %{path: path, offset: offset} = entry) do
+  defp poll_bee(ghost_id, %{path: path, offset: offset} = entry) do
     case File.stat(path) do
       {:ok, %{size: size}} when size > offset ->
         {new_entries, new_offset} = GiTF.Transcript.parse_from_offset(path, offset)
 
         new_entries
         |> GiTF.Transcript.extract_costs()
-        |> Enum.each(&record_cost(bee_id, &1))
+        |> Enum.each(&record_cost(ghost_id, &1))
 
-        maybe_emit_checkpoint(bee_id, new_entries)
+        maybe_emit_checkpoint(ghost_id, new_entries)
 
         %{entry | offset: new_offset}
 
@@ -157,14 +157,14 @@ defmodule GiTF.TranscriptWatcher do
   end
 
   @doc false
-  def maybe_emit_checkpoint(_bee_id, entries) when entries == [], do: :ok
+  def maybe_emit_checkpoint(_ghost_id, entries) when entries == [], do: :ok
 
-  def maybe_emit_checkpoint(bee_id, entries) do
+  def maybe_emit_checkpoint(ghost_id, entries) do
     # Infer phase from tool usage patterns in transcript entries
     phase = infer_phase(entries)
 
     if phase do
-      GiTF.Waggle.send_checkpoint(bee_id, %{
+      GiTF.Waggle.send_checkpoint(ghost_id, %{
         phase: phase,
         synthetic: true,
         entries_count: length(entries)
@@ -197,8 +197,8 @@ defmodule GiTF.TranscriptWatcher do
     end
   end
 
-  defp record_cost(bee_id, cost_data) do
-    {:ok, _cost} = GiTF.Costs.record(bee_id, cost_data)
+  defp record_cost(ghost_id, cost_data) do
+    {:ok, _cost} = GiTF.Costs.record(ghost_id, cost_data)
     :ok
   end
 end

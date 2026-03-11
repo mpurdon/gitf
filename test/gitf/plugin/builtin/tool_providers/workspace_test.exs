@@ -61,14 +61,14 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
       assert result =~ "No active cells"
     end
 
-    test "lists cells with bee assignments" do
-      Store.insert(:cells, %{id: "cell-1", bee_id: "bee-abc", path: "/tmp/cell1"})
+    test "lists cells with ghost assignments" do
+      Store.insert(:cells, %{id: "cell-1", ghost_id: "ghost-abc", path: "/tmp/cell1"})
 
       tool = find_tool("list_cells")
       {:ok, result} = tool.callback.(%{})
 
       assert result =~ "cell-1"
-      assert result =~ "bee-abc"
+      assert result =~ "ghost-abc"
     end
   end
 

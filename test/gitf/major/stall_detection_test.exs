@@ -18,13 +18,13 @@ defmodule GiTF.Major.StallDetectionTest do
   describe "Waggle.send_checkpoint/2" do
     test "sends checkpoint waggle to queen" do
       {:ok, waggle} =
-        GiTF.Waggle.send_checkpoint("bee-abc123", %{
+        GiTF.Waggle.send_checkpoint("ghost-abc123", %{
           phase: "coding",
           files_changed: 3,
           progress_pct: 45
         })
 
-      assert waggle.from == "bee-abc123"
+      assert waggle.from == "ghost-abc123"
       assert waggle.to == "major"
       assert waggle.subject == "checkpoint"
 
@@ -37,13 +37,13 @@ defmodule GiTF.Major.StallDetectionTest do
   describe "Waggle.send_resource_warning/2" do
     test "sends resource warning waggle to queen" do
       {:ok, waggle} =
-        GiTF.Waggle.send_resource_warning("bee-def456", %{
+        GiTF.Waggle.send_resource_warning("ghost-def456", %{
           type: "context_tokens",
           current: 180_000,
           limit: 200_000
         })
 
-      assert waggle.from == "bee-def456"
+      assert waggle.from == "ghost-def456"
       assert waggle.to == "major"
       assert waggle.subject == "resource_warning"
 
@@ -54,13 +54,13 @@ defmodule GiTF.Major.StallDetectionTest do
   end
 
   describe "detect_stalled_bees/1" do
-    test "detects bees with no checkpoint beyond timeout" do
-      # Create a working bee that was inserted 15 minutes ago
+    test "detects ghosts with no checkpoint beyond timeout" do
+      # Create a working ghost that was inserted 15 minutes ago
       old_time = DateTime.add(DateTime.utc_now(), -900, :second)
 
       {:ok, _bee} =
-        Store.insert(:bees, %{
-          name: "stale-bee",
+        Store.insert(:ghosts, %{
+          name: "stale-ghost",
           status: "working",
           job_id: nil,
           cell_path: nil,
@@ -81,10 +81,10 @@ defmodule GiTF.Major.StallDetectionTest do
       assert :ok == GiTF.Major.detect_stalled_bees(state)
     end
 
-    test "does not flag bees with recent checkpoints" do
-      {:ok, bee} =
-        Store.insert(:bees, %{
-          name: "active-bee",
+    test "does not flag ghosts with recent checkpoints" do
+      {:ok, ghost} =
+        Store.insert(:ghosts, %{
+          name: "active-ghost",
           status: "working",
           job_id: nil,
           cell_path: nil,
@@ -97,7 +97,7 @@ defmodule GiTF.Major.StallDetectionTest do
 
       state = %{
         last_checkpoint: %{
-          bee.id => %{at: DateTime.utc_now(), data: %{"phase" => "coding"}}
+          ghost.id => %{at: DateTime.utc_now(), data: %{"phase" => "coding"}}
         },
         stall_timeout: :timer.minutes(10)
       }
@@ -113,16 +113,16 @@ defmodule GiTF.Major.StallDetectionTest do
         %{content: "Using Edit tool to modify code"}
       ]
 
-      assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("bee-test", entries)
+      assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("ghost-test", entries)
     end
 
     test "does nothing for empty entries" do
-      assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("bee-test", [])
+      assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("ghost-test", [])
     end
 
     test "emits checkpoint for test-related entries" do
       entries = [%{content: "Running test suite with assert checks"}]
-      assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("bee-test", entries)
+      assert :ok == GiTF.TranscriptWatcher.maybe_emit_checkpoint("ghost-test", entries)
     end
   end
 end

@@ -1,8 +1,8 @@
 defmodule GiTF.Major.PhaseCollector do
   @moduledoc """
-  Parses raw bee output into structured phase artifacts.
+  Parses raw ghost output into structured phase artifacts.
 
-  The bee's stdout contains Claude's stream-json events. The collector
+  The ghost's stdout contains Claude's stream-json events. The collector
   extracts the assistant's response text, finds the JSON block, validates
   required keys per phase, and returns a structured artifact map.
 

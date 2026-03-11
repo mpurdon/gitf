@@ -1,10 +1,10 @@
-defmodule GiTF.Dashboard.BeesLive do
+defmodule GiTF.Dashboard.GhostsLive do
   @moduledoc """
   Bee monitoring page.
 
-  Displays all bees with their status, name, assigned job, and cell
+  Displays all ghosts with their status, name, assigned job, and cell
   information. Subscribes to PubSub for live status updates. Working
-  bees show a green pulse animation; crashed bees appear in red.
+  ghosts show a green pulse animation; crashed ghosts appear in red.
   """
 
   use Phoenix.LiveView
@@ -32,12 +32,12 @@ defmodule GiTF.Dashboard.BeesLive do
   end
 
   defp assign_data(socket) do
-    bees = GiTF.Bees.list()
+    ghosts = GiTF.Ghosts.list()
 
     socket
     |> assign(:page_title, "Bees")
-    |> assign(:current_path, "/bees")
-    |> assign(:bees, bees)
+    |> assign(:current_path, "/ghosts")
+    |> assign(:ghosts, ghosts)
   end
 
   @impl true
@@ -47,8 +47,8 @@ defmodule GiTF.Dashboard.BeesLive do
       <h1 class="page-title">Bee Agents</h1>
 
       <div class="panel">
-        <%= if @bees == [] do %>
-          <div class="empty">No bees spawned yet. Bees are created when the Major assigns jobs.</div>
+        <%= if @ghosts == [] do %>
+          <div class="empty">No ghosts spawned yet. Bees are created when the Major assigns jobs.</div>
         <% else %>
           <table>
             <thead>
@@ -63,20 +63,20 @@ defmodule GiTF.Dashboard.BeesLive do
               </tr>
             </thead>
             <tbody>
-              <%= for bee <- @bees do %>
+              <%= for ghost <- @ghosts do %>
                 <tr>
                   <td style="width:1rem">
-                    <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(bee, :status, "unknown"))}"} class={if Map.get(bee, :status) == "working", do: "pulse"}></span>
+                    <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(ghost, :status, "unknown"))}"} class={if Map.get(ghost, :status) == "working", do: "pulse"}></span>
                   </td>
-                  <td style="font-family:monospace; font-size:0.8rem">{bee.id}</td>
-                  <td>{Map.get(bee, :name, "-")}</td>
-                  <td><span class={"badge #{status_badge(Map.get(bee, :status, "unknown"))}"}>{Map.get(bee, :status, "unknown")}</span></td>
-                  <td style="font-family:monospace; font-size:0.8rem">{Map.get(bee, :job_id, "-")}</td>
-                  <td style="font-size:0.8rem">{Map.get(bee, :assigned_model, "-")}</td>
+                  <td style="font-family:monospace; font-size:0.8rem">{ghost.id}</td>
+                  <td>{Map.get(ghost, :name, "-")}</td>
+                  <td><span class={"badge #{status_badge(Map.get(ghost, :status, "unknown"))}"}>{Map.get(ghost, :status, "unknown")}</span></td>
+                  <td style="font-family:monospace; font-size:0.8rem">{Map.get(ghost, :job_id, "-")}</td>
+                  <td style="font-size:0.8rem">{Map.get(ghost, :assigned_model, "-")}</td>
                   <td>
-                    <%= if Map.has_key?(bee, :context_percentage) do %>
-                      <span class={"badge #{context_badge(bee.context_percentage)}"}>
-                        {Float.round(bee.context_percentage / 1, 1)}%
+                    <%= if Map.has_key?(ghost, :context_percentage) do %>
+                      <span class={"badge #{context_badge(ghost.context_percentage)}"}>
+                        {Float.round(ghost.context_percentage / 1, 1)}%
                       </span>
                     <% else %>
                       <span class="badge badge-grey">-</span>

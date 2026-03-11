@@ -5,7 +5,7 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   Uses Telegram Bot API via `Req` (already a dep). Supports:
   - Long-polling for inbound messages
   - Formatted section event notifications (markdown)
-  - Inbound command parsing (/bee list, /quest show 1)
+  - Inbound command parsing (/ghost list, /quest show 1)
   - Configurable notification scoping and batching
   """
 
@@ -228,8 +228,8 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
 
   defp format_notification(event, payload) do
     case event do
-      :bee_completed -> "Bee #{payload[:bee_id]} completed job #{payload[:job_id]}"
-      :bee_failed -> "Bee #{payload[:bee_id]} failed: #{payload[:error]}"
+      :bee_completed -> "Bee #{payload[:ghost_id]} completed job #{payload[:job_id]}"
+      :bee_failed -> "Bee #{payload[:ghost_id]} failed: #{payload[:error]}"
       :quest_completed -> "Quest #{payload[:quest_id]} completed!"
       :waggle -> payload[:text] || "New waggle message"
       _ -> "GiTF event: #{event} #{inspect(payload)}"
@@ -257,9 +257,9 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
       Enum.map(events_config, fn event_name ->
         case event_name do
           "job_complete" -> [:gitf, :job, :completed]
-          "job_failed" -> [:gitf, :bee, :failed]
+          "job_failed" -> [:gitf, :ghost, :failed]
           "quest_completed" -> [:gitf, :quest, :completed]
-          "bee_crashed" -> [:gitf, :bee, :failed]
+          "bee_crashed" -> [:gitf, :ghost, :failed]
           _ -> nil
         end
       end)

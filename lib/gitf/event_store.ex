@@ -3,12 +3,12 @@ defmodule GiTF.EventStore do
   Persistent event log with replay support.
 
   A context module (no GenServer) backed by `GiTF.Store`. Every significant
-  action in the system — bee lifecycle, job transitions, quest milestones —
+  action in the system — ghost lifecycle, job transitions, quest milestones —
   is recorded as an immutable event. This provides:
 
   - **Audit trail**: what happened, when, and to whom.
   - **Replay**: reconstruct entity history from its event stream.
-  - **Timeline**: see all activity for a quest across jobs, bees, and merges.
+  - **Timeline**: see all activity for a quest across jobs, ghosts, and merges.
 
   All event data passes through `GiTF.Redaction.redact_map/1` before
   persistence to ensure secrets never reach the event log.
@@ -54,8 +54,8 @@ defmodule GiTF.EventStore do
 
   ## Examples
 
-      iex> GiTF.EventStore.record(:bee_spawned, "bee-abc123", %{model: "sonnet"})
-      {:ok, %{type: :bee_spawned, entity_id: "bee-abc123", ...}}
+      iex> GiTF.EventStore.record(:bee_spawned, "ghost-abc123", %{model: "sonnet"})
+      {:ok, %{type: :bee_spawned, entity_id: "ghost-abc123", ...}}
   """
   @spec record(atom(), String.t(), map()) :: {:ok, map()} | {:error, :invalid_event_type}
   def record(event_type, entity_id, data) do
@@ -65,7 +65,7 @@ defmodule GiTF.EventStore do
   @doc """
   Records an event with metadata for cross-referencing.
 
-  Metadata may include `:quest_id`, `:job_id`, `:bee_id` to link
+  Metadata may include `:quest_id`, `:job_id`, `:ghost_id` to link
   events across entity boundaries.
   """
   @spec record(atom(), String.t(), map(), map()) :: {:ok, map()} | {:error, :invalid_event_type}
@@ -96,7 +96,7 @@ defmodule GiTF.EventStore do
     * `:limit` - max results (default 100)
     * `:quest_id` - filter by metadata quest_id
     * `:job_id` - filter by metadata job_id
-    * `:bee_id` - filter by metadata bee_id
+    * `:ghost_id` - filter by metadata ghost_id
 
   Results are sorted by timestamp descending (newest first).
   """
@@ -133,7 +133,7 @@ defmodule GiTF.EventStore do
   @doc """
   Returns a full chronological timeline for a quest.
 
-  Gathers all events across every entity (jobs, bees, merges) whose
+  Gathers all events across every entity (jobs, ghosts, merges) whose
   metadata `:quest_id` matches the given quest ID.
   """
   @spec timeline(String.t()) :: [map()]
@@ -190,7 +190,7 @@ defmodule GiTF.EventStore do
     |> maybe_filter_since(Keyword.get(opts, :since))
     |> maybe_filter_metadata(:quest_id, Keyword.get(opts, :quest_id))
     |> maybe_filter_metadata(:job_id, Keyword.get(opts, :job_id))
-    |> maybe_filter_metadata(:bee_id, Keyword.get(opts, :bee_id))
+    |> maybe_filter_metadata(:ghost_id, Keyword.get(opts, :ghost_id))
   end
 
   defp maybe_filter_type(events, nil), do: events

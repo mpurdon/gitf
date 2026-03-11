@@ -58,18 +58,18 @@ defmodule GiTF.Migrations do
       Store.put(:jobs, updated)
     end)
 
-    # Add bees model tracking
-    bees = Store.all(:bees)
+    # Add ghosts model tracking
+    ghosts = Store.all(:ghosts)
 
-    Enum.each(bees, fn bee ->
+    Enum.each(ghosts, fn ghost ->
       updated =
-        bee
+        ghost
         |> Map.put_new(:assigned_model, nil)
         |> Map.put_new(:context_tokens_used, 0)
         |> Map.put_new(:context_tokens_limit, nil)
         |> Map.put_new(:context_percentage, 0.0)
 
-      Store.put(:bees, updated)
+      Store.put(:ghosts, updated)
     end)
 
     # Initialize context_snapshots collection (empty)

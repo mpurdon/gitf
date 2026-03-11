@@ -76,7 +76,7 @@ defmodule GiTF.Runtime.CrossModelAudit do
 
   defp find_cell(job) do
     case GiTF.Store.find_one(:cells, fn c ->
-      c.bee_id == job.bee_id and c.status == "active"
+      c.ghost_id == job.ghost_id and c.status == "active"
     end) do
       nil -> {:error, :no_cell}
       cell -> {:ok, cell}

@@ -125,7 +125,7 @@ defmodule GiTF.Runtime.ModelsTest do
     test "returns nil in API mode (ReqLLMProvider)" do
       # ReqLLMProvider doesn't implement workspace_setup — API mode
       # doesn't need CLI settings files
-      assert nil == Models.workspace_setup("bee-test123", "/tmp/test-gitf")
+      assert nil == Models.workspace_setup("ghost-test123", "/tmp/test-gitf")
     end
 
     test "returns nil for queen in API mode" do

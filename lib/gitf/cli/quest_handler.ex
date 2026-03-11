@@ -146,7 +146,7 @@ defmodule GiTF.CLI.QuestHandler do
                     j.id,
                     String.slice(to_string(j.title), 0, 50),
                     j.status,
-                    j[:bee_id] || "-",
+                    j[:ghost_id] || "-",
                     j[:assigned_model] || "-"
                   ]
                 end)

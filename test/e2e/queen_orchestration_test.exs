@@ -16,14 +16,14 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
         dependencies: [{1, 0}]
       )
 
-    # Spawn a mock bee for job1 only — Major should auto-spawn for job2
+    # Spawn a mock ghost for job1 only — Major should auto-spawn for job2
     {:ok, bee1} = Harness.spawn_mock_bee(env, job1.id, comb.id, delay_ms: 200)
 
     # Wait for job1 to complete
     await({:job_done, job1.id}, timeout: 15_000)
     await({:bee_stopped, bee1.id}, timeout: 5_000)
 
-    # Wait for a waggle from the bee — the validation pipeline in mark_success
+    # Wait for a waggle from the ghost — the validation pipeline in mark_success
     # may spawn Claude for diff assessment (up to 60s timeout), so be very generous
     await(
       fn ->
@@ -41,7 +41,7 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
 
     # Quest status should reflect the state of jobs.
     # Major attempts to spawn for job2 but without claude_executable,
-    # the bee can't find Claude and fails. After retries, quest may be "failed".
+    # the ghost can't find Claude and fails. After retries, quest may be "failed".
     {:ok, updated_quest} = GiTF.Quests.get(quest.id)
     assert updated_quest.status in ["pending", "active", "completed", "failed"]
   end
@@ -64,7 +64,7 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
 
     # The Worker sends a waggle AFTER the validation pipeline completes.
     # The Validator may spawn Claude for diff assessment (60s timeout in Validator).
-    # Wait for any waggle from the bee.
+    # Wait for any waggle from the ghost.
     await(
       fn ->
         waggles = GiTF.Store.all(:waggles)

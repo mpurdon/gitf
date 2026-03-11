@@ -35,10 +35,10 @@ defmodule GiTF.CLI.Help do
 
   def show_tip(:bee_spawned) do
     IO.puts("")
-    IO.puts("💡 Monitor your bee:")
+    IO.puts("💡 Monitor your ghost:")
     IO.puts("   • Watch progress:     section watch")
-    IO.puts("   • Check status:       section bee list")
-    IO.puts("   • View context:       section bee context <bee-id>")
+    IO.puts("   • Check status:       section ghost list")
+    IO.puts("   • View context:       section ghost context <ghost-id>")
   end
 
   def show_tip(:verification_failed) do
@@ -46,14 +46,14 @@ defmodule GiTF.CLI.Help do
     IO.puts("💡 To fix verification failures:")
     IO.puts("   1. Review the output above")
     IO.puts("   2. Check the job details:  section jobs show <job-id>")
-    IO.puts("   3. Revive the bee:         section bee revive --id <bee-id>")
+    IO.puts("   3. Revive the ghost:         section ghost revive --id <ghost-id>")
     IO.puts("   4. Or manually fix and verify")
   end
 
   def show_tip(:context_warning) do
     IO.puts("")
     IO.puts("⚠️  Context usage is high. Consider:")
-    IO.puts("   • Creating a handoff:  section handoff create --bee <bee-id>")
+    IO.puts("   • Creating a handoff:  section handoff create --ghost <ghost-id>")
     IO.puts("   • Simplifying the job")
     IO.puts("   • Breaking into smaller tasks")
   end
@@ -78,7 +78,7 @@ defmodule GiTF.CLI.Help do
       $ section quest new "Refactor module" --budget 5.00
 
     The Major will analyze your goal, research the codebase, create a plan,
-    and spawn bees to execute the work.
+    and spawn ghosts to execute the work.
     """
   end
 
@@ -164,7 +164,7 @@ defmodule GiTF.CLI.Help do
     Monitoring:
       section watch                       Live progress monitor
       section dashboard                   Web UI (localhost:4040)
-      section bee list                    List all bees
+      section ghost list                    List all ghosts
       section costs summary               Check token costs
 
     Verification:

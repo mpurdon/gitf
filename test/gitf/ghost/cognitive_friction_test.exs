@@ -1,7 +1,7 @@
-defmodule GiTF.Bee.CognitiveFrictionTest do
+defmodule GiTF.Ghost.CognitiveFrictionTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.Bee.CognitiveFriction
+  alias GiTF.Ghost.CognitiveFriction
 
   describe "friction_instructions/1" do
     test "low risk returns empty string" do

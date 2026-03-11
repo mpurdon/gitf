@@ -38,7 +38,7 @@ defmodule GiTF.Plugin.Builtin.Themes.Default do
 
       # Activity panel
       bee_working: :green,
-      bee_idle: :white,
+      ghost_idle: :white,
       bee_stopped: :bright_black,
       bee_crashed: :red,
 

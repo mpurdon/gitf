@@ -1,7 +1,7 @@
 defmodule GiTF.E2E.FailureRetryTest do
   use GiTF.TestDriver.Scenario
 
-  scenario "failed bee sends job_failed waggle" do
+  scenario "failed ghost sends job_failed waggle" do
     {:ok, env, comb} = Harness.add_comb(env)
 
     {:ok, _quest, [job1]} =
@@ -11,7 +11,7 @@ defmodule GiTF.E2E.FailureRetryTest do
         jobs: [%{title: "Failing task"}]
       )
 
-    # Spawn bee with exit_code: 1 (failure)
+    # Spawn ghost with exit_code: 1 (failure)
     {:ok, bee1} =
       Harness.spawn_mock_bee(env, job1.id, comb.id,
         exit_code: 1,
@@ -40,7 +40,7 @@ defmodule GiTF.E2E.FailureRetryTest do
         jobs: [%{title: "Retryable task"}]
       )
 
-    # Spawn bee that will fail
+    # Spawn ghost that will fail
     {:ok, bee1} =
       Harness.spawn_mock_bee(env, job1.id, comb.id,
         exit_code: 1,
@@ -48,7 +48,7 @@ defmodule GiTF.E2E.FailureRetryTest do
         mock_opts: [events: GiTF.TestDriver.MockClaude.failure_events()]
       )
 
-    # Wait for the bee to stop (it exited with code 1)
+    # Wait for the ghost to stop (it exited with code 1)
     await({:bee_stopped, bee1.id}, timeout: 15_000)
 
     # job_failed waggle should exist — the Worker sends it on failure
@@ -75,11 +75,11 @@ defmodule GiTF.E2E.FailureRetryTest do
         jobs: [%{title: "Exhausting task"}]
       )
 
-    # Create a bee record and transition the job to failed state manually
-    {:ok, bee} =
-      GiTF.Store.insert(:bees, %{name: "exhaust-bee", status: "working", job_id: job1.id})
+    # Create a ghost record and transition the job to failed state manually
+    {:ok, ghost} =
+      GiTF.Store.insert(:ghosts, %{name: "exhaust-ghost", status: "working", job_id: job1.id})
 
-    {:ok, _} = GiTF.Jobs.assign(job1.id, bee.id)
+    {:ok, _} = GiTF.Jobs.assign(job1.id, ghost.id)
     {:ok, _} = GiTF.Jobs.start(job1.id)
     {:ok, _} = GiTF.Jobs.fail(job1.id)
 
@@ -90,7 +90,7 @@ defmodule GiTF.E2E.FailureRetryTest do
     # Send failure waggle directly to Major
     waggle = %{
       id: "wag-exhaust-#{:erlang.unique_integer([:positive])}",
-      from: bee.id,
+      from: ghost.id,
       to: "major",
       subject: "job_failed",
       body: "Job failed after max retries",

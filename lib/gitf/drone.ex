@@ -136,12 +136,12 @@ defmodule GiTF.Drone do
 
   # -- PubSub-driven verification (event-driven, no polling delay) ------------
 
-  def handle_info({:review_job, job_id, bee_id, cell_id}, state) do
-    Logger.info("Drone received review request for job #{job_id} (bee #{bee_id})")
+  def handle_info({:review_job, job_id, ghost_id, cell_id}, state) do
+    Logger.info("Drone received review request for job #{job_id} (ghost #{ghost_id})")
 
     # Run verification in a fire-and-forget Task to avoid blocking patrols
     Task.start(fn ->
-      do_review_job(job_id, bee_id, cell_id)
+      do_review_job(job_id, ghost_id, cell_id)
     end)
 
     {:noreply, state}
@@ -509,10 +509,10 @@ defmodule GiTF.Drone do
     GiTF.Store.filter(:jobs, fn j -> j.status == "running" end)
     |> Enum.each(fn job ->
       worker_alive? =
-        case job.bee_id do
+        case job.ghost_id do
           nil -> false
-          bee_id ->
-            case GiTF.Bee.Worker.lookup(bee_id) do
+          ghost_id ->
+            case GiTF.Ghost.Worker.lookup(ghost_id) do
               {:ok, pid} -> Process.alive?(pid)
               :error -> false
             end
@@ -554,7 +554,7 @@ defmodule GiTF.Drone do
 
   @verification_max_attempts 3
 
-  defp do_review_job(job_id, _bee_id, cell_id) do
+  defp do_review_job(job_id, _ghost_id, cell_id) do
     do_review_job_attempt(job_id, cell_id, 1)
   rescue
     e ->

@@ -77,7 +77,7 @@ defmodule GiTF.Config.Provider do
         themes: %{default: "default"}
       },
       queen: %{
-        max_bees: 5,
+        max_ghosts: 5,
         max_retries: 3
       },
       shutdown: %{

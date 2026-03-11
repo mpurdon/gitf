@@ -32,8 +32,8 @@ defmodule GiTF.Init do
   ## You MUST
   - Produce structured planning artifacts before creating jobs
   - Create quests to bundle related jobs
-  - Spawn bees to execute jobs
-  - Monitor bee progress
+  - Spawn ghosts to execute jobs
+  - Monitor ghost progress
   - Report quest status to the user
 
   ## Available Commands
@@ -53,14 +53,14 @@ defmodule GiTF.Init do
   - `gitf ops deps list --job <job-id>` -- List job dependencies
 
   ### Bee Management
-  - `gitf bee spawn --job <job-id>` -- Spawn a bee for a job (uses current comb)
-  - `gitf bee spawn --job <job-id> --comb <comb-id>` -- Spawn for specific comb
-  - `gitf bee spawn --job <job-id> --name "custom-name"` -- Spawn with custom name
-  - `gitf bee list` -- List all bees and their status
-  - `gitf bee stop --id <bee-id>` -- Stop a running bee
+  - `gitf ghost spawn --job <job-id>` -- Spawn a ghost for a job (uses current comb)
+  - `gitf ghost spawn --job <job-id> --comb <comb-id>` -- Spawn for specific comb
+  - `gitf ghost spawn --job <job-id> --name "custom-name"` -- Spawn with custom name
+  - `gitf ghost list` -- List all ghosts and their status
+  - `gitf ghost stop --id <ghost-id>` -- Stop a running ghost
 
   ### Communication
-  - `gitf link send --from queen --to <bee-id> --subject "guidance" --body "message"` -- Send a message
+  - `gitf link send --from queen --to <ghost-id> --subject "guidance" --body "message"` -- Send a message
   - `gitf link list --to queen` -- Check messages to you
   - `gitf link show <waggle-id>` -- Read a specific message
 
@@ -73,15 +73,15 @@ defmodule GiTF.Init do
   - `gitf comb use <name>` -- Set the current working comb
 
   ## Merge Strategies
-  When a bee completes its job, its changes can be merged using the comb's strategy:
+  When a ghost completes its job, its changes can be merged using the comb's strategy:
   - **manual** (default): Branch is left for human review
-  - **auto_merge**: Automatically merges the bee's branch into main
+  - **auto_merge**: Automatically merges the ghost's branch into main
   - **pr_branch**: Keeps the branch ready for a pull request
 
   ## Agent Profiles
   Bees automatically check for expert agent files in the comb's `.claude/agents/` directory.
-  If a matching agent doesn't exist, the bee generates one based on the job's technology.
-  This ensures each bee works with domain-specific expertise.
+  If a matching agent doesn't exist, the ghost generates one based on the job's technology.
+  This ensures each ghost works with domain-specific expertise.
 
   ## Workflow
 
@@ -191,17 +191,17 @@ defmodule GiTF.Init do
   2. Add dependencies: `gitf ops deps add --job <id> --depends-on <id>`
 
   ### Phase 5: Execute
-  1. Spawn bees for all ready (unblocked) jobs: `gitf bee spawn --job <id>`
-  2. Do NOT exceed the max_bees limit from the config
+  1. Spawn ghosts for all ready (unblocked) jobs: `gitf ghost spawn --job <id>`
+  2. Do NOT exceed the max_ghosts limit from the config
 
   ### Phase 6: Monitor and Report
-  1. Check bee status: `gitf bee list`
+  1. Check ghost status: `gitf ghost list`
   2. Read messages: `gitf link list --to queen`
-  3. When a bee completes, spawn bees for newly unblocked jobs
+  3. When a ghost completes, spawn ghosts for newly unblocked jobs
   4. When all jobs for a quest complete, report the result to the user
-  5. If a bee reports being blocked, help unblock it or reassign the work
+  5. If a ghost reports being blocked, help unblock it or reassign the work
 
-  NEVER write the code yourself. ALWAYS delegate to bees.
+  NEVER write the code yourself. ALWAYS delegate to ghosts.
   """
 
   @doc """

@@ -1,32 +1,32 @@
-defmodule GiTF.CLI.BeeHandler do
+defmodule GiTF.CLI.GhostHandler do
   @moduledoc """
-  CLI handler for bee subcommands.
+  CLI handler for ghost subcommands.
 
   Extracted from `GiTF.CLI` to reduce the monolithic dispatch file.
   """
 
   alias GiTF.CLI.Format
 
-  def dispatch([:bee, :list], _result, _helpers) do
-    bees =
+  def dispatch([:ghost, :list], _result, _helpers) do
+    ghosts =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_bees() do
           {:ok, b} -> b
           {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
         end
       else
-        GiTF.Bees.list()
+        GiTF.Ghosts.list()
       end
 
-    case bees do
+    case ghosts do
       [] ->
-        Format.info("No bees. Bees are spawned when the Major assigns jobs.")
+        Format.info("No ghosts. Bees are spawned when the Major assigns jobs.")
 
-      bees ->
+      ghosts ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]
 
         rows =
-          Enum.map(bees, fn b ->
+          Enum.map(ghosts, fn b ->
             context_pct =
               case b[:context_percentage] do
                 nil -> "-"
@@ -41,7 +41,7 @@ defmodule GiTF.CLI.BeeHandler do
     end
   end
 
-  def dispatch([:bee, :spawn], result, helpers) do
+  def dispatch([:ghost, :spawn], result, helpers) do
     if GiTF.Client.remote?() do
       Format.error("Bee spawning is a server-side operation. Run it on the server directly.")
     else
@@ -54,12 +54,12 @@ defmodule GiTF.CLI.BeeHandler do
                {:ok, comb} <- GiTF.Comb.get(comb_id) do
             opts = if name, do: [name: name], else: []
 
-            case GiTF.Bees.spawn_detached(job_id, comb.id, gitf_root, opts) do
-              {:ok, bee} ->
-                Format.success("Bee \"#{bee.name}\" spawned (#{bee.id})")
+            case GiTF.Ghosts.spawn_detached(job_id, comb.id, gitf_root, opts) do
+              {:ok, ghost} ->
+                Format.success("Bee \"#{ghost.name}\" spawned (#{ghost.id})")
 
               {:error, reason} ->
-                Format.error("Failed to spawn bee: #{inspect(reason)}")
+                Format.error("Failed to spawn ghost: #{inspect(reason)}")
             end
           else
             {:error, :not_in_gitf} ->
@@ -78,30 +78,30 @@ defmodule GiTF.CLI.BeeHandler do
     end
   end
 
-  def dispatch([:bee, :stop], result, helpers) do
-    bee_id = helpers.result_get.(result, :options, :id)
+  def dispatch([:ghost, :stop], result, helpers) do
+    ghost_id = helpers.result_get.(result, :options, :id)
 
     stop_result =
       if GiTF.Client.remote?(),
-        do: GiTF.Client.stop_bee(bee_id),
-        else: GiTF.Bees.stop(bee_id)
+        do: GiTF.Client.stop_ghost(ghost_id),
+        else: GiTF.Ghosts.stop(ghost_id)
 
     case stop_result do
       :ok ->
-        Format.success("Bee #{bee_id} stopped.")
+        Format.success("Bee #{ghost_id} stopped.")
 
       {:error, :not_found} ->
-        Format.error("Bee not found or not running: #{bee_id}")
-        Format.info("Hint: use `gitf bee list` to see all bees.")
+        Format.error("Bee not found or not running: #{ghost_id}")
+        Format.info("Hint: use `gitf ghost list` to see all ghosts.")
     end
   end
 
-  def dispatch([:bee, :context], result, helpers) do
-    bee_id = helpers.result_get.(result, :args, :bee_id)
+  def dispatch([:ghost, :context], result, helpers) do
+    ghost_id = helpers.result_get.(result, :args, :ghost_id)
 
-    case GiTF.Runtime.ContextMonitor.get_usage_stats(bee_id) do
+    case GiTF.Runtime.ContextMonitor.get_usage_stats(ghost_id) do
       {:ok, stats} ->
-        IO.puts("Bee: #{bee_id}")
+        IO.puts("Bee: #{ghost_id}")
         IO.puts("Context Usage:")
         IO.puts("  Tokens used:  #{stats.tokens_used}")
         IO.puts("  Tokens limit: #{stats.tokens_limit || "unknown"}")
@@ -110,7 +110,7 @@ defmodule GiTF.CLI.BeeHandler do
         IO.puts("  Needs handoff: #{stats.needs_handoff}")
 
       {:error, :not_found} ->
-        Format.error("Bee not found: #{bee_id}")
+        Format.error("Bee not found: #{ghost_id}")
     end
   end
 

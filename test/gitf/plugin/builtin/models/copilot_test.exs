@@ -55,7 +55,7 @@ defmodule GiTF.Plugin.Builtin.Models.CopilotTest do
 
   describe "workspace_setup/2" do
     test "returns nil" do
-      assert Copilot.workspace_setup("bee-123", "/tmp/hive") == nil
+      assert Copilot.workspace_setup("ghost-123", "/tmp/hive") == nil
       assert Copilot.workspace_setup("major", "/tmp/hive") == nil
     end
   end

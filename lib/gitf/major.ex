@@ -2,7 +2,7 @@ defmodule GiTF.Major do
   @moduledoc """
   GenServer for the Major orchestrator process.
 
-  The Major coordinates work across bees by subscribing to waggle messages
+  The Major coordinates work across ghosts by subscribing to waggle messages
   and reacting to status updates. This is a thin GenServer -- the business
   logic for waggle processing lives in `GiTF.Waggle` and `GiTF.Prime`,
   while the Major merely maintains session state and dispatches reactions.
@@ -11,7 +11,7 @@ defmodule GiTF.Major do
 
       %{
         status: :idle | :active,
-        active_bees: %{bee_id => bee_info},
+        active_ghosts: %{ghost_id => bee_info},
         gitf_root: String.t()
       }
 
@@ -89,14 +89,14 @@ defmodule GiTF.Major do
     # Subscribe to waggle messages addressed to the queen
     GiTF.Waggle.subscribe("link:major")
 
-    max_bees = read_max_bees(gitf_root)
+    max_ghosts = read_max_ghosts(gitf_root)
 
     state = %{
       status: :idle,
-      active_bees: %{},
+      active_ghosts: %{},
       gitf_root: gitf_root,
       port: nil,
-      max_bees: max_bees,
+      max_ghosts: max_ghosts,
       max_retries: 3,
       last_checkpoint: %{},
       stall_timeout: :timer.minutes(10),
@@ -118,10 +118,10 @@ defmodule GiTF.Major do
     send(self(), :recover_missed_waggles)
     schedule_waggle_recovery()
 
-    # Periodically check for pending jobs that need bees
+    # Periodically check for pending jobs that need ghosts
     schedule_job_spawner()
 
-    # Periodically check for stalled bees
+    # Periodically check for stalled ghosts
     schedule_stall_check()
 
     # Periodically recover stuck jobs (workers died without waggle)
@@ -161,7 +161,7 @@ defmodule GiTF.Major do
   end
 
   def handle_call(:status, _from, state) do
-    {:reply, Map.take(state, [:status, :active_bees, :gitf_root, :max_bees]), state}
+    {:reply, Map.take(state, [:status, :active_ghosts, :gitf_root, :max_ghosts]), state}
   end
 
   def handle_call(:await_session_end, from, state) do
@@ -217,18 +217,18 @@ defmodule GiTF.Major do
     {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
-  def handle_info({ref, {:verification_passed, bee_id, job_id}}, state) do
+  def handle_info({ref, {:verification_passed, ghost_id, job_id}}, state) do
     # Flush task monitor
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
-    Logger.info("Verification passed for job #{job_id} (bee #{bee_id})")
+    Logger.info("Verification passed for job #{job_id} (ghost #{ghost_id})")
     notify_run_job_completed(job_id)
     GiTF.Reputation.update_after_job(job_id)
-    state = advance_quest(bee_id, state)
+    state = advance_quest(ghost_id, state)
     {:noreply, state}
   end
 
-  def handle_info({ref, {:verification_failed, bee_id, job_id, result}}, state) do
+  def handle_info({ref, {:verification_failed, ghost_id, job_id, result}}, state) do
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.warning("Verification failed for job #{job_id}: #{inspect(result[:output])}")
@@ -237,7 +237,7 @@ defmodule GiTF.Major do
 
     # Treat as job failure -> trigger retry logic
     waggle = %{
-      from: bee_id,
+      from: ghost_id,
       subject: "verification_failed",
       body: "Verification failed: #{result[:output]}"
     }
@@ -245,14 +245,14 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
-  def handle_info({ref, {:verification_error, bee_id, job_id, reason}}, state) do
+  def handle_info({ref, {:verification_error, ghost_id, job_id, reason}}, state) do
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.error("Verification system error for job #{job_id}: #{inspect(reason)}")
 
     # Fail safe: retry
     waggle = %{
-      from: bee_id,
+      from: ghost_id,
       subject: "verification_error",
       body: "System error during verification: #{inspect(reason)}"
     }
@@ -320,10 +320,10 @@ defmodule GiTF.Major do
 
     Enum.each(stuck_jobs, fn job ->
       worker_alive? =
-        case job.bee_id do
+        case job.ghost_id do
           nil -> false
-          bee_id ->
-            case GiTF.Bee.Worker.lookup(bee_id) do
+          ghost_id ->
+            case GiTF.Ghost.Worker.lookup(ghost_id) do
               {:ok, pid} -> Process.alive?(pid)
               :error -> false
             end
@@ -368,7 +368,7 @@ defmodule GiTF.Major do
       end
     end)
 
-    # Timeout jobs stuck in "assigned" (bee never started working)
+    # Timeout jobs stuck in "assigned" (ghost never started working)
     GiTF.Store.filter(:jobs, fn j -> j.status == "assigned" end)
     |> Enum.each(fn job ->
       age = DateTime.diff(now, job.updated_at || job.inserted_at, :second)
@@ -391,9 +391,9 @@ defmodule GiTF.Major do
   defp handle_waggle(%{subject: "job_complete"} = waggle, state) do
     Logger.info("Bee #{waggle.from} reports job complete. Initiating verification...")
 
-    # We remove from active_bees immediately so Major doesn't think it's still "working"
+    # We remove from active_ghosts immediately so Major doesn't think it's still "working"
     # but we don't advance quest yet.
-    state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
+    state = update_in(state.active_ghosts, &Map.delete(&1, waggle.from))
 
     job_id = find_job_for_bee(waggle.from)
 
@@ -433,8 +433,8 @@ defmodule GiTF.Major do
           %{state | pending_verifications: pending}
       end
     else
-      Logger.warning("Could not find job for bee #{waggle.from}, skipping verification")
-      # Fallback: try to advance anyway if we can't verify (orphan bee?)
+      Logger.warning("Could not find job for ghost #{waggle.from}, skipping verification")
+      # Fallback: try to advance anyway if we can't verify (orphan ghost?)
       state = advance_quest(waggle.from, state)
       state
     end
@@ -442,7 +442,7 @@ defmodule GiTF.Major do
 
   defp handle_waggle(%{subject: "job_failed"} = waggle, state) do
     Logger.warning("Bee #{waggle.from} reports job failed: #{waggle.body}")
-    state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
+    state = update_in(state.active_ghosts, &Map.delete(&1, waggle.from))
 
     job_id = find_job_for_bee(waggle.from)
     if job_id, do: notify_run_job_failed(job_id)
@@ -452,18 +452,18 @@ defmodule GiTF.Major do
 
   defp handle_waggle(%{subject: "validation_failed"} = waggle, state) do
     Logger.warning("Bee #{waggle.from} reports validation failed: #{waggle.body}")
-    state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
+    state = update_in(state.active_ghosts, &Map.delete(&1, waggle.from))
     maybe_retry_job(waggle, state)
   end
 
   defp handle_waggle(%{subject: "merge_conflict_warning"} = waggle, state) do
-    Logger.warning("Merge conflict detected from bee #{waggle.from}: #{waggle.body}")
+    Logger.warning("Merge conflict detected from ghost #{waggle.from}: #{waggle.body}")
 
-    # Extract cell_id from the bee record
+    # Extract cell_id from the ghost record
     cell_id =
-      case GiTF.Bees.get(waggle.from) do
-        {:ok, bee} ->
-          case GiTF.Store.find_one(:cells, fn c -> c.bee_id == bee.id end) do
+      case GiTF.Ghosts.get(waggle.from) do
+        {:ok, ghost} ->
+          case GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id end) do
             nil -> nil
             cell -> cell.id
           end
@@ -513,7 +513,7 @@ defmodule GiTF.Major do
       end
     else
       # No cell found — reimagine directly by finding the job
-      Logger.warning("No cell for bee #{waggle.from}, reimagining job directly")
+      Logger.warning("No cell for ghost #{waggle.from}, reimagining job directly")
       reimagine_conflicted_job(nil, waggle, state)
     end
   end
@@ -532,14 +532,14 @@ defmodule GiTF.Major do
     if job_id do
       notify_run_job_completed(job_id)
 
-      bee_id =
+      ghost_id =
         case GiTF.Jobs.get(job_id) do
-          {:ok, job} -> job.bee_id
+          {:ok, job} -> job.ghost_id
           _ -> nil
         end
 
-      if bee_id do
-        advance_quest(bee_id, state)
+      if ghost_id do
+        advance_quest(ghost_id, state)
       else
         state
       end
@@ -549,7 +549,7 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "scout_complete"} = waggle, state) do
-    # A scout bee finished. Parse its findings and inject them into the parent job.
+    # A scout ghost finished. Parse its findings and inject them into the parent job.
     case Jason.decode(waggle.body) do
       {:ok, %{"scout_job_id" => scout_job_id, "parent_job_id" => parent_job_id, "output" => output}} ->
         findings = GiTF.Scout.parse_findings(output)
@@ -589,8 +589,8 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "checkpoint"} = waggle, state) do
-    bee_id = waggle.from
-    Logger.debug("Checkpoint from bee #{bee_id}: #{waggle.body}")
+    ghost_id = waggle.from
+    Logger.debug("Checkpoint from ghost #{ghost_id}: #{waggle.body}")
 
     checkpoint_data =
       case Jason.decode(waggle.body) do
@@ -599,7 +599,7 @@ defmodule GiTF.Major do
       end
 
     last_checkpoint =
-      Map.put(state.last_checkpoint, bee_id, %{
+      Map.put(state.last_checkpoint, ghost_id, %{
         at: DateTime.utc_now(),
         data: checkpoint_data
       })
@@ -608,7 +608,7 @@ defmodule GiTF.Major do
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
       "section:progress",
-      {:bee_checkpoint, bee_id, checkpoint_data}
+      {:bee_checkpoint, ghost_id, checkpoint_data}
     )
 
     %{state | last_checkpoint: last_checkpoint}
@@ -617,14 +617,14 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "resource_warning"} = waggle, state) do
-    bee_id = waggle.from
-    Logger.warning("Resource warning from bee #{bee_id}: #{waggle.body}")
+    ghost_id = waggle.from
+    Logger.warning("Resource warning from ghost #{ghost_id}: #{waggle.body}")
 
     # Broadcast alert
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
       "section:alerts",
-      {:resource_warning, bee_id, waggle.body}
+      {:resource_warning, ghost_id, waggle.body}
     )
 
     state
@@ -669,7 +669,7 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "clarification_needed"} = waggle, state) do
-    Logger.warning("Clarification request from bee #{waggle.from}: #{waggle.body}")
+    Logger.warning("Clarification request from ghost #{waggle.from}: #{waggle.body}")
 
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
@@ -690,9 +690,9 @@ defmodule GiTF.Major do
   # -- Private: retry logic ---------------------------------------------------
 
   defp maybe_retry_job(waggle, state) do
-    case GiTF.Bees.get(waggle.from) do
-      {:ok, bee} when not is_nil(bee.job_id) ->
-        job_id = bee.job_id
+    case GiTF.Ghosts.get(waggle.from) do
+      {:ok, ghost} when not is_nil(ghost.job_id) ->
+        job_id = ghost.job_id
         feedback = waggle.body
 
         # Read persisted retry count from job record (survives Major restarts)
@@ -730,7 +730,7 @@ defmodule GiTF.Major do
       {:ok, new_job} ->
         case check_quest_budget(new_job.quest_id) do
           :ok ->
-            case GiTF.Bees.spawn(new_job.id, new_job.comb_id, state.gitf_root) do
+            case GiTF.Ghosts.spawn(new_job.id, new_job.comb_id, state.gitf_root) do
               {:ok, _bee} -> {:ok, :intelligent_retry}
               error -> error
             end
@@ -754,7 +754,7 @@ defmodule GiTF.Major do
       {:ok, job} ->
         case check_quest_budget(job.quest_id) do
           :ok ->
-            case GiTF.Bees.spawn(job_id, job.comb_id, state.gitf_root) do
+            case GiTF.Ghosts.spawn(job_id, job.comb_id, state.gitf_root) do
               {:ok, _bee} ->
                 state
 
@@ -784,10 +784,10 @@ defmodule GiTF.Major do
 
   # -- Private: quest advancement -----------------------------------------------
 
-  defp advance_quest(bee_id, state) do
-    with {:ok, bee} <- GiTF.Bees.get(bee_id),
-         true <- not is_nil(bee[:job_id]),
-         {:ok, job} <- GiTF.Jobs.get(bee[:job_id]) do
+  defp advance_quest(ghost_id, state) do
+    with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
+         true <- not is_nil(ghost[:job_id]),
+         {:ok, job} <- GiTF.Jobs.get(ghost[:job_id]) do
       quest_id = job[:quest_id]
       GiTF.Quests.update_status!(quest_id)
 
@@ -878,8 +878,8 @@ defmodule GiTF.Major do
           |> Enum.filter(&(&1.status == "pending"))
           |> Enum.filter(&GiTF.Jobs.ready?(&1.id))
 
-        active_count = GiTF.Bees.list(status: "working") |> length()
-        available_slots = max(state.max_bees - active_count, 0)
+        active_count = GiTF.Ghosts.list(status: "working") |> length()
+        available_slots = max(state.max_ghosts - active_count, 0)
         stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 
         jobs_to_spawn = Enum.take(pending_jobs, available_slots)
@@ -954,19 +954,19 @@ defmodule GiTF.Major do
   defp spawn_single_job(job, state, run) do
     if GiTF.Distributed.clustered?() do
       GiTF.Distributed.spawn_on_cluster(fn ->
-        GiTF.Bees.spawn_detached(job.id, job.comb_id, state.gitf_root)
+        GiTF.Ghosts.spawn_detached(job.id, job.comb_id, state.gitf_root)
       end)
       Logger.info("Dispatched distributed spawn for job #{job.id}")
       state
     else
-      case GiTF.Bees.spawn_detached(job.id, job.comb_id, state.gitf_root) do
-        {:ok, bee} ->
-          Logger.info("Auto-spawned bee #{bee.id} for job #{job.id} (#{job.title})")
-          register_with_run(run, bee.id, job.id)
+      case GiTF.Ghosts.spawn_detached(job.id, job.comb_id, state.gitf_root) do
+        {:ok, ghost} ->
+          Logger.info("Auto-spawned ghost #{ghost.id} for job #{job.id} (#{job.title})")
+          register_with_run(run, ghost.id, job.id)
           state
 
         {:error, reason} ->
-          Logger.warning("Failed to auto-spawn bee for job #{job.id}: #{inspect(reason)}")
+          Logger.warning("Failed to auto-spawn ghost for job #{job.id}: #{inspect(reason)}")
           state
       end
     end
@@ -1024,7 +1024,7 @@ defmodule GiTF.Major do
   end
 
   defp resume_active_quests(_state) do
-    # On startup, find active quests with no running jobs or phase bees and kick them
+    # On startup, find active quests with no running jobs or phase ghosts and kick them
     active_quests =
       GiTF.Store.all(:quests)
       |> Enum.filter(fn q ->
@@ -1049,7 +1049,7 @@ defmodule GiTF.Major do
 
   defp advance_stuck_quest_phases do
     # Periodically call advance_quest for quests in non-terminal phases.
-    # This catches cases where a phase bee completed but the waggle was lost.
+    # This catches cases where a phase ghost completed but the waggle was lost.
     phase_statuses = ["research", "requirements", "design", "review", "planning",
                       "implementation", "validation", "awaiting_approval"]
 
@@ -1078,57 +1078,57 @@ defmodule GiTF.Major do
     now = DateTime.utc_now()
     base_stall_seconds = div(state.stall_timeout, 1000)
 
-    working_bees = GiTF.Bees.list(status: "working")
+    working_bees = GiTF.Ghosts.list(status: "working")
 
-    Enum.each(working_bees, fn bee ->
-      last_cp = Map.get(state.last_checkpoint, bee.id)
+    Enum.each(working_bees, fn ghost ->
+      last_cp = Map.get(state.last_checkpoint, ghost.id)
 
-      # Use checkpoint time if available, otherwise use bee's inserted_at
+      # Use checkpoint time if available, otherwise use ghost's inserted_at
       reference_time =
-        if last_cp, do: last_cp.at, else: bee.inserted_at
+        if last_cp, do: last_cp.at, else: ghost.inserted_at
 
       seconds_since = DateTime.diff(now, reference_time, :second)
 
       # Scale stall timeout with job complexity
-      stall_seconds = adaptive_stall_timeout(bee, base_stall_seconds)
+      stall_seconds = adaptive_stall_timeout(ghost, base_stall_seconds)
 
       if seconds_since > stall_seconds * 2 do
-        # Double the stall threshold = hard-fail the bee
+        # Double the stall threshold = hard-fail the ghost
         Logger.warning(
-          "Hard-stall: bee #{bee.id} unresponsive for #{seconds_since}s, failing job"
+          "Hard-stall: ghost #{ghost.id} unresponsive for #{seconds_since}s, failing job"
         )
 
         # Kill the worker process if it exists
-        case GiTF.Bee.Worker.lookup(bee.id) do
+        case GiTF.Ghost.Worker.lookup(ghost.id) do
           {:ok, pid} -> Process.exit(pid, :kill)
           :error -> :ok
         end
 
         # Fail the job so retry logic picks it up
-        if bee.job_id do
-          GiTF.Jobs.fail(bee.job_id)
-          notify_run_job_failed(bee.job_id)
+        if ghost.job_id do
+          GiTF.Jobs.fail(ghost.job_id)
+          notify_run_job_failed(ghost.job_id)
 
           waggle = %{
-            from: bee.id,
+            from: ghost.id,
             subject: "stall_timeout",
             body: "Bee stalled for #{seconds_since}s without checkpoint. Auto-failed for retry."
           }
           maybe_retry_job(waggle, state)
         end
 
-        GiTF.Store.put(:bees, %{bee | status: "failed"})
+        GiTF.Store.put(:ghosts, %{ghost | status: "failed"})
       else
         if seconds_since > stall_seconds do
           Logger.warning(
-            "Stall detected: bee #{bee.id} has not reported in #{seconds_since}s " <>
+            "Stall detected: ghost #{ghost.id} has not reported in #{seconds_since}s " <>
               "(threshold: #{stall_seconds}s)"
           )
 
           Phoenix.PubSub.broadcast(
             GiTF.PubSub,
             "section:alerts",
-            {:stall_warning, bee.id, seconds_since}
+            {:stall_warning, ghost.id, seconds_since}
           )
         end
       end
@@ -1236,7 +1236,7 @@ defmodule GiTF.Major do
     task = Task.async(fn ->
       GiTF.Runtime.AgentLoop.run(
         "You are the Major orchestrator for a GiTF of AI coding agents. " <>
-          "Monitor active quests, manage bee workers, and coordinate work.",
+          "Monitor active quests, manage ghost workers, and coordinate work.",
         queen_workspace,
         tool_set: :major,
         max_iterations: 200,
@@ -1290,9 +1290,9 @@ defmodule GiTF.Major do
     end
   end
 
-  defp find_job_for_bee(bee_id) do
-    case GiTF.Bees.get(bee_id) do
-      {:ok, bee} -> bee.job_id
+  defp find_job_for_bee(ghost_id) do
+    case GiTF.Ghosts.get(ghost_id) do
+      {:ok, ghost} -> ghost.job_id
       _ -> nil
     end
   rescue
@@ -1326,7 +1326,7 @@ defmodule GiTF.Major do
 
       maybe_retry_job(conflict_waggle, state)
     else
-      Logger.warning("Could not reimagine: no job found for bee #{waggle.from}")
+      Logger.warning("Could not reimagine: no job found for ghost #{waggle.from}")
       state
     end
   rescue
@@ -1337,9 +1337,9 @@ defmodule GiTF.Major do
 
   # Scale stall timeout based on job complexity:
   # simple = 1x (10 min default), moderate = 2x (20 min), complex = 4x (40 min)
-  defp adaptive_stall_timeout(bee, base_seconds) do
+  defp adaptive_stall_timeout(ghost, base_seconds) do
     multiplier =
-      case bee.job_id do
+      case ghost.job_id do
         nil -> 1
         job_id ->
           case GiTF.Jobs.get(job_id) do
@@ -1378,11 +1378,11 @@ defmodule GiTF.Major do
     _ -> :ok
   end
 
-  defp read_max_bees(gitf_root) do
+  defp read_max_ghosts(gitf_root) do
     config_path = Path.join([gitf_root, ".gitf", "config.toml"])
 
     case GiTF.Config.read_config(config_path) do
-      {:ok, config} -> get_in(config, ["major", "max_bees"]) || 5
+      {:ok, config} -> get_in(config, ["major", "max_ghosts"]) || 5
       {:error, _} -> 5
     end
   end
@@ -1413,10 +1413,10 @@ defmodule GiTF.Major do
       nil
   end
 
-  defp register_with_run(nil, _bee_id, _job_id), do: :ok
+  defp register_with_run(nil, _ghost_id, _job_id), do: :ok
 
-  defp register_with_run(run, bee_id, job_id) do
-    GiTF.Run.add_bee(run.id, bee_id)
+  defp register_with_run(run, ghost_id, job_id) do
+    GiTF.Run.add_bee(run.id, ghost_id)
 
     unless job_id in run.job_ids do
       GiTF.Run.add_job(run.id, job_id)

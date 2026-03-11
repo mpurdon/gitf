@@ -1,6 +1,6 @@
 defmodule GiTF.Conflict do
   @moduledoc """
-  Detects merge conflicts between a bee's worktree branch and the main branch.
+  Detects merge conflicts between a ghost's worktree branch and the main branch.
 
   Uses `git diff` to detect potential conflicts before merging.
   Pure context module -- no process state.

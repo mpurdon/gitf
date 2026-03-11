@@ -1,7 +1,7 @@
-defmodule GiTF.Bee.WorkerTest do
+defmodule GiTF.Ghost.WorkerTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Bee.Worker
+  alias GiTF.Ghost.Worker
   alias GiTF.Store
 
   @tmp_dir System.tmp_dir!()
@@ -29,22 +29,22 @@ defmodule GiTF.Bee.WorkerTest do
 
     {:ok, job} =
       GiTF.Jobs.create(%{
-        title: "Test task for bee",
+        title: "Test task for ghost",
         description: "Do the work",
         quest_id: quest.id,
         comb_id: comb.id
       })
 
-    {:ok, bee} = Store.insert(:bees, %{name: "test-worker-bee", status: "starting"})
+    {:ok, ghost} = Store.insert(:ghosts, %{name: "test-worker-ghost", status: "starting"})
 
-    # Assign the job to the bee so the transition pending->assigned works
-    {:ok, _} = GiTF.Jobs.assign(job.id, bee.id)
+    # Assign the job to the ghost so the transition pending->assigned works
+    {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
 
     %{
       comb: comb,
       quest: quest,
       job: job,
-      bee: bee,
+      ghost: ghost,
       gitf_root: gitf_root,
       repo_path: repo_path
     }
@@ -55,7 +55,7 @@ defmodule GiTF.Bee.WorkerTest do
       # Use /bin/echo as a fake "claude" that exits immediately with 0
       {:ok, pid} =
         Worker.start_link(
-          bee_id: ctx.bee.id,
+          ghost_id: ctx.ghost.id,
           job_id: ctx.job.id,
           comb_id: ctx.comb.id,
           gitf_root: ctx.gitf_root,
@@ -68,10 +68,10 @@ defmodule GiTF.Bee.WorkerTest do
       # Wait for the process to finish (echo exits quickly)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
 
-      # Verify DB state: bee should be stopped or crashed
-      # (validation failure in test env may mark bee as crashed)
-      {:ok, bee} = GiTF.Bees.get(ctx.bee.id)
-      assert bee.status in ["stopped", "crashed"]
+      # Verify DB state: ghost should be stopped or crashed
+      # (validation failure in test env may mark ghost as crashed)
+      {:ok, ghost} = GiTF.Ghosts.get(ctx.ghost.id)
+      assert ghost.status in ["stopped", "crashed"]
 
       # Job should be done or failed (validation may fail in test env)
       {:ok, job} = GiTF.Jobs.get(ctx.job.id)
@@ -80,18 +80,18 @@ defmodule GiTF.Bee.WorkerTest do
       # A waggle message should have been sent to the queen
       # The worker may report job_complete or validation_failed depending on
       # whether git post-processing succeeds in the test environment
-      waggles = GiTF.Waggle.list(from: ctx.bee.id)
+      waggles = GiTF.Waggle.list(from: ctx.ghost.id)
       assert length(waggles) >= 1
       assert Enum.any?(waggles, &(&1.subject in ["job_complete", "validation_failed"]))
     end
   end
 
   describe "start_link/1 with failing command" do
-    test "marks bee crashed and job failed on non-zero exit", ctx do
+    test "marks ghost crashed and job failed on non-zero exit", ctx do
       # Use /usr/bin/false which exits with status 1
       {:ok, pid} =
         Worker.start_link(
-          bee_id: ctx.bee.id,
+          ghost_id: ctx.ghost.id,
           job_id: ctx.job.id,
           comb_id: ctx.comb.id,
           gitf_root: ctx.gitf_root,
@@ -102,16 +102,16 @@ defmodule GiTF.Bee.WorkerTest do
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
 
-      # Verify DB state: bee should be crashed
-      {:ok, bee} = GiTF.Bees.get(ctx.bee.id)
-      assert bee.status == "crashed"
+      # Verify DB state: ghost should be crashed
+      {:ok, ghost} = GiTF.Ghosts.get(ctx.ghost.id)
+      assert ghost.status == "crashed"
 
       # Job should be failed
       {:ok, job} = GiTF.Jobs.get(ctx.job.id)
       assert job.status == "failed"
 
       # A waggle message about failure
-      waggles = GiTF.Waggle.list(from: ctx.bee.id)
+      waggles = GiTF.Waggle.list(from: ctx.ghost.id)
       assert Enum.any?(waggles, &(&1.subject == "job_failed"))
     end
   end
@@ -121,7 +121,7 @@ defmodule GiTF.Bee.WorkerTest do
       # Use /bin/sleep to keep the process alive
       {:ok, pid} =
         Worker.start_link(
-          bee_id: ctx.bee.id,
+          ghost_id: ctx.ghost.id,
           job_id: ctx.job.id,
           comb_id: ctx.comb.id,
           gitf_root: ctx.gitf_root,
@@ -132,8 +132,8 @@ defmodule GiTF.Bee.WorkerTest do
       # Give it a moment to provision
       Process.sleep(500)
 
-      assert {:ok, status} = Worker.status(ctx.bee.id)
-      assert status.bee_id == ctx.bee.id
+      assert {:ok, status} = Worker.status(ctx.ghost.id)
+      assert status.ghost_id == ctx.ghost.id
       assert status.job_id == ctx.job.id
       assert status.status == :running
 
@@ -142,8 +142,8 @@ defmodule GiTF.Bee.WorkerTest do
       end)
     end
 
-    test "returns error for non-running bee" do
-      assert {:error, :not_found} = Worker.status("bee-nonexistent")
+    test "returns error for non-running ghost" do
+      assert {:error, :not_found} = Worker.status("ghost-nonexistent")
     end
   end
 
@@ -154,7 +154,7 @@ defmodule GiTF.Bee.WorkerTest do
 
       {:ok, pid} =
         Worker.start_link(
-          bee_id: ctx.bee.id,
+          ghost_id: ctx.ghost.id,
           job_id: ctx.job.id,
           comb_id: ctx.comb.id,
           gitf_root: ctx.gitf_root,
@@ -165,16 +165,16 @@ defmodule GiTF.Bee.WorkerTest do
       Process.sleep(500)
       ref = Process.monitor(pid)
 
-      assert :ok = Worker.stop(ctx.bee.id)
+      assert :ok = Worker.stop(ctx.ghost.id)
       assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 5_000
       assert reason in [:normal, :shutdown]
 
-      {:ok, bee} = GiTF.Bees.get(ctx.bee.id)
-      assert bee.status == "stopped"
+      {:ok, ghost} = GiTF.Ghosts.get(ctx.ghost.id)
+      assert ghost.status == "stopped"
     end
 
-    test "returns error for non-running bee" do
-      assert {:error, :not_found} = Worker.stop("bee-nonexistent")
+    test "returns error for non-running ghost" do
+      assert {:error, :not_found} = Worker.stop("ghost-nonexistent")
     end
   end
 
@@ -182,7 +182,7 @@ defmodule GiTF.Bee.WorkerTest do
     test "finds a running worker via Registry", ctx do
       {:ok, pid} =
         Worker.start_link(
-          bee_id: ctx.bee.id,
+          ghost_id: ctx.ghost.id,
           job_id: ctx.job.id,
           comb_id: ctx.comb.id,
           gitf_root: ctx.gitf_root,
@@ -192,7 +192,7 @@ defmodule GiTF.Bee.WorkerTest do
 
       Process.sleep(100)
 
-      assert {:ok, ^pid} = Worker.lookup(ctx.bee.id)
+      assert {:ok, ^pid} = Worker.lookup(ctx.ghost.id)
 
       on_exit(fn ->
         if Process.alive?(pid), do: GenServer.stop(pid, :normal)
@@ -200,7 +200,7 @@ defmodule GiTF.Bee.WorkerTest do
     end
 
     test "returns error when no worker running" do
-      assert :error = Worker.lookup("bee-nonexistent")
+      assert :error = Worker.lookup("ghost-nonexistent")
     end
   end
 
@@ -208,14 +208,14 @@ defmodule GiTF.Bee.WorkerTest do
     test "produces a valid child spec with temporary restart" do
       spec =
         Worker.child_spec(
-          bee_id: "bee-test",
+          ghost_id: "ghost-test",
           job_id: "job-test",
           comb_id: "cmb-test",
           gitf_root: "/tmp"
         )
 
       assert spec.restart == :temporary
-      assert spec.id == {Worker, "bee-test"}
+      assert spec.id == {Worker, "ghost-test"}
     end
   end
 

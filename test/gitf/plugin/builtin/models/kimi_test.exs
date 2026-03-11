@@ -65,7 +65,7 @@ defmodule GiTF.Plugin.Builtin.Models.KimiTest do
 
   describe "workspace_setup/2" do
     test "returns nil" do
-      assert Kimi.workspace_setup("bee-123", "/tmp/hive") == nil
+      assert Kimi.workspace_setup("ghost-123", "/tmp/hive") == nil
       assert Kimi.workspace_setup("major", "/tmp/hive") == nil
     end
   end

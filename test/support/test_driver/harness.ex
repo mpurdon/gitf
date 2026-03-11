@@ -148,14 +148,14 @@ defmodule GiTF.TestDriver.Harness do
   end
 
   @doc """
-  Spawns a bee with a mock Claude executable for a given job.
+  Spawns a ghost with a mock Claude executable for a given job.
 
   ## Options
 
     * `:exit_code` - mock exit code (default: 0)
     * `:delay_ms` - mock delay (default: 100)
     * `:mock_opts` - additional MockClaude options
-    * `:name` - bee name
+    * `:name` - ghost name
 
   """
   @spec spawn_mock_bee(env(), String.t(), String.t(), keyword()) :: {:ok, map()}
@@ -173,7 +173,7 @@ defmodule GiTF.TestDriver.Harness do
       [claude_executable: script_path, prompt: "test prompt"] ++
         Keyword.take(opts, [:name])
 
-    GiTF.Bees.spawn(job_id, comb_id, env.gitf_root, spawn_opts)
+    GiTF.Ghosts.spawn(job_id, comb_id, env.gitf_root, spawn_opts)
   end
 
   @doc """

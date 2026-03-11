@@ -14,7 +14,7 @@ defmodule GiTF.TUI.Bridge do
 
       {:intent, :user_input, %{text: "..."}}
       {:intent, :move, %{x: 0, y: 1}}
-      {:intent, :interact, %{target: "bee-123"}}
+      {:intent, :interact, %{target: "ghost-123"}}
   """
 
   @topics [
@@ -90,17 +90,17 @@ defmodule GiTF.TUI.Bridge do
   @spec state_snapshot() :: map()
   def state_snapshot do
     %{
-      bees: list_bees(),
+      ghosts: list_bees(),
       quests: list_quests(),
       jobs: list_jobs(),
       progress: list_progress()
     }
   end
 
-  @doc "Lists all bees with their current status."
+  @doc "Lists all ghosts with their current status."
   @spec list_bees() :: [map()]
   def list_bees do
-    GiTF.Bees.list()
+    GiTF.Ghosts.list()
   rescue
     _ -> []
   end
@@ -121,7 +121,7 @@ defmodule GiTF.TUI.Bridge do
     _ -> []
   end
 
-  @doc "Lists current bee progress entries."
+  @doc "Lists current ghost progress entries."
   @spec list_progress() :: [map()]
   def list_progress do
     GiTF.Progress.all()

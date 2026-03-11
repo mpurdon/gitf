@@ -36,9 +36,9 @@ defmodule GiTF.JobsTest do
   end
 
   defp create_bee(name \\ nil) do
-    name = name || "test-bee-#{:erlang.unique_integer([:positive])}"
-    {:ok, bee} = Store.insert(:bees, %{name: name, status: "starting"})
-    bee
+    name = name || "test-ghost-#{:erlang.unique_integer([:positive])}"
+    {:ok, ghost} = Store.insert(:ghosts, %{name: name, status: "starting"})
+    ghost
   end
 
   describe "create/1" do
@@ -113,28 +113,28 @@ defmodule GiTF.JobsTest do
 
   describe "status transitions" do
     test "pending -> assigned via assign/2", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
       assert job.status == "pending"
 
-      assert {:ok, assigned} = Jobs.assign(job.id, bee.id)
+      assert {:ok, assigned} = Jobs.assign(job.id, ghost.id)
       assert assigned.status == "assigned"
-      assert assigned.bee_id == bee.id
+      assert assigned.ghost_id == ghost.id
     end
 
     test "assigned -> running via start/1", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
 
       assert {:ok, running} = Jobs.start(job.id)
       assert running.status == "running"
     end
 
     test "running -> done via complete/1", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
       {:ok, _} = Jobs.start(job.id)
 
       assert {:ok, done} = Jobs.complete(job.id)
@@ -142,9 +142,9 @@ defmodule GiTF.JobsTest do
     end
 
     test "running -> failed via fail/1", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
       {:ok, _} = Jobs.start(job.id)
 
       assert {:ok, failed} = Jobs.fail(job.id)
@@ -159,9 +159,9 @@ defmodule GiTF.JobsTest do
     end
 
     test "running -> blocked via block/1", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
       {:ok, _} = Jobs.start(job.id)
 
       assert {:ok, blocked} = Jobs.block(job.id)
@@ -177,21 +177,21 @@ defmodule GiTF.JobsTest do
     end
 
     test "failed -> pending via reset/1", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
       {:ok, _} = Jobs.start(job.id)
       {:ok, _} = Jobs.fail(job.id)
 
       assert {:ok, reset} = Jobs.reset(job.id)
       assert reset.status == "pending"
-      assert reset.bee_id == nil
+      assert reset.ghost_id == nil
     end
 
     test "reset/2 appends feedback to description", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb, %{description: "Original task"})
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
       {:ok, _} = Jobs.start(job.id)
       {:ok, _} = Jobs.fail(job.id)
 
@@ -234,9 +234,9 @@ defmodule GiTF.JobsTest do
     end
 
     test "cannot block a done job", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
       {:ok, _} = Jobs.start(job.id)
       {:ok, _} = Jobs.complete(job.id)
 
@@ -249,9 +249,9 @@ defmodule GiTF.JobsTest do
     end
 
     test "cannot reset a running job", %{quest: quest, comb: comb} do
-      bee = create_bee()
+      ghost = create_bee()
       {:ok, job} = create_job(quest, comb)
-      {:ok, _} = Jobs.assign(job.id, bee.id)
+      {:ok, _} = Jobs.assign(job.id, ghost.id)
       {:ok, _} = Jobs.start(job.id)
 
       assert {:error, :invalid_transition} = Jobs.reset(job.id)

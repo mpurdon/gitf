@@ -38,7 +38,7 @@ defmodule GiTF.InitTest do
 
       config_path = Path.join([workspace, ".gitf", "config.toml"])
       assert {:ok, config} = GiTF.Config.read_config(config_path)
-      assert config["major"]["max_bees"] == 5
+      assert config["major"]["max_ghosts"] == 5
     end
 
     test "writes QUEEN.md with delegation instructions" do

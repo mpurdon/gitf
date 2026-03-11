@@ -362,7 +362,7 @@ defmodule GiTF.Major.Planner do
   @doc """
   Creates implementation jobs from phase-generated specs.
 
-  Takes a list of job spec maps (from the planning phase bee output) and
+  Takes a list of job spec maps (from the planning phase ghost output) and
   creates real job records with dependencies.
 
   Returns `{:ok, [job]}`.

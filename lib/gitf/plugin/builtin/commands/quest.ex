@@ -73,7 +73,7 @@ defmodule GiTF.Plugin.Builtin.Commands.Quest do
             jobs ->
               ["", "Jobs:"] ++
                 Enum.map(jobs, fn j ->
-                  "  #{j.id}  #{j.title}  [#{j.status}]  #{j.bee_id || "-"}"
+                  "  #{j.id}  #{j.title}  [#{j.status}]  #{j.ghost_id || "-"}"
                 end)
           end
 

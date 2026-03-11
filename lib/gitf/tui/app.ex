@@ -235,15 +235,15 @@ defmodule GiTF.TUI.App do
 
   # Every 20th tick (~10s): health, identities, budget, checkpoints
   defp maybe_refresh_slow(model, count) when rem(count, 20) == 0 do
-    bees = model.activity.bees
+    ghosts = model.activity.ghosts
     quests = model.activity.quests
 
     checkpoints =
-      bees
+      ghosts
       |> Enum.filter(&(&1[:status] == "working"))
-      |> Enum.reduce(%{}, fn bee, acc ->
-        case safe_call(fn -> GiTF.Checkpoint.load(bee[:id]) end, :error) do
-          {:ok, cp} -> Map.put(acc, bee[:id], cp)
+      |> Enum.reduce(%{}, fn ghost, acc ->
+        case safe_call(fn -> GiTF.Checkpoint.load(ghost[:id]) end, :error) do
+          {:ok, cp} -> Map.put(acc, ghost[:id], cp)
           _ -> acc
         end
       end)
@@ -463,15 +463,15 @@ defmodule GiTF.TUI.App do
   end
 
   defp build_system_prompt(cwd) do
-    bees = try do GiTF.Store.all(:bees) rescue _ -> [] end
+    ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
     quests = try do GiTF.Store.all(:quests) rescue _ -> [] end
     jobs = try do GiTF.Store.all(:jobs) rescue _ -> [] end
 
-    # Only show active bees in context — crashed/stopped are noise
-    active_bees = Enum.filter(bees, fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
+    # Only show active ghosts in context — crashed/stopped are noise
+    active_ghosts = Enum.filter(ghosts, fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
 
-    bee_summary = if active_bees == [], do: "None active", else:
-      Enum.map_join(active_bees, "\n", fn b ->
+    bee_summary = if active_ghosts == [], do: "None active", else:
+      Enum.map_join(active_ghosts, "\n", fn b ->
         "  - #{b[:id] || b.id}: #{b[:status] || b[:state] || "unknown"} (job: #{b[:job_id] || "none"})"
       end)
 
@@ -499,15 +499,15 @@ defmodule GiTF.TUI.App do
     - Quest: a high-level objective broken into phases (research > requirements > design > review > planning > implementation > validation)
     - Job: a discrete unit of work within a quest
     - Bee: an autonomous AI coding agent that works on jobs in isolated git worktrees (cells)
-    - Waggle: a message between agents (like bee-to-queen status updates)
-    - Major: the central coordinator that manages quests, spawns bees, handles retries
+    - Waggle: a message between agents (like ghost-to-queen status updates)
+    - Major: the central coordinator that manages quests, spawns ghosts, handles retries
     - Drone: autonomous watchdog that monitors quality
 
     CLI commands the user can run outside the TUI:
     - section quest new "goal" --comb <name>  (create a quest)
     - section comb add <path>                 (register a repository)
     - section comb list                       (list combs)
-    - section bee list                        (list bees)
+    - section ghost list                        (list ghosts)
     - section quest list                      (list quests)
     - section quest show <id>                 (show quest details)
     - section status                          (overall section status)
@@ -520,7 +520,7 @@ defmodule GiTF.TUI.App do
     Jobs: #{job_summary}
 
     You have full access to the workspace to read files and execute commands.
-    You can run section CLI commands directly to create quests, spawn bees, etc.
+    You can run section CLI commands directly to create quests, spawn ghosts, etc.
     Act autonomously — the user wants a dark factory, not hand-holding.
 
     STRUCTURED QUESTIONS: When you need to ask the user clarifying questions,
@@ -663,75 +663,75 @@ defmodule GiTF.TUI.App do
   defp parse_plan_block(_), do: :no_plan
 
   defp refresh_activity(model) do
-    bees = try do GiTF.Store.all(:bees) rescue _ -> [] end
+    ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
     quests = try do GiTF.Store.all(:quests) rescue _ -> [] end
     jobs = try do GiTF.Store.all(:jobs) rescue _ -> [] end
 
-    # Reap dead bees — detect bees marked "working" but actually finished/dead
-    # Returns list of {bee_id, :done | :failed, summary} events
-    reap_events = reap_dead_bees(bees, jobs)
+    # Reap dead ghosts — detect ghosts marked "working" but actually finished/dead
+    # Returns list of {ghost_id, :done | :failed, summary} events
+    reap_events = reap_dead_bees(ghosts, jobs)
 
     # Add reap events to chat
     model = Enum.reduce(reap_events, model, fn
-      {bee_id, :done, summary}, m ->
-        job_title = Enum.find_value(jobs, "unknown", fn j -> if j[:bee_id] == bee_id, do: j[:title] end)
-        msg = "#{bee_id} finished: #{job_title}\n#{summary}"
+      {ghost_id, :done, summary}, m ->
+        job_title = Enum.find_value(jobs, "unknown", fn j -> if j[:ghost_id] == ghost_id, do: j[:title] end)
+        msg = "#{ghost_id} finished: #{job_title}\n#{summary}"
         %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
 
-      {bee_id, :failed, reason}, m ->
-        msg = "#{bee_id} failed: #{reason}"
+      {ghost_id, :failed, reason}, m ->
+        msg = "#{ghost_id} failed: #{reason}"
         %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
     end)
 
     # Re-read after reaping
-    bees = try do GiTF.Store.all(:bees) rescue _ -> [] end
+    ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
 
     # Build job_id -> quest_id lookup
     job_quest_map = Map.new(jobs, fn j -> {j[:id], j[:quest_id]} end)
 
-    # Filter to active bees and attach quest_id
-    active_bees = bees
+    # Filter to active ghosts and attach quest_id
+    active_ghosts = ghosts
     |> Enum.filter(fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
     |> Enum.map(fn b -> Map.put(b, :quest_id, job_quest_map[b[:job_id]]) end)
 
-    bee_logs = read_bee_logs(active_bees)
+    bee_logs = read_bee_logs(active_ghosts)
 
     activity = model.activity
-    |> Activity.update_bees(active_bees)
+    |> Activity.update_bees(active_ghosts)
     |> Activity.update_quests(quests)
     |> Activity.update_bee_logs(bee_logs)
     %{model | activity: activity, jobs: jobs}
   end
 
-  defp reap_dead_bees(bees, _jobs) do
+  defp reap_dead_bees(ghosts, _jobs) do
     case GiTF.gitf_dir() do
       {:ok, root} ->
         run_dir = Path.join([root, ".gitf", "run"])
 
-        bees
+        ghosts
         |> Enum.filter(fn b -> (b[:status] || b[:state]) == "working" end)
-        |> Enum.flat_map(fn bee ->
-          log_path = Path.join(run_dir, "#{bee[:id]}.log")
-          script_path = Path.join(run_dir, "#{bee[:id]}.sh")
+        |> Enum.flat_map(fn ghost ->
+          log_path = Path.join(run_dir, "#{ghost[:id]}.log")
+          script_path = Path.join(run_dir, "#{ghost[:id]}.sh")
 
           cond do
             bee_log_completed?(log_path) ->
-              debug("reaper: bee #{bee[:id]} completed (result in log)")
+              debug("reaper: ghost #{ghost[:id]} completed (result in log)")
               summary = bee_log_last_message(log_path)
-              mark_bee_done(bee)
-              [{bee[:id], :done, summary}]
+              mark_bee_done(ghost)
+              [{ghost[:id], :done, summary}]
 
             not script_running?(script_path) and File.exists?(log_path) ->
               if bee_log_has_error?(log_path) do
-                debug("reaper: bee #{bee[:id]} failed (process dead, error in log)")
-                mark_bee_failed(bee, "Process died")
-                [{bee[:id], :failed, "Process died"}]
+                debug("reaper: ghost #{ghost[:id]} failed (process dead, error in log)")
+                mark_bee_failed(ghost, "Process died")
+                [{ghost[:id], :failed, "Process died"}]
               else
                 log_age = log_file_age_seconds(log_path)
                 if log_age > 120 do
-                  debug("reaper: bee #{bee[:id]} stale (log #{log_age}s old, no process)")
-                  mark_bee_failed(bee, "Process disappeared")
-                  [{bee[:id], :failed, "Process disappeared"}]
+                  debug("reaper: ghost #{ghost[:id]} stale (log #{log_age}s old, no process)")
+                  mark_bee_failed(ghost, "Process disappeared")
+                  [{ghost[:id], :failed, "Process disappeared"}]
                 else
                   []
                 end
@@ -826,22 +826,22 @@ defmodule GiTF.TUI.App do
     _ -> 0
   end
 
-  defp mark_bee_done(bee) do
+  defp mark_bee_done(ghost) do
     try do
-      updated = Map.put(bee, :status, "stopped")
-      GiTF.Store.put(:bees, updated)
+      updated = Map.put(ghost, :status, "stopped")
+      GiTF.Store.put(:ghosts, updated)
 
-      if bee[:job_id] do
-        GiTF.Jobs.complete(bee[:job_id])
-        GiTF.Jobs.unblock_dependents(bee[:job_id])
-        GiTF.Waggle.send(bee[:id], "major", "job_complete", "Job #{bee[:job_id]} completed (reaped)")
+      if ghost[:job_id] do
+        GiTF.Jobs.complete(ghost[:job_id])
+        GiTF.Jobs.unblock_dependents(ghost[:job_id])
+        GiTF.Waggle.send(ghost[:id], "major", "job_complete", "Job #{ghost[:job_id]} completed (reaped)")
 
         # Tell Major to advance
         case Process.whereis(GiTF.Major) do
           nil -> :ok
           _pid ->
             try do
-              {:ok, job} = GiTF.Jobs.get(bee[:job_id])
+              {:ok, job} = GiTF.Jobs.get(ghost[:job_id])
               GiTF.Major.Orchestrator.advance_quest(job.quest_id)
             rescue
               _ -> :ok
@@ -853,31 +853,31 @@ defmodule GiTF.TUI.App do
     end
   end
 
-  defp mark_bee_failed(bee, reason) do
+  defp mark_bee_failed(ghost, reason) do
     try do
-      updated = Map.put(bee, :status, "crashed")
-      GiTF.Store.put(:bees, updated)
+      updated = Map.put(ghost, :status, "crashed")
+      GiTF.Store.put(:ghosts, updated)
 
-      if bee[:job_id] do
-        GiTF.Jobs.fail(bee[:job_id])
-        GiTF.Waggle.send(bee[:id], "major", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
+      if ghost[:job_id] do
+        GiTF.Jobs.fail(ghost[:job_id])
+        GiTF.Waggle.send(ghost[:id], "major", "job_failed", "Job #{ghost[:job_id]} failed: #{reason}")
       end
     rescue
       _ -> :ok
     end
   end
 
-  defp read_bee_logs(bees) do
+  defp read_bee_logs(ghosts) do
     case GiTF.gitf_dir() do
       {:ok, root} ->
         run_dir = Path.join([root, ".gitf", "run"])
 
-        bees
+        ghosts
         |> Enum.filter(fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
-        |> Map.new(fn bee ->
-          log_path = Path.join(run_dir, "#{bee[:id]}.log")
+        |> Map.new(fn ghost ->
+          log_path = Path.join(run_dir, "#{ghost[:id]}.log")
           lines = tail_file(log_path, 3)
-          {bee[:id], lines}
+          {ghost[:id], lines}
         end)
 
       _ ->
@@ -1003,7 +1003,7 @@ defmodule GiTF.TUI.App do
   defp build_kpi_parts(stats) do
     parts = [
       {" | ", :white},
-      {"B:#{stats.bees.active}", :cyan},
+      {"B:#{stats.ghosts.active}", :cyan},
       {" J:#{stats.jobs.running}", :yellow},
       {" $#{Float.round(stats.costs.total, 2)}", :red}
     ]

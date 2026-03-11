@@ -1,17 +1,17 @@
 defmodule GiTF.Handoff do
   @moduledoc """
-  Context-preserving bee restart mechanism.
+  Context-preserving ghost restart mechanism.
 
-  When a bee is replaced -- due to crash, context exhaustion, or manual
-  restart -- the handoff system captures the outgoing bee's state and
-  provides it to the incoming bee so work can continue seamlessly.
+  When a ghost is replaced -- due to crash, context exhaustion, or manual
+  restart -- the handoff system captures the outgoing ghost's state and
+  provides it to the incoming ghost so work can continue seamlessly.
 
-  The handoff is stored as a waggle message from the bee to itself with
+  The handoff is stored as a waggle message from the ghost to itself with
   the subject "handoff". This keeps all state within the existing waggle
   infrastructure: no new tables, no new schemas, just a well-structured
-  message that a new bee can consume when it starts.
+  message that a new ghost can consume when it starts.
 
-  This is a pure context module. Every function transforms bee state into
+  This is a pure context module. Every function transforms ghost state into
   a structured handoff document and back.
   """
 
@@ -22,18 +22,18 @@ defmodule GiTF.Handoff do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Creates a handoff record for a bee.
+  Creates a handoff record for a ghost.
 
-  Captures the bee's current job state, recent waggles, cell info, and
-  stores it as a waggle from the bee to itself with subject "handoff".
+  Captures the ghost's current job state, recent waggles, cell info, and
+  stores it as a waggle from the ghost to itself with subject "handoff".
   
   Also creates a context snapshot for tracking purposes.
 
   Returns `{:ok, waggle}` with the handoff content.
   """
   @spec create(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def create(bee_id, opts \\ []) do
-    with {:ok, context} <- build_handoff_context(bee_id, opts) do
+  def create(ghost_id, opts \\ []) do
+    with {:ok, context} <- build_handoff_context(ghost_id, opts) do
       session_id = Keyword.get(opts, :session_id)
 
       context =
@@ -44,20 +44,20 @@ defmodule GiTF.Handoff do
         end
 
       # Create context snapshot for tracking
-      GiTF.Runtime.ContextMonitor.create_snapshot(bee_id)
+      GiTF.Runtime.ContextMonitor.create_snapshot(ghost_id)
 
-      GiTF.Waggle.send(bee_id, bee_id, @handoff_subject, context)
+      GiTF.Waggle.send(ghost_id, ghost_id, @handoff_subject, context)
     end
   end
 
   @doc """
-  Reads a handoff waggle and generates a briefing for the new bee.
+  Reads a handoff waggle and generates a briefing for the new ghost.
 
-  Takes a bee_id and a handoff waggle_id, marks the waggle as read,
+  Takes a ghost_id and a handoff waggle_id, marks the waggle as read,
   and returns the handoff context as markdown.
   """
   @spec resume(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def resume(_bee_id, handoff_waggle_id) do
+  def resume(_ghost_id, handoff_waggle_id) do
     case Store.get(:waggles, handoff_waggle_id) do
       nil ->
         {:error, :handoff_not_found}
@@ -70,15 +70,15 @@ defmodule GiTF.Handoff do
   end
 
   @doc """
-  Checks if there is an unread handoff waggle for this bee.
+  Checks if there is an unread handoff waggle for this ghost.
 
   Returns `{:ok, waggle}` if a handoff exists, `{:error, :no_handoff}` otherwise.
   """
   @spec detect_handoff(String.t()) :: {:ok, map()} | {:error, :no_handoff}
-  def detect_handoff(bee_id) do
+  def detect_handoff(ghost_id) do
     waggle =
       Store.filter(:waggles, fn w ->
-        w.to == bee_id and w.subject == @handoff_subject and w.read == false
+        w.to == ghost_id and w.subject == @handoff_subject and w.read == false
       end)
       |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
       |> List.first()
@@ -103,29 +103,29 @@ defmodule GiTF.Handoff do
   end
 
   @doc """
-  Builds the markdown state dump for a bee's handoff context.
+  Builds the markdown state dump for a ghost's handoff context.
 
   Gathers: current job status, cell info, recent waggles sent and received,
-  and a summary of the bee's state.
+  and a summary of the ghost's state.
   """
   @spec build_handoff_context(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def build_handoff_context(bee_id, _opts \\ []) do
-    with {:ok, bee} <- fetch_bee(bee_id) do
-      job = fetch_job(bee)
-      cell = fetch_cell(bee_id)
-      sent_waggles = GiTF.Waggle.list(from: bee_id, limit: 10)
-      received_waggles = GiTF.Waggle.list(to: bee_id, limit: 10)
-      checkpoint_section = build_checkpoint_section(bee_id)
+  def build_handoff_context(ghost_id, _opts \\ []) do
+    with {:ok, ghost} <- fetch_bee(ghost_id) do
+      job = fetch_job(ghost)
+      cell = fetch_cell(ghost_id)
+      sent_waggles = GiTF.Waggle.list(from: ghost_id, limit: 10)
+      received_waggles = GiTF.Waggle.list(to: ghost_id, limit: 10)
+      checkpoint_section = build_checkpoint_section(ghost_id)
 
-      error_section = build_error_section(bee_id)
+      error_section = build_error_section(ghost_id)
 
       markdown =
         [
-          "# Handoff Context for #{Map.get(bee, :name, bee.id)} (#{bee.id})",
+          "# Handoff Context for #{Map.get(ghost, :name, ghost.id)} (#{ghost.id})",
           "",
           "## Bee Status",
-          "- Status: #{bee.status}",
-          "- Created: #{bee.inserted_at}",
+          "- Status: #{ghost.status}",
+          "- Created: #{ghost.inserted_at}",
           "",
           "## Job",
           format_job_section(job),
@@ -142,7 +142,7 @@ defmodule GiTF.Handoff do
           format_waggles_section(received_waggles),
           "",
           "## Instructions for Continuation",
-          "- Review the job description above and continue where the previous bee left off.",
+          "- Review the job description above and continue where the previous ghost left off.",
           "- Check the workspace path for any work in progress.",
           "- Avoid the error patterns listed above if present.",
           "- Send a waggle to the queen when you have completed the job or if you are blocked."
@@ -156,10 +156,10 @@ defmodule GiTF.Handoff do
 
   # -- Private: data fetching ------------------------------------------------
 
-  defp fetch_bee(bee_id) do
-    case Store.get(:bees, bee_id) do
+  defp fetch_bee(ghost_id) do
+    case Store.get(:ghosts, ghost_id) do
       nil -> {:error, :bee_not_found}
-      bee -> {:ok, bee}
+      ghost -> {:ok, ghost}
     end
   end
 
@@ -171,8 +171,8 @@ defmodule GiTF.Handoff do
 
   defp fetch_job(_bee), do: nil
 
-  defp fetch_cell(bee_id) do
-    Store.filter(:cells, fn c -> c.bee_id == bee_id end)
+  defp fetch_cell(ghost_id) do
+    Store.filter(:cells, fn c -> c.ghost_id == ghost_id end)
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
     |> List.first()
   end
@@ -221,11 +221,11 @@ defmodule GiTF.Handoff do
     |> Enum.join("\n")
   end
 
-  defp build_error_section(bee_id) do
-    # Gather recent error waggles for this bee
+  defp build_error_section(ghost_id) do
+    # Gather recent error waggles for this ghost
     error_waggles =
       Store.filter(:waggles, fn w ->
-        w.from == bee_id and
+        w.from == ghost_id and
           w.subject in ["job_failed", "verification_failed", "validation_failed", "merge_conflict"]
       end)
       |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
@@ -245,8 +245,8 @@ defmodule GiTF.Handoff do
     _ -> ""
   end
 
-  defp build_checkpoint_section(bee_id) do
-    case GiTF.Checkpoint.load(bee_id) do
+  defp build_checkpoint_section(ghost_id) do
+    case GiTF.Checkpoint.load(ghost_id) do
       {:ok, checkpoint} ->
         GiTF.Checkpoint.build_resume_prompt(checkpoint) <> "\n\n"
 
@@ -259,7 +259,7 @@ defmodule GiTF.Handoff do
     [
       "# Handoff Briefing",
       "",
-      "You are continuing work from a previous bee session.",
+      "You are continuing work from a previous ghost session.",
       "The handoff was created at #{waggle.inserted_at}.",
       "",
       "---",

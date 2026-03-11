@@ -11,7 +11,7 @@ defmodule GiTF.Major.OrchestratorTest do
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    # Ensure CombSupervisor is running (needed for bee spawning)
+    # Ensure CombSupervisor is running (needed for ghost spawning)
     unless Process.whereis(GiTF.CombSupervisor) do
       DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.CombSupervisor)
     end

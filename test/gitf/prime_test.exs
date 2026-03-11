@@ -47,14 +47,14 @@ defmodule GiTF.PrimeTest do
       assert {:error, :enoent} = Prime.prime(:major, tmp)
     end
 
-    test "includes active bee information in state summary" do
+    test "includes active ghost information in state summary" do
       gitf_root = create_gitf_workspace()
 
-      # Create a working bee
-      {:ok, _bee} = Store.insert(:bees, %{name: "busy-bee", status: "working"})
+      # Create a working ghost
+      {:ok, _bee} = Store.insert(:ghosts, %{name: "busy-ghost", status: "working"})
 
       {:ok, markdown} = Prime.prime(:major, gitf_root)
-      assert markdown =~ "busy-bee"
+      assert markdown =~ "busy-ghost"
     end
 
     test "includes planning quests in state summary" do
@@ -106,26 +106,26 @@ defmodule GiTF.PrimeTest do
     end
   end
 
-  describe "prime(:bee, bee_id)" do
-    test "returns a briefing for an existing bee" do
-      {:ok, bee} = Store.insert(:bees, %{name: "worker-bee", status: "starting"})
+  describe "prime(:ghost, ghost_id)" do
+    test "returns a briefing for an existing ghost" do
+      {:ok, ghost} = Store.insert(:ghosts, %{name: "worker-ghost", status: "starting"})
 
-      assert {:ok, markdown} = Prime.prime(:bee, bee.id)
+      assert {:ok, markdown} = Prime.prime(:ghost, ghost.id)
       assert markdown =~ "Bee Briefing"
-      assert markdown =~ "worker-bee"
+      assert markdown =~ "worker-ghost"
       assert markdown =~ "Your Job"
       assert markdown =~ "Your Workspace"
       assert markdown =~ "Rules"
     end
 
-    test "returns error for nonexistent bee" do
-      assert {:error, :bee_not_found} = Prime.prime(:bee, "bee-000000")
+    test "returns error for nonexistent ghost" do
+      assert {:error, :bee_not_found} = Prime.prime(:ghost, "ghost-000000")
     end
 
-    test "shows no job when bee has no assignment" do
-      {:ok, bee} = Store.insert(:bees, %{name: "idle-bee", status: "starting"})
+    test "shows no job when ghost has no assignment" do
+      {:ok, ghost} = Store.insert(:ghosts, %{name: "idle-ghost", status: "starting"})
 
-      {:ok, markdown} = Prime.prime(:bee, bee.id)
+      {:ok, markdown} = Prime.prime(:ghost, ghost.id)
       assert markdown =~ "No job assigned"
     end
   end

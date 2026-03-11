@@ -1,14 +1,14 @@
 defmodule GiTF.Merge do
   @moduledoc """
-  Handles merging bee worktree branches back into the main codebase.
+  Handles merging ghost worktree branches back into the main codebase.
 
-  After a bee completes its job, the merge module applies the comb's
-  configured merge strategy to integrate the bee's changes.
+  After a ghost completes its job, the merge module applies the comb's
+  configured merge strategy to integrate the ghost's changes.
 
   ## Strategies
 
     * `"manual"` -- No auto-merge. Sends a waggle with instructions.
-    * `"auto_merge"` -- Checks out the main branch and merges the bee branch.
+    * `"auto_merge"` -- Checks out the main branch and merges the ghost branch.
     * `"pr_branch"` -- Keeps the branch intact for a PR workflow.
   """
 
@@ -20,7 +20,7 @@ defmodule GiTF.Merge do
   @lock_retry_interval 500
 
   @doc """
-  Merges a bee's worktree branch back according to the comb's merge strategy.
+  Merges a ghost's worktree branch back according to the comb's merge strategy.
 
   Looks up the cell, finds the comb, reads the merge_strategy, and dispatches.
   Returns `{:ok, strategy_applied}` or `{:error, reason}`.
@@ -40,9 +40,9 @@ defmodule GiTF.Merge do
   end
 
   @doc """
-  Merges all completed bee branches for a quest into a single quest branch.
+  Merges all completed ghost branches for a quest into a single quest branch.
 
-  Creates `quest/<quest-name>` off the main branch, then merges each bee's
+  Creates `quest/<quest-name>` off the main branch, then merges each ghost's
   branch into it sequentially. Returns `{:ok, quest_branch}` with the branch
   name, or `{:error, reason}` if any merge fails.
   """
@@ -134,9 +134,9 @@ defmodule GiTF.Merge do
   end
 
   @doc """
-  Merges a bee branch using rebase-then-merge strategy.
+  Merges a ghost branch using rebase-then-merge strategy.
 
-  Rebases the bee branch onto main first, then does a fast-forward merge.
+  Rebases the ghost branch onto main first, then does a fast-forward merge.
   Returns `{:ok, "rebase_merge"}` or `{:error, reason}`.
   """
   @spec merge_back_with_rebase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
@@ -177,10 +177,10 @@ defmodule GiTF.Merge do
 
   defp maybe_create_github_pr(comb, cell) do
     if Map.get(comb, :github_owner) && Map.get(comb, :github_repo) do
-      # Look up the job for this cell's bee
-      case Store.find_one(:jobs, fn j -> j.bee_id == cell.bee_id end) do
+      # Look up the job for this cell's ghost
+      case Store.find_one(:jobs, fn j -> j.ghost_id == cell.ghost_id end) do
         nil ->
-          Logger.debug("No job found for bee #{cell.bee_id}, skipping GitHub PR")
+          Logger.debug("No job found for ghost #{cell.ghost_id}, skipping GitHub PR")
 
         job ->
           case GiTF.GitHub.create_pr(comb, cell, job) do
@@ -210,13 +210,13 @@ defmodule GiTF.Merge do
   # -- Private: quest merge helpers -------------------------------------------
 
   defp cells_for_quest(quest) do
-    bee_ids =
+    ghost_ids =
       quest.jobs
-      |> Enum.map(& &1.bee_id)
+      |> Enum.map(& &1.ghost_id)
       |> Enum.reject(&is_nil/1)
 
     Store.filter(:cells, fn c ->
-      c.bee_id in bee_ids and c.status == "active"
+      c.ghost_id in ghost_ids and c.status == "active"
     end)
   end
 
@@ -255,7 +255,7 @@ defmodule GiTF.Merge do
     failures = Enum.filter(results, &match?({:error, _, _}, &1))
 
     if failures == [] do
-      Logger.info("All bee branches merged into #{quest_branch}")
+      Logger.info("All ghost branches merged into #{quest_branch}")
       {:ok, quest_branch}
     else
       # Roll back to savepoint — none of the merges should persist if any failed

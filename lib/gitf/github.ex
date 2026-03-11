@@ -23,7 +23,7 @@ defmodule GiTF.GitHub do
         title: job.title,
         head: cell.branch,
         base: detect_default_branch(comb),
-        body: "Automated PR from GiTF bee.\n\nJob: #{job.id}\n#{job.description || ""}"
+        body: "Automated PR from GiTF ghost.\n\nJob: #{job.id}\n#{job.description || ""}"
       }
 
       case Req.post(client,

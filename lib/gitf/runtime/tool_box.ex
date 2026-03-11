@@ -8,8 +8,8 @@ defmodule GiTF.Runtime.ToolBox do
 
   ## Tool Sets
 
-  - `:standard` — Full read/write tools for implementation bees
-  - `:readonly` — Read-only tools for phase/validation bees
+  - `:standard` — Full read/write tools for implementation ghosts
+  - `:readonly` — Read-only tools for phase/validation ghosts
   - `:major` — Standard tools + orchestration tools
   """
 
@@ -104,7 +104,7 @@ defmodule GiTF.Runtime.ToolBox do
       build_tool("list_quests", "List all active quests and their statuses", [],
         fn _args -> list_quests() end),
 
-      build_tool("list_bees", "List all active bees and their statuses", [],
+      build_tool("list_bees", "List all active ghosts and their statuses", [],
         fn _args -> list_bees() end),
 
       build_tool("check_costs", "Check total cost summary for the section", [],
@@ -267,17 +267,17 @@ defmodule GiTF.Runtime.ToolBox do
   end
 
   defp list_bees do
-    bees = GiTF.Store.all(:bees)
+    ghosts = GiTF.Store.all(:ghosts)
 
     summary =
-      Enum.map(bees, fn b ->
+      Enum.map(ghosts, fn b ->
         "#{b.id}: #{b.name} (#{b.status}) - job: #{b.job_id || "none"}"
       end)
       |> Enum.join("\n")
 
-    {:ok, if(summary == "", do: "No bees found.", else: summary)}
+    {:ok, if(summary == "", do: "No ghosts found.", else: summary)}
   rescue
-    _ -> {:ok, "Error listing bees"}
+    _ -> {:ok, "Error listing ghosts"}
   end
 
   defp check_costs do

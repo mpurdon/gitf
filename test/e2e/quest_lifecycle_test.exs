@@ -14,7 +14,7 @@ defmodule GiTF.E2E.QuestLifecycleTest do
         ]
       )
 
-    # Spawn mock bees for both jobs
+    # Spawn mock ghosts for both jobs
     {:ok, bee1} = Harness.spawn_mock_bee(env, job1.id, comb.id, delay_ms: 200)
     {:ok, bee2} = Harness.spawn_mock_bee(env, job2.id, comb.id, delay_ms: 200)
 
@@ -22,18 +22,18 @@ defmodule GiTF.E2E.QuestLifecycleTest do
     await({:job_done, job1.id}, timeout: 15_000)
     await({:job_done, job2.id}, timeout: 15_000)
 
-    # Both bees should be stopped
+    # Both ghosts should be stopped
     await({:bee_stopped, bee1.id}, timeout: 5_000)
     await({:bee_stopped, bee2.id}, timeout: 5_000)
 
     # Waggle messages arrive after the validation pipeline in mark_success
     # (may involve git diff + Claude validation, up to 60s). Wait generously.
-    bee_ids = [bee1.id, bee2.id]
+    ghost_ids = [bee1.id, bee2.id]
 
     await(
       fn ->
         waggles = GiTF.Store.all(:waggles)
-        Enum.any?(waggles, &(&1.from in bee_ids))
+        Enum.any?(waggles, &(&1.from in ghost_ids))
       end,
       timeout: 15_000
     )
@@ -64,7 +64,7 @@ defmodule GiTF.E2E.QuestLifecycleTest do
         ]
       )
 
-    # Only spawn a bee for job1
+    # Only spawn a ghost for job1
     {:ok, _bee1} = Harness.spawn_mock_bee(env, job1.id, comb.id, delay_ms: 100)
 
     await({:job_done, job1.id}, timeout: 15_000)

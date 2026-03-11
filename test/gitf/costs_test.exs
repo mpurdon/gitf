@@ -11,9 +11,9 @@ defmodule GiTF.CostsTest do
     {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    {:ok, bee} = Store.insert(:bees, %{name: "cost-test-bee", status: "starting"})
+    {:ok, ghost} = Store.insert(:ghosts, %{name: "cost-test-ghost", status: "starting"})
 
-    %{bee: bee}
+    %{ghost: ghost}
   end
 
   describe "calculate_cost/1" do
@@ -83,15 +83,15 @@ defmodule GiTF.CostsTest do
   end
 
   describe "record/2" do
-    test "records a cost entry with auto-calculated cost_usd", %{bee: bee} do
+    test "records a cost entry with auto-calculated cost_usd", %{ghost: ghost} do
       attrs = %{
         input_tokens: 500,
         output_tokens: 200,
         model: "google:gemini-2.5-flash"
       }
 
-      assert {:ok, cost} = Costs.record(bee.id, attrs)
-      assert cost.bee_id == bee.id
+      assert {:ok, cost} = Costs.record(ghost.id, attrs)
+      assert cost.ghost_id == ghost.id
       assert cost.input_tokens == 500
       assert cost.output_tokens == 200
       assert cost.cost_usd > 0
@@ -99,18 +99,18 @@ defmodule GiTF.CostsTest do
       assert String.starts_with?(cost.id, "cst-")
     end
 
-    test "preserves explicit cost_usd if provided", %{bee: bee} do
+    test "preserves explicit cost_usd if provided", %{ghost: ghost} do
       attrs = %{
         input_tokens: 500,
         output_tokens: 200,
         cost_usd: 42.0
       }
 
-      assert {:ok, cost} = Costs.record(bee.id, attrs)
+      assert {:ok, cost} = Costs.record(ghost.id, attrs)
       assert cost.cost_usd == 42.0
     end
 
-    test "preserves explicit recorded_at if provided", %{bee: bee} do
+    test "preserves explicit recorded_at if provided", %{ghost: ghost} do
       timestamp = ~U[2025-01-15 10:00:00Z]
 
       attrs = %{
@@ -119,28 +119,28 @@ defmodule GiTF.CostsTest do
         recorded_at: timestamp
       }
 
-      assert {:ok, cost} = Costs.record(bee.id, attrs)
+      assert {:ok, cost} = Costs.record(ghost.id, attrs)
       assert cost.recorded_at == timestamp
     end
   end
 
   describe "for_bee/1" do
-    test "returns costs for a specific bee", %{bee: bee} do
-      {:ok, _} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
-      {:ok, _} = Costs.record(bee.id, %{input_tokens: 200, output_tokens: 100})
+    test "returns costs for a specific ghost", %{ghost: ghost} do
+      {:ok, _} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
+      {:ok, _} = Costs.record(ghost.id, %{input_tokens: 200, output_tokens: 100})
 
-      costs = Costs.for_bee(bee.id)
+      costs = Costs.for_bee(ghost.id)
       assert length(costs) == 2
-      assert Enum.all?(costs, &(&1.bee_id == bee.id))
+      assert Enum.all?(costs, &(&1.ghost_id == ghost.id))
     end
 
-    test "returns empty list for unknown bee" do
-      assert [] = Costs.for_bee("bee-nonexistent")
+    test "returns empty list for unknown ghost" do
+      assert [] = Costs.for_bee("ghost-nonexistent")
     end
   end
 
   describe "for_quest/1" do
-    test "returns costs for bees working on quest jobs", %{bee: bee} do
+    test "returns costs for ghosts working on quest jobs", %{ghost: ghost} do
       {:ok, comb} =
         Store.insert(:combs, %{name: "cost-quest-comb-#{:erlang.unique_integer([:positive])}"})
 
@@ -155,10 +155,10 @@ defmodule GiTF.CostsTest do
           title: "Quest job",
           quest_id: quest.id,
           comb_id: comb.id,
-          bee_id: bee.id
+          ghost_id: ghost.id
         })
 
-      {:ok, _} = Costs.record(bee.id, %{input_tokens: 300, output_tokens: 150})
+      {:ok, _} = Costs.record(ghost.id, %{input_tokens: 300, output_tokens: 150})
 
       costs = Costs.for_quest(quest.id)
       assert length(costs) >= 1
@@ -166,9 +166,9 @@ defmodule GiTF.CostsTest do
   end
 
   describe "total/1" do
-    test "sums cost_usd from a list of costs", %{bee: bee} do
-      {:ok, c1} = Costs.record(bee.id, %{input_tokens: 1_000_000, output_tokens: 0})
-      {:ok, c2} = Costs.record(bee.id, %{input_tokens: 1_000_000, output_tokens: 0})
+    test "sums cost_usd from a list of costs", %{ghost: ghost} do
+      {:ok, c1} = Costs.record(ghost.id, %{input_tokens: 1_000_000, output_tokens: 0})
+      {:ok, c2} = Costs.record(ghost.id, %{input_tokens: 1_000_000, output_tokens: 0})
 
       total = Costs.total([c1, c2])
       # 2 * $0.15/MTok (gemini-2.5-flash default) = $0.30
@@ -181,9 +181,9 @@ defmodule GiTF.CostsTest do
   end
 
   describe "summary/0" do
-    test "returns aggregate cost data with by_category", %{bee: bee} do
+    test "returns aggregate cost data with by_category", %{ghost: ghost} do
       {:ok, _} =
-        Costs.record(bee.id, %{
+        Costs.record(ghost.id, %{
           input_tokens: 1000,
           output_tokens: 500,
           model: "google:gemini-2.5-flash"
@@ -207,7 +207,7 @@ defmodule GiTF.CostsTest do
   end
 
   describe "category derivation" do
-    test "queen bee_id maps to orchestration" do
+    test "queen ghost_id maps to orchestration" do
       {:ok, cost} = Costs.record("major", %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "orchestration"
     end
@@ -219,9 +219,9 @@ defmodule GiTF.CostsTest do
       assert cost.category == "planning"
     end
 
-    test "unknown bee falls back to unknown" do
+    test "unknown ghost falls back to unknown" do
       {:ok, cost} =
-        Costs.record("bee-nonexistent-#{:erlang.unique_integer([:positive])}", %{
+        Costs.record("ghost-nonexistent-#{:erlang.unique_integer([:positive])}", %{
           input_tokens: 100,
           output_tokens: 50
         })
@@ -229,7 +229,7 @@ defmodule GiTF.CostsTest do
       assert cost.category == "unknown"
     end
 
-    test "phase job research maps to planning", %{bee: bee} do
+    test "phase job research maps to planning", %{ghost: ghost} do
       {:ok, comb} =
         Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
 
@@ -244,19 +244,19 @@ defmodule GiTF.CostsTest do
           title: "Research task",
           quest_id: quest.id,
           comb_id: comb.id,
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           phase_job: true,
           phase: "research"
         })
 
-      # Update bee with job_id
-      Store.put(:bees, Map.put(bee, :job_id, job.id))
+      # Update ghost with job_id
+      Store.put(:ghosts, Map.put(ghost, :job_id, job.id))
 
-      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
+      {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "planning"
     end
 
-    test "phase job validation maps to verification", %{bee: bee} do
+    test "phase job validation maps to verification", %{ghost: ghost} do
       {:ok, comb} =
         Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
 
@@ -271,18 +271,18 @@ defmodule GiTF.CostsTest do
           title: "Validation task",
           quest_id: quest.id,
           comb_id: comb.id,
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           phase_job: true,
           phase: "validation"
         })
 
-      Store.put(:bees, Map.put(bee, :job_id, job.id))
+      Store.put(:ghosts, Map.put(ghost, :job_id, job.id))
 
-      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
+      {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "verification"
     end
 
-    test "non-phase job maps to implementation", %{bee: bee} do
+    test "non-phase job maps to implementation", %{ghost: ghost} do
       {:ok, comb} =
         Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
 
@@ -297,13 +297,13 @@ defmodule GiTF.CostsTest do
           title: "Implementation task",
           quest_id: quest.id,
           comb_id: comb.id,
-          bee_id: bee.id,
+          ghost_id: ghost.id,
           phase_job: false
         })
 
-      Store.put(:bees, Map.put(bee, :job_id, job.id))
+      Store.put(:ghosts, Map.put(ghost, :job_id, job.id))
 
-      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
+      {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "implementation"
     end
 

@@ -24,19 +24,19 @@ defmodule GiTF.AutonomyTest do
       assert is_list(results)
     end
 
-    test "cleans up orphaned bees" do
-      # Create bee without active job
-      bee = %{
-        id: "bee-orphan",
+    test "cleans up orphaned ghosts" do
+      # Create ghost without active job
+      ghost = %{
+        id: "ghost-orphan",
         status: "active",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:bees, bee)
+      Store.insert(:ghosts, ghost)
       
       results = Autonomy.self_heal()
       
-      # Should detect and clean up orphaned bee
+      # Should detect and clean up orphaned ghost
       assert is_list(results)
     end
   end

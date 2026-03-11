@@ -24,15 +24,15 @@ defmodule GiTF.PubSubBridgeTest do
 
   test "broadcasts telemetry events to pubsub" do
     # Emit a test event
-    GiTF.Telemetry.emit([:gitf, :bee, :spawned], %{count: 1}, %{bee_id: "test-bee"})
+    GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{count: 1}, %{ghost_id: "test-ghost"})
 
     # Assert we receive it
     assert_receive {:gitf_event, payload}, 1000
 
-    assert payload.event == "section.bee.spawned"
+    assert payload.event == "section.ghost.spawned"
     assert payload.measurements == %{count: 1}
     # PubSubBridge adds :node to metadata
-    assert payload.metadata.bee_id == "test-bee"
+    assert payload.metadata.ghost_id == "test-ghost"
     assert Map.has_key?(payload.metadata, :node)
     assert %DateTime{} = payload.timestamp
   end
