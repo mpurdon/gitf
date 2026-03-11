@@ -1,14 +1,14 @@
-# Remove all crashed/stopped bees from the Store
+# Remove all crashed/stopped ghosts from the Archive
 path = "/Users/mp/Projects/gitf-workspace/.gitf/store/gitf.etf"
 data = File.read!(path) |> :erlang.binary_to_term()
 
-bees = data[:bees] || %{}
-{keep, remove} = Map.split_with(bees, fn {_id, bee} -> bee.status == "working" end)
+ghosts = data[:ghosts] || %{}
+{keep, remove} = Map.split_with(ghosts, fn {_id, ghost} -> ghost.status == "working" end)
 
-IO.puts("Keeping #{map_size(keep)} working bees")
-IO.puts("Removing #{map_size(remove)} dead bees:")
-for {id, bee} <- remove, do: IO.puts("  #{id} [#{bee.status}]")
+IO.puts("Keeping #{map_size(keep)} working ghosts")
+IO.puts("Removing #{map_size(remove)} dead ghosts:")
+for {id, ghost} <- remove, do: IO.puts("  #{id} [#{ghost.status}]")
 
-data = %{data | bees: keep}
+data = %{data | ghosts: keep}
 File.write!(path, :erlang.term_to_binary(data))
 IO.puts("Done.")

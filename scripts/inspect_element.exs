@@ -56,13 +56,13 @@ defmodule Ratatouille.Renderer.Element do
       ]
     ],
     canvas_cell: [
-      description: "A canvas cell which represents one square of the canvas",
+      description: "A canvas shell which represents one square of the canvas",
       child_tags: [],
       attributes: [
-        x: {:required, "Integer representing the cell's column (zero-indexed)"},
-        y: {:required, "Integer representing the cell's row (zero-indexed)"},
+        x: {:required, "Integer representing the shell's column (zero-indexed)"},
+        y: {:required, "Integer representing the shell's row (zero-indexed)"},
         color: {:optional, "Constant representing color to use for foreground"},
-        char: {:optional, "Single character to render within this cell"},
+        char: {:optional, "Single character to render within this shell"},
         background:
           {:optional, "Constant representing color to use for background"},
         attributes:
@@ -158,7 +158,7 @@ defmodule Ratatouille.Renderer.Element do
       attributes: []
     ],
     table_cell: [
-      description: "Element representing a table cell",
+      description: "Element representing a table shell",
       child_tags: [],
       attributes: [
         content:

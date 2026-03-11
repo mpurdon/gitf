@@ -1,36 +1,36 @@
-# The Hive - Architecture
+# GiTF - Architecture
 
 ## System Overview
 
-The Hive is a multi-agent orchestration system designed to operate as a "Dark Factory" for software development. It coordinates multiple AI agents (Bees) to autonomously plan, implement, verify, and deliver code changes with minimal human oversight.
+GiTF (Ghost in the Factory) is a multi-agent orchestration system designed to operate as a "Dark Factory" for software development. It coordinates multiple AI agents (Ghosts) to autonomously plan, implement, verify, and deliver code changes with minimal human oversight.
 
-The system leverages a **Research → Plan → Implement** pipeline, enforced by a central coordinator (Queen) and a dedicated quality assurance watchdog (Drone).
+The system leverages a **Research → Plan → Implement** pipeline, enforced by a central coordinator (Major) and a dedicated quality assurance watchdog (Tachikoma).
 
 ## Core Architecture
 
 ### Supervision Tree
 
 ```
-Hive.Application (OTP App)
-├── Hive.Repo (SQLite via Ecto)
+GiTF.Application (OTP App)
+├── GiTF.Archive (ETF-backed persistence)
 ├── Phoenix.PubSub (inter-agent messaging)
 ├── Registry (process registry)
-├── Hive.Plugin.Manager (plugin lifecycle + hot reload)
-│   ├── Hive.Plugin.Registry (ETS-backed lookup)
-│   ├── Hive.Plugin.MCPSupervisor
-│   └── Hive.Plugin.ChannelSupervisor
-├── Hive.CombSupervisor (DynamicSupervisor)
-│   └── Hive.Comb (per-project supervisor)
-│       ├── Hive.Bee.Worker (GenServer per worker)
-│       └── Hive.TranscriptWatcher (file watcher)
-├── Hive.Queen (GenServer - coordinator)
-├── Hive.Drone (GenServer - autonomous watchdog)
-└── Hive.Dashboard.Endpoint (Phoenix - web UI)
+├── GiTF.Plugin.Manager (plugin lifecycle + hot reload)
+│   ├── GiTF.Plugin.Registry (ETS-backed lookup)
+│   ├── GiTF.Plugin.MCPSupervisor
+│   └── GiTF.Plugin.ChannelSupervisor
+├── GiTF.SectorSupervisor (DynamicSupervisor)
+│   └── GiTF.Sector (per-project supervisor)
+│       ├── GiTF.Ghost.Worker (GenServer per worker)
+│       └── GiTF.TranscriptWatcher (file watcher)
+├── GiTF.Major (GenServer - coordinator)
+├── GiTF.Tachikoma (GenServer - autonomous watchdog)
+└── GiTF.Dashboard.Endpoint (Phoenix - web UI)
 ```
 
 ### Process Communication
 
-Agents communicate via **Waggles** (messages) broadcast over Phoenix PubSub.
+Agents communicate via **Links** (messages) broadcast over Phoenix PubSub.
 
 ```
                     ┌─────────────────┐
@@ -41,32 +41,32 @@ Agents communicate via **Waggles** (messages) broadcast over Phoenix PubSub.
          │                   │                   │
          ▼                   ▼                   ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  waggle:queen   │ │ waggle:bee:123  │ │waggle:comb:proj │
+│  link:major     │ │ link:ghost:123  │ │link:sector:proj │
 └────────┬────────┘ └────────┬────────┘ └────────┬────────┘
          │                   │                   │
          ▼                   ▼                   ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│   Hive.Queen    │ │ Hive.Bee.Worker │ │   Hive.Comb     │
+│   GiTF.Major   │ │GiTF.Ghost.Worker│ │  GiTF.Sector    │
 │   (GenServer)   │ │   (GenServer)   │ │   (Supervisor)  │
 └─────────────────┘ └─────────────────┘ └─────────────────┘
 ```
 
 ## Data Model
 
-The system uses a document-oriented approach over SQLite.
+The system uses a document-oriented approach backed by ETF (Erlang Term Format) persistence.
 
 ### Schema Entities
 
 | Entity | Description | Key Fields |
 |--------|-------------|------------|
-| **Comb** | A managed git repository | `id`, `name`, `path`, `repo_url` |
-| **Quest** | High-level objective | `id`, `goal`, `status`, `plan`, `current_phase` |
-| **Job** | Discrete unit of work | `id`, `title`, `job_type`, `status`, `assigned_model`, `verification_status` |
-| **Bee** | Active agent instance | `id`, `name`, `status`, `context_usage`, `assigned_model` |
-| **Cell** | Isolated git worktree | `id`, `worktree_path`, `branch` |
-| **Waggle** | Inter-agent message | `id`, `from`, `to`, `subject`, `body` |
+| **Sector** | A managed git repository | `id`, `name`, `path`, `repo_url` |
+| **Mission** | High-level objective | `id`, `goal`, `status`, `plan`, `current_phase` |
+| **Op** | Discrete unit of work | `id`, `title`, `op_type`, `status`, `assigned_model`, `audit_status` |
+| **Ghost** | Active agent instance | `id`, `name`, `status`, `context_usage`, `assigned_model` |
+| **Shell** | Isolated git worktree | `id`, `worktree_path`, `branch` |
+| **Link** | Inter-agent message | `id`, `from`, `to`, `subject`, `body` |
 
-### Job Types
+### Op Types
 - **Planning**: Breaking down requirements (Model: Opus)
 - **Implementation**: Writing code (Model: Sonnet)
 - **Research**: Analyzing codebase (Model: Haiku)
@@ -74,12 +74,12 @@ The system uses a document-oriented approach over SQLite.
 
 ## Autonomous Workflows ("The Dark Factory")
 
-The Hive operates on a strict phased pipeline to ensuring quality and autonomy.
+GiTF operates on a strict phased pipeline to ensure quality and autonomy.
 
 ### 1. Research → Plan → Implement
-1.  **Research Phase**: The Queen scans the codebase using cost-effective models (Haiku) to map dependencies, entry points, and constraints. This data is cached to minimize token usage.
-2.  **Planning Phase**: The Queen uses high-intelligence models (Opus) to decompose the Quest into a dependency graph of Jobs. Each job is assigned a specific `job_type` and `verification_criteria`.
-3.  **Implementation Phase**: Bees are spawned to execute jobs in parallel. Each Bee works in an isolated **Cell** (git worktree) to prevent conflicts.
+1.  **Research Phase**: The Major scans the codebase using cost-effective models (Haiku) to map dependencies, entry points, and constraints. This data is cached to minimize token usage.
+2.  **Planning Phase**: The Major uses high-intelligence models (Opus) to decompose the Mission into a dependency graph of Ops. Each op is assigned a specific `op_type` and `audit_criteria`.
+3.  **Implementation Phase**: Ghosts are spawned to execute ops in parallel. Each Ghost works in an isolated **Shell** (git worktree) to prevent conflicts.
 
 ### 2. Multi-Model Intelligence
 The system dynamically selects the optimal AI model for each task to balance cost and quality:
@@ -88,28 +88,28 @@ The system dynamically selects the optimal AI model for each task to balance cos
 *   **Claude 3 Haiku**: Used for high-volume tasks like research, summarization, and verification.
 
 ### 3. Context Management
-*   **Context Monitor**: Real-time tracking of token usage per Bee.
-*   **Auto-Handoff**: If a Bee exceeds 50% context usage, it automatically summarizes its state and "hands off" to a fresh instance to prevent context window exhaustion.
+*   **Context Monitor**: Real-time tracking of token usage per Ghost.
+*   **Auto-Transfer**: If a Ghost exceeds 50% context usage, it automatically summarizes its state and "transfers" to a fresh instance to prevent context window exhaustion.
 
 ### 4. Quality Assurance & Verification
-The **Drone** acts as an autonomous quality gatekeeper:
-*   **Verification Gates**: A Job cannot be marked "Done" until it passes verification.
+The **Tachikoma** acts as an autonomous quality gatekeeper:
+*   **Audit Gates**: An Op cannot be marked "Done" until it passes audit.
 *   **Static Analysis**: Automated linting and code style checks.
 *   **Security Scanning**: Vulnerability detection (secrets, dependencies).
 *   **Performance Benchmarking**: Regression testing against baselines.
-*   **Self-Healing**: The Drone periodically patrols the Hive to detect stuck Bees, deadlocks, or orphaned resources, automatically triggering recovery procedures.
+*   **Self-Healing**: The Tachikoma periodically patrols the factory to detect stuck Ghosts, deadlocks, or orphaned resources, automatically triggering recovery procedures.
 
 ## Observability
 
 The system provides real-time visibility into the "Dark Factory" operations:
 
-*   **TUI Dashboard**: A terminal-based UI showing active Bees, Quests, and system health.
+*   **TUI Dashboard**: A terminal-based UI showing active Ghosts, Missions, and system health.
 *   **Metrics**: Real-time tracking of Quality Scores, Token Costs, and Failure Rates.
-*   **Alerts**: Immediate notifications for stalled quests, validation failures, or budget overruns.
+*   **Alerts**: Immediate notifications for stalled missions, audit failures, or budget overruns.
 
 ## Plugin System
 
-The Hive is extensible via a behaviour-based plugin system:
+GiTF is extensible via a behaviour-based plugin system:
 
 *   **Models**: Adapters for AI providers (Claude, Copilot, Kimi).
 *   **Commands**: Custom CLI extensions.
@@ -118,5 +118,5 @@ The Hive is extensible via a behaviour-based plugin system:
 ## Future Roadmap
 
 *   **Enterprise Monitoring**: Prometheus/Grafana integration for long-term metrics history.
-*   **Multi-Agent Collaboration**: Direct Bee-to-Bee communication for collaborative problem solving.
-*   **Human-in-the-Loop**: Interactive approval gates for high-risk changes.
+*   **Multi-Agent Collaboration**: Direct Ghost-to-Ghost communication for collaborative problem solving.
+*   **Human-in-the-Loop**: Interactive approval gates (Override) for high-risk changes.

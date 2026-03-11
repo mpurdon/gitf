@@ -1,73 +1,73 @@
-# The Hive
+# GiTF — Ghost in the Factory, Section 9
 
 **Multi-agent orchestration system for AI coding assistants with persistent work tracking**
 
 ## Quick Start
 
 ```bash
-hive init ~/my-hive --git
-cd ~/my-hive
-hive comb add myproject https://github.com/you/repo.git
-hive queen
+gitf init ~/my-factory --git
+cd ~/my-factory
+gitf sector add myproject https://github.com/you/repo.git
+gitf major
 ```
 
-Then tell the Queen what you want to build!
+Then tell the Major what you want to build!
 
 ## Overview
 
-The Hive is a workspace manager that coordinates multiple AI coding agents working on different tasks. Built in Elixir, it leverages OTP patterns for process supervision, Phoenix PubSub for messaging, and SQLite for persistence.
+GiTF is a workspace manager that coordinates multiple AI coding agents working on different tasks. Built in Elixir, it leverages OTP patterns for process supervision, Phoenix PubSub for messaging, and an ETF-backed archive for persistence.
 
-Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any custom provider via the `Hive.Plugin.Model` behaviour.
+Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any custom provider via the `GiTF.Plugin.Model` behaviour.
 
 ## Core Concepts
 
 | Concept | Name | Description |
 |---------|------|-------------|
-| Workspace | **Hive** | Root directory, one Queen |
-| Coordinator | **Queen** | AI that orchestrates work |
-| Project | **Comb** | Git repo container |
-| Worker agent | **Bee** | Ephemeral AI instance |
-| Work unit | **Job** | Single task for a bee |
-| Work bundle | **Quest** | Group of related jobs |
-| Messages | **Waggle** | Inter-agent communication |
-| Persistent state | **Cell** | Git worktree for bee's work |
+| Workspace | **GiTF** | Root directory, one Major |
+| Coordinator | **Major** | AI that orchestrates work |
+| Project | **Sector** | Git repo container |
+| Worker agent | **Ghost** | Ephemeral AI instance |
+| Work unit | **Op** | Single task for a ghost |
+| Work bundle | **Mission** | Group of related ops |
+| Messages | **Link** | Inter-agent communication |
+| Persistent state | **Shell** | Git worktree for ghost's work |
 
 ## Architecture
 
 ```
-Hive.Application (OTP App)
-├── Hive.Repo (SQLite via Ecto)
+GiTF.Application (OTP App)
+├── GiTF.Archive (ETF-backed persistence)
 ├── Phoenix.PubSub (inter-agent messaging)
 ├── Registry (process registry)
-├── Hive.Plugin.Manager (plugin lifecycle + hot reload)
-│   ├── Hive.Plugin.Registry (ETS-backed lookup)
-│   ├── Hive.Plugin.MCPSupervisor
-│   └── Hive.Plugin.ChannelSupervisor
-├── Hive.CombSupervisor (DynamicSupervisor)
-│   └── Hive.Comb (per-project supervisor)
-│       ├── Hive.Bee.Worker (GenServer per worker)
-│       └── Hive.TranscriptWatcher (file watcher)
-├── Hive.Queen (GenServer - started on demand)
-├── Hive.Drone (GenServer - health monitor)
-└── Hive.Dashboard.Endpoint (Phoenix - web UI)
+├── GiTF.Plugin.Manager (plugin lifecycle + hot reload)
+│   ├── GiTF.Plugin.Registry (ETS-backed lookup)
+│   ├── GiTF.Plugin.MCPSupervisor
+│   └── GiTF.Plugin.ChannelSupervisor
+├── GiTF.SectorSupervisor (DynamicSupervisor)
+│   └── GiTF.Sector (per-project supervisor)
+│       ├── GiTF.Ghost.Worker (GenServer per worker)
+│       └── GiTF.TranscriptWatcher (file watcher)
+├── GiTF.Major (GenServer - started on demand)
+├── GiTF.Tachikoma (GenServer - health monitor)
+└── GiTF.Dashboard.Endpoint (Phoenix - web UI)
 ```
 
 ## Workflow
 
 ```
-You → hive queen
+You → gitf major
         "Build user authentication system"
         ↓
-      Queen creates jobs:
-        - job-a1b2: "Create user model"
-        - job-c3d4: "Implement login endpoint"
-        - job-e5f6: "Add session management"
+      Major creates ops:
+        - op-a1b2: "Create user model"
+        - op-c3d4: "Implement login endpoint"
+        - op-e5f6: "Add session management"
         ↓
-      Queen spawns bees, assigns jobs
+      Major spawns ghosts, assigns ops
         ↓
-      Bees complete work, Queen tracks progress
+      Ghosts complete work, Major tracks progress
         ↓
-      You see: "Auth system complete, 3/3 jobs done"
+      You see: "Auth system complete, 3/3 ops done"
 ```
 
 ## Model Providers
@@ -78,7 +78,7 @@ You → hive queen
 | Copilot CLI | Plain text | No | No |
 | Kimi CLI | JSONL | Yes | Yes |
 
-Configure the default in `.hive/config.toml`:
+Configure the default in `.gitf/config.toml`:
 
 ```toml
 [plugins.models]
@@ -89,21 +89,21 @@ default = "claude"
 
 | Command | Description |
 |---------|-------------|
-| `hive init` | Initialize a new hive |
-| `hive queen` | Start Queen session |
-| `hive comb add` | Add a project |
-| `hive comb list` | List projects |
-| `hive comb rename` | Rename a comb |
-| `hive quest list` | Show quests |
-| `hive quest show` | Quest details |
-| `hive bees` | List active bees |
-| `hive bee revive` | Revive a dead bee |
-| `hive waggle list` | Check messages |
-| `hive costs` | Token costs |
-| `hive doctor` | Health checks |
-| `hive dashboard` | Web UI |
-| `hive plugin list` | List plugins |
-| `hive watch` | Live progress |
+| `gitf init` | Initialize a new workspace |
+| `gitf major` | Start Major session |
+| `gitf sector add` | Add a project |
+| `gitf sector list` | List projects |
+| `gitf sector rename` | Rename a sector |
+| `gitf mission list` | Show missions |
+| `gitf mission show` | Mission details |
+| `gitf ghosts` | List active ghosts |
+| `gitf ghost revive` | Revive a dead ghost |
+| `gitf link list` | Check messages |
+| `gitf costs` | Token costs |
+| `gitf medic` | Health checks |
+| `gitf dashboard` | Web UI |
+| `gitf plugin list` | List plugins |
+| `gitf watch` | Live progress |
 
 ## Dependencies
 

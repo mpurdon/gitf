@@ -1,88 +1,107 @@
-# The Hive - Glossary
+# GiTF - Glossary
 
 ## Terminology Mapping
 
-| Gas Town | The Hive | Description |
-|----------|----------|-------------|
-| Town | **Hive** | Root workspace directory |
-| Mayor | **Queen** | AI coordinator agent |
-| Rig | **Comb** | Project/repository container |
-| Polecat | **Bee** | Ephemeral worker agent |
-| Bead | **Job** | Single unit of work |
-| Convoy | **Quest** | Bundle of related jobs |
-| Mail | **Waggle** | Inter-agent messages |
-| Hook (worktree) | **Cell** | Git worktree for bee isolation |
-| Deacon/Witness | **Drone** | Patrol/health monitor agent |
-| Handoff | **Handoff** | Context-preserving restart |
+| Gas Town | The Hive | GiTF (Section 9) | Description |
+|----------|----------|-------------------|-------------|
+| Town | Hive | **GiTF** | Root workspace directory |
+| Mayor | Queen | **Major** | AI coordinator agent |
+| Rig | Comb | **Sector** | Project/repository container |
+| Polecat | Bee | **Ghost** | Ephemeral worker agent |
+| Bead | Job | **Op** | Single unit of work |
+| Convoy | Quest | **Mission** | Bundle of related ops |
+| Mail | Waggle | **Link** | Inter-agent messages |
+| Hook | Cell | **Shell** | Git worktree for ghost isolation |
+| Deacon | Drone | **Tachikoma** | Patrol/health monitor agent |
+| Handoff | Handoff | **Transfer** | Context-preserving restart |
 
 ## Core Concepts
 
-### Hive 🐝
+### GiTF (Ghost in the Factory)
 
-Your workspace directory (e.g., `~/my-hive/`). Contains all projects, the Queen, configuration, and the SQLite database. One Queen per Hive.
+Your workspace directory (e.g., `~/my-factory/`). Contains all projects, the Major, configuration, and the ETF-backed archive. One Major per workspace.
 
-### Queen 👑
+### Major
 
-The coordinator AI agent. An AI instance with full context about your workspace. Start here - tell the Queen what you want to accomplish and she'll create jobs and spawn bees.
+The coordinator AI agent. An AI instance with full context about your workspace. Start here — tell the Major what you want to accomplish and it will create ops and spawn ghosts.
 
-### Comb 🍯
+### Sector
 
-A project container. Each comb wraps a git repository and manages its associated bees. Multiple combs can exist in one hive.
+A project container. Each sector wraps a git repository and manages its associated ghosts. Multiple sectors can exist in one workspace.
 
-### Bee 🐝
+### Ghost
 
-An ephemeral worker agent. Spawns to complete a single job, then disappears. Each bee runs in its own git worktree (cell) for isolation.
+An ephemeral worker agent. Spawns to complete a single op, then disappears. Each ghost runs in its own git worktree (shell) for isolation. Named after the operatives in Ghost in the Shell.
 
-### Job 📋
+### Op
 
-A discrete unit of work. Created by the Queen, assigned to a bee. Examples: "Implement login endpoint", "Add OAuth provider", "Write tests for auth module".
+A discrete unit of work. Created by the Major, assigned to a ghost. Examples: "Implement login endpoint", "Add OAuth provider", "Write tests for auth module".
 
-### Quest 🗺️
+### Mission
 
-A bundle of related jobs. When you tell the Queen "Build user authentication", she creates a quest containing multiple jobs that together accomplish the goal.
+A bundle of related ops. When you tell the Major "Build user authentication", it creates a mission containing multiple ops that together accomplish the goal.
 
-### Waggle 💬
+### Link
 
-The messaging system. Named after the waggle dance bees use to communicate. Bees and Queen exchange waggles to coordinate work, report progress, and handle issues.
+The messaging system. Inter-agent communication channels. Ghosts and the Major exchange links to coordinate work, report progress, and handle issues.
 
-### Cell 🔲
+### Shell
 
-A git worktree where a bee does its work. Provides isolation so multiple bees can work on the same comb without conflicts. Cleaned up when the bee completes.
+A git worktree where a ghost does its work. Provides isolation so multiple ghosts can work on the same sector without conflicts. Cleaned up when the ghost completes. The shell is the vessel the ghost inhabits.
 
-### Drone 🛡️
+### Tachikoma
 
-A patrol agent that monitors hive health. Checks for stuck bees, orphaned cells, and other issues. (Future feature)
+A patrol agent that monitors factory health. Checks for stuck ghosts, orphaned shells, and other issues. Named after the think-tanks from Ghost in the Shell.
 
 ## Workflow Terms
 
-### Prime
+### Brief
 
-The context injection that happens when an AI session starts. The `hive prime` command outputs role-specific context that the AI captures.
+The context injection that happens when an AI session starts. The `gitf brief` command outputs role-specific context that the AI captures.
 
-### Handoff
+### Transfer
 
-When a bee's context window fills up, it can "hand off" to a fresh session. State is serialized, sent as a waggle to itself, and restored in the new session.
+When a ghost's context window fills up, it can "transfer" to a fresh session. State is serialized, sent as a link to itself, and restored in the new session.
 
 ### Transcript
 
-The AI's conversation log. The Hive watches transcript files to track token usage and costs.
+The AI's conversation log. GiTF watches transcript files to track token usage and costs.
+
+## Additional Concepts
+
+| Concept | Name | Description |
+|---------|------|-------------|
+| Permissions | **Clearance** | Graduated permission levels for ghosts |
+| Trust scoring | **Trust** | Model reliability tracking |
+| Approval gates | **Override** | Human-in-the-loop approval for high-risk changes |
+| Path protection | **Barrier** | Path traversal and scope protection |
+| Learning | **Intel** | Pattern learning from past operations |
+| Identity | **GhostID** | Operative identity and agent profiles |
+| Autonomy limits | **Limiter** | Ghost autonomy constraints |
+| Reconnaissance | **Recon** | Read-only codebase exploration |
+| Diagnostics | **Medic** | System health diagnostics |
+| Quality check | **Audit** | Post-op verification |
+| Post-op review | **Debrief** | Post-operation review |
+| State snapshot | **Backup** | Ghost state checkpointing |
+| Code integration | **Sync** | Branch merging and code integration |
+| Shutdown | **Exfil** | Graceful shutdown procedures |
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `hive init` | Initialize a new hive |
-| `hive queen` | Start Queen session |
-| `hive comb add` | Add a project |
-| `hive comb list` | List projects |
-| `hive quest list` | Show quests |
-| `hive quest show` | Quest details |
-| `hive bees` | List active bees |
-| `hive waggle list` | Check messages |
-| `hive costs` | Token costs |
-| `hive doctor` | Health checks |
-| `hive dashboard` | Web UI |
-| `hive plugin list` | List plugins |
-| `hive bee revive` | Revive a dead bee |
-| `hive comb rename` | Rename a comb |
-| `hive watch` | Live progress |
+| `gitf init` | Initialize a new workspace |
+| `gitf major` | Start Major session |
+| `gitf sector add` | Add a project |
+| `gitf sector list` | List projects |
+| `gitf sector rename` | Rename a sector |
+| `gitf mission list` | Show missions |
+| `gitf mission show` | Mission details |
+| `gitf ghosts` | List active ghosts |
+| `gitf ghost revive` | Revive a dead ghost |
+| `gitf link list` | Check messages |
+| `gitf costs` | Token costs |
+| `gitf medic` | Health checks |
+| `gitf dashboard` | Web UI |
+| `gitf plugin list` | List plugins |
+| `gitf watch` | Live progress |

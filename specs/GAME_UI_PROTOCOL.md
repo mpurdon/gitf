@@ -1,6 +1,6 @@
-# Hive Game UI Protocol Specification
+# GiTF Game UI Protocol Specification
 
-This document defines the interface for building a 3D "God Mode" visualization for the Hive autonomous software factory.
+This document defines the interface for building a 3D "God Mode" visualization for the GiTF autonomous software factory.
 
 ## Connection
 
@@ -24,9 +24,9 @@ To connect from a non-Phoenix client (e.g., Unity/C#, Godot/GDScript), you need 
 
 ---
 
-## Outbound Events (Hive -> Game)
+## Outbound Events (GiTF -> Game)
 
-The Hive pushes these events to the client.
+GiTF pushes these events to the client.
 
 ### 1. `world_state`
 Sent immediately upon joining. Represents the full snapshot of the factory.
@@ -34,43 +34,43 @@ Sent immediately upon joining. Represents the full snapshot of the factory.
 **Payload Schema:**
 ```json
 {
-  "quests": [
+  "missions": [
     {
-      "id": "quest-123",
+      "id": "mission-123",
       "name": "Refactor Auth",
-      "status": "active", // pending, active, completed, failed
+      "status": "active",
       "current_phase": "implementation",
-      "comb_id": "comb-main"
+      "sector_id": "sector-main"
     }
   ],
-  "bees": [
+  "ghosts": [
     {
-      "id": "swift-scout-ab12",
-      "name": "Swift Scout",
-      "status": "working", // starting, working, idle, stopped
-      "job_id": "job-456",
-      "context_percentage": 0.45 // 0.0 to 1.0 (context window usage)
+      "id": "swift-recon-ab12",
+      "name": "Swift Recon",
+      "status": "working",
+      "op_id": "op-456",
+      "context_percentage": 0.45
     }
   ],
-  "combs": [
+  "sectors": [
     {
-      "id": "comb-main",
+      "id": "sector-main",
       "name": "Main Repository",
-      "path": "/data/hive/worktrees/main"
+      "path": "/data/gitf/worktrees/main"
     }
   ]
 }
 ```
 
-### 2. `hive_event`
-Real-time telemetry updates. Use these to animate the 3D world (e.g., spawn a bee model, flash a quest node).
+### 2. `gitf_event`
+Real-time telemetry updates. Use these to animate the 3D world (e.g., spawn a ghost model, flash a mission node).
 
 **Payload Schema:**
 ```json
 {
-  "type": "string", // Event name (see Event Types below)
-  "timestamp": 1708456000123, // Unix ms
-  "data": { ... } // Dynamic metadata based on event type
+  "type": "string",
+  "timestamp": 1708456000123,
+  "data": { ... }
 }
 ```
 
@@ -78,37 +78,37 @@ Real-time telemetry updates. Use these to animate the 3D world (e.g., spawn a be
 
 | Event Type | Data Fields | Description | Visual Cue |
 | :--- | :--- | :--- | :--- |
-| `hive.bee.spawned` | `bee_id`, `job_id`, `comb_id` | A new bee has entered the factory. | Spawn Bee model at Comb location. |
-| `hive.job.started` | `job_id`, `quest_id` | A bee started working on a job. | Draw line between Bee and Quest. |
-| `hive.job.completed` | `job_id` | Work finished. | Bee deposits payload at Quest, turns green. |
-| `hive.job.failed` | `job_id` | Work failed. | Bee turns red, emits smoke/particles. |
-| `hive.quest.phase_transition` | `quest_id`, `from`, `to` | Quest moved to next phase. | Quest node pulses/changes color. |
-| `hive.alert.raised` | `type`, `message` | System alert. | Flash screen/UI warning. |
+| `gitf.ghost.spawned` | `ghost_id`, `op_id`, `sector_id` | A new ghost has entered the factory. | Spawn Ghost model at Sector location. |
+| `gitf.op.started` | `op_id`, `mission_id` | A ghost started working on an op. | Draw line between Ghost and Mission. |
+| `gitf.op.completed` | `op_id` | Work finished. | Ghost deposits payload at Mission, turns green. |
+| `gitf.op.failed` | `op_id` | Work failed. | Ghost turns red, emits smoke/particles. |
+| `gitf.mission.phase_transition` | `mission_id`, `from`, `to` | Mission moved to next phase. | Mission node pulses/changes color. |
+| `gitf.alert.raised` | `type`, `message` | System alert. | Flash screen/UI warning. |
 
 ---
 
-## Inbound Commands (Game -> Hive)
+## Inbound Commands (Game -> GiTF)
 
 The game client can send these messages to control the factory.
 
-### 1. `spawn_quest`
+### 1. `spawn_mission`
 Create a new work order.
 
 **Message:**
 ```json
-["ref", "topic", "spawn_quest", {
+["ref", "topic", "spawn_mission", {
   "goal": "Build a login page",
-  "comb_id": "comb-main" // Optional, defaults to first available
+  "sector_id": "sector-main"
 }]
 ```
 
 **Response:**
 ```json
-{"status": "ok", "response": {"quest_id": "quest-789"}}
+{"status": "ok", "response": {"mission_id": "mission-789"}}
 ```
 
 ### 2. `emergency_stop`
-Kill all active bees immediately.
+Kill all active ghosts immediately.
 
 **Message:**
 ```json
@@ -124,7 +124,7 @@ Kill all active bees immediately.
 
 ## 3D Visualization Guidelines
 
-*   **Combs:** Represent as hexagonal landing pads.
-*   **Quests:** Represent as large floating crystals or monoliths above the pads. Color code by phase (Research=Blue, Implementation=Orange, Validation=Purple).
-*   **Bees:** Represent as drones flying between the Hive center (or Comb) and the Quest monoliths.
+*   **Sectors:** Represent as hexagonal landing pads or facility zones.
+*   **Missions:** Represent as large floating crystals or monoliths above the pads. Color code by phase (Research=Blue, Implementation=Orange, Audit=Purple).
+*   **Ghosts:** Represent as translucent operatives moving between the factory center (or Sector) and the Mission monoliths.
 *   **Budget:** Display a "Burn Rate" meter in the HUD.

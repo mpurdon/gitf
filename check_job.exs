@@ -1,31 +1,31 @@
 store_path = "/Users/mp/Projects/gitf-workspace/.gitf/store/gitf.etf"
 data = File.read!(store_path) |> :erlang.binary_to_term()
 
-job = get_in(data, [:jobs, "job-0208de"])
-if job do
-  IO.puts("Job: #{job.id}")
-  IO.puts("Title: #{job[:title]}")
-  IO.puts("Status: #{job[:status]}")
-  IO.puts("Phase: #{job[:phase]}")
-  IO.puts("Phase job: #{job[:phase_job]}")
-  IO.puts("Quest ID: #{job[:quest_id]}")
-  IO.puts("Bee ID: #{job[:bee_id]}")
-  IO.puts("Error: #{inspect(job[:error])}")
-  IO.puts("Failure reason: #{inspect(job[:failure_reason])}")
-  IO.puts("\nFull job:")
-  IO.inspect(job, pretty: true, limit: :infinity)
+op = get_in(data, [:ops, "op-0208de"])
+if op do
+  IO.puts("Job: #{op.id}")
+  IO.puts("Title: #{op[:title]}")
+  IO.puts("Status: #{op[:status]}")
+  IO.puts("Phase: #{op[:phase]}")
+  IO.puts("Phase op: #{op[:phase_job]}")
+  IO.puts("Quest ID: #{op[:mission_id]}")
+  IO.puts("Bee ID: #{op[:ghost_id]}")
+  IO.puts("Error: #{inspect(op[:error])}")
+  IO.puts("Failure reason: #{inspect(op[:failure_reason])}")
+  IO.puts("\nFull op:")
+  IO.inspect(op, pretty: true, limit: :infinity)
 else
   IO.puts("Job not found")
 end
 
-bee = get_in(data, [:bees, "bee-c09b6f"])
-if bee do
-  IO.puts("\n\nBee: #{bee.id}")
-  IO.puts("Status: #{bee[:status]}")
-  IO.puts("Error: #{inspect(bee[:error])}")
-  IO.puts("Exit reason: #{inspect(bee[:exit_reason])}")
-  IO.puts("\nFull bee:")
-  IO.inspect(bee, pretty: true, limit: :infinity)
+ghost = get_in(data, [:ghosts, "ghost-c09b6f"])
+if ghost do
+  IO.puts("\n\nBee: #{ghost.id}")
+  IO.puts("Status: #{ghost[:status]}")
+  IO.puts("Error: #{inspect(ghost[:error])}")
+  IO.puts("Exit reason: #{inspect(ghost[:exit_reason])}")
+  IO.puts("\nFull ghost:")
+  IO.inspect(ghost, pretty: true, limit: :infinity)
 else
   IO.puts("\nBee not found")
 end

@@ -1,16 +1,16 @@
-# Reset the stuck job directly on disk, bypassing Store GenServer
+# Reset the stuck op directly on disk, bypassing Archive GenServer
 path = "/Users/mp/Projects/gitf-workspace/.gitf/store/gitf.etf"
 data = File.read!(path) |> :erlang.binary_to_term()
 
-job = data[:jobs]["job-c54c34"]
-IO.puts("Before: #{job.status}")
+op = data[:ops]["op-c54c34"]
+IO.puts("Before: #{op.status}")
 
-job = %{job | status: "pending", bee_id: nil}
-data = put_in(data, [:jobs, "job-c54c34"], job)
+op = %{op | status: "pending", ghost_id: nil}
+data = put_in(data, [:ops, "op-c54c34"], op)
 
 binary = :erlang.term_to_binary(data)
 File.write!(path, binary)
 
 # Verify
 data2 = File.read!(path) |> :erlang.binary_to_term()
-IO.puts("After: #{data2[:jobs]["job-c54c34"].status}")
+IO.puts("After: #{data2[:ops]["op-c54c34"].status}")

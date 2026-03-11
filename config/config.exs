@@ -32,6 +32,6 @@ config :req_llm, load_dotenv: true
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id]
+  metadata: [:remission_id]
 
 import_config "#{config_env()}.exs"

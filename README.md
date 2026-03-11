@@ -1,12 +1,12 @@
-# The Hive
+# GiTF — Ghost in the Factory, Section 9
 
 Multi-agent orchestration system for AI coding assistants. Coordinate multiple AI instances working on a shared codebase with automatic task delegation, isolated git worktrees, inter-agent messaging, cost tracking, and a real-time web dashboard.
 
 **Status: Dark Factory Complete (98%)** - Fully autonomous operation with self-healing, quality assurance, and intelligent model selection.
 
-Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any future provider via the `Hive.Plugin.Model` behaviour.
+Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any future provider via the `GiTF.Plugin.Model` behaviour.
 
-Built in Elixir, leveraging OTP supervision trees for process management, Phoenix PubSub for messaging, and SQLite for persistence.
+Built in Elixir, leveraging OTP supervision trees for process management, Phoenix PubSub for messaging, and an ETF-backed archive for persistence.
 
 ## Getting Started
 
@@ -32,72 +32,72 @@ copilot --version  # GitHub Copilot CLI
 kimi --version     # Kimi CLI
 ```
 
-### 2. Build the Hive CLI
+### 2. Build the GiTF CLI
 
 ```bash
-git clone git@github.com:mpurdon/hive.git
-cd hive
+git clone git@github.com:mpurdon/gitf.git
+cd gitf
 mix deps.get
 mix escript.build
 ```
 
-This produces a `./hive` binary. Optionally move it to your PATH:
+This produces a `./gitf` binary. Optionally move it to your PATH:
 
 ```bash
-cp hive /usr/local/bin/
+cp gitf /usr/local/bin/
 ```
 
-### 3. Create a hive workspace
+### 3. Create a workspace
 
 The quickest way -- auto-discovers any git repos in the target directory:
 
 ```bash
-hive init ~/my-hive --quick
+gitf init ~/my-factory --quick
 ```
 
 Or step by step:
 
 ```bash
-hive init ~/my-hive
-cd ~/my-hive
-hive comb add /path/to/your/repo --name myproject
+gitf init ~/my-factory
+cd ~/my-factory
+gitf sector add /path/to/your/repo --name myproject
 ```
 
-### 4. Start the Queen
+### 4. Start the Major
 
 ```bash
-cd ~/my-hive
-hive queen
+cd ~/my-factory
+gitf major
 ```
 
-Tell the Queen what you want built. She'll analyze your request, break it into jobs, spawn worker bees (parallel AI instances), and coordinate them to completion.
+Tell the Major what you want built. It will analyze your request, break it into ops, spawn ghosts (parallel AI instances), and coordinate them to completion.
 
 ### 5. Monitor progress
 
 ```bash
-hive                    # Launch the interactive "Dark Factory" Dashboard (TUI)
-hive watch              # Live terminal progress (simple view)
-hive quest list         # See active quests
-hive bee list           # See running bees
-hive costs summary      # Check token spend
-hive dashboard          # Web UI at localhost:4040 (legacy)
+gitf                    # Launch the interactive "Dark Factory" Dashboard (TUI)
+gitf watch              # Live terminal progress (simple view)
+gitf mission list       # See active missions
+gitf ghost list         # See running ghosts
+gitf costs summary      # Check token spend
+gitf dashboard          # Web UI at localhost:4040 (legacy)
 ```
 
-Run `hive doctor` at any time to verify your system health.
+Run `gitf medic` at any time to verify your system health.
 
 ## "Dark Factory" Capabilities
 
-The Hive operates autonomously to deliver high-quality code:
+GiTF operates autonomously to deliver high-quality code:
 
 *   **Research → Plan → Implement**: A structured pipeline ensures thoughtful execution.
 *   **Multi-Model Intelligence**: Dynamically selects the best AI model (Opus vs Sonnet vs Haiku) for each task to balance cost and quality.
-*   **Context Management**: Automatically monitors token usage and "hands off" work to fresh agents before context limits are reached.
-*   **Autonomous Quality Assurance**: The **Drone** watchdog continuously verifies work, running tests and checks before marking jobs as complete.
+*   **Context Management**: Automatically monitors token usage and "transfers" work to fresh agents before context limits are reached.
+*   **Autonomous Quality Assurance**: The **Tachikoma** watchdog continuously verifies work, running tests and checks before marking ops as complete.
 *   **Self-Healing**: Detects and recovers from stuck processes, deadlocks, and orphaned resources automatically.
 
 ## Model Providers
 
-The Hive uses a plugin system to support multiple AI model providers. The active provider is resolved per-session via config or CLI flags.
+GiTF uses a plugin system to support multiple AI model providers. The active provider is resolved per-session via config or CLI flags.
 
 | Provider | Binary | Streaming | Cost Tracking | Session Resume |
 |----------|--------|-----------|---------------|----------------|
@@ -105,7 +105,7 @@ The Hive uses a plugin system to support multiple AI model providers. The active
 | **Copilot CLI** | `copilot` | Plain text | No (subscription) | No |
 | **Kimi CLI** | `kimi` | JSONL | Yes | Yes |
 
-Set the default provider in `.hive/config.toml`:
+Set the default provider in `.gitf/config.toml`:
 
 ```toml
 [plugins.models]
@@ -117,119 +117,119 @@ default = "claude"   # or "copilot" or "kimi"
 ### Workspace
 
 ```bash
-hive init [PATH] [--quick] [--force]   # Initialize a hive workspace
-hive doctor [--fix]                     # Run health checks
-hive                    # Start interactive TUI dashboard
-hive watch                              # Live progress monitor
-hive version                            # Print version
+gitf init [PATH] [--quick] [--force]   # Initialize a workspace
+gitf medic [--fix]                      # Run health checks
+gitf                                    # Start interactive TUI dashboard
+gitf watch                              # Live progress monitor
+gitf version                            # Print version
 ```
 
-### Projects (Combs)
+### Projects (Sectors)
 
 ```bash
-hive comb add <path> [--name NAME]      # Register a git repo
-  [--merge-strategy manual|auto_merge|pr_branch]
+gitf sector add <path> [--name NAME]    # Register a git repo
+  [--sync-strategy manual|auto_merge|pr_branch]
   [--validation-command "mix test"]
   [--github-owner OWNER] [--github-repo REPO]
-hive comb list                          # List registered projects
-hive comb remove <name>                 # Unregister a project
-hive comb rename <old> <new>            # Rename a comb
+gitf sector list                        # List registered projects
+gitf sector remove <name>               # Unregister a project
+gitf sector rename <old> <new>          # Rename a sector
 ```
 
 ### Orchestration
 
 ```bash
-hive queen                              # Start Queen coordinator session
-hive bee list                           # List all bees
-hive bee spawn --job ID --comb ID       # Spawn a worker bee
-hive bee stop --id ID                   # Stop a running bee
-hive bee revive --id ID                 # Revive a dead bee's worktree
-hive bee done --id ID                   # Mark a bee as completed
-hive bee fail --id ID --reason "..."    # Mark a bee as failed
+gitf major                              # Start Major coordinator session
+gitf ghost list                         # List all ghosts
+gitf ghost spawn --op ID --sector ID    # Spawn a worker ghost
+gitf ghost stop --id ID                 # Stop a running ghost
+gitf ghost revive --id ID               # Revive a dead ghost's worktree
+gitf ghost done --id ID                 # Mark a ghost as completed
+gitf ghost fail --id ID --reason "..."  # Mark a ghost as failed
 ```
 
 ### Work Tracking
 
 ```bash
-hive quest new <name>                   # Create a quest
-hive quest list                         # List quests
-hive quest show <id>                    # Show quest details with jobs
+gitf mission new <name>                 # Create a mission
+gitf mission list                       # List missions
+gitf mission show <id>                  # Show mission details with ops
 
-hive jobs list                          # List all jobs
-hive jobs show <id>                     # Show job details
-hive jobs create --quest ID --title T --comb ID  # Create a job
+gitf ops list                           # List all ops
+gitf ops show <id>                      # Show op details
+gitf ops create --mission ID --title T --sector ID  # Create an op
 ```
 
-### Job Dependencies
+### Op Dependencies
 
 ```bash
-hive jobs deps add --job ID --depends-on ID    # Add dependency
-hive jobs deps remove --job ID --depends-on ID # Remove dependency
-hive jobs deps list --job ID                   # Show dependencies
+gitf ops deps add --op ID --depends-on ID    # Add dependency
+gitf ops deps remove --op ID --depends-on ID # Remove dependency
+gitf ops deps list --op ID                   # Show dependencies
 ```
 
-### Messaging (Waggles)
+### Messaging (Links)
 
 ```bash
-hive waggle list [--to RECIPIENT]       # List messages
-hive waggle show <id>                   # Read a message
-hive waggle send -f FROM -t TO -s SUBJ -b BODY  # Send a message
+gitf link list [--to RECIPIENT]         # List messages
+gitf link show <id>                     # Read a message
+gitf link send -f FROM -t TO -s SUBJ -b BODY  # Send a message
 ```
 
 ### Cost Tracking
 
 ```bash
-hive costs summary                      # Aggregate cost report
-hive costs record --bee ID --input N --output N  # Record costs manually
-hive budget --quest ID                  # Check quest budget status
+gitf costs summary                      # Aggregate cost report
+gitf costs record --ghost ID --input N --output N  # Record costs manually
+gitf budget --mission ID                # Check mission budget status
 ```
 
-### Git Worktrees (Cells)
+### Git Worktrees (Shells)
 
 ```bash
-hive cell list                          # List active worktrees
-hive cell clean                         # Remove orphaned worktrees
+gitf shell list                         # List active worktrees
+gitf shell clean                        # Remove orphaned worktrees
 ```
 
 ### Advanced
 
 ```bash
-hive prime --queen                      # Output Queen context prompt
-hive prime --bee <id>                   # Output Bee context prompt
-hive handoff create --bee ID            # Create context-preserving handoff
-hive handoff show --bee ID              # Show handoff context
-hive conflict check [--bee ID]          # Check for merge conflicts
-hive validate --bee ID                  # Validate a bee's completed work
-hive drone [--no-fix]                   # Start health patrol
+gitf brief --major                      # Output Major context prompt
+gitf brief --ghost <id>                 # Output Ghost context prompt
+gitf transfer create --ghost ID         # Create context-preserving transfer
+gitf transfer show --ghost ID           # Show transfer context
+gitf conflict check [--ghost ID]        # Check for merge conflicts
+gitf audit --ghost ID                   # Validate a ghost's completed work
+gitf tachikoma [--no-fix]               # Start health patrol
 ```
 
 ### Plugins
 
 ```bash
-hive plugin list                        # List loaded plugins
-hive plugin load <path>                 # Load a plugin from file
-hive plugin unload <type> <name>        # Unload a plugin
-hive plugin reload <type> <name>        # Hot-reload a plugin
+gitf plugin list                        # List loaded plugins
+gitf plugin load <path>                 # Load a plugin from file
+gitf plugin unload <type> <name>        # Unload a plugin
+gitf plugin reload <type> <name>        # Hot-reload a plugin
 ```
 
 ### GitHub Integration
 
 ```bash
-hive github pr --bee ID                 # Create PR for a bee's work
-hive github issues --comb ID            # List issues for a project
-hive github sync --comb ID              # Sync GitHub issues
+gitf github pr --ghost ID              # Create PR for a ghost's work
+gitf github issues --sector ID         # List issues for a project
+gitf github sync --sector ID           # Sync GitHub issues
 ```
 
 ## Configuration
 
-The hive config lives at `.hive/config.toml`:
+The config lives at `.gitf/config.toml`:
 
 ```toml
-[hive]
+[gitf]
 version = "0.1.0"
 
-[queen]
-max_bees = 5
+[major]
+max_ghosts = 5
 
 [costs]
 warn_threshold_usd = 5.0
@@ -242,7 +242,7 @@ default = "claude"
 token = ""
 ```
 
-You can also set the `HIVE_PATH` environment variable to point to your hive workspace from anywhere.
+You can also set the `GITF_PATH` environment variable to point to your workspace from anywhere.
 
 ## Development
 
@@ -257,14 +257,14 @@ mix test --exclude e2e
 mix format
 
 # Build escript
-mix escript.build
+MIX_ENV=prod mix escript.build
 ```
 
 ## Further Reading
 
 - [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) -- Detailed system design, workflows, and schema.
 - [`specs/GLOSSARY.md`](specs/GLOSSARY.md) -- Full terminology reference.
-- [`specs/DELEGATION.md`](specs/DELEGATION.md) -- Queen delegation principle and enforcement.
+- [`specs/DELEGATION.md`](specs/DELEGATION.md) -- Major delegation principle and enforcement.
 
 ## License
 
