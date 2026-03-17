@@ -118,6 +118,11 @@ defmodule GiTF.Tachikoma do
     results = run_patrol(state)
     count = state.patrol_count + 1
 
+    # Check for zombie missions every 5 patrols (~2.5 min)
+    if rem(count, 5) == 0 do
+      check_zombie_missions()
+    end
+
     # Prune stale worktree metadata every 10 patrols (~5 min)
     if rem(count, 10) == 0 do
       prune_worktrees()
@@ -308,11 +313,15 @@ defmodule GiTF.Tachikoma do
     if active_quests != [] do
       case GenServer.whereis(GiTF.Major) do
         nil ->
+          # Major is dead — attempt auto-restart
+          Logger.warning("Major is not running but #{length(active_quests)} mission(s) are active, attempting restart")
+          maybe_restart_major()
+
           [
             %{
               name: "queen_heartbeat",
               status: :error,
-              message: "Major is not running but #{length(active_quests)} mission(s) are active"
+              message: "Major is not running but #{length(active_quests)} mission(s) are active (restart attempted)"
             }
           ]
 
@@ -331,11 +340,15 @@ defmodule GiTF.Tachikoma do
               ]
 
             :exit, _ ->
+              # Major process is dead (stale PID) — attempt restart
+              Logger.warning("Major process is dead, attempting restart")
+              maybe_restart_major()
+
               [
                 %{
                   name: "queen_heartbeat",
                   status: :error,
-                  message: "Major process is dead"
+                  message: "Major process is dead (restart attempted)"
                 }
               ]
           end
@@ -345,6 +358,107 @@ defmodule GiTF.Tachikoma do
     end
   rescue
     _ -> []
+  end
+
+  defp maybe_restart_major do
+    case GiTF.gitf_dir() do
+      {:ok, gitf_root} ->
+        # Clean up stale supervisor child entry if it exists
+        try do
+          Supervisor.terminate_child(GiTF.Supervisor, GiTF.Major)
+          Supervisor.delete_child(GiTF.Supervisor, GiTF.Major)
+        catch
+          :exit, _ -> :ok
+        end
+
+        case GiTF.Major.start_link(gitf_root: gitf_root) do
+          {:ok, pid} ->
+            Logger.info("Tachikoma: auto-restarted Major (pid: #{inspect(pid)})")
+            GiTF.Major.start_session()
+
+            GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+              type: :major_auto_restarted,
+              message: "Tachikoma auto-restarted Major after detecting it was dead"
+            })
+
+          {:error, {:already_started, _pid}} ->
+            Logger.debug("Tachikoma: Major already restarted by another process")
+
+          {:error, reason} ->
+            Logger.error("Tachikoma: failed to restart Major: #{inspect(reason)}")
+
+            GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+              type: :major_restart_failed,
+              message: "Tachikoma failed to restart Major: #{inspect(reason)}"
+            })
+        end
+
+      {:error, _} ->
+        Logger.error("Tachikoma: cannot restart Major — no gitf root found")
+    end
+  rescue
+    e ->
+      Logger.error("Tachikoma: Major restart crashed: #{Exception.message(e)}")
+  end
+
+  defp check_zombie_missions do
+    # Find active missions where ALL non-phase ops are terminal (failed/done/rejected)
+    # and no ghosts are working — these missions are stuck and need escalation
+    GiTF.Missions.list()
+    |> Enum.filter(&(&1.status in ["active", "implementation"]))
+    |> Enum.each(fn mission ->
+      impl_jobs =
+        GiTF.Ops.list(mission_id: mission.id)
+        |> Enum.reject(& &1[:phase_job])
+
+      if impl_jobs != [] do
+        all_terminal =
+          Enum.all?(impl_jobs, &(&1.status in ["done", "failed", "rejected", "killed"]))
+
+        any_working =
+          impl_jobs
+          |> Enum.filter(&(&1[:ghost_id] != nil))
+          |> Enum.any?(fn op ->
+            case GiTF.Ghost.Worker.lookup(op.ghost_id) do
+              {:ok, pid} -> Process.alive?(pid)
+              :error -> false
+            end
+          end)
+
+        all_failed = Enum.all?(impl_jobs, &(&1.status in ["failed", "rejected", "killed"]))
+
+        if all_terminal and not any_working do
+          if all_failed do
+            Logger.warning(
+              "Tachikoma: mission #{mission.id} has all ops failed/rejected with no active ghosts — marking failed"
+            )
+
+            GiTF.Missions.transition_phase(mission.id, "completed", "All ops failed — auto-escalated by Tachikoma")
+            GiTF.Missions.update_status!(mission.id)
+
+            GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+              type: :mission_auto_failed,
+              message: "Mission #{mission.id} auto-failed: all #{length(impl_jobs)} ops exhausted"
+            })
+
+            GiTF.Link.send("tachikoma", "major", "mission_exhausted",
+              "Mission #{mission.id} auto-failed by Tachikoma: all ops exhausted retries")
+          else
+            # Mix of done + failed — let the orchestrator's check_implementation_complete handle it
+            # Just trigger an advance attempt
+            try do
+              GiTF.Major.Orchestrator.advance_quest(mission.id)
+            rescue
+              _ -> :ok
+            end
+          end
+        end
+      end
+    end)
+  rescue
+    e ->
+      Logger.warning("Tachikoma: check_zombie_missions failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp check_deadlocks do

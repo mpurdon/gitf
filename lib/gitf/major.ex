@@ -861,6 +861,18 @@ defmodule GiTF.Major do
   defp spawn_ready_jobs(%{status: "planning"}, state), do: state
 
   defp spawn_ready_jobs(mission, state) do
+    # Pre-flight health gate — don't spawn into a degraded system
+    case preflight_health_check() do
+      {:degraded, reasons} ->
+        Logger.warning("Spawn gate: system degraded (#{Enum.join(reasons, ", ")}), skipping spawn cycle")
+        state
+
+      :ok ->
+        do_spawn_ready_jobs(mission, state)
+    end
+  end
+
+  defp do_spawn_ready_jobs(mission, state) do
     # Check API circuit breaker — don't spawn into an outage
     if GiTF.CircuitBreaker.get_state("api:llm") == :open do
       Logger.warning("API circuit breaker is OPEN — skipping op spawning until recovery")
@@ -915,6 +927,58 @@ defmodule GiTF.Major do
         end)
     end
     end
+  end
+
+  defp preflight_health_check do
+    checks = [
+      {:store, GiTF.Observability.Health.ready?()},
+      {:disk, check_disk_ok()},
+      {:git, check_git_ok()}
+    ]
+
+    failed = Enum.reject(checks, fn {_, ok?} -> ok? end) |> Enum.map(&elem(&1, 0))
+
+    if failed == [] do
+      :ok
+    else
+      {:degraded, Enum.map(failed, &to_string/1)}
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp check_disk_ok do
+    case GiTF.gitf_dir() do
+      {:ok, gitf_root} ->
+        # Quick check: can we write a temp file?
+        probe = Path.join([gitf_root, ".gitf", ".health_probe"])
+        case File.write(probe, "ok") do
+          :ok -> File.rm(probe); true
+          {:error, _} -> false
+        end
+
+      _ ->
+        false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp check_git_ok do
+    case GiTF.Archive.all(:sectors) |> List.first() do
+      nil -> true
+      sector ->
+        if sector.path && File.dir?(sector.path) do
+          case GiTF.Git.safe_cmd(["status", "--porcelain"], cd: sector.path, stderr_to_stdout: true) do
+            {_, 0} -> true
+            _ -> false
+          end
+        else
+          true
+        end
+    end
+  rescue
+    _ -> true
   end
 
   defp check_quest_budget(mission_id) do
