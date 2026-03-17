@@ -1,63 +1,72 @@
 defmodule GiTF.Major.FastPath do
   @moduledoc """
-  Fast path for simple missions that don't need the full 7-phase pipeline.
+  Fast path for missions that don't need the full 7-phase pipeline.
 
-  Trivial missions (typo fixes, doc updates, version bumps, simple renames) skip
-  research → requirements → design → review → planning and go straight to
-  implementation with a single op and a single ghost.
+  Bug fixes, single features, doc updates, and focused tasks skip
+  research → requirements → design → review → planning and go straight
+  to implementation with a single op and ghost. Verification still runs
+  (Tachikoma reviews the work and SyncQueue merges it).
+
+  A mission is auto-eligible if it has a short, focused goal without
+  multi-system complexity indicators. It can also be forced onto the
+  fast path with `force: true` (via `gitf run` or `--quick` flag).
   """
 
   require Logger
 
-  @complex_keywords ~w(migration security auth deploy database infrastructure
-    refactor architect redesign integration credential secret)
+  # Keywords that signal multi-system complexity requiring the full pipeline
+  @complex_keywords ~w(migration infrastructure architect redesign
+    credential secret multi-service distributed)
 
-  @simple_indicators ~w(fix typo update rename doc bump comment format lint
-    spelling whitespace changelog version readme license)
-
-  @max_goal_length 500
+  @max_goal_length 1000
 
   @doc """
   Returns true if a mission is simple enough for the fast path.
 
   Checks:
-  - Goal is short (< 500 chars)
-  - No complex keywords (migration, security, auth, deploy, etc.)
-  - No multi-file references (more than 2 file paths)
-  - Has at least one simple indicator keyword
+  - Goal is under 1000 chars (focused, not a spec)
+  - No multi-system complexity keywords
+  - No excessive file references (more than 5 file paths)
   - No existing artifacts (hasn't started the pipeline)
-  """
-  @spec eligible?(map()) :: boolean()
-  def eligible?(mission) do
-    goal = Map.get(mission, :goal, "")
-    goal_lower = String.downcase(goal)
-    artifacts = Map.get(mission, :artifacts, %{})
 
-    short_goal?(goal) and
-      no_complex_keywords?(goal_lower) and
-      no_multi_file_refs?(goal) and
-      has_simple_indicator?(goal_lower) and
-      no_existing_artifacts?(artifacts)
+  Can be bypassed with `force: true` in opts.
+  """
+  @spec eligible?(map(), keyword()) :: boolean()
+  def eligible?(mission, opts \\ []) do
+    if Keyword.get(opts, :force, false) do
+      true
+    else
+      goal = Map.get(mission, :goal, "")
+      goal_lower = String.downcase(goal)
+      artifacts = Map.get(mission, :artifacts, %{})
+
+      short_goal?(goal) and
+        no_complex_keywords?(goal_lower) and
+        no_multi_file_refs?(goal) and
+        no_existing_artifacts?(artifacts)
+    end
   end
 
   @doc """
   Executes the fast path: transitions directly to implementation, creates
-  a single op, and spawns a single ghost.
+  a single op, and spawns a single ghost. Verification is NOT skipped —
+  the op goes through the standard Tachikoma review and merge pipeline.
 
   Returns `{:ok, "implementation"}` or `{:error, reason}`.
   """
   @spec execute(String.t()) :: {:ok, String.t()} | {:error, term()}
   def execute(mission_id) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
-         {:ok, _} <- GiTF.Missions.transition_phase(mission_id, "implementation", "Fast path: simple mission") do
+         {:ok, _} <- GiTF.Missions.transition_phase(mission_id, "implementation", "Fast path: focused task") do
 
-      # Create a single implementation op
+      # Create a single implementation op (verification enabled)
       job_attrs = %{
         title: mission.goal,
         description: mission.goal,
         mission_id: mission_id,
         sector_id: mission.sector_id,
-        phase_job: false
+        phase_job: false,
+        skip_verification: false
       }
 
       case GiTF.Ops.create(job_attrs) do
@@ -96,7 +105,6 @@ defmodule GiTF.Major.FastPath do
   end
 
   defp no_multi_file_refs?(goal) do
-    # Count things that look like file paths (contain / or end with common extensions)
     file_refs =
       goal
       |> String.split(~r/\s+/)
@@ -104,11 +112,7 @@ defmodule GiTF.Major.FastPath do
         String.contains?(word, "/") or Regex.match?(~r/\.\w{1,4}$/, word)
       end)
 
-    file_refs <= 2
-  end
-
-  defp has_simple_indicator?(goal_lower) do
-    Enum.any?(@simple_indicators, &String.contains?(goal_lower, &1))
+    file_refs <= 5
   end
 
   defp no_existing_artifacts?(artifacts) when map_size(artifacts) == 0, do: true

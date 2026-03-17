@@ -56,18 +56,18 @@ defmodule GiTF.Major.FastPathTest do
       refute FastPath.eligible?(mission)
     end
 
-    test "returns false for security-related changes" do
+    test "returns true for security-related bug fix (not multi-system)" do
       mission = %{goal: "Fix security vulnerability in authentication", artifacts: %{}}
+      assert FastPath.eligible?(mission)
+    end
+
+    test "returns false for multi-system infrastructure changes" do
+      mission = %{goal: "Redesign distributed infrastructure for multi-service deployment", artifacts: %{}}
       refute FastPath.eligible?(mission)
     end
 
-    test "returns false for deploy-related changes" do
-      mission = %{goal: "Fix deploy pipeline for production", artifacts: %{}}
-      refute FastPath.eligible?(mission)
-    end
-
-    test "returns false for long goals" do
-      long_goal = String.duplicate("Fix the typo in the documentation. ", 20)
+    test "returns false for long goals (spec-length)" do
+      long_goal = String.duplicate("Implement the full user registration flow with validation. ", 25)
       mission = %{goal: long_goal, artifacts: %{}}
       refute FastPath.eligible?(mission)
     end
@@ -77,18 +77,24 @@ defmodule GiTF.Major.FastPathTest do
       refute FastPath.eligible?(mission)
     end
 
-    test "returns false without simple indicators" do
+    test "returns true for focused feature without complex keywords" do
       mission = %{goal: "Implement new user registration flow", artifacts: %{}}
-      refute FastPath.eligible?(mission)
+      assert FastPath.eligible?(mission)
     end
 
-    test "returns false for multi-file references" do
+    test "returns false for excessive file references" do
       mission = %{
-        goal: "Fix typo in lib/foo.ex lib/bar.ex lib/baz.ex",
+        goal: "Fix typo in lib/foo.ex lib/bar.ex lib/baz.ex lib/qux.ex lib/quux.ex lib/corge.ex",
         artifacts: %{}
       }
 
       refute FastPath.eligible?(mission)
+    end
+
+    test "force: true bypasses eligibility checks" do
+      mission = %{goal: "Redesign distributed infrastructure", artifacts: %{}}
+      refute FastPath.eligible?(mission)
+      assert FastPath.eligible?(mission, force: true)
     end
   end
 

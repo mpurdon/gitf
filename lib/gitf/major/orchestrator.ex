@@ -29,11 +29,22 @@ defmodule GiTF.Major.Orchestrator do
   Validates the mission is ready and kicks off the research phase.
   """
   @spec start_quest(String.t()) :: {:ok, map()} | {:error, term()}
-  def start_quest(mission_id) do
+  @doc """
+  Start a mission workflow.
+
+  ## Options
+
+    * `:force_fast_path` - skip the full pipeline and go straight to
+      implementation with a single op (for bug fixes, focused tasks)
+  """
+  @spec start_quest(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def start_quest(mission_id, opts \\ []) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          :ok <- validate_quest_ready(mission) do
-      # Fast path: skip all phases for trivial missions
-      if FastPath.eligible?(mission) do
+      force = Keyword.get(opts, :force_fast_path, false)
+
+      # Fast path: skip all phases for focused tasks
+      if FastPath.eligible?(mission, force: force) do
         Logger.info("Quest #{mission_id} eligible for fast path, skipping phase pipeline")
         FastPath.execute(mission_id)
       else

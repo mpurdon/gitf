@@ -1656,6 +1656,45 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:run], result) do
+    goal = result_get(result, :args, :goal)
+
+    sector_id =
+      case resolve_comb_id(result_get(result, :options, :sector)) do
+        {:ok, cid} -> cid
+        {:error, :no_comb} ->
+          # Auto-pick the first sector if only one exists
+          case GiTF.Sector.list() do
+            [sector] -> sector.id
+            [] ->
+              Format.error("No sectors registered. Run `gitf init` first.")
+              System.halt(1)
+            _multiple ->
+              Format.error("Multiple sectors found. Specify one with --sector.")
+              System.halt(1)
+          end
+      end
+
+    Format.info("Creating task: #{goal}")
+
+    case GiTF.Missions.create(%{goal: goal, sector_id: sector_id}) do
+      {:ok, mission} ->
+        Format.success("Mission #{mission.id} created")
+
+        case GiTF.Major.Orchestrator.start_quest(mission.id, force_fast_path: true) do
+          {:ok, phase} ->
+            Format.success("Running (phase: #{phase})")
+            Format.info("Ghost is working. Track progress with: gitf mission show #{mission.id}")
+
+          {:error, reason} ->
+            Format.error("Failed to start: #{inspect(reason)}")
+        end
+
+      {:error, reason} ->
+        Format.error("Failed to create mission: #{inspect(reason)}")
+    end
+  end
+
   defp dispatch([:mission, :new], result) do
     goal = result_get(result, :args, :goal)
 
@@ -1697,7 +1736,20 @@ defmodule GiTF.CLI do
       case quest_result do
         {:ok, mission} ->
           Format.success("Quest \"#{mission.name}\" created (#{mission.id})")
-          GiTF.CLI.PlanHandler.start_interactive_planning(mission)
+
+          if result_get(result, :options, :quick) do
+            # Quick mode: fast path, no interactive planning
+            case GiTF.Major.Orchestrator.start_quest(mission.id, force_fast_path: true) do
+              {:ok, phase} ->
+                Format.success("Quick run started (phase: #{phase})")
+                Format.info("Track progress: gitf mission show #{mission.id}")
+
+              {:error, reason} ->
+                Format.error("Failed to start: #{inspect(reason)}")
+            end
+          else
+            GiTF.CLI.PlanHandler.start_interactive_planning(mission)
+          end
 
         {:error, reason} ->
           Format.error("Failed to create mission: #{inspect(reason)}")
@@ -2857,6 +2909,27 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
+        run: [
+          name: "run",
+          about: "Quick-run a focused task (bug fix, single feature). Skips the full phase pipeline.",
+          args: [
+            goal: [
+              value_name: "GOAL",
+              help: "What to do, e.g. \"fix the login bug\" or \"add pagination to the users endpoint\"",
+              required: true,
+              parser: :string
+            ]
+          ],
+          options: [
+            sector: [
+              short: "-c",
+              long: "--sector",
+              help: "Sector ID (defaults to current sector)",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
         queen: [
           name: "major",
           about: "Start the queen orchestrator for a mission"
@@ -2988,6 +3061,13 @@ defmodule GiTF.CLI do
                   long: "--sector",
                   help: "Sector ID (defaults to current sector)",
                   parser: :string,
+                  required: false
+                ],
+                quick: [
+                  short: "-q",
+                  long: "--quick",
+                  help: "Skip full pipeline — create a single op and go (for bug fixes, focused tasks)",
+                  parser: :boolean,
                   required: false
                 ]
               ]
