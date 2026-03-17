@@ -128,7 +128,7 @@ defmodule GiTF.Dashboard.SectorsLive do
            |> put_flash(:info, "Sector added.")}
 
         {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Failed: #{inspect(reason)}")}
+          {:noreply, put_flash(socket, :error, format_sector_error(reason, path))}
       end
     end
   end
@@ -231,6 +231,11 @@ defmodule GiTF.Dashboard.SectorsLive do
   rescue
     _ -> []
   end
+
+  defp format_sector_error(:path_not_found, path), do: "Directory not found: #{path}"
+  defp format_sector_error(:name_already_taken, _), do: "A sector with that name already exists."
+  defp format_sector_error(:not_a_git_repo, path), do: "#{path} is not a git repository."
+  defp format_sector_error(reason, _), do: "Failed: #{inspect(reason)}"
 
   # -- Render ----------------------------------------------------------------
 
