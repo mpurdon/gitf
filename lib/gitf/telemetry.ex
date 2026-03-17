@@ -40,6 +40,8 @@ defmodule GiTF.Telemetry do
     [:gitf, :token, :consumed],
     [:gitf, :plugin, :loaded],
     [:gitf, :plugin, :unloaded],
+    [:gitf, :tachikoma, :review_failed],
+    [:gitf, :phase, :spawn_failed],
     [:gitf, :alert, :raised],
     [:gitf, :sync, :exhausted],
     [:gitf, :sync, :tier_failed],
@@ -145,6 +147,18 @@ defmodule GiTF.Telemetry do
   defp map_event([:gitf, :mission, :completed], measurements, meta) do
     {:quest_completed, Map.get(meta, :mission_id, "unknown"),
      Map.merge(measurements, %{name: meta[:name]}), %{}}
+  end
+
+  defp map_event([:gitf, :tachikoma, :review_failed], measurements, meta) do
+    {:error, Map.get(meta, :op_id, "tachikoma"),
+     Map.merge(measurements, %{step: meta[:step], reason: meta[:reason]}),
+     %{op_id: meta[:op_id]}}
+  end
+
+  defp map_event([:gitf, :phase, :spawn_failed], measurements, meta) do
+    {:bee_failed, Map.get(meta, :mission_id, "unknown"),
+     Map.merge(measurements, %{phase: meta[:phase], reason: meta[:reason]}),
+     %{mission_id: meta[:mission_id], op_id: meta[:op_id]}}
   end
 
   defp map_event(_, _, _), do: nil

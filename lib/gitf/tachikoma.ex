@@ -141,7 +141,19 @@ defmodule GiTF.Tachikoma do
 
     # Run verification in a fire-and-forget Task to avoid blocking patrols
     Task.start(fn ->
-      do_review_job(op_id, ghost_id, shell_id)
+      try do
+        do_review_job(op_id, ghost_id, shell_id)
+      rescue
+        e ->
+          Logger.error("Tachikoma: review task crashed for op #{op_id}: #{Exception.message(e)}")
+
+          GiTF.Telemetry.emit([:gitf, :tachikoma, :review_failed], %{}, %{
+            op_id: op_id,
+            ghost_id: ghost_id,
+            step: :review_task,
+            reason: Exception.message(e)
+          })
+      end
     end)
 
     {:noreply, state}
@@ -349,7 +361,9 @@ defmodule GiTF.Tachikoma do
       end
     end)
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Tachikoma: check_deadlocks failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp prune_worktrees do
@@ -435,7 +449,9 @@ defmodule GiTF.Tachikoma do
       {:ok, count} -> Logger.info("Tachikoma: cleaned up #{count} orphan shells")
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Tachikoma: cleanup_orphan_cells failed: #{Exception.message(e)}")
+      :ok
   end
 
   @prune_age_hours 48
@@ -524,7 +540,9 @@ defmodule GiTF.Tachikoma do
       end
     end)
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Tachikoma: check_stuck_jobs failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp notify_major(issues) do
@@ -535,7 +553,9 @@ defmodule GiTF.Tachikoma do
 
     GiTF.Link.send("tachikoma", "major", "health_alert", summary)
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Tachikoma: notify_major failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp format_audit_result(result) do
@@ -618,6 +638,12 @@ defmodule GiTF.Tachikoma do
   rescue
     e ->
       Logger.error("Tachikoma: reject_and_improve failed for op #{op_id}: #{Exception.message(e)}")
+
+      GiTF.Telemetry.emit([:gitf, :tachikoma, :review_failed], %{}, %{
+        op_id: op_id,
+        step: :reject_and_improve,
+        reason: Exception.message(e)
+      })
   end
 
   defp cleanup_cell(nil), do: :ok

@@ -865,16 +865,37 @@ defmodule GiTF.Major.Orchestrator do
 
               {:error, reason} ->
                 Logger.error("Failed to spawn #{phase} phase ghost: #{inspect(reason)}")
+
+                GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
+                  mission_id: mission.id,
+                  phase: phase,
+                  reason: inspect(reason)
+                })
+
                 {:error, reason}
             end
 
           {:error, reason} ->
             Logger.error("Cannot spawn phase ghost — no gitf root: #{inspect(reason)}")
+
+            GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
+              mission_id: mission.id,
+              phase: phase,
+              reason: "no_gitf_root"
+            })
+
             {:error, :no_gitf_root}
         end
 
       {:error, reason} ->
         Logger.error("Failed to create #{phase} phase op: #{inspect(reason)}")
+
+        GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
+          mission_id: mission.id,
+          phase: phase,
+          reason: inspect(reason)
+        })
+
         {:error, reason}
     end
   end
@@ -888,13 +909,26 @@ defmodule GiTF.Major.Orchestrator do
         |> Enum.filter(&GiTF.Ops.ready?(&1.id))
         |> Enum.each(fn op ->
           case GiTF.Ghosts.spawn_detached(op.id, op.sector_id, gitf_root) do
-            {:ok, _bee} -> :ok
-            {:error, _reason} -> :ok
+            {:ok, _ghost} ->
+              :ok
+
+            {:error, reason} ->
+              Logger.warning(
+                "Orchestrator: failed to spawn impl ghost for op #{op.id} " <>
+                  "in mission #{mission.id}: #{inspect(reason)}"
+              )
+
+              GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
+                mission_id: mission.id,
+                phase: "implementation",
+                op_id: op.id,
+                reason: inspect(reason)
+              })
           end
         end)
 
-      {:error, _} ->
-        :ok
+      {:error, reason} ->
+        Logger.warning("Orchestrator: cannot spawn impl jobs — no gitf root: #{inspect(reason)}")
     end
   end
 

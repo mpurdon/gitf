@@ -90,7 +90,7 @@ defmodule GiTF.Exfil do
   defp notify_channels do
     Phoenix.PubSub.broadcast(GiTF.PubSub, "section:system", {:shutdown, :initiated})
   rescue
-    _ -> :ok
+    e -> Logger.warning("Exfil: notify_channels failed: #{Exception.message(e)}")
   end
 
   defp mark_jobs_stopped do
@@ -99,7 +99,7 @@ defmodule GiTF.Exfil do
       GiTF.Archive.put(:ops, %{op | status: "pending"})
     end)
   rescue
-    _ -> :ok
+    e -> Logger.warning("Exfil: mark_jobs_stopped failed: #{Exception.message(e)}")
   end
 
   defp save_active_checkpoints do
@@ -108,11 +108,11 @@ defmodule GiTF.Exfil do
       try do
         GiTF.Transfer.create(ghost.id)
       rescue
-        _ -> :ok
+        e -> Logger.warning("Exfil: checkpoint save failed for ghost #{ghost.id}: #{Exception.message(e)}")
       end
     end)
   rescue
-    _ -> :ok
+    e -> Logger.warning("Exfil: save_active_checkpoints failed: #{Exception.message(e)}")
   end
 
   defp drain_waggles(timeout) do
@@ -150,7 +150,7 @@ defmodule GiTF.Exfil do
         end)
     end
   rescue
-    _ -> :ok
+    e -> Logger.warning("Exfil: stop_ghosts failed: #{Exception.message(e)}")
   end
 
   defp flush_store do
@@ -158,7 +158,7 @@ defmodule GiTF.Exfil do
     # This is a read-then-write under the lock, which flushes the cache to disk
     GiTF.Archive.transact(fn data -> data end)
   rescue
-    _ -> :ok
+    e -> Logger.warning("Exfil: flush_store failed: #{Exception.message(e)}")
   end
 
   defp stop_major do
@@ -167,6 +167,6 @@ defmodule GiTF.Exfil do
       pid -> GenServer.stop(pid, :shutdown, 5_000)
     end
   rescue
-    _ -> :ok
+    e -> Logger.warning("Exfil: stop_major failed: #{Exception.message(e)}")
   end
 end
