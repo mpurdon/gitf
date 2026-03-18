@@ -1,18 +1,10 @@
 defmodule GiTF.OpsTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Ops
   alias GiTF.Archive
 
   setup do
-    GiTF.Test.StoreHelper.ensure_infrastructure()
-
-    tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(tmp_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
-    on_exit(fn -> File.rm_rf!(tmp_dir) end)
-
     {:ok, sector} =
       Archive.insert(:sectors, %{name: "ops-test-sector-#{:erlang.unique_integer([:positive])}"})
 

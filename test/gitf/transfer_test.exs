@@ -1,16 +1,10 @@
 defmodule GiTF.TransferTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Transfer
   alias GiTF.Archive
 
   setup do
-    tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(tmp_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
-    on_exit(fn -> File.rm_rf!(tmp_dir) end)
-
     # Set up a full ghost with op, shell, and links
     {:ok, sector} =
       Archive.insert(:sectors, %{name: "transfer-sector-#{:erlang.unique_integer([:positive])}"})

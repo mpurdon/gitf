@@ -1,16 +1,10 @@
 defmodule GiTF.CombTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Sector
   alias GiTF.Archive
 
   setup do
-    store_dir = Path.join(System.tmp_dir!(), "gitf_store_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(store_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
-    on_exit(fn -> File.rm_rf!(store_dir) end)
-
     tmp = Path.join(System.tmp_dir!(), "gitf_comb_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf!(tmp) end)

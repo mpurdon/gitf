@@ -1,19 +1,10 @@
 defmodule GiTF.BriefTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Brief
   alias GiTF.Archive
 
   @tmp_dir System.tmp_dir!()
-
-  setup do
-    tmp_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(tmp_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
-    on_exit(fn -> File.rm_rf!(tmp_dir) end)
-    :ok
-  end
 
   defp create_gitf_workspace do
     name = "gitf_prime_test_#{:erlang.unique_integer([:positive])}"

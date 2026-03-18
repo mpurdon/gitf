@@ -1,18 +1,10 @@
 defmodule GiTF.Major.FastPathTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Major.FastPath
   alias GiTF.Archive
 
   setup do
-    GiTF.Test.StoreHelper.ensure_infrastructure()
-    tmp_dir = Path.join(System.tmp_dir!(), "fast_path_test_#{:rand.uniform(1_000_000)}")
-    File.mkdir_p!(tmp_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = Archive.start_link(data_dir: tmp_dir)
-
-    on_exit(fn -> File.rm_rf!(tmp_dir) end)
-
     {:ok, sector} = Archive.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
 
     {:ok, mission} =

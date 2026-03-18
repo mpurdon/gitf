@@ -1,22 +1,8 @@
 defmodule GiTF.OverrideTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Override
   alias GiTF.Archive
-  alias GiTF.Test.StoreHelper
-
-  setup do
-    data_dir = Path.join(System.tmp_dir!(), "gitf_test_gate_#{:rand.uniform(1_000_000)}")
-    File.mkdir_p!(data_dir)
-    StoreHelper.restart_store!(data_dir)
-
-    on_exit(fn ->
-      StoreHelper.stop_store()
-      File.rm_rf!(data_dir)
-    end)
-
-    :ok
-  end
 
   defp create_quest(opts \\ %{}) do
     goal = Map.get(opts, :goal, "Test mission")

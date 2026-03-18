@@ -1,16 +1,7 @@
 defmodule GiTF.LinkTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Link
-
-  setup do
-    tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(tmp_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
-    on_exit(fn -> File.rm_rf!(tmp_dir) end)
-    :ok
-  end
 
   describe "send/5" do
     test "persists a link_msg message to the database" do

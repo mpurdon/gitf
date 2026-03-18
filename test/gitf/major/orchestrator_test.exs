@@ -1,5 +1,5 @@
 defmodule GiTF.Major.OrchestratorTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
   import Mox
 
   alias GiTF.Major.Orchestrator
@@ -9,8 +9,6 @@ defmodule GiTF.Major.OrchestratorTest do
   setup :verify_on_exit!
 
   setup do
-    GiTF.Test.StoreHelper.ensure_infrastructure()
-
     # Ensure SectorSupervisor is running (needed for ghost spawning)
     unless Process.whereis(GiTF.SectorSupervisor) do
       DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
@@ -23,14 +21,7 @@ defmodule GiTF.Major.OrchestratorTest do
     # Use Mock LLM Client
     Application.put_env(:gitf, :llm_client, GiTF.Runtime.LLMClient.Mock)
 
-    # Start store for tests with unique directory
-    tmp_dir = System.tmp_dir!() |> Path.join("orchestrator_test_#{:rand.uniform(1_000_000)}")
-    File.mkdir_p!(tmp_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
-
     on_exit(fn ->
-      File.rm_rf!(tmp_dir)
       Application.put_env(:gitf, :llm, original_config)
       Application.put_env(:gitf, :llm_client, GiTF.Runtime.LLMClient.Default)
     end)

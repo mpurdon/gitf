@@ -1,19 +1,8 @@
 defmodule GiTF.Intel.SuccessPatternsTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Intel.SuccessPatterns
   alias GiTF.Archive
-
-  setup do
-    store_dir = Path.join(System.tmp_dir!(), "section-success-test-#{:rand.uniform(100000)}")
-    File.mkdir_p!(store_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    start_supervised!({Archive, data_dir: store_dir})
-    
-    on_exit(fn -> File.rm_rf!(store_dir) end)
-    
-    %{store_dir: store_dir}
-  end
 
   describe "analyze_success/1" do
     test "analyzes a successful op" do

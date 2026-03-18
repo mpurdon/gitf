@@ -1,18 +1,9 @@
 defmodule GiTF.QuickStartTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.QuickStart
 
   @tmp_dir System.tmp_dir!()
-
-  setup do
-    store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(store_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
-    on_exit(fn -> File.rm_rf!(store_dir) end)
-    :ok
-  end
 
   describe "detect_environment/1" do
     test "detects environment for a plain directory" do

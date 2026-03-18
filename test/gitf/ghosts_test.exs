@@ -1,5 +1,5 @@
 defmodule GiTF.GhostsTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Ghosts
   alias GiTF.Archive
@@ -7,18 +7,10 @@ defmodule GiTF.GhostsTest do
   @tmp_dir System.tmp_dir!()
 
   setup do
-    GiTF.Test.StoreHelper.ensure_infrastructure()
-
     # Ensure SectorSupervisor is running (may have been killed by prior tests)
     unless Process.whereis(GiTF.SectorSupervisor) do
       DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
     end
-
-    store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(store_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
-    on_exit(fn -> File.rm_rf!(store_dir) end)
 
     repo_path = create_temp_git_repo()
     gitf_root = create_gitf_workspace()

@@ -1,5 +1,5 @@
 defmodule GiTF.ShellTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Shell
   alias GiTF.Archive
@@ -7,12 +7,6 @@ defmodule GiTF.ShellTest do
   @tmp_dir System.tmp_dir!()
 
   setup do
-    store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(store_dir)
-    GiTF.Test.StoreHelper.stop_store()
-    {:ok, _} = GiTF.Archive.start_link(data_dir: store_dir)
-    on_exit(fn -> File.rm_rf!(store_dir) end)
-
     # Create a temp git repo to serve as a sector
     repo_path = create_temp_git_repo()
 
