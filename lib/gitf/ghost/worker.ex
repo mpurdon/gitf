@@ -470,7 +470,17 @@ defmodule GiTF.Ghost.Worker do
         maybe_build_task_skill(build_prompt(state), shell.worktree_path, state.op_id)
       end
 
-      case spawn_process_with_timeout(state, shell) do
+      # API mode spawns Task.async directly (no timeout wrapper needed —
+      # the task runs asynchronously). CLI mode uses spawn_process_with_timeout
+      # to handle executable lookup and port creation with a timeout.
+      spawn_result =
+        if state.execution_mode in [:api, :ollama, :bedrock] do
+          spawn_process(state, shell)
+        else
+          spawn_process_with_timeout(state, shell)
+        end
+
+      case spawn_result do
         {:ok, handle} ->
           # Schedule beacon verification to confirm the process actually started
           Process.send_after(self(), :verify_beacon, 10_000)

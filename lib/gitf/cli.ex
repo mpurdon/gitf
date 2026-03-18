@@ -80,6 +80,7 @@ defmodule GiTF.CLI do
   end
 
   defp run_cli(argv) do
+    argv = extract_workspace_flag(argv)
     argv = extract_mode_flag(argv)
     argv = expand_defaults(argv)
     optimus = build_optimus!()
@@ -142,6 +143,18 @@ defmodule GiTF.CLI do
     end
   end
 
+  # Extract --workspace / -w <path> from argv, set GITF_PATH, and strip it.
+  # This lets all commands operate on a different workspace without cd-ing.
+  defp extract_workspace_flag(argv) do
+    case find_flag_value(argv, "--workspace", "-w") do
+      {cleaned, nil} -> cleaned
+      {cleaned, path} ->
+        expanded = Path.expand(path)
+        System.put_env("GITF_PATH", expanded)
+        cleaned
+    end
+  end
+
   # Extract --mode <mode> from anywhere in argv, set GITF_EXECUTION_MODE, and strip it.
   # This allows `gitf --mode bedrock mission new "..."` or `gitf mission new "..." --mode cli`.
   @valid_modes ~w(api cli ollama bedrock)
@@ -155,6 +168,29 @@ defmodule GiTF.CLI do
         Format.warn("Unknown mode '#{bad_mode}', ignoring. Valid: #{Enum.join(@valid_modes, ", ")}")
         cleaned
     end
+  end
+
+  # Generic flag value extractor: removes --long <value> or -short <value> from argv
+  defp find_flag_value(argv, long, short) do
+    find_flag_value(argv, long, short, [], nil)
+  end
+
+  defp find_flag_value([], _long, _short, acc, val), do: {Enum.reverse(acc), val}
+
+  defp find_flag_value([flag, value | rest], long, short, acc, _val) when flag == long do
+    find_flag_value(rest, long, short, acc, value)
+  end
+
+  defp find_flag_value([flag, value | rest], long, short, acc, prev_val) when flag == short do
+    if String.starts_with?(value, "-") do
+      find_flag_value(rest, long, short, [value | [flag | acc]], prev_val)
+    else
+      find_flag_value(rest, long, short, acc, value)
+    end
+  end
+
+  defp find_flag_value([head | rest], long, short, acc, val) do
+    find_flag_value(rest, long, short, [head | acc], val)
   end
 
   defp find_mode_flag([], acc, mode), do: {Enum.reverse(acc), mode}
