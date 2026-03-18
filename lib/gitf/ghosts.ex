@@ -88,7 +88,14 @@ defmodule GiTF.Ghosts do
   @spec spawn_detached(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def spawn_detached(op_id, sector_id, gitf_root, opts \\ []) do
-    spawn_detached_cli(op_id, sector_id, gitf_root, opts)
+    if GiTF.Runtime.ModelResolver.api_mode?() do
+      # API mode: use supervised Worker (runs agent loop via API calls).
+      # The caller must keep the BEAM alive for the Worker to complete.
+      spawn(op_id, sector_id, gitf_root, opts)
+    else
+      # CLI mode: spawn Claude as a detached OS process that outlives the caller
+      spawn_detached_cli(op_id, sector_id, gitf_root, opts)
+    end
   end
 
   defp spawn_detached_cli(op_id, sector_id, gitf_root, opts) do

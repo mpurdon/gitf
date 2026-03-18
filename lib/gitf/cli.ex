@@ -1704,7 +1704,14 @@ defmodule GiTF.CLI do
         case GiTF.Major.Orchestrator.start_quest(mission.id, force_fast_path: true) do
           {:ok, phase} ->
             Format.success("Running (phase: #{phase})")
-            Format.info("Ghost is working. Track progress with: gitf mission show #{mission.id}")
+
+            if GiTF.Runtime.ModelResolver.api_mode?() do
+              # API mode: ghost runs in-process via Worker — keep alive until done
+              Format.info("Ghost working via API (waiting for completion)...")
+              wait_for_mission(mission.id)
+            else
+              Format.info("Ghost is working. Track progress with: gitf mission show #{mission.id}")
+            end
 
           {:error, reason} ->
             Format.error("Failed to start: #{inspect(reason)}")
@@ -1712,6 +1719,34 @@ defmodule GiTF.CLI do
 
       {:error, reason} ->
         Format.error("Failed to create mission: #{inspect(reason)}")
+    end
+  end
+
+  defp wait_for_mission(mission_id) do
+    Process.sleep(2_000)
+
+    case GiTF.Missions.get(mission_id) do
+      {:ok, mission} ->
+        ops = GiTF.Ops.list(mission_id: mission_id)
+        all_terminal = Enum.all?(ops, &(&1.status in ["done", "failed", "rejected"]))
+
+        if all_terminal do
+          done = Enum.count(ops, &(&1.status == "done"))
+          failed = Enum.count(ops, &(&1.status == "failed"))
+
+          if failed == 0 do
+            Format.success("Mission completed. #{done} op(s) done.")
+          else
+            Format.warn("Mission finished. #{done} done, #{failed} failed.")
+          end
+        else
+          running = Enum.count(ops, &(&1.status in ["running", "assigned"]))
+          Format.info("  #{running} op(s) still running...")
+          wait_for_mission(mission_id)
+        end
+
+      _ ->
+        Format.error("Mission not found")
     end
   end
 
