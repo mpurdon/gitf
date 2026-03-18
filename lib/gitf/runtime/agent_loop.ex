@@ -189,14 +189,16 @@ defmodule GiTF.Runtime.AgentLoop do
           })
         end)
 
-        # Execute tool calls and build tool result messages
-        tool_results = execute_tool_calls(tool_calls, tools)
+        # Execute tool calls and append results to context using ReqLLM's
+        # official method (handles provider-specific message formatting)
+        next_context = ReqLLM.Context.execute_and_append_tools(
+          response.context, tool_calls, tools
+        )
 
-        # Build context with tool results for next iteration
-        # response.context already includes the assistant message
-        next_context = append_tool_results(response.context, tool_calls, tool_results)
-
-        loop(next_context, response.model || extract_model(state), tools, %{
+        # Keep the original model spec (with provider prefix) — don't use
+        # response.model which may strip the provider prefix (e.g. "gemini-2.5-flash"
+        # instead of "google:gemini-2.5-flash")
+        loop(next_context, extract_model(state), tools, %{
           state
           | iteration: state.iteration + 1
         })
@@ -232,22 +234,10 @@ defmodule GiTF.Runtime.AgentLoop do
 
   # -- Context Building --------------------------------------------------------
 
-  defp prepare_context_and_cache(system_prompt, prompt, model) do
-    if is_gemini?(model) and CacheControl.should_cache?(system_prompt) do
-      case GiTF.Runtime.GeminiCacheManager.get_or_create(system_prompt, model) do
-        {:ok, cache_name} ->
-          # Cache hit/created: Omit system prompt from messages, pass cache name in opts
-          messages = ReqLLM.Context.new([ReqLLM.Context.user(prompt)])
-          {messages, [gemini_cache: cache_name]}
-
-        _ ->
-          # Cache failed: Fallback to standard messages
-          {build_initial_messages(system_prompt, prompt, model), []}
-      end
-    else
-      # Standard behavior (Anthropic caching handles itself inside build_initial_messages)
-      {build_initial_messages(system_prompt, prompt, model), []}
-    end
+  defp prepare_context_and_cache(system_prompt, prompt, _model) do
+    # Use standard ReqLLM message formatting for all providers.
+    # ReqLLM handles provider-specific system prompt formatting internally.
+    {build_initial_messages(system_prompt, prompt, _model), []}
   end
 
   defp is_gemini?(model), do: String.contains?(model, "google") or String.contains?(model, "gemini")
@@ -258,11 +248,9 @@ defmodule GiTF.Runtime.AgentLoop do
     ])
   end
 
-  defp build_initial_messages(system_prompt, prompt, model) do
-    system_msg = CacheControl.mark_system_prompt(system_prompt, model)
-
+  defp build_initial_messages(system_prompt, prompt, _model) do
     ReqLLM.Context.new([
-      system_msg,
+      ReqLLM.Context.system(system_prompt),
       ReqLLM.Context.user(prompt)
     ])
   end
@@ -278,7 +266,8 @@ defmodule GiTF.Runtime.AgentLoop do
           {:error, text} -> "Error: #{text}"
         end
 
-        ReqLLM.Context.tool_result(tc.id, content)
+        # Pass both ID and name — Gemini requires the function name in tool results
+        ReqLLM.Context.tool_result(tc.id, tc.name, content)
       end)
 
     Enum.reduce(tool_messages, ctx, fn msg, c ->
