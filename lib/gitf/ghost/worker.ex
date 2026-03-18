@@ -141,7 +141,8 @@ defmodule GiTF.Ghost.Worker do
       output: [],
       parsed_events: [],
       opts: opts,
-      backup_timer: schedule_checkpoint()
+      backup_timer: schedule_checkpoint(),
+      fallback_attempted: false
     }
 
     {:ok, state, {:continue, :provision}}
@@ -208,7 +209,15 @@ defmodule GiTF.Ghost.Worker do
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
     Logger.info("Ghost #{state.ghost_id} completed successfully")
-    mark_success(state)
+
+    try do
+      mark_success(state)
+    rescue
+      e ->
+        Logger.error("Ghost #{state.ghost_id} mark_success crashed: #{Exception.message(e)}")
+        mark_failed(state, "Success handler crashed: #{Exception.message(e)}")
+    end
+
     {:stop, :normal, %{state | status: :done, port: nil}}
   end
 
@@ -236,7 +245,14 @@ defmodule GiTF.Ghost.Worker do
       task: nil
     }
 
-    mark_success(state)
+    try do
+      mark_success(state)
+    rescue
+      e ->
+        Logger.error("Ghost #{state.ghost_id} mark_success crashed: #{Exception.message(e)}")
+        mark_failed(state, "Success handler crashed: #{Exception.message(e)}")
+    end
+
     {:stop, :normal, %{state | status: :done}}
   end
 
