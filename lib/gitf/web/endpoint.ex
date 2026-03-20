@@ -13,6 +13,10 @@ defmodule GiTF.Web.Endpoint do
 
   socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
 
+  if code_reloading? do
+    plug Phoenix.CodeReloader
+  end
+
   plug GiTF.Web.StaticAssets
 
   plug Plug.Static,

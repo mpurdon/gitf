@@ -284,6 +284,16 @@ defmodule GiTF.Ghost.Worker do
   def handle_info({:agent_progress, ghost_id, event}, state) when ghost_id == state.ghost_id do
     progress = format_agent_progress(event)
     GiTF.Progress.update(state.ghost_id, progress)
+
+    # Track context from per-response usage events (input_tokens = actual window size)
+    case event do
+      %{type: :response_usage, input_tokens: input, output_tokens: output} when input > 0 or output > 0 ->
+        GiTF.Runtime.ContextMonitor.record_usage(ghost_id, input, output)
+
+      _ ->
+        :ok
+    end
+
     {:noreply, state}
   end
 

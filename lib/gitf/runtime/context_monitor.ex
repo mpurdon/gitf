@@ -1,12 +1,12 @@
 defmodule GiTF.Runtime.ContextMonitor do
   @moduledoc """
   Monitors and enforces context budget limits for ghosts.
-  
-  Tracks token usage per ghost session and triggers automatic transfers
-  when context usage approaches the configured threshold (default 45%).
-  
+
+  Tracks per-call context window usage (input_tokens = actual window size),
+  peak usage (high watermark), and cumulative tokens in/out.
+
   ## Thresholds
-  
+
   - Warning: 40% - Log warning, notify via PubSub
   - Critical: 45% - Trigger automatic transfer
   - Maximum: 50% - Hard limit, force transfer
@@ -19,24 +19,39 @@ defmodule GiTF.Runtime.ContextMonitor do
   @max_threshold 0.50
 
   @doc """
-  Record token usage for a ghost session.
-  
-  Updates the ghost's context tracking fields and checks if transfer is needed.
-  Returns {:ok, :normal | :warning | :critical | :transfer_needed}.
+  Record per-response token usage for a ghost.
+
+  `input_tokens` is the number of input tokens in the latest API call,
+  which represents the actual context window size (full conversation history).
+  `output_tokens` is the number of tokens generated in this response.
   """
   @spec record_usage(String.t(), integer(), integer()) ::
           {:ok, :normal | :warning | :critical | :transfer_needed} | {:error, term()}
   def record_usage(ghost_id, input_tokens, output_tokens) do
     with {:ok, ghost} <- Archive.fetch(:ghosts, ghost_id),
          {:ok, limit} <- get_context_limit(ghost) do
-      total_tokens = (ghost.context_tokens_used || 0) + input_tokens + output_tokens
-      percentage = total_tokens / limit
+      # Current context window = latest input_tokens (includes full conversation)
+      current_window = input_tokens
+      percentage = current_window / limit
+
+      # Peak = high watermark
+      prev_peak = Map.get(ghost, :context_peak_tokens, 0)
+      peak = max(prev_peak, current_window)
+      peak_percentage = peak / limit
+
+      # Cumulative tokens in/out (for cost tracking)
+      prev_in = Map.get(ghost, :context_total_input, 0)
+      prev_out = Map.get(ghost, :context_total_output, 0)
 
       updated =
         ghost
-        |> Map.put(:context_tokens_used, total_tokens)
+        |> Map.put(:context_tokens_used, current_window)
         |> Map.put(:context_tokens_limit, limit)
         |> Map.put(:context_percentage, percentage)
+        |> Map.put(:context_peak_tokens, peak)
+        |> Map.put(:context_peak_percentage, peak_percentage)
+        |> Map.put(:context_total_input, prev_in + input_tokens)
+        |> Map.put(:context_total_output, prev_out + output_tokens)
 
       Archive.put(:ghosts, updated)
 
@@ -84,6 +99,10 @@ defmodule GiTF.Runtime.ContextMonitor do
            tokens_used: ghost.context_tokens_used || 0,
            tokens_limit: ghost.context_tokens_limit,
            percentage: ghost.context_percentage || 0.0,
+           peak_tokens: Map.get(ghost, :context_peak_tokens, 0),
+           peak_percentage: Map.get(ghost, :context_peak_percentage, 0.0),
+           total_input: Map.get(ghost, :context_total_input, 0),
+           total_output: Map.get(ghost, :context_total_output, 0),
            status: determine_status(ghost.context_percentage || 0.0),
            needs_handoff: needs_handoff?(ghost_id)
          }}
@@ -92,8 +111,6 @@ defmodule GiTF.Runtime.ContextMonitor do
 
   @doc """
   Create a context snapshot for transfer purposes.
-  
-  Captures the current state of the ghost's work for context preservation.
   """
   @spec create_snapshot(String.t()) :: {:ok, map()} | {:error, term()}
   def create_snapshot(ghost_id) do
@@ -105,6 +122,7 @@ defmodule GiTF.Runtime.ContextMonitor do
         snapshot_at: DateTime.utc_now(),
         tokens_used: Map.get(ghost, :context_tokens_used, 0),
         percentage: Map.get(ghost, :context_percentage, 0.0),
+        peak_percentage: Map.get(ghost, :context_peak_percentage, 0.0),
         op_id: op.id,
         job_title: op.title,
         op_status: op.status,
@@ -134,7 +152,6 @@ defmodule GiTF.Runtime.ContextMonitor do
   # Private functions
 
   defp get_context_limit(ghost) do
-    # Try to get limit from model info
     case ghost.assigned_model do
       nil ->
         {:ok, 200_000}

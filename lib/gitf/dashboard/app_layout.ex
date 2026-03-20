@@ -45,11 +45,13 @@ defmodule GiTF.Dashboard.AppLayout do
         </div>
       </nav>
       <main class="main">
-        <div :if={Phoenix.Flash.get(@flash, :info)} class="flash-info">
-          {Phoenix.Flash.get(@flash, :info)}
+        <div :if={Phoenix.Flash.get(@flash, :info)} class="flash-info" style="display:flex; justify-content:space-between; align-items:center">
+          <span>{Phoenix.Flash.get(@flash, :info)}</span>
+          <button phx-click="lv:clear-flash" phx-value-key="info" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
         </div>
-        <div :if={Phoenix.Flash.get(@flash, :error)} class="flash-error">
-          {Phoenix.Flash.get(@flash, :error)}
+        <div :if={Phoenix.Flash.get(@flash, :error)} class="flash-error" style="display:flex; justify-content:space-between; align-items:center">
+          <span>{Phoenix.Flash.get(@flash, :error)}</span>
+          <button phx-click="lv:clear-flash" phx-value-key="error" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
         </div>
         {render_slot(@inner_block)}
       </main>

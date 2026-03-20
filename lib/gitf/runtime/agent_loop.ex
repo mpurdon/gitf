@@ -144,6 +144,15 @@ defmodule GiTF.Runtime.AgentLoop do
     usage = response.usage || %{}
     state = accumulate_usage(state, usage)
 
+    # Emit per-response usage so context tracking sees actual window size
+    if map_size(usage) > 0 do
+      emit_progress(state.on_progress, %{
+        type: :response_usage,
+        input_tokens: Map.get(usage, :input_tokens, 0),
+        output_tokens: Map.get(usage, :output_tokens, 0)
+      })
+    end
+
     case classified.type do
       :final_answer ->
         text = classified.text || ""

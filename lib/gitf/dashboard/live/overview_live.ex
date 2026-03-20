@@ -35,6 +35,20 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   @impl true
+  def handle_event("use_sector", %{"id" => sector_id}, socket) do
+    case GiTF.Sector.set_current(sector_id) do
+      {:ok, sector} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Switched to sector: #{sector.name || sector.id}")
+         |> assign_data()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
   def handle_event("quick_run", %{"task" => %{"goal" => goal}}, socket) do
     goal = String.trim(goal)
 
@@ -78,14 +92,25 @@ defmodule GiTF.Dashboard.OverviewLive do
     active_ghosts = Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
     active_quests = Enum.count(missions, &(Map.get(&1, :status) == "active"))
     
-    # Context monitoring
-    bees_with_context = Enum.filter(ghosts, &Map.has_key?(&1, :context_percentage))
-    avg_context = if bees_with_context != [] do
-      Enum.sum(Enum.map(bees_with_context, &(&1.context_percentage || 0.0))) / length(bees_with_context)
-    else
-      0.0
-    end
-    high_context_bees = Enum.count(bees_with_context, &((&1.context_percentage || 0) > 40))
+    # Context monitoring — only active ghosts for the gauge
+    active_ghost_list = Enum.filter(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
+
+    {avg_context, peak_context, high_context_bees} =
+      case active_ghost_list do
+        [] ->
+          {0.0, 0.0, 0}
+
+        active ->
+          pcts = Enum.map(active, &(Map.get(&1, :context_percentage, 0.0) * 100))
+          peaks = Enum.map(active, &(Map.get(&1, :context_peak_percentage, 0.0) * 100))
+          avg = Enum.sum(pcts) / length(pcts)
+          peak = Enum.max(peaks, fn -> 0.0 end)
+          high = Enum.count(pcts, &(&1 > 40))
+          {avg, peak, high}
+      end
+
+    # "Fuel remaining" = inverse of average usage (100% = full tank, 0% = empty)
+    fuel_remaining = max(0.0, 100.0 - avg_context)
     
     # Audit stats
     ops = GiTF.Ops.list()
@@ -113,6 +138,12 @@ defmodule GiTF.Dashboard.OverviewLive do
 
     sector_count = length(sectors)
 
+    current_sector_id =
+      case GiTF.Sector.current() do
+        {:ok, s} -> s.id
+        _ -> nil
+      end
+
     recent_sectors =
       sectors
       |> Enum.sort_by(&(-safe_unix_ts(&1)))
@@ -137,10 +168,14 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:total_cost, cost_summary.total_cost)
     |> assign(:total_input_tokens, cost_summary.total_input_tokens)
     |> assign(:total_output_tokens, cost_summary.total_output_tokens)
+    |> assign(:cost_by_model, cost_summary.by_model)
     |> assign(:recent_waggles, recent_waggles)
     |> assign(:active_processes, safe_active_count())
     |> assign(:avg_context, avg_context)
+    |> assign(:peak_context, peak_context)
+    |> assign(:fuel_remaining, fuel_remaining)
     |> assign(:high_context_bees, high_context_bees)
+    |> assign(:active_ghost_list, active_ghost_list)
     |> assign(:verified_jobs, verified_jobs)
     |> assign(:failed_verification, failed_verification)
     |> assign(:pending_verification, pending_verification)
@@ -150,6 +185,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:pending_approvals, pending_approvals)
     |> assign(:sector_count, sector_count)
     |> assign(:recent_sectors, recent_sectors)
+    |> assign(:current_sector_id, current_sector_id)
     |> assign(:recent_missions, recent_missions)
   end
 
@@ -202,6 +238,26 @@ defmodule GiTF.Dashboard.OverviewLive do
     end
   end
 
+  defp short_model_name(name) when is_binary(name) do
+    name
+    |> String.replace(~r"^(google|anthropic):", "")
+    |> String.replace("gemini-", "")
+    |> String.replace("claude-", "")
+  end
+
+  defp short_model_name(_), do: "unknown"
+
+  defp model_bar_color(name) when is_binary(name) do
+    cond do
+      String.contains?(name, "pro") or String.contains?(name, "opus") -> "#a855f7"
+      String.contains?(name, "flash") or String.contains?(name, "sonnet") -> "#3b82f6"
+      String.contains?(name, "haiku") -> "#06b6d4"
+      true -> "#6b7280"
+    end
+  end
+
+  defp model_bar_color(_), do: "#6b7280"
+
   defp safe_active_count do
     GiTF.SectorSupervisor.active_count()
   rescue
@@ -238,7 +294,8 @@ defmodule GiTF.Dashboard.OverviewLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
       <h1 class="page-title">Dashboard Overview</h1>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; grid-auto-rows:1fr; gap:0.75rem; margin-bottom:1.5rem">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-bottom:1.5rem">
+        <%!-- Row 1 --%>
         <%!-- Sectors: col 1, spans 2 rows --%>
         <div class="card" style="grid-row:1 / 3">
           <div class="card-label">Sectors</div>
@@ -247,9 +304,16 @@ defmodule GiTF.Dashboard.OverviewLive do
           <% else %>
             <div style="display:flex; flex-direction:column; gap:0.4rem; margin-top:0.5rem">
               <%= for sector <- @recent_sectors do %>
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0; border-bottom:1px solid #21262d">
-                  <span style="color:#f0f6fc; font-weight:500; font-size:0.85rem">{Map.get(sector, :name, "-")}</span>
-                  <span class="badge badge-grey" style="font-size:0.65rem">{Map.get(sector, :sync_strategy, "-")}</span>
+                <div style={"display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0.2rem; border-bottom:1px solid #21262d; border-left:2px solid #{if Map.get(sector, :id) == @current_sector_id, do: "#3b82f6", else: "transparent"}; padding-left:0.4rem"}>
+                  <div style="display:flex; align-items:center; gap:0.4rem; overflow:hidden; flex:1">
+                    <span style="color:#f0f6fc; font-weight:500; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{Map.get(sector, :name, "-")}</span>
+                    <%= if Map.get(sector, :id) == @current_sector_id do %>
+                      <span class="badge badge-blue" style="font-size:0.55rem; flex-shrink:0">active</span>
+                    <% end %>
+                  </div>
+                  <%= if Map.get(sector, :id) != @current_sector_id do %>
+                    <button phx-click="use_sector" phx-value-id={sector.id} style="background:none; border:1px solid #30363d; color:#8b949e; font-size:0.6rem; padding:0.1rem 0.4rem; border-radius:3px; cursor:pointer; flex-shrink:0">use</button>
+                  <% end %>
                 </div>
               <% end %>
             </div>
@@ -289,36 +353,36 @@ defmodule GiTF.Dashboard.OverviewLive do
           </div>
         </div>
 
-        <%!-- Col 3: metric cards, one per row --%>
-        <div class="card">
+        <%!-- Total Cost: col 3, spans 2 rows --%>
+        <div class="card" style="grid-row:1 / 3">
           <div class="card-label">Total Cost</div>
           <div class="card-value green">{format_cost(@total_cost)}</div>
           <div class="card-label" style="margin-top:0.25rem">{format_tokens(@total_input_tokens + @total_output_tokens)} tokens</div>
+          <%!-- Per-model cost bar chart --%>
+          <%= if @cost_by_model != %{} do %>
+            <div style="margin-top:0.75rem; border-top:1px solid #21262d; padding-top:0.75rem">
+              <div style="font-size:0.7rem; color:#6b7280; margin-bottom:0.5rem">Cost by Model</div>
+              <% max_cost = @cost_by_model |> Map.values() |> Enum.map(& &1.cost) |> Enum.max(fn -> 0.001 end) %>
+              <%= for {model, data} <- Enum.sort_by(@cost_by_model, fn {_, d} -> -d.cost end) do %>
+                <div style="margin-bottom:0.5rem">
+                  <div style="display:flex; justify-content:space-between; font-size:0.7rem; margin-bottom:2px">
+                    <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%">{short_model_name(model)}</span>
+                    <span style="color:#3fb950">{format_cost(data.cost)}</span>
+                  </div>
+                  <div style="height:4px; background:#21262d; border-radius:2px; overflow:hidden">
+                    <div style={"height:100%; border-radius:2px; background:#{model_bar_color(model)}; width:#{Float.round(data.cost / max_cost * 100, 1)}%"}></div>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
         </div>
+
+        <%!-- Row 3: Active Ghosts, Quest Phases, Pending Approvals --%>
         <div class="card">
           <div class="card-label">Active Ghosts</div>
           <div class="card-value blue">{@active_ghosts}</div>
           <div class="card-label" style="margin-top:0.25rem">{@ghost_count} total</div>
-        </div>
-
-        <%!-- Row 3: three metric cards --%>
-        <div class="card">
-          <div class="card-label">Context Usage</div>
-          <div class={"card-value #{if @avg_context > 40, do: "orange", else: "blue"}"}>
-            {Float.round(@avg_context, 1)}%
-          </div>
-          <div class="card-label" style="margin-top:0.25rem">
-            {if @high_context_bees > 0, do: "#{@high_context_bees} ghosts >40%", else: "all ghosts healthy"}
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-label">Audit</div>
-          <div class={"card-value #{if @failed_verification > 0, do: "red", else: "green"}"}>
-            {@verified_jobs}
-          </div>
-          <div class="card-label" style="margin-top:0.25rem">
-            {if @failed_verification > 0, do: "#{@failed_verification} failed", else: "#{@pending_verification} pending"}
-          </div>
         </div>
         <div class="card">
           <div class="card-label">Quest Phases</div>
@@ -327,8 +391,6 @@ defmodule GiTF.Dashboard.OverviewLive do
             R:{@research_quests} P:{@planning_quests} I:{@implementation_quests}
           </div>
         </div>
-
-        <%!-- Row 4 --%>
         <div class="card">
           <div class="card-label">Pending Approvals</div>
           <div class={"card-value #{if @pending_approvals > 0, do: "yellow"}"}>
@@ -336,6 +398,67 @@ defmodule GiTF.Dashboard.OverviewLive do
           </div>
           <div class="card-label" style="margin-top:0.25rem">
             <a href="/dashboard/approvals" style="color:#58a6ff; font-size:0.8rem">View queue</a>
+          </div>
+        </div>
+
+        <%!-- Row 4: Context Fuel Gauge, Audit (under Total Cost) --%>
+        <div class="card">
+          <div class="card-label">Context Fuel</div>
+          <%!-- Gas gauge: SVG arc --%>
+          <div style="display:flex; justify-content:center; padding:0.5rem 0">
+            <svg viewBox="0 0 120 70" width="120" height="70">
+              <%!-- Background arc --%>
+              <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="#21262d" stroke-width="8" stroke-linecap="round" />
+              <%!-- Fuel arc — colored by level --%>
+              <% fuel = @fuel_remaining %>
+              <% arc_pct = fuel / 100.0 %>
+              <% color = cond do
+                fuel > 60 -> "#3fb950"
+                fuel > 30 -> "#d29922"
+                fuel > 10 -> "#f97316"
+                true -> "#f85149"
+              end %>
+              <% # Arc endpoint: angle goes from pi (left) to 0 (right) as fuel goes 0→100%
+                 angle = :math.pi * (1.0 - arc_pct)
+                 ex = 60 + 45 * :math.cos(angle)
+                 ey = 60 - 45 * :math.sin(angle)
+                 large = if arc_pct > 0.5, do: "1", else: "0"
+              %>
+              <%= if arc_pct > 0.01 do %>
+                <path
+                  d={"M 15 60 A 45 45 0 #{large} 1 #{Float.round(ex, 1)} #{Float.round(ey, 1)}"}
+                  fill="none"
+                  stroke={color}
+                  stroke-width="8"
+                  stroke-linecap="round"
+                />
+              <% end %>
+              <%!-- Center text --%>
+              <text x="60" y="55" text-anchor="middle" fill={color} font-size="16" font-weight="bold">
+                {Float.round(fuel, 0) |> trunc()}%
+              </text>
+              <text x="60" y="67" text-anchor="middle" fill="#6b7280" font-size="8">
+                remaining
+              </text>
+            </svg>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:#6b7280; padding:0 0.25rem">
+            <span>peak: {Float.round(@peak_context, 1)}%</span>
+            <span>{length(@active_ghost_list)} active</span>
+          </div>
+          <%= if @high_context_bees > 0 do %>
+            <div style="font-size:0.7rem; color:#f97316; margin-top:0.25rem; text-align:center">
+              {if @high_context_bees > 0, do: "#{@high_context_bees} ghost(s) >40%"}
+            </div>
+          <% end %>
+        </div>
+        <div class="card">
+          <div class="card-label">Audit</div>
+          <div class={"card-value #{if @failed_verification > 0, do: "red", else: "green"}"}>
+            {@verified_jobs}
+          </div>
+          <div class="card-label" style="margin-top:0.25rem">
+            {if @failed_verification > 0, do: "#{@failed_verification} failed", else: "#{@pending_verification} pending"}
           </div>
         </div>
       </div>
