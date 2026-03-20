@@ -125,6 +125,19 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "start_mission",
+        description: "[WRITE] Start a mission (or restart a stalled one). Kicks off the phase pipeline from research. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Mission ID"},
+            fast: %{type: "boolean", description: "Use fast path (skip full pipeline, single implementation op)", default: false},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
         name: "kill_mission",
         description: "[WRITE] Kill a mission and all its ops/ghosts. This is destructive. Requires confirm: true.",
         inputSchema: %{

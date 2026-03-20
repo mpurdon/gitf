@@ -235,6 +235,22 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("create_mission", _), do: {:error, "Missing required parameter: goal"}
 
+  def call("start_mission", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      opts = if args["fast"], do: [force_fast_path: true], else: []
+
+      case GiTF.Major.Orchestrator.start_quest(id, opts) do
+        {:ok, phase} ->
+          {:ok, json_text(%{id: id, status: "active", phase: phase})}
+
+        {:error, reason} ->
+          {:error, "Failed to start mission: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("start_mission", _), do: {:error, "Missing required parameter: id"}
+
   def call("kill_mission", %{"id" => id} = args) do
     with :ok <- require_confirm(args) do
       case GiTF.Missions.kill(id) do
@@ -360,15 +376,17 @@ defmodule GiTF.MCPServer.Handlers do
     }
   end
 
+  # Compact op summary for mission listings — omits the full description
+  # (which can be thousands of chars of prompt text). Use show_op for full details.
   defp serialize_op(j) do
     %{
       id: j.id,
       title: j.title,
       status: j.status,
+      phase: j[:phase],
       mission_id: j.mission_id,
       sector_id: j[:sector_id],
       ghost_id: j[:ghost_id],
-      description: j[:description],
       inserted_at: to_string(j[:inserted_at])
     }
   end

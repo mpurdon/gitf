@@ -60,7 +60,9 @@ defmodule GiTF.MCPServer.SocketListener do
                :binary,
                packet: :line,
                active: false,
-               reuseaddr: true
+               reuseaddr: true,
+               recbuf: 65_536,
+               sndbuf: 1_048_576
              ]) do
           {:ok, listen_socket} ->
             write_pid_file()
