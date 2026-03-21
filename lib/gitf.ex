@@ -1,10 +1,21 @@
 defmodule GiTF do
   @moduledoc "The GiTF - Multi-agent orchestration for AI coding assistants."
 
-  @version Mix.Project.config()[:version]
-
   @spec version() :: String.t()
-  def version, do: @version
+  def version do
+    # In dev, read mix.exs directly so version updates without restart.
+    # In prod/escript, mix.exs won't be at cwd — fall back to app spec.
+    case File.read("mix.exs") do
+      {:ok, content} ->
+        case Regex.run(~r/@version "([^"]+)"/, content) do
+          [_, v] -> v
+          _ -> Application.spec(:gitf, :vsn) |> to_string()
+        end
+
+      _ ->
+        Application.spec(:gitf, :vsn) |> to_string()
+    end
+  end
 
   @doc """
   Locates the root directory of a GiTF project.
