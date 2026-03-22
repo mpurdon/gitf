@@ -93,19 +93,19 @@ defmodule GiTF.Tachikoma.Scoring do
   end
 
   defp base_scores(true = _passed) do
-    %{correctness: 70, completeness: 70, code_quality: 60, efficiency: 60}
+    %{final_output: 70, trajectory: 70, tool_usage: 60, safety_alignment: 70}
   end
 
   defp base_scores(false = _passed) do
-    %{correctness: 30, completeness: 30, code_quality: 40, efficiency: 40}
+    %{final_output: 30, trajectory: 40, tool_usage: 40, safety_alignment: 50}
   end
 
   defp extract_quality_scores(result) do
     %{}
-    |> maybe_add_quality(:code_quality, result[:quality_score])
-    |> maybe_add_quality(:code_quality, result[:static_score])
-    |> maybe_add_quality(:efficiency, result[:performance_score])
-    |> maybe_add_quality(:correctness, result[:cross_audit_score])
+    |> maybe_add_quality(:tool_usage, result[:quality_score])
+    |> maybe_add_quality(:tool_usage, result[:static_score])
+    |> maybe_add_quality(:trajectory, result[:performance_score])
+    |> maybe_add_quality(:final_output, result[:cross_audit_score])
   end
 
   defp maybe_add_quality(acc, _key, nil), do: acc
@@ -207,7 +207,7 @@ defmodule GiTF.Tachikoma.Scoring do
       model: model,
       total_jobs: 0,
       pass_rate: 0.0,
-      avg_scores: %{correctness: 0.0, completeness: 0.0, code_quality: 0.0, efficiency: 0.0},
+      avg_scores: %{final_output: 0.0, trajectory: 0.0, tool_usage: 0.0, safety_alignment: 0.0},
       strengths: [],
       weaknesses: [],
       best_op_types: [],
@@ -238,7 +238,7 @@ defmodule GiTF.Tachikoma.Scoring do
   end
 
   defp average_scores(scores) do
-    keys = [:correctness, :completeness, :code_quality, :efficiency]
+    keys = [:final_output, :trajectory, :tool_usage, :safety_alignment]
     total = length(scores)
 
     Enum.reduce(keys, %{}, fn key, acc ->
