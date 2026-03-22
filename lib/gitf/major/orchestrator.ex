@@ -95,16 +95,12 @@ defmodule GiTF.Major.Orchestrator do
       # Circuit breaker: fail missions that have been running too long
       if quest_timed_out?(mission) do
         Logger.warning("Quest #{mission_id} exceeded #{@max_quest_age_hours}h max age, force-completing")
-        GiTF.Missions.transition_phase(mission_id, "completed",
-          "Quest timed out after #{@max_quest_age_hours}h")
-        GiTF.Missions.update_status!(mission_id)
-
         GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
           type: :quest_timeout,
           message: "Quest #{mission_id} force-completed after #{@max_quest_age_hours}h timeout"
         })
 
-        {:ok, "completed"}
+        fail_quest(mission_id, "Quest timed out after #{@max_quest_age_hours}h")
       else
         advance_mission_phase(mission)
       end
@@ -387,9 +383,7 @@ defmodule GiTF.Major.Orchestrator do
               "branch" => quest_branch,
               "error" => inspect(reason)
             })
-            GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
-            GiTF.Missions.update_status!(mission.id)
-            {:ok, "completed"}
+            fail_quest(mission.id, "Sync failed: #{inspect(reason)}")
         end
 
       {:error, reason} ->
@@ -466,9 +460,7 @@ defmodule GiTF.Major.Orchestrator do
         "status" => "failed",
         "error" => Exception.message(e)
       })
-      GiTF.Missions.transition_phase(mission.id, "completed", "PR finalization failed")
-      GiTF.Missions.update_status!(mission.id)
-      {:ok, "completed"}
+      fail_quest(mission.id, "PR finalization failed")
   end
 
   defp start_awaiting_approval(mission) do
@@ -731,9 +723,7 @@ defmodule GiTF.Major.Orchestrator do
 
       :rejected ->
         Logger.warning("Quest #{mission.id} rejected by human reviewer")
-        GiTF.Missions.transition_phase(mission.id, "completed", "Human review rejected")
-        GiTF.Missions.update_status!(mission.id)
-        {:ok, "completed"}
+        fail_quest(mission.id, "Human review rejected")
 
       :pending ->
         # Check for approval timeout — re-validate then auto-approve
@@ -749,9 +739,7 @@ defmodule GiTF.Major.Orchestrator do
           else
             Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
             GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve")
-            GiTF.Missions.transition_phase(mission.id, "completed", "Auto-approve failed re-validation")
-            GiTF.Missions.update_status!(mission.id)
-            {:ok, "completed"}
+            fail_quest(mission.id, "Auto-approve failed re-validation")
           end
         else
           {:ok, "awaiting_approval"}
@@ -1111,8 +1099,7 @@ defmodule GiTF.Major.Orchestrator do
       start_validation(mission)
     else
       # Nothing succeeded — fail the mission
-      GiTF.Missions.transition_phase(mission.id, "completed", "Implementation exhausted: all plans failed")
-      GiTF.Missions.update_status!(mission.id)
+      fail_quest(mission.id, "Implementation exhausted: all plans failed")
 
       GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
         type: :quest_exhausted,
@@ -1149,9 +1136,7 @@ defmodule GiTF.Major.Orchestrator do
           attempt_validation_fixes(mission, validation, fix_attempt)
         else
           Logger.warning("Quest #{mission.id} validation failed after #{fix_attempt} fix attempts: #{validation["summary"]}")
-          GiTF.Missions.transition_phase(mission.id, "completed", "Validation failed after #{fix_attempt} fix attempts")
-          GiTF.Missions.update_status!(mission.id)
-          {:ok, "completed"}
+          fail_quest(mission.id, "Validation failed after #{fix_attempt} fix attempts")
         end
     end
   end
@@ -1225,16 +1210,12 @@ defmodule GiTF.Major.Orchestrator do
       {:ok, "implementation"}
     else
       Logger.warning("Quest #{mission.id}: no fixable issues extracted from validation")
-      GiTF.Missions.transition_phase(mission.id, "completed", "Validation failed, no fixable issues identified")
-      GiTF.Missions.update_status!(mission.id)
-      {:ok, "completed"}
+      fail_quest(mission.id, "Validation failed, no fixable issues identified")
     end
   rescue
     e ->
       Logger.warning("Validation fix attempt failed for mission #{mission.id}: #{Exception.message(e)}")
-      GiTF.Missions.transition_phase(mission.id, "completed", "Validation fix attempt crashed")
-      GiTF.Missions.update_status!(mission.id)
-      {:ok, "completed"}
+      fail_quest(mission.id, "Validation fix attempt crashed")
   end
 
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
@@ -1329,6 +1310,12 @@ defmodule GiTF.Major.Orchestrator do
     end
 
     complete_quest(mission.id)
+  end
+
+  defp fail_quest(mission_id, reason) do
+    GiTF.Missions.transition_phase(mission_id, "completed", reason)
+    GiTF.Missions.update_status!(mission_id)
+    {:ok, "completed"}
   end
 
   defp complete_quest(mission_id) do

@@ -15,6 +15,12 @@ defmodule GiTF.Web.Endpoint do
 
   if code_reloading? do
     plug Phoenix.CodeReloader
+    plug :bust_version_cache
+  end
+
+  defp bust_version_cache(conn, _opts) do
+    GiTF.reload_version()
+    conn
   end
 
   plug GiTF.Web.StaticAssets

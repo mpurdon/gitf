@@ -141,33 +141,19 @@ defmodule GiTF.Runtime.AgentLoop do
 
   defp handle_response(response, _messages, _model, tools, state) do
     classified = ReqLLM.Response.classify(response)
-    # Extract usage — try struct accessor first, then map access
-    raw_usage =
-      try do
-        ReqLLM.Response.usage(response)
-      rescue
-        _ -> response.usage
-      end
-
-    usage = raw_usage || %{}
+    usage = normalize_usage(response)
     state = accumulate_usage(state, usage)
 
-    # Emit per-response usage so context tracking sees actual window size.
-    input_t = Map.get(usage, :input_tokens) || Map.get(usage, "input_tokens") ||
-              Map.get(usage, :prompt_tokens) || Map.get(usage, "prompt_tokens") || 0
-    output_t = Map.get(usage, :output_tokens) || Map.get(usage, "output_tokens") ||
-               Map.get(usage, :completion_tokens) || Map.get(usage, "completion_tokens") ||
-               Map.get(usage, :candidates_tokens) || Map.get(usage, "candidates_tokens") || 0
+    # Emit per-response usage for context tracking
+    input_t = Map.get(usage, :input_tokens, 0)
+    output_t = Map.get(usage, :output_tokens, 0)
 
     if input_t > 0 or output_t > 0 do
-      Logger.debug("AgentLoop: context usage in=#{input_t} out=#{output_t}")
       emit_progress(state.on_progress, %{
         type: :response_usage,
         input_tokens: input_t,
         output_tokens: output_t
       })
-    else
-      Logger.debug("AgentLoop: no usage extracted, raw=#{inspect(raw_usage, limit: 200)}")
     end
 
     case classified.type do
@@ -264,7 +250,20 @@ defmodule GiTF.Runtime.AgentLoop do
 
   # -- Usage Tracking ----------------------------------------------------------
 
-  defp accumulate_usage(state, nil), do: state
+  # Normalize usage from any provider format into canonical atom-keyed map
+  defp normalize_usage(%{usage: %{input_tokens: _} = usage}), do: usage
+  defp normalize_usage(%{usage: usage}) when is_map(usage), do: normalize_usage_keys(usage)
+  defp normalize_usage(_), do: %{input_tokens: 0, output_tokens: 0, total_cost: 0}
+
+  defp normalize_usage_keys(usage) do
+    input = Map.get(usage, :input_tokens) || Map.get(usage, "input_tokens") ||
+            Map.get(usage, :prompt_tokens) || Map.get(usage, "prompt_tokens") || 0
+    output = Map.get(usage, :output_tokens) || Map.get(usage, "output_tokens") ||
+             Map.get(usage, :completion_tokens) || Map.get(usage, "completion_tokens") ||
+             Map.get(usage, :candidates_tokens) || Map.get(usage, "candidates_tokens") || 0
+    cost = Map.get(usage, :total_cost) || Map.get(usage, "total_cost") || 0
+    %{input_tokens: input, output_tokens: output, total_cost: cost}
+  end
 
   defp accumulate_usage(state, usage) do
     current = state.total_usage

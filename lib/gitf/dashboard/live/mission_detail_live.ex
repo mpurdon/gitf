@@ -7,18 +7,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   @refresh_interval :timer.seconds(5)
 
-  @phases [
-    "pending",
-    "research",
-    "requirements",
-    "design",
-    "review",
-    "planning",
-    "implementation",
-    "validation",
-    "sync",
-    "completed"
-  ]
+  # Derive display phases from the orchestrator's canonical list,
+  # adding "pending" and "completed" bookends, removing "awaiting_approval" (shown as sync)
+  @phases (["pending"] ++
+    (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++
+    ["completed"])
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do

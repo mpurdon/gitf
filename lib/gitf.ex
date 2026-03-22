@@ -3,8 +3,23 @@ defmodule GiTF do
 
   @spec version() :: String.t()
   def version do
-    # In dev, read mix.exs directly so version updates without restart.
-    # In prod/escript, mix.exs won't be at cwd — fall back to app spec.
+    case :persistent_term.get(:gitf_version, nil) do
+      nil ->
+        v = read_version()
+        :persistent_term.put(:gitf_version, v)
+        v
+
+      v ->
+        v
+    end
+  end
+
+  @doc "Bust the cached version (call after mix.exs changes in dev)."
+  def reload_version do
+    :persistent_term.put(:gitf_version, read_version())
+  end
+
+  defp read_version do
     case File.read("mix.exs") do
       {:ok, content} ->
         case Regex.run(~r/@version "([^"]+)"/, content) do
