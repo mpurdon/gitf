@@ -16,7 +16,7 @@ defmodule GiTF.Major.Orchestrator do
   alias GiTF.Archive
   alias GiTF.Major.{FastPath, PhasePrompts, Planner}
 
-  @phases ~w(research requirements design review planning implementation validation awaiting_approval sync)
+  @phases ~w(research requirements design review planning implementation validation awaiting_approval sync simplify scoring)
   @max_redesign_iterations 2
   @approval_timeout_hours 1
   @max_quest_age_hours 24
@@ -168,6 +168,15 @@ defmodule GiTF.Major.Orchestrator do
 
         "awaiting_approval" ->
           handle_approval_result(mission)
+
+        "sync" ->
+          check_and_advance(mission, "sync", &start_simplify/1)
+
+        "simplify" ->
+          check_simplify_complete(mission)
+
+        "scoring" ->
+          check_and_advance(mission, "scoring", &finish_scored/1)
 
         other ->
           {:ok, other}
@@ -340,7 +349,8 @@ defmodule GiTF.Major.Orchestrator do
             "status" => "manual",
             "note" => "Branches left for manual merge"
           })
-          complete_quest(mission.id)
+          # Sync artifact stored — advance_mission_phase will pick up simplify
+          {:ok, "sync"}
 
         "pr_branch" ->
           finalize_merge_as_pr(mission, sector)
@@ -366,7 +376,9 @@ defmodule GiTF.Major.Orchestrator do
             "branch" => quest_branch,
             "merged_at" => DateTime.utc_now()
           })
-          complete_quest(mission.id)
+          # Sync done — advance will pick up simplify
+          {:ok, mission} = GiTF.Missions.get(mission.id)
+          start_simplify(mission)
         else
           {:error, reason} ->
             Logger.warning("Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}")
@@ -434,7 +446,8 @@ defmodule GiTF.Major.Orchestrator do
             })
         end
 
-        complete_quest(mission.id)
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_simplify(mission)
 
       {:error, reason} ->
         GiTF.Missions.store_artifact(mission.id, "sync", %{
@@ -1222,6 +1235,100 @@ defmodule GiTF.Major.Orchestrator do
       GiTF.Missions.transition_phase(mission.id, "completed", "Validation fix attempt crashed")
       GiTF.Missions.update_status!(mission.id)
       {:ok, "completed"}
+  end
+
+  # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
+
+  defp start_simplify(mission) do
+    # Skip simplify for fast-path missions
+    if Map.get(mission, :pipeline_mode) == "fast" do
+      start_scoring(mission)
+    else
+      with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "simplify", "Sync complete, simplifying") do
+        sector = Archive.get(:sectors, mission.sector_id)
+        repo_path = if sector, do: sector.path, else: nil
+
+        # Get changed files from all implementation ops
+        changed_files = get_mission_changed_files(mission)
+
+        # Spawn 3 parallel review ghosts
+        for {focus, prompt} <- PhasePrompts.simplify_prompts(mission, repo_path, changed_files) do
+          spawn_phase_ghost(mission, "simplify", prompt, model: "general", strategy: focus)
+        end
+
+        {:ok, "simplify"}
+      end
+    end
+  end
+
+  defp check_simplify_complete(mission) do
+    simplify_ops = Enum.filter(mission.ops, fn op ->
+      Map.get(op, :phase) == "simplify"
+    end)
+
+    if simplify_ops == [] do
+      # No simplify ops yet — still spawning
+      {:ok, "simplify"}
+    else
+      all_done = Enum.all?(simplify_ops, &(&1.status in ["done", "failed"]))
+
+      if all_done do
+        # Collect findings from each agent
+        findings =
+          simplify_ops
+          |> Enum.filter(&(&1.status == "done"))
+          |> Enum.map(fn op ->
+            strategy = extract_strategy_from_title(op.title)
+            artifact = GiTF.Missions.get_artifact(mission.id, "simplify_#{strategy}")
+            %{focus: strategy, result: artifact}
+          end)
+          |> Enum.reject(&is_nil(&1.result))
+
+        GiTF.Missions.store_artifact(mission.id, "simplify", %{
+          "agents" => Enum.map(findings, & &1.focus),
+          "completed_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+        })
+
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_scoring(mission)
+      else
+        {:ok, "simplify"}
+      end
+    end
+  end
+
+  defp get_mission_changed_files(mission) do
+    mission.ops
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.flat_map(fn op ->
+      case Map.get(op, :files_changed) || Map.get(op, :changed_files) do
+        files when is_list(files) -> files
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  # -- Scoring Phase: final quality assessment --------------------------------
+
+  defp start_scoring(mission) do
+    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "scoring", "Simplify complete, scoring") do
+      all_artifacts = Map.get(mission, :artifacts, %{})
+      prompt = PhasePrompts.scoring_prompt(mission, all_artifacts)
+      spawn_phase_ghost(mission, "scoring", prompt, model: "general")
+      {:ok, "scoring"}
+    end
+  end
+
+  defp finish_scored(mission) do
+    scoring = GiTF.Missions.get_artifact(mission.id, "scoring")
+
+    if scoring do
+      score = Map.get(scoring, "overall_score", 0)
+      Logger.info("Quest #{mission.id} scored #{score}/100")
+    end
+
+    complete_quest(mission.id)
   end
 
   defp complete_quest(mission_id) do

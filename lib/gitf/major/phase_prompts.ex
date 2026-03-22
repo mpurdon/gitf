@@ -412,4 +412,202 @@ defmodule GiTF.Major.PhasePrompts do
     Set `overall_verdict` to "fail" if any must-have requirements are not met.
     """
   end
+
+  @doc """
+  Returns 3 {focus, prompt} tuples for parallel simplify agents.
+  Each agent reviews changed files with a different lens.
+  """
+  def simplify_prompts(mission, repo_path, changed_files) do
+    files_list = if changed_files != [], do: Enum.join(changed_files, "\n"), else: "(no files tracked)"
+    location = repo_path || "(unknown)"
+
+    [
+      {"reuse", """
+      # Code Reuse Review
+
+      You are a code reuse specialist. Review the changed files for duplicated logic,
+      repeated patterns, and missed abstractions.
+
+      **Goal**: #{mission.goal}
+      **Codebase**: #{location}
+
+      ## Changed Files
+      #{files_list}
+
+      ## Instructions
+
+      1. Read each changed file
+      2. Search the codebase for similar patterns that could be consolidated
+      3. Identify duplicated logic across files
+      4. Suggest extractions into shared helpers/modules where beneficial
+      5. **Apply fixes directly** — don't just report, fix the code
+
+      ## Output Format
+
+      Output ONLY a JSON object in a ```json fence:
+
+      ```json
+      {
+        "issues_found": 0,
+        "issues_fixed": 0,
+        "changes": [
+          {
+            "file": "path/to/file",
+            "type": "extracted_helper",
+            "description": "What was changed and why"
+          }
+        ],
+        "summary": "Brief summary of reuse improvements"
+      }
+      ```
+      """},
+
+      {"quality", """
+      # Code Quality Review
+
+      You are a code quality specialist. Review the changed files for readability,
+      structural problems, and patterns that a senior developer would flag in code review.
+
+      **Goal**: #{mission.goal}
+      **Codebase**: #{location}
+
+      ## Changed Files
+      #{files_list}
+
+      ## Instructions
+
+      1. Read each changed file
+      2. Check naming conventions, function length, clarity
+      3. Look for overly complex conditionals, deep nesting, unclear intent
+      4. Identify missing error handling at system boundaries
+      5. **Apply fixes directly** — don't just report, fix the code
+
+      Do NOT add unnecessary comments, docstrings, or type annotations to code
+      that is already clear. Only fix genuine quality issues.
+
+      ## Output Format
+
+      Output ONLY a JSON object in a ```json fence:
+
+      ```json
+      {
+        "issues_found": 0,
+        "issues_fixed": 0,
+        "changes": [
+          {
+            "file": "path/to/file",
+            "type": "simplified_logic",
+            "description": "What was changed and why"
+          }
+        ],
+        "summary": "Brief summary of quality improvements"
+      }
+      ```
+      """},
+
+      {"efficiency", """
+      # Efficiency Review
+
+      You are a performance and efficiency specialist. Review the changed files for
+      unnecessary iterations, resource waste, and missed optimizations.
+
+      **Goal**: #{mission.goal}
+      **Codebase**: #{location}
+
+      ## Changed Files
+      #{files_list}
+
+      ## Instructions
+
+      1. Read each changed file
+      2. Look for unnecessary iterations, N+1 patterns, redundant computations
+      3. Check for resource leaks (unclosed files, connections, etc.)
+      4. Identify missed concurrency/batching opportunities
+      5. **Apply fixes directly** — don't just report, fix the code
+
+      Do NOT prematurely optimize. Only fix genuine efficiency issues that would
+      matter at normal scale.
+
+      ## Output Format
+
+      Output ONLY a JSON object in a ```json fence:
+
+      ```json
+      {
+        "issues_found": 0,
+        "issues_fixed": 0,
+        "changes": [
+          {
+            "file": "path/to/file",
+            "type": "removed_n_plus_1",
+            "description": "What was changed and why"
+          }
+        ],
+        "summary": "Brief summary of efficiency improvements"
+      }
+      ```
+      """}
+    ]
+  end
+
+  @doc "Scoring prompt: assess final result against original specification."
+  def scoring_prompt(mission, all_artifacts) do
+    artifacts_json =
+      try do
+        Jason.encode!(all_artifacts, pretty: true)
+      rescue
+        _ -> "{}"
+      end
+
+    """
+    # Final Scoring
+
+    You are a project assessor. Score how well the completed implementation
+    matches the original mission goal and requirements.
+
+    **Goal**: #{mission.goal}
+
+    ## All Phase Artifacts
+
+    ```json
+    #{artifacts_json}
+    ```
+
+    ## Instructions
+
+    1. Review the original goal and requirements
+    2. Check each requirement against the implementation artifacts
+    3. Assess code quality based on simplify agent feedback (if available)
+    4. Score completeness, correctness, and quality independently
+    5. Compute an overall weighted score
+
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "completeness": {
+        "score": 85,
+        "notes": "Which requirements were fully met, partially met, or missed"
+      },
+      "correctness": {
+        "score": 90,
+        "notes": "Whether the implementation is correct and handles edge cases"
+      },
+      "quality": {
+        "score": 80,
+        "notes": "Code quality, test coverage, documentation"
+      },
+      "overall_score": 85,
+      "grade": "B+",
+      "summary": "One paragraph assessment of the final result"
+    }
+    ```
+
+    Score each dimension 0-100. Overall score = weighted average
+    (completeness 40%, correctness 40%, quality 20%).
+    Grade: A (90+), B (80+), C (70+), D (60+), F (<60).
+    """
+  end
 end

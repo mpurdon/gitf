@@ -189,7 +189,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:recent_missions, recent_missions)
   end
 
-  @mini_phases ~w(research requirements design review planning implementation validation sync completed)
+  @mini_phases ~w(research requirements design review planning implementation validation sync simplify scoring completed)
 
   defp mini_phase_pipeline(assigns) do
     current = assigns.phase || "pending"

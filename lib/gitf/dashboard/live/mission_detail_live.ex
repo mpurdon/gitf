@@ -439,6 +439,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp phase_icon(%{phase: "implementation"} = assigns), do: ~H"<Heroicons.wrench_screwdriver mini class='w-4 h-4' />"
   defp phase_icon(%{phase: "validation"} = assigns), do: ~H"<Heroicons.shield_check mini class='w-4 h-4' />"
   defp phase_icon(%{phase: "sync"} = assigns), do: ~H"<Heroicons.arrow_path_rounded_square mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "simplify"} = assigns), do: ~H"<Heroicons.sparkles mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "scoring"} = assigns), do: ~H"<Heroicons.chart_bar mini class='w-4 h-4' />"
   defp phase_icon(%{phase: "completed"} = assigns), do: ~H"<Heroicons.flag mini class='w-4 h-4' />"
   defp phase_icon(assigns), do: ~H"<span>{@phase |> String.first() |> String.upcase()}</span>"
 
@@ -446,7 +448,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp normalise_phase(phase), do: phase
 
   # Phases that fast-path missions actually execute
-  @fast_phases ~w(pending implementation validation sync completed)
+  @fast_phases ~w(pending implementation validation sync scoring completed)
 
   defp phase_done?(mission, phase) do
     current = normalise_phase(Map.get(mission, :current_phase, "pending"))
