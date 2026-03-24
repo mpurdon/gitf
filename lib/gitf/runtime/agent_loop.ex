@@ -69,8 +69,7 @@ defmodule GiTF.Runtime.AgentLoop do
           include_dynamic: Keyword.get(opts, :include_dynamic, false)
         )
 
-    tool_set = Keyword.get(opts, :tool_set, :standard)
-    system_prompt = build_system_prompt(Keyword.get(opts, :system_prompt), working_dir, tool_set)
+    system_prompt = build_system_prompt(Keyword.get(opts, :system_prompt), working_dir, nil)
     max_iterations = Keyword.get(opts, :max_iterations, @default_max_iterations)
     max_tokens = Keyword.get(opts, :max_tokens, @default_max_tokens)
     receive_timeout = Keyword.get(opts, :receive_timeout, configured_receive_timeout())
@@ -315,43 +314,12 @@ defmodule GiTF.Runtime.AgentLoop do
 
   # -- System Prompt -----------------------------------------------------------
 
-  defp build_system_prompt(base_prompt, working_dir, tool_set) do
-    # Only load agent profiles for implementation ghosts — phase ghosts (research,
-    # requirements, review, validation) don't need them and the bloat causes timeouts
-    agent_content =
-      if tool_set == :readonly do
-        ""
-      else
-        load_agent_files(working_dir)
-      end
-
-    case {base_prompt, agent_content} do
-      {nil, ""} -> nil
-      {nil, content} -> "## Expert Agent Profiles\n\n" <> content
-      {base, ""} -> base
-      {base, content} -> base <> "\n\n## Expert Agent Profiles\n\n" <> content
-    end
-  end
-
-  defp load_agent_files(working_dir) do
-    agents_dir = Path.join([working_dir, ".claude", "agents"])
-
-    if File.dir?(agents_dir) do
-      agents_dir
-      |> File.ls!()
-      |> Enum.filter(&String.ends_with?(&1, ".md"))
-      |> Enum.sort()
-      |> Enum.map(fn filename ->
-        path = Path.join(agents_dir, filename)
-        content = File.read!(path)
-        "### #{Path.rootname(filename)}\n\n#{content}"
-      end)
-      |> Enum.join("\n\n---\n\n")
-    else
-      ""
-    end
-  rescue
-    _ -> ""
+  defp build_system_prompt(base_prompt, _working_dir, _tool_set) do
+    # Agent profiles are NOT loaded into the system prompt. Each op already has
+    # focused task context (title, description, acceptance criteria) and a
+    # generated task-skill file. Loading all .claude/agents/*.md caused massive
+    # system prompts that triggered API timeouts on first call.
+    base_prompt
   end
 
   # -- Helpers -----------------------------------------------------------------
