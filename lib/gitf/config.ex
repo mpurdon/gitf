@@ -1,23 +1,41 @@
 defmodule GiTF.Config do
   @moduledoc """
-  Reads, writes, and provides defaults for the `.gitf/config.toml` configuration file.
+  Reads, writes, and provides defaults for GiTF configuration files.
 
-  The config is a small TOML file that lives inside the `.gitf/` directory and
-  controls section-wide settings such as maximum concurrent ghosts and cost thresholds.
+  Two config files are supported:
+
+    * **Global** (`~/.config/gitf/config.toml`) — API keys, budgets, thresholds,
+      and other user-wide settings.
+    * **Project** (`<project>/.gitf/config.toml`) — version, session state, and
+      optional per-project overrides that merge on top of global config.
   """
 
-  @default_config %{
-    "gitf" => %{"version" => GiTF.version()},
+  @global_default_config %{
     "major" => %{"max_ghosts" => 5},
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
     "server" => %{"url" => ""},
+    "observability" => %{"webhook_url" => ""}
+  }
+
+  @project_default_config %{
+    "gitf" => %{"version" => GiTF.version()},
     "session" => %{"current_sector" => ""}
   }
 
+  @default_config Map.merge(@global_default_config, @project_default_config)
+
+  @doc "Returns the default global configuration map (API keys, budgets, thresholds)."
+  @spec global_default_config() :: map()
+  def global_default_config, do: @global_default_config
+
+  @doc "Returns the default project configuration map (version, session)."
+  @spec project_default_config() :: map()
+  def project_default_config, do: @project_default_config
+
   @doc """
-  Returns the default configuration map.
+  Returns the full default configuration map (global + project merged).
 
   ## Examples
 
@@ -53,39 +71,36 @@ defmodule GiTF.Config do
   end
 
   @doc """
-  Returns the server URL from .gitf/config.toml, or nil if not configured.
+  Returns the server URL from config, or nil if not configured.
   """
   @spec server_url() :: String.t() | nil
   def server_url do
-    with {:ok, root} <- GiTF.gitf_dir(),
-         {:ok, config} <- read_config(Path.join([root, ".gitf", "config.toml"])),
-         url when is_binary(url) and url != "" <- get_in(config, ["server", "url"]) do
-      url
-    else
+    case GiTF.Config.Provider.get([:server, :url]) do
+      url when is_binary(url) and url != "" -> url
       _ -> nil
     end
+  rescue
+    # Provider not started yet (e.g. early CLI boot)
+    _ -> nil
   end
 
   @doc """
-  Reads a top-level config value from .gitf/config.toml.
+  Reads a top-level config value via Config.Provider (ETS-backed).
 
-  Supports dotted keys like `:api_key` which maps to `["server", "api_key"]`.
-  Returns nil if not found or config can't be read.
+  Supports dotted keys like `:api_key` which maps to `[:server, :api_key]`.
+  Returns nil if not found.
   """
   @spec get(atom()) :: term() | nil
   def get(key) do
-    with {:ok, root} <- GiTF.gitf_dir(),
-         {:ok, config} <- read_config(Path.join([root, ".gitf", "config.toml"])) do
-      config_lookup(config, key)
-    else
-      _ -> nil
-    end
+    GiTF.Config.Provider.get(config_path(key))
+  rescue
+    _ -> nil
   end
 
-  defp config_lookup(config, :api_key), do: get_in(config, ["server", "api_key"])
-  defp config_lookup(config, :max_ghosts), do: get_in(config, ["major", "max_ghosts"])
-  defp config_lookup(config, :budget_usd), do: get_in(config, ["costs", "budget_usd"])
-  defp config_lookup(_config, _key), do: nil
+  defp config_path(:api_key), do: [:server, :api_key]
+  defp config_path(:max_ghosts), do: [:major, :max_ghosts]
+  defp config_path(:budget_usd), do: [:costs, :budget_usd]
+  defp config_path(_key), do: []
 
   # -- Private: TOML encoding ------------------------------------------------
 

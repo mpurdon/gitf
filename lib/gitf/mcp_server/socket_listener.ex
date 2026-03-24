@@ -7,7 +7,7 @@ defmodule GiTF.MCPServer.SocketListener do
   newline-delimited JSON-RPC messages and dispatches them to the
   existing `GiTF.MCPServer` message handler.
 
-  Socket path: `~/.gitf/mcp.sock` (configurable via `GITF_MCP_SOCK`)
+  Socket path: `~/.config/gitf/mcp.sock` (configurable via `GITF_MCP_SOCK`)
 
   A PID file (`<socket_path>.pid`) is written on startup and checked
   to detect stale sockets from crashed previous instances.
@@ -16,7 +16,7 @@ defmodule GiTF.MCPServer.SocketListener do
   use GenServer
   require Logger
 
-  @default_socket_dir Path.join(System.user_home!(), ".gitf")
+  @default_socket_dir Path.join([System.user_home!(), ".config", "gitf"])
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)

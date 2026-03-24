@@ -2,7 +2,8 @@ defmodule GiTF.Config.Provider do
   @moduledoc """
   Runtime config precedence chain.
 
-  Load order: defaults -> `.gitf/config.toml` -> env vars (`HIVE_*`) -> CLI flags.
+  Load order: defaults -> global config (`~/.config/gitf/config.toml`) ->
+  project config (`.gitf/config.toml`) -> env vars (`HIVE_*`) -> CLI flags.
   Each layer merges over the previous. Config available via `get/1`.
 
   Supports env var interpolation in TOML values: `token = "${HIVE_TELEGRAM_TOKEN}"`
@@ -64,7 +65,8 @@ defmodule GiTF.Config.Provider do
 
   defp load_config(gitf_root) do
     defaults()
-    |> deep_merge(load_toml(gitf_root))
+    |> deep_merge(load_global_toml())
+    |> deep_merge_non_empty(load_project_toml(gitf_root))
     |> deep_merge(load_env())
   end
 
@@ -86,15 +88,21 @@ defmodule GiTF.Config.Provider do
     }
   end
 
-  defp load_toml(nil), do: %{}
+  defp load_global_toml do
+    load_toml_file(GiTF.global_config_path())
+  end
 
-  defp load_toml(gitf_root) do
-    path = Path.join([gitf_root, ".gitf", "config.toml"])
+  defp load_project_toml(nil), do: %{}
 
+  defp load_project_toml(gitf_root) do
+    load_toml_file(Path.join([gitf_root, ".gitf", "config.toml"]))
+  end
+
+  defp load_toml_file(path) do
     case File.read(path) do
       {:ok, content} ->
         case Toml.decode(content) do
-          {:ok, parsed} -> atomize_keys(interpolate_env(parsed))
+          {:ok, parsed} -> parsed |> interpolate_env() |> strip_empty_strings() |> atomize_keys()
           {:error, _} -> %{}
         end
 
@@ -130,6 +138,15 @@ defmodule GiTF.Config.Provider do
 
   defp interpolate_env(value), do: value
 
+  # Normalize empty strings to nil so downstream code doesn't need != "" guards
+  defp strip_empty_strings(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {k, strip_empty_strings(v)} end)
+  end
+
+  defp strip_empty_strings(""), do: nil
+  defp strip_empty_strings(list) when is_list(list), do: Enum.map(list, &strip_empty_strings/1)
+  defp strip_empty_strings(value), do: value
+
   defp atomize_keys(map) when is_map(map) do
     Map.new(map, fn
       {k, v} when is_binary(k) -> {String.to_atom(k), atomize_keys(v)}
@@ -157,4 +174,15 @@ defmodule GiTF.Config.Provider do
   end
 
   defp deep_merge(_left, right), do: right
+
+  # Project overlay: skip nil values so unset project keys don't clobber global config
+  defp deep_merge_non_empty(left, right) when is_map(left) and is_map(right) do
+    Map.merge(left, right, fn
+      _key, l, r when is_map(l) and is_map(r) -> deep_merge_non_empty(l, r)
+      _key, l, nil -> l
+      _key, _l, r -> r
+    end)
+  end
+
+  defp deep_merge_non_empty(_left, right), do: right
 end

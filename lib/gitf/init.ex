@@ -213,10 +213,31 @@ defmodule GiTF.Init do
   def major_instructions, do: @major_instructions
 
   @doc """
-  Initializes a GiTF workspace at `path`.
+  Ensures the global config directory and config file exist at `~/.config/gitf/`.
 
-  Creates the `.gitf/` directory structure, writes the default config,
-  seeds the Major's instruction file, and starts the ETF file store.
+  Creates the directory and writes a default global config if missing.
+  Safe to call multiple times — skips if already present.
+  """
+  @spec init_global() :: :ok | {:error, term()}
+  def init_global do
+    global_dir = GiTF.global_config_dir()
+    global_path = GiTF.global_config_path()
+
+    with :ok <- File.mkdir_p(global_dir) do
+      if File.exists?(global_path) do
+        :ok
+      else
+        Config.write_config(global_path, Config.global_default_config())
+      end
+    end
+  end
+
+  @doc """
+  Initializes a GiTF project workspace at `path`.
+
+  Creates the `.gitf/` directory structure, writes a project-scoped config
+  (version and session only), seeds the Major's instruction file, and starts
+  the ETF file store. Also ensures the global config exists.
 
   ## Options
 
@@ -232,7 +253,8 @@ defmodule GiTF.Init do
     expanded = Path.expand(path)
     gitf_dir = Path.join(expanded, ".gitf")
 
-    with :ok <- validate_path(gitf_dir, force?),
+    with :ok <- init_global(),
+         :ok <- validate_path(gitf_dir, force?),
          :ok <- create_directories(gitf_dir),
          :ok <- write_config(gitf_dir),
          :ok <- write_major_instructions(gitf_dir),
@@ -267,7 +289,7 @@ defmodule GiTF.Init do
 
   defp write_config(gitf_dir) do
     config_path = Path.join(gitf_dir, "config.toml")
-    Config.write_config(config_path)
+    Config.write_config(config_path, Config.project_default_config())
   end
 
   defp write_major_instructions(gitf_dir) do

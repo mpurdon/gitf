@@ -31,14 +31,27 @@ defmodule GiTF.InitTest do
       assert File.exists?(Path.join([workspace, ".gitf", "major", "MAJOR.md"]))
     end
 
-    test "writes a valid TOML config" do
+    test "writes a valid TOML project config" do
       workspace = tmp_workspace()
 
       {:ok, _} = GiTF.Init.init(workspace)
 
       config_path = Path.join([workspace, ".gitf", "config.toml"])
       assert {:ok, config} = GiTF.Config.read_config(config_path)
-      assert config["major"]["max_ghosts"] == 5
+      assert config["gitf"]["version"] == GiTF.version()
+      assert config["session"]["current_sector"] == ""
+    end
+
+    test "creates global config at ~/.config/gitf/" do
+      # init/2 calls init_global/0 automatically
+      workspace = tmp_workspace()
+
+      {:ok, _} = GiTF.Init.init(workspace)
+
+      assert File.exists?(GiTF.global_config_path())
+      assert {:ok, global} = GiTF.Config.read_config(GiTF.global_config_path())
+      assert global["major"]["max_ghosts"] == 5
+      assert global["costs"]["budget_usd"] == 10.0
     end
 
     test "writes MAJOR.md with delegation instructions" do

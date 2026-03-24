@@ -1025,8 +1025,13 @@ defmodule GiTF.Major do
           {complexity, pipeline} = GiTF.Triage.triage(op)
           triage_store_job(op, complexity, pipeline)
 
-          # If complex and no recon exists yet, create one and skip spawning the parent
-          if complexity == :complex and GiTF.Recon.should_scout?(op) and not scout_exists?(op.id) do
+          # If complex and no recon exists yet, create one and skip spawning the parent.
+          # Skip recon for ops that are already recons or phase jobs (research, requirements, etc.)
+          already_recon? = Map.get(op, :recon, false)
+          phase_job? = Map.get(op, :phase_job, false)
+
+          if complexity == :complex and not already_recon? and not phase_job? and
+               GiTF.Recon.should_scout?(op) and not scout_exists?(op.id) do
             case GiTF.Recon.create_scout_job(op.id, op.sector_id) do
               {:ok, scout_job} ->
                 Logger.info("Created recon for complex op #{op.id}, deferring spawn")
@@ -1123,8 +1128,7 @@ defmodule GiTF.Major do
 
   defp scout_exists?(parent_op_id) do
     GiTF.Archive.filter(:ops, fn j ->
-      Map.get(j, :scout_for) == parent_op_id and
-        j.status not in ["failed", "rejected"]
+      Map.get(j, :scout_for) == parent_op_id
     end)
     |> Enum.any?()
   rescue

@@ -220,7 +220,7 @@ defmodule GiTF.CLI do
   defp expand_defaults(argv), do: argv
 
   # Commands that manage their own store lifecycle or don't need the store.
-  @no_auto_store [[:version], [:server], [:daemon]]
+  @no_auto_store [[:version], [:server], [:daemon], [:completions], [:quickref]]
 
   defp maybe_ensure_store(subcommand_path) do
     unless subcommand_path in @no_auto_store do
@@ -309,7 +309,7 @@ defmodule GiTF.CLI do
         end
 
       {:error, :not_in_gitf} ->
-        prompt_init()
+        prompt_project_init()
     end
   end
 
@@ -317,12 +317,13 @@ defmodule GiTF.CLI do
     System.get_env("GITF_PATH") != nil
   end
 
-  defp prompt_init do
+  defp prompt_project_init do
     IO.puts("gitf v#{GiTF.version()}")
+    IO.puts("Global config: #{GiTF.global_config_path()}")
     IO.puts("")
 
     answer =
-      case IO.gets("No gitf workspace found. Initialize one here? [y/n] ") do
+      case IO.gets("No gitf project found. Initialize one here? [y/n] ") do
         :eof -> "y"
         line when is_binary(line) -> line |> String.trim() |> String.downcase()
       end
@@ -332,7 +333,7 @@ defmodule GiTF.CLI do
 
       case GiTF.Init.init(init_path, force: false) do
         {:ok, expanded} ->
-          Format.success("GiTF initialized at #{expanded}")
+          Format.success("Project initialized at #{expanded}")
           ensure_store()
 
         {:error, reason} ->

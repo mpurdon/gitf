@@ -32,6 +32,22 @@ defmodule GiTF do
     end
   end
 
+  # -- Global config paths ----------------------------------------------------
+
+  @doc "Returns the global config directory: ~/.config/gitf/"
+  @spec global_config_dir() :: String.t()
+  def global_config_dir do
+    Path.join([System.user_home!(), ".config", "gitf"])
+  end
+
+  @doc "Returns the global config file path: ~/.config/gitf/config.toml"
+  @spec global_config_path() :: String.t()
+  def global_config_path do
+    Path.join(global_config_dir(), "config.toml")
+  end
+
+  # -- Project discovery ------------------------------------------------------
+
   @doc """
   Locates the root directory of a GiTF project.
 

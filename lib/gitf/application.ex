@@ -25,18 +25,18 @@ defmodule GiTF.Application do
   end
 
   defp start_full_app do
-    # Ensure global storage directories exist
-    File.mkdir_p!(Path.join(System.user_home!(), ".gitf/llm_db"))
+    GiTF.Init.init_global()
+    File.mkdir_p!(Path.join(GiTF.global_config_dir(), "llm_db"))
 
-    # Determine gitf root for config loading
+    # Determine project root for config overlay (nil if not in a project)
     gitf_root = case GiTF.gitf_dir() do
       {:ok, root} -> root
-      _ -> File.cwd!()
+      _ -> nil
     end
 
     setup_file_logging()
 
-    # Start Config.Provider early so all subsequent code can read config.toml
+    # Start Config.Provider early — loads global config, then project overlay
     GiTF.Config.Provider.start_link(gitf_root: gitf_root)
 
     GiTF.Runtime.Keys.load()
@@ -45,7 +45,7 @@ defmodule GiTF.Application do
       GiTF.Runtime.ModelResolver.setup_ollama_env()
     end
 
-    validate_config(gitf_root)
+    validate_config()
 
     GiTF.Progress.init()
     GiTF.CircuitBreaker.init()
@@ -187,51 +187,43 @@ defmodule GiTF.Application do
     }]
   end
 
-  defp validate_config(gitf_root) do
-    config_path = Path.join([gitf_root, ".gitf", "config.toml"])
+  defp validate_config do
+    alias GiTF.Config.Provider
 
-    case GiTF.Config.read_config(config_path) do
-      {:ok, config} ->
-        # Warn about missing critical config sections
-        warnings = []
+    warnings = []
 
-        warnings =
-          if get_in(config, ["costs", "budget_usd"]) == nil do
-            ["costs.budget_usd not set (defaulting to $10)" | warnings]
-          else
-            warnings
-          end
+    warnings =
+      if Provider.get([:costs, :budget_usd]) == nil do
+        ["costs.budget_usd not set (defaulting to $10)" | warnings]
+      else
+        warnings
+      end
 
-        warnings =
-          if get_in(config, ["major", "max_ghosts"]) == nil do
-            ["queen.max_ghosts not set (defaulting to 5)" | warnings]
-          else
-            warnings
-          end
+    warnings =
+      if Provider.get([:major, :max_ghosts]) == nil do
+        ["queen.max_ghosts not set (defaulting to 5)" | warnings]
+      else
+        warnings
+      end
 
-        # Check for API keys if in API mode
-        warnings =
-          if GiTF.Runtime.ModelResolver.api_mode?() do
-            has_google = (get_in(config, ["llm", "keys", "google"]) || "") != ""
-            has_anthropic = (get_in(config, ["llm", "keys", "anthropic"]) || "") != ""
-            env_google = System.get_env("GOOGLE_API_KEY") || System.get_env("GEMINI_API_KEY")
-            env_anthropic = System.get_env("ANTHROPIC_API_KEY")
+    warnings =
+      if GiTF.Runtime.ModelResolver.api_mode?() do
+        has_google = (Provider.get([:llm, :keys, :google]) || "") != ""
+        has_anthropic = (Provider.get([:llm, :keys, :anthropic]) || "") != ""
+        env_google = System.get_env("GOOGLE_API_KEY") || System.get_env("GEMINI_API_KEY")
+        env_anthropic = System.get_env("ANTHROPIC_API_KEY")
 
-            if not has_google and not has_anthropic and env_google == nil and env_anthropic == nil do
-              ["No API keys found in config or environment — API calls will fail" | warnings]
-            else
-              warnings
-            end
-          else
-            warnings
-          end
-
-        if warnings != [] do
-          Enum.each(warnings, fn w -> Logger.warning("Config: #{w}") end)
+        if not has_google and not has_anthropic and env_google == nil and env_anthropic == nil do
+          ["No API keys found in config or environment — API calls will fail" | warnings]
+        else
+          warnings
         end
+      else
+        warnings
+      end
 
-      {:error, reason} ->
-        Logger.warning("Config: cannot read #{config_path}: #{inspect(reason)}, using defaults")
+    if warnings != [] do
+      Enum.each(warnings, fn w -> Logger.warning("Config: #{w}") end)
     end
   rescue
     _ -> :ok

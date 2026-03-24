@@ -96,13 +96,12 @@ defmodule GiTF.Runtime.Keys do
 
   # -- Private -----------------------------------------------------------------
 
+  # Provider is started before Keys.load(), so we can read from ETS
   defp read_keys_from_toml do
-    with {:ok, root} <- GiTF.gitf_dir(),
-         path = Path.join([root, ".gitf", "config.toml"]),
-         {:ok, content} <- File.read(path),
-         {:ok, parsed} <- Toml.decode(content) do
-      get_in(parsed, ["llm", "keys"]) || %{}
-    else
+    case GiTF.Config.Provider.get([:llm, :keys]) do
+      keys when is_map(keys) ->
+        Map.new(keys, fn {k, v} -> {to_string(k), v} end)
+        |> Map.filter(fn {_k, v} -> is_binary(v) and v != "" end)
       _ -> %{}
     end
   rescue
