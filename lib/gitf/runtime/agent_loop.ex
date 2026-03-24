@@ -265,6 +265,15 @@ defmodule GiTF.Runtime.AgentLoop do
   # Normalize usage from any provider format into canonical atom-keyed map
   defp normalize_usage(%{usage: %{input_tokens: _} = usage}), do: usage
   defp normalize_usage(%{usage: usage}) when is_map(usage), do: normalize_usage_keys(usage)
+  # Google/Gemini returns raw JSON with "usageMetadata" string key
+  defp normalize_usage(%{"usageMetadata" => meta}) when is_map(meta) do
+    %{
+      input_tokens: Map.get(meta, "promptTokenCount", 0),
+      output_tokens: Map.get(meta, "candidatesTokenCount", 0) ||
+        max(0, Map.get(meta, "totalTokenCount", 0) - Map.get(meta, "promptTokenCount", 0)),
+      total_cost: 0
+    }
+  end
   defp normalize_usage(_), do: %{input_tokens: 0, output_tokens: 0, total_cost: 0}
 
   defp normalize_usage_keys(usage) do

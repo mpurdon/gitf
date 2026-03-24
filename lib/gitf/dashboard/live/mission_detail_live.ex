@@ -272,11 +272,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <% "pending" -> %>
               <button phx-click="start" class="btn btn-green">Start Mission</button>
             <% "active" -> %>
-              <%= if Map.get(@mission, :current_phase) == "planning" do %>
+              <%= if has_artifacts?(@mission) do %>
                 <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
               <% end %>
               <button phx-click="kill" class="btn btn-red" data-confirm="Kill this mission?">Kill</button>
             <% "completed" -> %>
+              <%= if has_artifacts?(@mission) do %>
+                <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
+              <% end %>
               <button phx-click="generate_report" class="btn btn-blue" disabled={@report_loading}>
                 <%= if @report_loading do %>
                   <span class="loading-spinner" style="width:14px;height:14px;border-width:2px"></span>
@@ -285,6 +288,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                   Generate Report
                 <% end %>
               </button>
+            <% "failed" -> %>
+              <%= if has_artifacts?(@mission) do %>
+                <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
+              <% end %>
             <% _ -> %>
           <% end %>
           <%= if Map.get(@mission, :status) == "failed" || Enum.any?(@ops, &(Map.get(&1, :status) == "failed")) do %>
@@ -388,9 +395,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                   </td>
                   <td style="font-family:monospace; font-size:0.8rem">{short_id(Map.get(op, :ghost_id))}</td>
                   <td style="min-width:7rem">
-                    <% ctx_pct = ghost_context_pct(op) %>
+                    <% {ctx_pct, ctx_used, ctx_limit} = ghost_context_info(op) %>
                     <%= if ctx_pct > 0 do %>
-                      <div style="display:flex; align-items:center; gap:0.3rem">
+                      <div style="display:flex; align-items:center; gap:0.3rem" title={"#{format_tokens_mb(ctx_used)} / #{format_tokens_mb(ctx_limit)}"}>
                         <div style="flex:1; height:6px; background:#1f2937; border-radius:3px; overflow:hidden">
                           <div style={"width:#{ctx_pct}%; height:100%; border-radius:3px; background:#{context_gauge_color(ctx_pct)}"}></div>
                         </div>
@@ -479,17 +486,38 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
-  defp ghost_context_pct(op) do
+  defp ghost_context_info(op) do
     case Map.get(op, :ghost_id) do
-      nil -> 0.0
+      nil -> {0.0, 0, 0}
       ghost_id ->
         case GiTF.Archive.get(:ghosts, ghost_id) do
-          %{context_percentage: pct} when is_number(pct) -> pct * 100
-          _ -> 0.0
+          %{context_percentage: pct, context_tokens_used: used, context_tokens_limit: limit}
+            when is_number(pct) ->
+            {pct * 100, used || 0, limit || 0}
+          %{context_percentage: pct} when is_number(pct) ->
+            {pct * 100, 0, 0}
+          _ -> {0.0, 0, 0}
         end
     end
   rescue
-    _ -> 0.0
+    _ -> {0.0, 0, 0}
+  end
+
+  # ~4 chars per token average, so tokens * 4 bytes ≈ context size
+  defp format_tokens_mb(0), do: "-"
+  defp format_tokens_mb(tokens) when is_number(tokens) do
+    kb = tokens / 250
+    if kb >= 1000 do
+      "#{Float.round(kb / 1000, 1)}MB"
+    else
+      "#{Float.round(kb, 0) |> trunc()}KB"
+    end
+  end
+  defp format_tokens_mb(_), do: "-"
+
+  defp has_artifacts?(mission) do
+    artifacts = Map.get(mission, :artifacts, %{})
+    is_map(artifacts) and map_size(artifacts) > 0
   end
 
   defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"
