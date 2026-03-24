@@ -42,20 +42,9 @@ defmodule GiTF.Budget do
   @doc "Returns the base budget from config (ignoring mission overrides)."
   @spec config_budget() :: float()
   def config_budget do
-    case GiTF.gitf_dir() do
-      {:ok, gitf_root} ->
-        config_path = Path.join([gitf_root, ".gitf", "config.toml"])
-
-        case GiTF.Config.read_config(config_path) do
-          {:ok, config} ->
-            (get_in(config, ["costs", "budget_usd"]) || @default_budget_usd) * 1.0
-
-          {:error, _} ->
-            @default_budget_usd
-        end
-
-      {:error, _} ->
-        @default_budget_usd
+    case GiTF.Config.Provider.get([:costs, :budget_usd]) do
+      val when is_number(val) and val > 0 -> val * 1.0
+      _ -> @default_budget_usd
     end
   end
 
@@ -87,6 +76,9 @@ defmodule GiTF.Budget do
 
   Returns `:ok`, `{:warn, estimated, remaining}`, or `{:error, :would_exceed, estimated, remaining}`.
   """
+  # Warn when estimated cost exceeds this fraction of remaining budget
+  @warn_threshold 0.7
+
   @spec preflight_check(String.t()) :: :ok | {:warn, float(), float()} | {:error, :would_exceed, float(), float()}
   def preflight_check(mission_id) do
     remaining = remaining(mission_id)
@@ -96,7 +88,7 @@ defmodule GiTF.Budget do
       estimated > remaining ->
         {:error, :would_exceed, estimated, remaining}
 
-      estimated > remaining * 0.7 ->
+      estimated > remaining * @warn_threshold ->
         {:warn, estimated, remaining}
 
       true ->
@@ -142,8 +134,8 @@ defmodule GiTF.Budget do
         end)
 
       _ ->
-        # No plan yet — conservative estimate of 3 general ops + phases
-        3 * @cost_per_tier["general"] + 4 * @cost_per_tier["general"]
+        # No plan yet — conservative estimate of ~7 general-tier ops (impl + phases)
+        7 * @cost_per_tier["general"]
     end
   end
 

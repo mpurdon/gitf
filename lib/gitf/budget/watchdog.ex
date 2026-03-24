@@ -18,6 +18,8 @@ defmodule GiTF.Budget.Watchdog do
 
   @check_interval :timer.seconds(10)
   @max_budget_multiplier 2.0
+  # Auto-fail paused missions after this grace period (default: 2 hours)
+  @pause_grace_hours 2
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -138,7 +140,7 @@ defmodule GiTF.Budget.Watchdog do
       end
     end)
 
-    update_quest_status(mission.id, "paused_budget")
+    update_quest_status(mission.id, "paused_budget", %{paused_at: DateTime.utc_now()})
 
     GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
       type: :budget_paused,
@@ -165,17 +167,47 @@ defmodule GiTF.Budget.Watchdog do
           )
 
         _ ->
-          :ok
+          # Check grace period — auto-fail if paused too long
+          maybe_auto_fail_paused(mission)
       end
     end)
   rescue
     _ -> :ok
   end
 
-  defp update_quest_status(mission_id, status) do
+  defp maybe_auto_fail_paused(mission) do
+    paused_at = Map.get(mission, :paused_at) || Map.get(mission, :updated_at) || Map.get(mission, :inserted_at)
+
+    case paused_at do
+      %DateTime{} = ts ->
+        hours_paused = DateTime.diff(DateTime.utc_now(), ts, :second) / 3600
+
+        if hours_paused > @pause_grace_hours do
+          Logger.warning("Quest #{mission.id} paused for #{Float.round(hours_paused, 1)}h (grace period exceeded), auto-failing")
+
+          GiTF.Missions.transition_phase(mission.id, "completed",
+            "Budget exhausted — auto-failed after #{@pause_grace_hours}h grace period")
+          GiTF.Missions.update_status!(mission.id)
+
+          GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+            type: :budget_auto_failed,
+            message: "Quest #{mission.id} auto-failed after #{@pause_grace_hours}h budget pause grace period"
+          })
+        end
+
+      _ ->
+        :ok
+    end
+  rescue
+    e ->
+      Logger.warning("Auto-fail check failed for paused mission #{mission.id}: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp update_quest_status(mission_id, status, extra \\ %{}) do
     case Archive.get(:missions, mission_id) do
       nil -> :ok
-      mission -> Archive.put(:missions, Map.put(mission, :status, status))
+      mission -> Archive.put(:missions, Map.merge(mission, Map.put(extra, :status, status)))
     end
   end
 end

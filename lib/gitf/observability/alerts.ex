@@ -32,8 +32,9 @@ defmodule GiTF.Observability.Alerts do
 
       case channel do
         :auto ->
+          # Log directly; webhook is handled by the telemetry handler
+          # attached in attach_webhook_handler/0 (fired by the emit above)
           send_notification(:log, type, message)
-          if webhook_url(), do: send_notification(:webhook, type, message)
 
         other ->
           send_notification(other, type, message)
@@ -48,7 +49,9 @@ defmodule GiTF.Observability.Alerts do
 
     case webhook_url() do
       nil -> :ok
-      _url -> send_notification(:webhook, type, message)
+      _url ->
+        # Fire-and-forget: avoid blocking the caller during retries
+        Task.start(fn -> send_notification(:webhook, type, message) end)
     end
 
     :ok
@@ -73,7 +76,8 @@ defmodule GiTF.Observability.Alerts do
     message = Map.get(metadata, :message, "")
 
     if webhook_url() do
-      send_notification(:webhook, type, message)
+      # Fire-and-forget: telemetry handlers run in the caller's process
+      Task.start(fn -> send_notification(:webhook, type, message) end)
     end
   rescue
     _ -> :ok
@@ -165,6 +169,8 @@ defmodule GiTF.Observability.Alerts do
     end
   end
 
+  @webhook_max_retries 3
+
   defp send_notification(:log, type, message) do
     Logger.warning("[ALERT] #{type}: #{message}")
   end
@@ -182,21 +188,41 @@ defmodule GiTF.Observability.Alerts do
           timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
         }
 
-        case Req.post(url, json: payload, receive_timeout: 5_000) do
-          {:ok, %{status: status}} when status in 200..299 ->
-            Logger.debug("Webhook alert sent: #{type}")
-
-          {:ok, %{status: status}} ->
-            Logger.warning("Webhook returned #{status} for alert: #{type}")
-
-          {:error, reason} ->
-            Logger.warning("Webhook failed for alert #{type}: #{inspect(reason)}")
-        end
+        send_webhook_with_retry(url, payload, type, 0)
     end
   end
 
   defp send_notification(channel, type, message) do
     Logger.warning("[#{channel}] #{type}: #{message}")
+  end
+
+  defp send_webhook_with_retry(_url, _payload, type, attempt) when attempt >= @webhook_max_retries do
+    Logger.warning("Webhook exhausted #{@webhook_max_retries} retries for alert: #{type}")
+  end
+
+  defp send_webhook_with_retry(url, payload, type, attempt) do
+    case Req.post(url, json: payload, receive_timeout: 5_000) do
+      {:ok, %{status: status}} when status in 200..299 ->
+        Logger.debug("Webhook alert sent: #{type}")
+
+      {:ok, %{status: status}} when status in [429, 500, 502, 503, 504] ->
+        delay = min(:timer.seconds(2) * Integer.pow(2, attempt), :timer.seconds(30))
+        Logger.warning("Webhook returned #{status} for alert #{type}, retrying in #{div(delay, 1000)}s (attempt #{attempt + 1}/#{@webhook_max_retries})")
+        Process.sleep(delay)
+        send_webhook_with_retry(url, payload, type, attempt + 1)
+
+      {:ok, %{status: status}} ->
+        Logger.warning("Webhook returned #{status} for alert: #{type}")
+
+      {:error, reason} ->
+        delay = min(:timer.seconds(1) * Integer.pow(2, attempt), :timer.seconds(15))
+        Logger.warning("Webhook failed for alert #{type}: #{inspect(reason)}, retrying in #{div(delay, 1000)}s (attempt #{attempt + 1}/#{@webhook_max_retries})")
+        Process.sleep(delay)
+        send_webhook_with_retry(url, payload, type, attempt + 1)
+    end
+  rescue
+    _ ->
+      Logger.warning("Webhook crashed for alert #{type} (attempt #{attempt + 1})")
   end
 
   defp webhook_url do

@@ -100,7 +100,8 @@ defmodule GiTF.Major do
       max_retries: 3,
       last_checkpoint: %{},
       stall_timeout: :timer.minutes(10),
-      pending_verifications: %{}
+      pending_verifications: %{},
+      clarification_timers: %{}
     }
 
     # Tachikoma is now supervised by Application — just verify it's running
@@ -367,6 +368,39 @@ defmodule GiTF.Major do
         Logger.debug("Delayed retry skipped for op #{op_id}: op not found")
         {:noreply, state}
     end
+  end
+
+  def handle_info({:clarification_timeout, ghost_id, body}, state) do
+    state = %{state | clarification_timers: Map.delete(state.clarification_timers, ghost_id)}
+
+    # Auto-resolve clarification after timeout — retry the ghost's op with simplified instructions
+    case GiTF.Ghosts.get(ghost_id) do
+      {:ok, ghost} when not is_nil(ghost.op_id) ->
+        case GiTF.Ops.get(ghost.op_id) do
+          {:ok, op} when op.status in ["running", "assigned"] ->
+            Logger.warning("Clarification timeout for ghost #{ghost_id}, auto-resolving op #{op.id}")
+            GiTF.Observability.Alerts.dispatch_webhook(:clarification_auto_resolved,
+              "Ghost #{ghost_id} clarification timed out after 15m — retrying op #{op.id} with simplified scope")
+
+            # Fail the current op so retry logic picks it up with feedback
+            GiTF.Ops.fail(op.id)
+            feedback = "Previous attempt requested clarification: #{String.slice(body, 0, 500)}. " <>
+              "Proceed with your best interpretation. If instructions are ambiguous, choose the simplest approach."
+            send(self(), {:delayed_retry, op.id, feedback})
+
+          _ ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+
+    {:noreply, state}
+  rescue
+    e ->
+      Logger.warning("Clarification timeout handler failed for ghost #{ghost_id}: #{Exception.message(e)}")
+      {:noreply, state}
   end
 
   def handle_info(msg, state) do
@@ -730,6 +764,8 @@ defmodule GiTF.Major do
     _ -> state
   end
 
+  @clarification_timeout_ms :timer.minutes(15)
+
   defp handle_waggle(%{subject: "clarification_needed"} = link_msg, state) do
     Logger.warning("Clarification request from ghost #{link_msg.from}: #{link_msg.body}")
 
@@ -739,7 +775,16 @@ defmodule GiTF.Major do
       {:clarification_needed, link_msg.from, link_msg.body}
     )
 
-    state
+    GiTF.Observability.Alerts.dispatch_webhook(:clarification_needed,
+      "Ghost #{link_msg.from} needs clarification: #{String.slice(link_msg.body, 0, 200)}")
+
+    # Cancel any previous timer for this ghost, then schedule a new one
+    ghost_id = link_msg.from
+    old_ref = Map.get(state.clarification_timers, ghost_id)
+    if old_ref, do: Process.cancel_timer(old_ref)
+
+    ref = Process.send_after(self(), {:clarification_timeout, ghost_id, link_msg.body}, @clarification_timeout_ms)
+    %{state | clarification_timers: Map.put(state.clarification_timers, ghost_id, ref)}
   rescue
     _ -> state
   end

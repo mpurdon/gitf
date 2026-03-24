@@ -59,6 +59,14 @@ defmodule GiTF.Major.Orchestrator do
           start_research(mission)
         end
       end
+    else
+      {:error, :no_sector_assigned} ->
+        # Fail the mission so it doesn't stall forever in "pending"
+        Logger.warning("Quest #{mission_id} has no sector and auto-assign failed")
+        fail_quest(mission_id, "No sector assigned and auto-assign failed")
+
+      error ->
+        error
     end
   end
 
@@ -101,9 +109,6 @@ defmodule GiTF.Major.Orchestrator do
           type: :quest_timeout,
           message: "Quest #{mission_id} force-completed after #{timeout_h}h timeout"
         })
-
-        GiTF.Observability.Alerts.dispatch_webhook(:quest_timeout,
-          "Quest #{mission_id} force-completed after #{timeout_h}h timeout")
 
         fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
       else

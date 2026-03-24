@@ -39,6 +39,7 @@ defmodule GiTF.Ghosts do
     # Atomic check: reject if op already has a ghost assigned (prevents duplicate spawning)
     with {:check_ready, :ok} <- {:check_ready, check_not_already_assigned(op_id)},
          {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
+         {:llm_health, :ok} <- {:llm_health, check_llm_available()},
          {:create_ghost, {:ok, ghost}} <- {:create_ghost, create_ghost_record(name, op_id)},
          {:assign, :ok} <- {:assign, assign_job(op_id, ghost.id)},
          {:start_worker, {:ok, _pid}} <-
@@ -102,6 +103,7 @@ defmodule GiTF.Ghosts do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
     with {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
+         {:llm_health, :ok} <- {:llm_health, check_llm_available()},
          {:create_ghost, {:ok, ghost}} <- {:create_ghost, create_ghost_record(name, op_id)},
          {:assign, :ok} <- {:assign, assign_job(op_id, ghost.id)},
          {:shell, {:ok, shell}} <-
@@ -227,6 +229,16 @@ defmodule GiTF.Ghosts do
 
   defp check_job_ready(op_id) do
     if GiTF.Ops.ready?(op_id), do: :ok, else: {:error, :blocked}
+  end
+
+  # Pre-flight check: don't waste a spawn attempt if the LLM circuit breaker is open
+  defp check_llm_available do
+    case GiTF.CircuitBreaker.get_state("api:llm") do
+      :open -> {:error, :circuit_open}
+      _ -> :ok
+    end
+  rescue
+    _ -> :ok
   end
 
   defp create_ghost_record(name, op_id) do
