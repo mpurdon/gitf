@@ -326,8 +326,38 @@ defmodule GiTF.Major.Planner do
 
   @doc false
   def strategy_instruction(nil, _), do: ""
-  def strategy_instruction(name, hint) when is_binary(hint),
-    do: "STRATEGY: \"#{name}\" — #{hint}. Design the plan accordingly."
+
+  def strategy_instruction("minimal", _hint) do
+    """
+    ## Strategy: MINIMAL
+    Go for the simplest thing that works. Fewest files changed, no new abstractions,
+    no tests unless they already exist. Skip nice-to-haves. If something can be
+    hardcoded instead of configurable, hardcode it. One op if possible.
+    """
+  end
+
+  def strategy_instruction("normal", _hint) do
+    """
+    ## Strategy: NORMAL
+    Standard implementation with reasonable completeness. Follow existing patterns
+    in the codebase. Include tests if the project has a test suite. Handle obvious
+    edge cases but don't over-engineer. 2-3 ops is typical.
+    """
+  end
+
+  def strategy_instruction("complex", _hint) do
+    """
+    ## Strategy: COMPLEX
+    Comprehensive implementation with thorough coverage. Add tests, handle edge
+    cases, consider error states, and document non-obvious decisions. If the design
+    mentions optional enhancements, include them. 3-4 ops is typical.
+    """
+  end
+
+  def strategy_instruction(name, hint) when is_binary(hint) do
+    "## Strategy: #{String.upcase(name)}\n#{hint}. Design the plan accordingly.\n"
+  end
+
   def strategy_instruction(_, _), do: ""
 
   defp extract_text(%{text: text}), do: text
@@ -431,70 +461,8 @@ defmodule GiTF.Major.Planner do
   minimal / normal / complex.
   """
   @spec discover_strategies(map(), map()) :: [%{name: String.t(), hint: String.t()}]
-  def discover_strategies(mission, artifacts \\ %{}) do
-    artifacts_context =
-      artifacts
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-      |> Enum.map(fn {k, _v} -> "- #{k} artifact available" end)
-      |> Enum.join("\n")
-
-    artifacts_section = if artifacts_context != "", do: "\nAvailable artifacts:\n#{artifacts_context}\n", else: ""
-
-    prompt = """
-    You are classifying a project goal.
-
-    Goal: #{mission.goal}
-    #{artifacts_section}
-    Does this goal involve a fundamental technology or approach choice (e.g., native vs cross-platform,
-    different languages, different frameworks/SDKs)?
-
-    If YES — output up to 3 alternative approaches as JSON:
-    ```json
-    [
-      {"name": "short-kebab-name", "hint": "One-line description of this approach"},
-      ...
-    ]
-    ```
-
-    If NO — output exactly:
-    ```json
-    [
-      {"name": "minimal", "hint": "Bare-minimum implementation to achieve the goal"},
-      {"name": "normal",  "hint": "Standard implementation with reasonable completeness"},
-      {"name": "complex", "hint": "Comprehensive implementation with thorough testing, edge cases, and documentation"}
-    ]
-    ```
-    """
-
-    case GiTF.Runtime.Models.generate_text(prompt, model: "fast") do
-      {:ok, response} ->
-        text = extract_text(response)
-        parse_strategies(text)
-
-      {:error, _} ->
-        @default_strategies
-    end
-  end
-
-  defp parse_strategies(text) do
-    json_str =
-      case Regex.run(~r/```json\s*\n(.*?)\n\s*```/s, text) do
-        [_, json] -> json
-        _ -> text
-      end
-
-    case Jason.decode(json_str) do
-      {:ok, list} when is_list(list) and length(list) > 0 ->
-        Enum.map(list, fn item ->
-          %{
-            name: item["name"] || "unknown",
-            hint: item["hint"] || ""
-          }
-        end)
-
-      _ ->
-        @default_strategies
-    end
+  def discover_strategies(_mission, _artifacts \\ %{}) do
+    @default_strategies
   end
 
   @doc """

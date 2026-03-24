@@ -325,18 +325,36 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec planning_prompt(map(), map(), map(), map()) :: String.t()
   def planning_prompt(mission, design, requirements, review) do
+    research = GiTF.Missions.get_artifact(mission.id, "research")
     design_json = Jason.encode!(design, pretty: true)
     requirements_json = Jason.encode!(requirements, pretty: true)
     review_json = Jason.encode!(review, pretty: true)
 
+    research_section = if research do
+      research_json = Jason.encode!(research, pretty: true)
+      """
+      ## Codebase Research
+
+      ```json
+      #{research_json}
+      ```
+      """
+    else
+      ""
+    end
+
     """
     # Planning Phase
 
-    You are a project planner. From the validated design, produce an ordered
-    list of implementation ops with dependencies.
+    You are a project planner. Using ALL prior phase artifacts below, produce an
+    ordered list of implementation ops with dependencies. Stay grounded in the
+    actual codebase — only reference files, patterns, and technologies identified
+    in the research and design phases. Do NOT introduce new technologies or
+    frameworks that aren't already in the project.
 
     **Goal**: #{mission.goal}
 
+    #{research_section}
     ## Requirements
 
     ```json
@@ -360,9 +378,9 @@ defmodule GiTF.Major.PhasePrompts do
     1. Break the design into discrete, parallelizable ops
     2. Each op should be completable by a single developer in one session
     3. Define clear acceptance criteria derived from requirements
-    4. Specify target files from the design
+    4. Specify target files from the design — these must be real files in the project
     5. Set up dependencies (op indices, 0-based)
-    6. Recommend model complexity (general for simple, thinking for complex)
+    6. Recommend model complexity: "general" for straightforward changes, "thinking" for complex logic
 
     ## Output Format
 
@@ -372,8 +390,8 @@ defmodule GiTF.Major.PhasePrompts do
     [
       {
         "title": "Short descriptive title",
-        "description": "Detailed implementation instructions",
-        "target_files": ["lib/path/to/file.ex"],
+        "description": "Detailed implementation instructions referencing specific files and functions",
+        "target_files": ["path/to/actual/file.ext"],
         "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
         "depends_on_indices": [],
         "model_recommendation": "general"
@@ -381,7 +399,7 @@ defmodule GiTF.Major.PhasePrompts do
     ]
     ```
 
-    Keep the number of ops minimal. Prefer fewer, larger ops over many small ones.
+    Keep the number of ops minimal (2-4). Prefer fewer, larger ops over many small ones.
     """
   end
 
