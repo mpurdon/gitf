@@ -140,36 +140,71 @@ defmodule GiTF.Runtime.Keys do
     end
   end
 
-  @doc "Loads AWS credentials from ~/.aws/credentials for the given profile."
+  @doc "Loads AWS credentials from ~/.aws/credentials or SSO for the given profile."
   def load_aws_profile(profile) do
     creds_path = Path.join(System.user_home!(), ".aws/credentials")
     config_path = Path.join(System.user_home!(), ".aws/config")
 
-    case parse_ini_file(creds_path) do
-      {:ok, sections} ->
-        case Map.get(sections, profile) do
-          nil ->
-            Logger.debug("AWS profile '#{profile}' not found in #{creds_path}")
-            0
+    # Try static credentials file first
+    loaded =
+      case parse_ini_file(creds_path) do
+        {:ok, sections} ->
+          case Map.get(sections, profile) do
+            nil -> 0
+            creds -> set_aws_env_vars(creds)
+          end
+        {:error, _} -> 0
+      end
 
-          creds ->
-            loaded = set_aws_env_vars(creds)
+    # If no static creds found, try SSO via `aws configure export-credentials`
+    loaded =
+      if loaded == 0 do
+        load_aws_sso_credentials(profile)
+      else
+        loaded
+      end
 
-            # Also check ~/.aws/config for region if not in credentials
-            if System.get_env("AWS_REGION") == nil do
-              load_aws_region(config_path, profile)
-            end
+    # Also check ~/.aws/config for region if not set
+    if System.get_env("AWS_REGION") == nil do
+      load_aws_region(config_path, profile)
+    end
 
-            if loaded > 0 do
-              Logger.info("Loaded AWS credentials from profile '#{profile}'")
-            end
+    if loaded > 0 do
+      Logger.info("Loaded AWS credentials from profile '#{profile}'")
+    end
 
-            loaded
-        end
+    loaded
+  end
 
-      {:error, _} ->
+  defp load_aws_sso_credentials(profile) do
+    case System.cmd("aws", ["configure", "export-credentials", "--profile", profile, "--format", "env"],
+           stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.count(fn line ->
+          case String.split(line, "=", parts: 2) do
+            ["export " <> var, value] ->
+              var = String.trim(var)
+              value = String.trim(value)
+              if var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"] do
+                System.put_env(var, value)
+                true
+              else
+                false
+              end
+            _ -> false
+          end
+        end)
+
+      {error, _} ->
+        Logger.debug("SSO credential export failed for profile '#{profile}': #{String.slice(error, 0, 200)}")
         0
     end
+  rescue
+    e ->
+      Logger.debug("SSO credential export error: #{Exception.message(e)}")
+      0
   end
 
   defp set_aws_env_vars(creds) do
