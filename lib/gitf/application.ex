@@ -52,6 +52,15 @@ defmodule GiTF.Application do
       GiTF.Runtime.ModelResolver.setup_ollama_env()
     end
 
+    # Set up AWS credentials for Bedrock if it's in the provider priority
+    try do
+      if "bedrock" in GiTF.Runtime.ProviderManager.provider_priority() do
+        GiTF.Runtime.ProviderManager.ensure_aws_credentials()
+      end
+    rescue
+      _ -> :ok
+    end
+
     validate_config()
 
     GiTF.Progress.init()

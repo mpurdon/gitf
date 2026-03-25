@@ -187,20 +187,43 @@ defmodule GiTF.Runtime.ProviderManager do
     end
   end
 
-  defp ensure_aws_credentials do
+  @doc "Ensures AWS credentials are loaded for Bedrock API calls."
+  def ensure_aws_credentials do
     profile = Config.get([:llm, :keys, :aws_profile]) ||
               Config.get([:llm, :keys, "aws_profile"])
 
     region = Config.get([:llm, :keys, :aws_region]) ||
-             Config.get([:llm, :keys, "aws_region"])
+             Config.get([:llm, :keys, "aws_region"]) ||
+             System.get_env("AWS_REGION") || "us-east-1"
 
-    if is_binary(region) and region != "" do
-      System.put_env("AWS_REGION", region)
-    end
+    System.put_env("AWS_REGION", region)
 
     if is_binary(profile) and profile != "" do
       GiTF.Runtime.Keys.load_aws_profile(profile)
     end
+
+    # Register credentials with ReqLLM's bedrock provider
+    access_key = System.get_env("AWS_ACCESS_KEY_ID")
+    secret_key = System.get_env("AWS_SECRET_ACCESS_KEY")
+    session_token = System.get_env("AWS_SESSION_TOKEN")
+
+    if access_key && secret_key do
+      creds = %{
+        access_key_id: access_key,
+        secret_access_key: secret_key,
+        region: region
+      }
+
+      creds = if session_token, do: Map.put(creds, :session_token, session_token), else: creds
+
+      try do
+        ReqLLM.put_key(:aws_bedrock, creds)
+      rescue
+        _ -> :ok
+      end
+    end
+
+    :ok
   rescue
     _ -> :ok
   end

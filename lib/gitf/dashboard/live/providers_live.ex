@@ -411,8 +411,14 @@ defmodule GiTF.Dashboard.ProvidersLive do
     |> List.replace_at(j, Enum.at(list, i))
   end
 
+  defp format_test_error({:error, %{body: %{"error" => %{"message" => msg}}}}), do: msg
+  defp format_test_error({:error, %{status: status, body: body}}) when is_binary(body), do: "HTTP #{status}: #{String.slice(body, 0, 200)}"
+  defp format_test_error({:error, %{status: status}}), do: "HTTP #{status}"
   defp format_test_error({:error, %{reason: reason}}) when is_binary(reason), do: reason
+  defp format_test_error({:error, %{__struct__: _, message: msg}}) when is_binary(msg), do: msg
   defp format_test_error({:error, reason}) when is_binary(reason), do: reason
+  defp format_test_error({:error, :unknown_provider}), do: "Provider not recognized by ReqLLM. Check the model string format (e.g., bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0)"
+  defp format_test_error({:error, reason}) when is_atom(reason), do: "#{reason}"
   defp format_test_error({:error, reason}), do: inspect(reason)
   defp format_test_error(_), do: "Unknown error"
 
