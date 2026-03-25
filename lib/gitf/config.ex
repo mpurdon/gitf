@@ -114,16 +114,27 @@ defmodule GiTF.Config do
   end
 
   defp encode_section({section, values}) when is_map(values) do
-    header = "[#{section}]"
-
-    body =
+    # Separate flat values from nested subsections (maps of maps)
+    {flat, nested} =
       values
       |> Enum.sort_by(fn {key, _} -> key end)
-      |> Enum.map_join("\n", fn {key, value} ->
-        "#{key} = #{encode_value(value)}"
+      |> Enum.split_with(fn {_key, value} ->
+        not (is_map(value) and Enum.any?(value, fn {_k, v} -> is_map(v) end))
       end)
 
-    "#{header}\n#{body}\n"
+    header = "[#{section}]"
+    body = Enum.map_join(flat, "\n", fn {key, value} ->
+      "#{key} = #{encode_value(value)}"
+    end)
+
+    subsections = Enum.map_join(nested, "\n", fn {key, sub_map} ->
+      Enum.map_join(sub_map, "\n", fn {sub_key, sub_values} ->
+        encode_section({"#{section}.#{key}.#{sub_key}", sub_values})
+      end)
+    end)
+
+    parts = [if(body != "", do: "#{header}\n#{body}\n"), if(subsections != "", do: subsections)]
+    parts |> Enum.reject(&is_nil/1) |> Enum.join("\n")
   end
 
   defp encode_value(value) when is_binary(value), do: ~s("#{value}")

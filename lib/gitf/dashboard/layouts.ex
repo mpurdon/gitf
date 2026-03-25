@@ -444,6 +444,26 @@ defmodule GiTF.Dashboard.Layouts do
           .model-ollama { color: #3fb950; border-color: #23863655; background: linear-gradient(135deg, #0d2d1622, #0d2d1644); text-shadow: 0 0 8px #3fb95066; }
           .model-bedrock { color: #f0983e; border-color: #d2870055; background: linear-gradient(135deg, #3d2a0022, #3d2a0044); text-shadow: 0 0 8px #f0983e66; }
           .model-unknown { color: #8b949e; border-color: #30363d55; background: linear-gradient(135deg, #16161622, #16161644); text-shadow: 0 0 6px #8b949e44; }
+          /* Provider config page */
+          .provider-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 1rem; transition: border-color 0.15s; }
+          .provider-card:hover { border-color: #484f58; }
+          .provider-card-disabled { opacity: 0.5; }
+          .provider-glyph { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.1rem; border: 1px solid; flex-shrink: 0; }
+          .provider-status-connected { color: #3fb950; }
+          .provider-status-configured { color: #d29922; }
+          .provider-status-unconfigured { color: #8b949e; }
+          .reorder-btn { background: none; border: 1px solid #30363d; color: #8b949e; border-radius: 4px; cursor: pointer; padding: 0.2rem 0.4rem; font-size: 0.85rem; transition: border-color 0.15s, color 0.15s; }
+          .reorder-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+          .reorder-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+          .toggle { position: relative; width: 36px; height: 20px; cursor: pointer; flex-shrink: 0; }
+          .toggle-track { width: 100%; height: 100%; border-radius: 10px; background: #30363d; transition: background 0.2s; }
+          .toggle-track.on { background: #238636; }
+          .toggle-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #c9d1d9; transition: transform 0.2s; }
+          .toggle-knob.on { transform: translateX(16px); }
+          .strategy-option { padding: 0.75rem; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; transition: border-color 0.15s, background 0.15s; flex: 1; min-width: 200px; }
+          .strategy-option:hover { border-color: #58a6ff; }
+          .strategy-option.selected { border-color: #58a6ff; background: rgba(31,111,235,0.07); }
+
           .group-progress { width: 60px; height: 4px; background: #30363d; border-radius: 2px; overflow: hidden; margin-left: auto; }
           .group-progress-fill { height: 100%; background: #3fb950; border-radius: 2px; transition: width 0.5s ease; }
           .plan-progress { height: 8px; background: #30363d; border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }

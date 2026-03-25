@@ -82,9 +82,19 @@ defmodule GiTF.Runtime.ModelResolver do
   """
   @spec configured_provider() :: String.t()
   def configured_provider do
-    GiTF.Config.Provider.get([:llm, :provider]) || "google"
+    case GiTF.Runtime.ProviderManager.provider_priority() do
+      [first | _] -> first
+      _ -> GiTF.Config.Provider.get([:llm, :provider]) || "google"
+    end
   rescue
     _ -> "google"
+  end
+
+  @doc "Returns the ordered provider priority list."
+  def provider_priority do
+    GiTF.Runtime.ProviderManager.provider_priority()
+  rescue
+    _ -> [configured_provider()]
   end
 
   @doc """
@@ -185,9 +195,21 @@ defmodule GiTF.Runtime.ModelResolver do
     end
   end
 
-  # Build the tier→model map for a given provider
+  # Build the tier→model map for a given provider (merges config overrides)
   defp provider_tier_map(provider_name) do
-    Map.get(@provider_models, provider_name, @provider_models["google"])
+    defaults = Map.get(@provider_models, provider_name, @provider_models["google"])
+
+    try do
+      case GiTF.Runtime.ProviderManager.tier_models(provider_name) do
+        %{thinking: t, general: g, fast: f} when t != "" ->
+          %{"thinking" => t, "general" => g, "fast" => f}
+
+        _ ->
+          defaults
+      end
+    rescue
+      _ -> defaults
+    end
   end
 
   # Resolve legacy aliases using the current tier map
@@ -246,13 +268,47 @@ defmodule GiTF.Runtime.ModelResolver do
   @spec fallback(String.t()) :: String.t() | nil
   def fallback(model_spec) do
     resolved = resolve(model_spec)
-    tier = reverse_lookup_tier(resolved)
+    current_provider = provider(resolved)
+    tier = reverse_lookup_tier(resolved) || "general"
 
-    case tier do
-      t when t in ["thinking", "opus"] -> resolve("general")
-      t when t in ["general", "sonnet"] -> resolve("fast")
+    strategy = GiTF.Runtime.ProviderManager.fallback_strategy()
+
+    case strategy do
+      "tier_downgrade_first" ->
+        tier_fallback(tier, current_provider) || next_provider_model(tier, current_provider)
+
+      _ ->
+        # priority_chain: try next provider at same tier first
+        next_provider_model(tier, current_provider) || tier_fallback(tier, current_provider)
+    end
+  end
+
+  defp tier_fallback(tier, current_provider) do
+    next_tier = case tier do
+      t when t in ["thinking", "opus"] -> "general"
+      t when t in ["general", "sonnet"] -> "fast"
       _ -> nil
     end
+
+    if next_tier do
+      models = GiTF.Runtime.ProviderManager.tier_models(current_provider)
+      Map.get(models, String.to_atom(next_tier))
+    end
+  end
+
+  defp next_provider_model(tier, current_provider) do
+    priority = provider_priority()
+    current_idx = Enum.find_index(priority, &(&1 == current_provider))
+
+    priority
+    |> Enum.drop((current_idx || 0) + 1)
+    |> Enum.find_value(fn next ->
+      if GiTF.Runtime.ProviderManager.provider_enabled?(next) do
+        models = GiTF.Runtime.ProviderManager.tier_models(next)
+        model = Map.get(models, String.to_atom(tier)) || Map.get(models, :general)
+        if model && model != "", do: model
+      end
+    end)
   end
 
   @doc """
