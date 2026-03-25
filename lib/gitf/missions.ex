@@ -199,14 +199,21 @@ defmodule GiTF.Missions do
   def compute_status([]), do: "pending"
 
   def compute_status(op_statuses) do
+    has_running = Enum.any?(op_statuses, &(&1 in ["running", "assigned"]))
+    has_failed = Enum.any?(op_statuses, &(&1 == "failed"))
+    has_pending = Enum.any?(op_statuses, &(&1 in ["pending", "blocked"]))
+
     cond do
       Enum.all?(op_statuses, &(&1 == "done")) ->
         "completed"
 
-      Enum.any?(op_statuses, &(&1 == "failed")) ->
+      has_running ->
+        "active"
+
+      has_failed and not has_running and not has_pending ->
         "failed"
 
-      Enum.any?(op_statuses, &(&1 in ["running", "assigned"])) ->
+      has_pending or has_failed ->
         "active"
 
       true ->
@@ -251,7 +258,18 @@ defmodule GiTF.Missions do
   def update_status!(mission_id) do
     with {:ok, mission} <- get(mission_id) do
       impl_jobs = Enum.reject(mission.ops, & &1[:phase_job])
-      op_statuses = Enum.map(impl_jobs, & &1.status)
+
+      # Exclude failed ops that have been retried (active retry exists)
+      retried_ids = impl_jobs
+        |> Enum.map(& &1[:retry_of])
+        |> Enum.reject(&is_nil/1)
+        |> MapSet.new()
+
+      active_jobs = Enum.reject(impl_jobs, fn op ->
+        op.status == "failed" and MapSet.member?(retried_ids, op.id)
+      end)
+
+      op_statuses = Enum.map(active_jobs, & &1.status)
 
       if mission.status == "planning" and op_statuses == [] do
         {:ok, mission |> Map.delete(:ops)}

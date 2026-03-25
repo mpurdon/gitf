@@ -125,8 +125,8 @@ defmodule GiTF.Dashboard.ProgressLive do
                   <div style="flex:1">
                     <!-- Ghost identity -->
                     <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem">
-                      <span style="color:#f0f6fc; font-weight:600">{activity.ghost_name}</span>
-                      <span class="badge badge-blue">{activity.model || "unknown"}</span>
+                      <% {provider, _short, _tier} = parse_model(activity.model) %>
+                      <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(activity.ghost_name, activity.model)}</span>
                       <span style="color:#8b949e; font-size:0.75rem">{short_id(activity.ghost_id)}</span>
                     </div>
 

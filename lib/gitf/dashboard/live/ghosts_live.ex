@@ -83,10 +83,9 @@ defmodule GiTF.Dashboard.GhostsLive do
                 <th></th>
                 <th></th>
                 <th>ID</th>
-                <th>Name</th>
+                <th>Ghost</th>
                 <th>Status</th>
                 <th>Job ID</th>
-                <th>Model</th>
                 <th>Context</th>
                 <th></th>
               </tr>
@@ -99,7 +98,10 @@ defmodule GiTF.Dashboard.GhostsLive do
                     <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(ghost, :status, "unknown"))}"} class={if Map.get(ghost, :status) == GhostStatus.working(), do: "pulse"}></span>
                   </td>
                   <td style="font-family:monospace; font-size:0.8rem">{short_id(ghost.id)}</td>
-                  <td>{Map.get(ghost, :name, "-")}</td>
+                  <td>
+                    <% {provider, _short, _tier} = parse_model(Map.get(ghost, :assigned_model)) %>
+                    <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(Map.get(ghost, :name, "-"), ghost[:assigned_model])}</span>
+                  </td>
                   <td><span class={"badge #{status_badge(Map.get(ghost, :status, "unknown"))}"}>{Map.get(ghost, :status, "unknown")}</span></td>
                   <td style="font-family:monospace; font-size:0.8rem">
                     <%= if Map.get(ghost, :op_id) do %>
@@ -108,7 +110,6 @@ defmodule GiTF.Dashboard.GhostsLive do
                       -
                     <% end %>
                   </td>
-                  <td style="font-size:0.8rem">{Map.get(ghost, :assigned_model, "-")}</td>
                   <td>
                     <%= if Map.has_key?(ghost, :context_percentage) do %>
                       <span class={"badge #{context_badge(ghost.context_percentage)}"}>

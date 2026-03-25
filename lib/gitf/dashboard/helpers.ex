@@ -118,6 +118,58 @@ defmodule GiTF.Dashboard.Helpers do
   def status_icon("blocked"), do: "⊘"
   def status_icon(_), do: "○"
 
+  @doc "Parses a model string into {provider, short_name, tier} for display."
+  def parse_model(nil), do: {nil, nil, nil}
+  def parse_model(model) when is_binary(model) do
+    {provider, model_id} =
+      case String.split(model, ":", parts: 2) do
+        [p, m] -> {p, m}
+        [m] -> {nil, m}
+      end
+
+    tier = infer_tier(model_id)
+    short = shorten_model(model_id)
+    {provider, short, tier}
+  end
+
+  @doc "Returns CSS class for provider-colored badge."
+  def provider_class("google"), do: "model-google"
+  def provider_class("anthropic"), do: "model-anthropic"
+  def provider_class("openai"), do: "model-openai"
+  def provider_class("ollama"), do: "model-ollama"
+  def provider_class("bedrock"), do: "model-bedrock"
+  def provider_class(_), do: "model-unknown"
+
+  @doc "Returns tier glyph."
+  def tier_glyph("thinking"), do: "🧠"
+  def tier_glyph("fast"), do: "⚡"
+  def tier_glyph(_), do: "◈"
+
+  @doc "Returns a single combined badge: tier icon + ghost name, colored by provider."
+  def ghost_badge_label(ghost_name, model) do
+    {_provider, _short, tier} = parse_model(model)
+    "#{tier_glyph(tier)} #{ghost_name}"
+  end
+
+  defp infer_tier(model) do
+    m = String.downcase(model || "")
+    cond do
+      String.contains?(m, "opus") -> "thinking"
+      String.contains?(m, "pro") and not String.contains?(m, "provision") -> "thinking"
+      String.contains?(m, "flash") -> "fast"
+      String.contains?(m, "haiku") -> "fast"
+      true -> "general"
+    end
+  end
+
+  defp shorten_model(nil), do: "-"
+  defp shorten_model(model) do
+    model
+    |> String.replace(~r/^(gemini|claude)-/, "")
+    |> String.replace(~r/-\d{8}.*$/, "")
+    |> String.replace(~r/-v\d+:\d+$/, "")
+  end
+
   @doc "Returns the CSS class suffix for an op status icon."
   def status_icon_class("done"), do: "done"
   def status_icon_class("running"), do: "running"

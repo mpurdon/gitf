@@ -232,6 +232,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem">
         <div>
           <h1 class="page-title" style="margin-bottom:0.25rem">
+            <a href="/dashboard/missions" style="color:#8b949e; text-decoration:none; margin-right:0.4rem; font-size:0.9em" title="Back to Missions">‹</a>
             {Map.get(@mission, :name, "Mission")}
           </h1>
           <div style="color:#8b949e; font-size:0.85rem; max-width:600px">
@@ -268,24 +269,21 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             </form>
           <% end %>
 
+          <%!-- View buttons (always show when artifacts exist) --%>
+          <%= if has_design_artifacts?(@mission) do %>
+            <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-purple">View Designs</a>
+          <% end %>
+          <%= if has_artifacts?(@mission) do %>
+            <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
+          <% end %>
+
+          <%!-- Status-specific actions --%>
           <%= case Map.get(@mission, :status, "pending") do %>
             <% "pending" -> %>
               <button phx-click="start" class="btn btn-green">Start Mission</button>
             <% "active" -> %>
-              <%= if has_design_artifacts?(@mission) do %>
-                <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-yellow">View Designs</a>
-              <% end %>
-              <%= if has_artifacts?(@mission) do %>
-                <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
-              <% end %>
-              <button phx-click="kill" class="btn btn-red" data-confirm="Kill this mission?">Kill</button>
+              <button phx-click="kill" class="btn btn-orange" data-confirm="Kill this mission?">Kill</button>
             <% "completed" -> %>
-              <%= if has_design_artifacts?(@mission) do %>
-                <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-yellow">View Designs</a>
-              <% end %>
-              <%= if has_artifacts?(@mission) do %>
-                <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
-              <% end %>
               <button phx-click="generate_report" class="btn btn-blue" disabled={@report_loading}>
                 <%= if @report_loading do %>
                   <span class="loading-spinner" style="width:14px;height:14px;border-width:2px"></span>
@@ -294,20 +292,16 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                   Generate Report
                 <% end %>
               </button>
-            <% "failed" -> %>
-              <%= if has_design_artifacts?(@mission) do %>
-                <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-yellow">View Designs</a>
-              <% end %>
-              <%= if has_artifacts?(@mission) do %>
-                <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
-              <% end %>
             <% _ -> %>
           <% end %>
+
+          <%!-- Diagnose (blue with cross) --%>
           <%= if Map.get(@mission, :status) == "failed" || Enum.any?(@ops, &(Map.get(&1, :status) == "failed")) do %>
-            <a href={"/dashboard/missions/#{@mission.id}/diagnostics"} class="btn btn-red">Diagnose</a>
+            <a href={"/dashboard/missions/#{@mission.id}/diagnostics"} class="btn btn-blue">✚ Diagnose</a>
           <% end %>
+
+          <%!-- Remove (always, red) --%>
           <button phx-click="remove" class="btn btn-red" data-confirm="Permanently remove this mission and all its data? This cannot be undone.">Remove</button>
-          <a href="/dashboard/missions" class="btn btn-grey">Back</a>
         </div>
       </div>
 
@@ -402,15 +396,26 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                       <span class="badge badge-grey">-</span>
                     <% end %>
                   </td>
-                  <td style="font-family:monospace; font-size:0.8rem">{short_id(Map.get(op, :ghost_id))}</td>
+                  <td>
+                    <% ghost_id = Map.get(op, :ghost_id) %>
+                    <%= if ghost_id do %>
+                      <% ghost_rec = GiTF.Archive.get(:ghosts, ghost_id) %>
+                      <% {provider, _short, _tier} = parse_model(ghost_rec && ghost_rec[:assigned_model]) %>
+                      <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(ghost_rec[:name] || short_id(ghost_id), ghost_rec[:assigned_model])}</span>
+                    <% else %>
+                      <span style="color:#6b7280">-</span>
+                    <% end %>
+                  </td>
                   <td style="min-width:7rem">
                     <% {ctx_pct, ctx_used, ctx_limit} = ghost_context_info(op) %>
                     <%= if ctx_pct > 0 do %>
+                      <% bar_width = max(ctx_pct, 2) %>
+                      <% label = if ctx_pct < 1, do: "<1%", else: "#{trunc(ctx_pct)}%" %>
                       <div style="display:flex; align-items:center; gap:0.3rem" title={"#{format_tokens_mb(ctx_used)} / #{format_tokens_mb(ctx_limit)}"}>
                         <div style="flex:1; height:6px; background:#1f2937; border-radius:3px; overflow:hidden">
-                          <div style={"width:#{ctx_pct}%; height:100%; border-radius:3px; background:#{context_gauge_color(ctx_pct)}"}></div>
+                          <div style={"width:#{bar_width}%; height:100%; border-radius:3px; background:#{context_gauge_color(ctx_pct)}"}></div>
                         </div>
-                        <span style={"font-size:0.65rem; font-family:monospace; color:#{context_gauge_color(ctx_pct)}"}>{Float.round(ctx_pct, 0) |> trunc()}%</span>
+                        <span style={"font-size:0.65rem; font-family:monospace; color:#{context_gauge_color(ctx_pct)}"}>{label}</span>
                       </div>
                     <% else %>
                       <span style="font-size:0.65rem; color:#6b7280">-</span>

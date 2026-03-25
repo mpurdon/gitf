@@ -190,6 +190,8 @@ defmodule GiTF.Dashboard.Layouts do
           .btn-grey:hover { background: #484f58; }
           .btn-purple { background: #8b5cf633; color: #a78bfa; border-color: #8b5cf655; }
           .btn-purple:hover { background: #8b5cf655; }
+          .btn-orange { background: #d2992233; color: #d29922; border-color: #d2992255; }
+          .btn-orange:hover { background: #d2992255; }
           .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
           /* -- Forms --------------------------------------------------------- */
@@ -433,6 +435,15 @@ defmodule GiTF.Dashboard.Layouts do
           .status-icon-blocked { color: #d29922; }
           .criteria-item { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.85rem; color: #8b949e; }
           .ghost-tag { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(31,111,235,0.13); padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.75rem; color: #58a6ff; }
+
+          /* Ghost model badges — provider color + tier icon, sci-fi glow */
+          .model-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; border: 1px solid; font-family: monospace; white-space: nowrap; }
+          .model-google { color: #58a6ff; border-color: #1f6feb55; background: linear-gradient(135deg, #0d2a5c22, #0d2a5c44); text-shadow: 0 0 8px #58a6ff66; }
+          .model-anthropic { color: #f07070; border-color: #da363655; background: linear-gradient(135deg, #3d1a1a22, #3d1a1a44); text-shadow: 0 0 8px #f0707066; }
+          .model-openai { color: #3fb950; border-color: #23863655; background: linear-gradient(135deg, #0d2d1622, #0d2d1644); text-shadow: 0 0 8px #3fb95066; }
+          .model-ollama { color: #3fb950; border-color: #23863655; background: linear-gradient(135deg, #0d2d1622, #0d2d1644); text-shadow: 0 0 8px #3fb95066; }
+          .model-bedrock { color: #f0983e; border-color: #d2870055; background: linear-gradient(135deg, #3d2a0022, #3d2a0044); text-shadow: 0 0 8px #f0983e66; }
+          .model-unknown { color: #8b949e; border-color: #30363d55; background: linear-gradient(135deg, #16161622, #16161644); text-shadow: 0 0 6px #8b949e44; }
           .group-progress { width: 60px; height: 4px; background: #30363d; border-radius: 2px; overflow: hidden; margin-left: auto; }
           .group-progress-fill { height: 100%; background: #3fb950; border-radius: 2px; transition: width 0.5s ease; }
           .plan-progress { height: 8px; background: #30363d; border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }

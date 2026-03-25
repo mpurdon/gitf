@@ -136,7 +136,8 @@ defmodule GiTF.Dashboard.PlanLive do
           <% item_status = Map.get(item, :status, "pending")
              item_id = Map.get(item, :id) || Map.get(item, "title", "")
              expanded = MapSet.member?(@expanded_ops, item_id)
-             ghost_name = if item[:ghost_id], do: Map.get(@ghost_names, item[:ghost_id]) %>
+             ghost_info = if item[:ghost_id], do: Map.get(@ghost_names, item[:ghost_id])
+             {g_provider, _g_short, _g_tier} = if ghost_info, do: parse_model(ghost_info[:model]), else: {nil, nil, nil} %>
 
           <div
             class={"checklist-item #{if item_status == "done", do: "checklist-item-done"}"}
@@ -145,8 +146,8 @@ defmodule GiTF.Dashboard.PlanLive do
           >
             <span class={"status-icon status-icon-#{status_icon_class(item_status)}"}>{status_icon(item_status)}</span>
             <span style="flex:1; color:#f0f6fc">{Map.get(item, :title) || Map.get(item, "title", "Untitled")}</span>
-            <span :if={ghost_name} class="ghost-tag">{ghost_name}</span>
-            <span :if={item[:ghost_id] && is_nil(ghost_name)} class="ghost-tag">{short_id(item[:ghost_id])}</span>
+            <span :if={ghost_info} class={"model-badge #{provider_class(g_provider)}"}>{ghost_badge_label(ghost_info[:name], ghost_info[:model])}</span>
+            <span :if={item[:ghost_id] && is_nil(ghost_info)} class="ghost-tag">{short_id(item[:ghost_id])}</span>
             <span class={"badge #{status_badge(item_status)}"}>{item_status}</span>
             <span :if={item[:verification_status] == "passed"} class="badge badge-green" style="font-size:0.7rem">verified</span>
             <span :if={item[:verification_status] == "failed"} class="badge badge-red" style="font-size:0.7rem">failed</span>
@@ -256,7 +257,7 @@ defmodule GiTF.Dashboard.PlanLive do
     |> Enum.uniq()
     |> Enum.reduce(%{}, fn gid, acc ->
       case GiTF.Ghosts.get(gid) do
-        {:ok, ghost} -> Map.put(acc, gid, ghost.name)
+        {:ok, ghost} -> Map.put(acc, gid, %{name: ghost.name, model: ghost[:assigned_model]})
         _ -> acc
       end
     end)
