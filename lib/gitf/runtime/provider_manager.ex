@@ -203,7 +203,7 @@ defmodule GiTF.Runtime.ProviderManager do
 
     start = System.monotonic_time(:millisecond)
 
-    case ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5) do
+    case ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5, use_converse: true) do
       {:ok, _response} ->
         latency = System.monotonic_time(:millisecond) - start
         {:ok, latency}
@@ -229,14 +229,14 @@ defmodule GiTF.Runtime.ProviderManager do
   def normalize_model_for_reqllm(model) when is_binary(model) do
     if String.starts_with?(model, "arn:aws:bedrock:") do
       ensure_aws_credentials()
-      # Inference profile ARNs need a provider_model_id so ReqLLM knows which
-      # formatter to use. The ARN goes as `id` (used in the API URL).
-      # Default to anthropic (most common Bedrock use case).
+      # Inference profile ARNs: use the ARN as the model ID but set
+      # provider_model_id to a known Anthropic model for formatter detection.
+      # Set family explicitly so ReqLLM uses the anthropic formatter.
       ReqLLM.model!(%{
         provider: :amazon_bedrock,
         id: model,
         provider_model_id: "anthropic.claude-sonnet-4-6-20250514-v1:0",
-        use_converse: true
+        family: "anthropic"
       })
     else
       model
