@@ -159,37 +159,46 @@ defmodule GiTF.Runtime.ProviderManager do
         {:error, "No model configured for #{name}"}
 
       name == "bedrock" ->
-        # Load credentials from the specified profile + region (may be unsaved editing state)
         profile = to_string(opts[:aws_profile] || "")
-        region = to_string(opts[:aws_region] || "")
+        region = to_string(opts[:aws_region] || "us-east-1")
 
-        if region != "", do: System.put_env("AWS_REGION", region)
-        if profile != "", do: GiTF.Runtime.Keys.load_aws_profile(profile)
-
-        # Force re-register with ReqLLM using current env vars
-        access_key = System.get_env("AWS_ACCESS_KEY_ID")
-        secret_key = System.get_env("AWS_SECRET_ACCESS_KEY")
-        session_token = System.get_env("AWS_SESSION_TOKEN")
-        effective_region = System.get_env("AWS_REGION") || "us-east-1"
-
-        if access_key && secret_key do
-          creds = %{access_key_id: access_key, secret_access_key: secret_key, region: effective_region}
-          creds = if session_token, do: Map.put(creds, :session_token, session_token), else: creds
-
-          require Logger
-          Logger.info("Bedrock test: region=#{effective_region}, key=#{String.slice(access_key, 0, 8)}..., model=#{model}")
-
-          try do
-            ReqLLM.put_key(:aws_bedrock, creds)
-          rescue
-            _ -> :ok
-          end
-        end
-
-        test_api_call(model)
+        test_bedrock_direct(model, profile, region)
 
       true ->
         test_api_call(model)
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  defp test_bedrock_direct(model, profile, region) do
+    args = [
+      "bedrock-runtime", "converse",
+      "--model-id", model,
+      "--messages", ~s([{"role":"user","content":[{"text":"Say OK"}]}]),
+      "--inference-config", ~s({"maxTokens":5}),
+      "--region", region
+    ]
+
+    args = if profile != "", do: args ++ ["--profile", profile], else: args
+
+    start = System.monotonic_time(:millisecond)
+
+    case System.cmd("aws", args, stderr_to_stdout: true) do
+      {_output, 0} ->
+        latency = System.monotonic_time(:millisecond) - start
+
+        # Also load credentials so they're available for actual ghost API calls
+        if profile != "" do
+          System.put_env("AWS_REGION", region)
+          GiTF.Runtime.Keys.load_aws_profile(profile)
+          ensure_aws_credentials()
+        end
+
+        {:ok, latency}
+
+      {error, _} ->
+        {:error, String.trim(error) |> String.slice(0, 300)}
     end
   rescue
     e -> {:error, Exception.message(e)}
@@ -203,7 +212,12 @@ defmodule GiTF.Runtime.ProviderManager do
 
     start = System.monotonic_time(:millisecond)
 
-    case ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5, use_converse: true) do
+    result = ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5, use_converse: true)
+
+    require Logger
+    Logger.info("test_api_call result: #{inspect(result, limit: 500)}")
+
+    case result do
       {:ok, _response} ->
         latency = System.monotonic_time(:millisecond) - start
         {:ok, latency}
