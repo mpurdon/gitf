@@ -208,11 +208,11 @@ defmodule GiTF.Runtime.ProviderManager do
     end
   end
 
-  @doc "Normalizes model strings for ReqLLM — ARNs get amazon_bedrock: prefix."
+  @doc "Normalizes model strings for ReqLLM — ARNs become inline model structs."
   def normalize_model_for_reqllm(model) when is_binary(model) do
     if String.starts_with?(model, "arn:aws:bedrock:") do
       ensure_aws_credentials()
-      "amazon_bedrock:#{model}"
+      ReqLLM.model!(%{provider: :amazon_bedrock, id: model})
     else
       model
     end
