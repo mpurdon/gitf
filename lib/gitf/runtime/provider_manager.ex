@@ -159,19 +159,33 @@ defmodule GiTF.Runtime.ProviderManager do
         {:error, "No model configured for #{name}"}
 
       name == "bedrock" ->
-        # Use provided profile/region or fall back to config
-        profile = opts[:aws_profile]
-        region = opts[:aws_region]
+        # Load credentials from the specified profile + region (may be unsaved editing state)
+        profile = to_string(opts[:aws_profile] || "")
+        region = to_string(opts[:aws_region] || "")
 
-        if is_binary(region) and region != "" do
-          System.put_env("AWS_REGION", region)
+        if region != "", do: System.put_env("AWS_REGION", region)
+        if profile != "", do: GiTF.Runtime.Keys.load_aws_profile(profile)
+
+        # Force re-register with ReqLLM using current env vars
+        access_key = System.get_env("AWS_ACCESS_KEY_ID")
+        secret_key = System.get_env("AWS_SECRET_ACCESS_KEY")
+        session_token = System.get_env("AWS_SESSION_TOKEN")
+        effective_region = System.get_env("AWS_REGION") || "us-east-1"
+
+        if access_key && secret_key do
+          creds = %{access_key_id: access_key, secret_access_key: secret_key, region: effective_region}
+          creds = if session_token, do: Map.put(creds, :session_token, session_token), else: creds
+
+          require Logger
+          Logger.info("Bedrock test: region=#{effective_region}, key=#{String.slice(access_key, 0, 8)}..., model=#{model}")
+
+          try do
+            ReqLLM.put_key(:aws_bedrock, creds)
+          rescue
+            _ -> :ok
+          end
         end
 
-        if is_binary(profile) and profile != "" do
-          GiTF.Runtime.Keys.load_aws_profile(profile)
-        end
-
-        ensure_aws_credentials()
         test_api_call(model)
 
       true ->
@@ -182,8 +196,11 @@ defmodule GiTF.Runtime.ProviderManager do
   end
 
   defp test_api_call(model) do
-    # ARN-based models need amazon_bedrock: prefix for ReqLLM
     model = normalize_model_for_reqllm(model)
+
+    require Logger
+    Logger.info("test_api_call: model=#{inspect(model)}, AWS_REGION=#{System.get_env("AWS_REGION")}, AWS_ACCESS_KEY_ID=#{String.slice(System.get_env("AWS_ACCESS_KEY_ID") || "", 0, 8)}...")
+
     start = System.monotonic_time(:millisecond)
 
     case ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5) do
