@@ -303,7 +303,7 @@ defmodule GiTF.Runtime.ProviderManager do
   @doc "Saves current provider config to config.toml and reloads."
   def save!(priority, strategy, provider_configs) do
     global_path = GiTF.global_config_path()
-    existing = GiTF.Config.read_config(global_path)
+    {:ok, existing} = GiTF.Config.read_config(global_path)
 
     llm = Map.get(existing, "llm", %{})
 
