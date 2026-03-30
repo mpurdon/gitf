@@ -479,9 +479,19 @@ defmodule GiTF.Ops do
     Enum.all?(deps, fn dep ->
       case Archive.get(:ops, dep.depends_on_id) do
         nil -> true
-        op -> op.status in ["done", "failed", "rejected"]
+        %{status: "done"} -> true
+        %{status: s} when s in ["failed", "rejected"] ->
+          # Dependency failed — check if a successful retry exists
+          retry_completed?(dep.depends_on_id)
+        _ -> false
       end
     end)
+  end
+
+  defp retry_completed?(op_id) do
+    Archive.find_one(:ops, fn j ->
+      Map.get(j, :retry_of) == op_id && j.status == "done"
+    end) != nil
   end
 
   @doc """

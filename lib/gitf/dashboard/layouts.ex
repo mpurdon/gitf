@@ -424,9 +424,12 @@ defmodule GiTF.Dashboard.Layouts do
           .file-tag { display: inline-block; background: #21262d; padding: 0.15rem 0.5rem; border-radius: 4px; font-family: monospace; font-size: 0.8rem; margin: 0.15rem; }
 
           /* -- Plan checklist ------------------------------------------------ */
-          .checklist-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.75rem; border-bottom: 1px solid #21262d; cursor: pointer; transition: background 0.15s; }
+          .checklist-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.85rem; border-bottom: 1px solid #21262d; cursor: pointer; transition: background 0.15s; }
           .checklist-item:hover { background: #1c2128; }
-          .checklist-item-done { opacity: 0.7; }
+          .checklist-item-done { opacity: 0.6; }
+          .checklist-item-running { border-left: 3px solid #58a6ff; background: rgba(31,111,235,0.04); }
+          .checklist-item-failed { border-left: 3px solid #f85149; background: rgba(248,81,73,0.04); }
+          .checklist-item-blocked { border-left: 3px solid #d29922; background: rgba(210,153,34,0.04); }
           .status-icon { font-size: 1rem; min-width: 1.2rem; text-align: center; }
           .status-icon-pending { color: #8b949e; }
           .status-icon-running { color: #58a6ff; }
@@ -435,6 +438,38 @@ defmodule GiTF.Dashboard.Layouts do
           .status-icon-blocked { color: #d29922; }
           .criteria-item { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.85rem; color: #8b949e; }
           .ghost-tag { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(31,111,235,0.13); padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.75rem; color: #58a6ff; }
+
+          /* -- Plan page layout ---------------------------------------------- */
+          .plan-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }
+          .plan-stat { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.75rem 1rem; text-align: center; }
+          .plan-stat-value { font-size: 1.5rem; font-weight: 700; color: #f0f6fc; }
+          .plan-stat-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.15rem; }
+          .plan-group { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 1rem; overflow: hidden; }
+          .plan-group-header { display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1rem; cursor: pointer; user-select: none; border-bottom: 1px solid #21262d; transition: background 0.15s; }
+          .plan-group-header:hover { background: #1c2128; }
+          .plan-group-title { font-weight: 600; font-size: 0.9rem; color: #f0f6fc; }
+          .plan-group-count { font-size: 0.8rem; color: #8b949e; font-weight: 400; }
+          .plan-group-progress { width: 80px; height: 5px; background: #30363d; border-radius: 3px; overflow: hidden; margin-left: auto; }
+          .plan-group-progress-fill { height: 100%; background: #3fb950; border-radius: 3px; transition: width 0.5s ease; }
+          .plan-group-pct { font-size: 0.75rem; color: #8b949e; font-family: monospace; min-width: 2.5rem; text-align: right; }
+          .plan-detail { padding: 0.85rem 1rem 1rem 2.75rem; border-bottom: 1px solid #21262d; background: #0d1117; }
+          .plan-detail-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.25rem; }
+          @media (max-width: 768px) { .plan-detail-grid { grid-template-columns: 1fr; } }
+          .plan-file-item { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: #8b949e; padding: 0.2rem 0; border-left: 2px solid #30363d; padding-left: 0.5rem; margin: 0.15rem 0; }
+          .plan-detail-section { margin-bottom: 0.75rem; }
+          .plan-detail-section:last-child { margin-bottom: 0; }
+          .plan-detail-heading { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.4rem; border-bottom: 1px solid #21262d; padding-bottom: 0.25rem; }
+
+          /* -- Plan description formatting ---------------------------------- */
+          .plan-desc { font-size: 0.85rem; color: #c9d1d9; margin-bottom: 0.85rem; line-height: 1.6; }
+          .plan-desc-heading { font-weight: 600; color: #f0f6fc; font-size: 0.9rem; margin-top: 0.75rem; margin-bottom: 0.35rem; padding: 0.35rem 0.6rem; background: #21262d; border-radius: 4px; border-left: 3px solid #58a6ff; }
+          .plan-desc-heading:first-child { margin-top: 0; }
+          .plan-desc-bullet { padding: 0.2rem 0 0.2rem 1rem; position: relative; color: #c9d1d9; }
+          .plan-desc-bullet::before { content: "•"; position: absolute; left: 0.25rem; color: #58a6ff; font-weight: 700; }
+          .plan-desc-sub-bullet { padding: 0.15rem 0 0.15rem 2.25rem; position: relative; color: #8b949e; font-size: 0.82rem; }
+          .plan-desc-sub-bullet::before { content: "›"; position: absolute; left: 1.5rem; color: #484f58; }
+          .plan-desc-para { margin: 0.4rem 0; color: #c9d1d9; }
+          .plan-inline-code { background: #21262d; padding: 0.1rem 0.35rem; border-radius: 3px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: #f0883e; }
 
           /* Ghost model badges — provider color + tier icon, sci-fi glow */
           .model-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; border: 1px solid; font-family: monospace; white-space: nowrap; }
@@ -471,8 +506,45 @@ defmodule GiTF.Dashboard.Layouts do
           @keyframes check-in { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
           .status-just-done .status-icon { animation: check-in 0.3s ease-out; }
 
+          /* -- Mission detail layout ----------------------------------------- */
+          .mission-detail-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 1.25rem; align-items: start; }
+          .mission-sidebar { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+          .sidebar-actions { display: flex; flex-direction: column; gap: 0.4rem; }
+          .sidebar-actions .btn { width: 100%; justify-content: center; }
+          .goal-text { color: #8b949e; font-size: 0.85rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+          .goal-text-full { -webkit-line-clamp: unset; overflow: visible; }
+          .goal-toggle { color: #58a6ff; font-size: 0.75rem; cursor: pointer; background: none; border: none; padding: 0; margin-top: 0.15rem; }
+          .goal-toggle:hover { text-decoration: underline; }
+          .op-card { border-bottom: 1px solid #21262d; padding: 0.6rem 0.75rem; cursor: pointer; transition: background 0.15s; }
+          .op-card:hover { background: #1c2128; }
+          .op-card:last-child { border-bottom: none; }
+          .op-card-done { opacity: 0.6; }
+          .op-card-running { border-left: 3px solid #58a6ff; background: rgba(31,111,235,0.04); }
+          .op-card-failed { border-left: 3px solid #f85149; background: rgba(248,81,73,0.04); }
+          .op-card-blocked { border-left: 3px solid #d29922; background: rgba(210,153,34,0.04); }
+          .op-card-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
+          .op-card-title span:first-child { flex-shrink: 0; }
+          .op-card-meta { display: flex; align-items: center; gap: 0.5rem; padding-left: 1.7rem; flex-wrap: wrap; }
+          .sidebar-stat-row { display: flex; align-items: center; justify-content: space-between; padding: 0.35rem 0; font-size: 0.85rem; transition: background 0.15s; border-radius: 4px; padding: 0.35rem 0.25rem; }
+          .sidebar-stat-row:not(:last-child) { border-bottom: 1px solid #21262d; }
+          .sidebar-stat-row:hover { background: #1c2128; }
+          .sidebar-stat-label { color: #8b949e; }
+          .sidebar-stat-value { font-weight: 700; font-family: monospace; font-size: 1rem; }
+
+          /* -- Op filter chips ------------------------------------------------ */
+          .op-filters { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid #21262d; }
+          .op-filter-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 500; border: 1px solid #30363d; background: transparent; color: #8b949e; cursor: pointer; transition: all 0.15s; }
+          .op-filter-chip:hover { border-color: #484f58; color: #c9d1d9; }
+          .op-filter-active { background: #1f6feb33; border-color: #1f6feb55; color: #58a6ff; }
+          .op-filter-green.op-filter-active { background: #23863622; border-color: #23863655; color: #3fb950; }
+          .op-filter-blue.op-filter-active { background: #1f6feb22; border-color: #1f6feb55; color: #58a6ff; }
+          .op-filter-yellow.op-filter-active { background: #d2992222; border-color: #d2992255; color: #d29922; }
+          .op-filter-red.op-filter-active { background: #f8514922; border-color: #f8514955; color: #f85149; }
+          .op-filter-purple.op-filter-active { background: #8b5cf622; border-color: #8b5cf655; color: #a78bfa; }
+          .op-filter-count { font-family: monospace; font-size: 0.7rem; font-weight: 700; }
+
           /* -- Responsive ---------------------------------------------------- */
-          @media (max-width: 1024px) { .design-layout { grid-template-columns: 1fr; } }
+          @media (max-width: 1024px) { .design-layout { grid-template-columns: 1fr; } .mission-detail-layout { grid-template-columns: 1fr; } .mission-sidebar { position: static; } }
           @media (max-width: 768px) {
             .nav { flex-direction: column; height: auto; padding: 0.75rem; gap: 0.5rem; }
             .cards { grid-template-columns: 1fr 1fr; }

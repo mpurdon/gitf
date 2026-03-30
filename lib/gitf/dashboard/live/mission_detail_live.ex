@@ -31,11 +31,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:current_path, "/dashboard/missions")
          |> assign(:mission, mission)
          |> assign(:ops, ops)
+         |> assign(:op_filter, "active")
+         |> assign(:show_full_goal, false)
          |> assign(:selected_phase, nil)
          |> assign(:artifact, nil)
          |> assign(:report, nil)
          |> assign(:report_loading, false)
-         |> assign(:sectors, load_sectors())}
+         |> assign(:sectors, load_sectors())
+         |> compute_op_stats()}
 
       {:error, _} ->
         {:ok,
@@ -150,6 +153,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
+  def handle_event("filter_ops", %{"filter" => filter}, socket) do
+    {:noreply, socket |> assign(:op_filter, filter) |> compute_op_stats()}
+  end
+
+  def handle_event("toggle_goal", _params, socket) do
+    {:noreply, assign(socket, :show_full_goal, not socket.assigns.show_full_goal)}
+  end
+
   def handle_event("toggle_op", %{"id" => op_id}, socket) do
     expanded = socket.assigns[:expanded_ops] || MapSet.new()
 
@@ -166,12 +177,49 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     case GiTF.Missions.get(id) do
       {:ok, mission} ->
-        ops = GiTF.Ops.list(mission_id: id)
-        assign(socket, mission: mission, ops: ops, sectors: load_sectors())
+        socket
+        |> assign(mission: mission, ops: GiTF.Ops.list(mission_id: id), sectors: load_sectors())
+        |> compute_op_stats()
 
       {:error, _} ->
         socket
     end
+  end
+
+  defp compute_op_stats(socket) do
+    all_ops = socket.assigns.ops || []
+    op_filter = socket.assigns[:op_filter] || "active"
+
+    impl_ops = Enum.reject(all_ops, & &1[:phase_job])
+    phase_ops = Enum.filter(all_ops, & &1[:phase_job])
+
+    counts = %{
+      done: Enum.count(impl_ops, &(Map.get(&1, :status) == "done")),
+      running: Enum.count(impl_ops, &(Map.get(&1, :status) in ["running", "assigned"])),
+      blocked: Enum.count(impl_ops, &(Map.get(&1, :status) == "blocked")),
+      failed: Enum.count(impl_ops, &(Map.get(&1, :status) == "failed")),
+      pending: Enum.count(impl_ops, &(Map.get(&1, :status) == "pending"))
+    }
+
+    visible_ops = case op_filter do
+      "all" -> all_ops
+      "active" -> Enum.reject(all_ops, &(Map.get(&1, :status) in ["done", "failed"] or &1[:phase_job]))
+      "done" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "done"))
+      "failed" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "failed"))
+      "running" -> Enum.filter(all_ops, &(Map.get(&1, :status) in ["running", "assigned"]))
+      "blocked" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "blocked"))
+      "pending" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "pending"))
+      "phase" -> phase_ops
+      _ -> all_ops
+    end
+
+    assign(socket,
+      visible_ops: visible_ops,
+      counts: counts,
+      total_ops: length(all_ops),
+      impl_count: length(impl_ops),
+      phase_op_count: length(phase_ops)
+    )
   end
 
   defp cleanup_mission_artifacts(mission_id) do
@@ -228,17 +276,22 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
-      <%!-- Header --%>
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem">
-        <div>
+
+      <%!-- Header (full width) --%>
+      <div style="margin-bottom:1.25rem">
           <h1 class="page-title" style="margin-bottom:0.25rem">
             <a href="/dashboard/missions" style="color:#8b949e; text-decoration:none; margin-right:0.4rem; font-size:0.9em" title="Back to Missions">‹</a>
             {Map.get(@mission, :name, "Mission")}
           </h1>
-          <div style="color:#8b949e; font-size:0.85rem; max-width:600px">
+          <div class={"goal-text #{if @show_full_goal, do: "goal-text-full"}"}>
             {Map.get(@mission, :goal, "")}
           </div>
-          <div style="margin-top:0.5rem; display:flex; gap:0.5rem; align-items:center">
+          <%= if String.length(Map.get(@mission, :goal, "")) > 120 do %>
+            <button phx-click="toggle_goal" class="goal-toggle">
+              {if @show_full_goal, do: "Show less", else: "Show more"}
+            </button>
+          <% end %>
+          <div style="margin-top:0.5rem; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
             <span class={"badge #{status_badge(Map.get(@mission, :status, "unknown"))}"}>
               {Map.get(@mission, :status, "unknown")}
             </span>
@@ -256,56 +309,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             </span>
           </div>
         </div>
-        <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
-          <!-- Sector assignment (if none assigned) -->
-          <%= if is_nil(Map.get(@mission, :sector_id)) and @sectors != [] do %>
-            <form phx-submit="assign_sector" style="display:flex; gap:0.5rem; align-items:center">
-              <select name="sector_id" class="form-select" style="font-size:0.8rem; padding:0.3rem 0.5rem; min-width:150px">
-                <%= for sector <- @sectors do %>
-                  <option value={sector.id}>{sector.name}</option>
-                <% end %>
-              </select>
-              <button type="submit" class="btn btn-blue" style="font-size:0.8rem; padding:0.3rem 0.6rem">Assign Sector</button>
-            </form>
-          <% end %>
 
-          <%!-- View buttons (always show when artifacts exist) --%>
-          <%= if has_design_artifacts?(@mission) do %>
-            <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-purple">View Designs</a>
-          <% end %>
-          <%= if has_artifacts?(@mission) do %>
-            <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
-          <% end %>
-
-          <%!-- Status-specific actions --%>
-          <%= case Map.get(@mission, :status, "pending") do %>
-            <% "pending" -> %>
-              <button phx-click="start" class="btn btn-green">Start Mission</button>
-            <% "active" -> %>
-              <button phx-click="kill" class="btn btn-orange" data-confirm="Kill this mission?">Kill</button>
-            <% "completed" -> %>
-              <button phx-click="generate_report" class="btn btn-blue" disabled={@report_loading}>
-                <%= if @report_loading do %>
-                  <span class="loading-spinner" style="width:14px;height:14px;border-width:2px"></span>
-                  Generating...
-                <% else %>
-                  Generate Report
-                <% end %>
-              </button>
-            <% _ -> %>
-          <% end %>
-
-          <%!-- Diagnose (blue with cross) --%>
-          <%= if Map.get(@mission, :status) == "failed" || Enum.any?(@ops, &(Map.get(&1, :status) == "failed")) do %>
-            <a href={"/dashboard/missions/#{@mission.id}/diagnostics"} class="btn btn-blue">✚ Diagnose</a>
-          <% end %>
-
-          <%!-- Remove (always, red) --%>
-          <button phx-click="remove" class="btn btn-red" data-confirm="Permanently remove this mission and all its data? This cannot be undone.">Remove</button>
-        </div>
-      </div>
-
-      <%!-- Phase Stepper --%>
+      <%!-- Phase Stepper (full width) --%>
       <div class="panel">
         <div class="panel-title">Phase Pipeline</div>
         <div class="stepper">
@@ -339,19 +344,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         </div>
       </div>
 
-      <%!-- Phase Artifact Viewer --%>
-      <%= if @selected_phase do %>
-        <div class="panel">
-          <div class="panel-title">Phase: {@selected_phase}</div>
-          <%= if @artifact do %>
-            <div class="pre-block">{inspect(@artifact, pretty: true, limit: :infinity)}</div>
-          <% else %>
-            <div class="empty">No artifact stored for this phase.</div>
-          <% end %>
-        </div>
-      <% end %>
-
-      <%!-- Report --%>
+      <%!-- Report (full width) --%>
       <%= if @report do %>
         <div class="panel">
           <div class="panel-title">Report</div>
@@ -359,98 +352,204 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         </div>
       <% end %>
 
-      <%!-- Ops Table --%>
-      <div class="panel">
-        <div class="panel-title">Ops ({length(@ops)})</div>
-        <%= if @ops == [] do %>
-          <div class="empty">No ops created yet.</div>
-        <% else %>
-          <table>
-            <thead>
-              <tr>
-                <th></th>
-                <th>ID</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Audit</th>
-                <th>Ghost</th>
-                <th>Context</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <%= for op <- @ops do %>
-                <tr class="detail-toggle" phx-click="toggle_op" phx-value-id={op.id}>
-                  <td style="width:1.5rem">{if MapSet.member?(@expanded_ops, op.id), do: "v", else: ">"}</td>
-                  <td>
-                    <a href={"/dashboard/ops/#{op.id}"} style="font-family:monospace; font-size:0.8rem">
-                      {short_id(op.id)}
-                    </a>
-                  </td>
-                  <td>{Map.get(op, :title, "-")}</td>
-                  <td><span class={"badge #{status_badge(Map.get(op, :status, "unknown"))}"}>{Map.get(op, :status, "unknown")}</span></td>
-                  <td>
-                    <%= if Map.get(op, :verification_status) do %>
-                      <span class={"badge #{verification_badge(op.verification_status)}"}>{op.verification_status}</span>
-                    <% else %>
-                      <span class="badge badge-grey">-</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <% ghost_id = Map.get(op, :ghost_id) %>
-                    <%= if ghost_id do %>
-                      <% ghost_rec = GiTF.Archive.get(:ghosts, ghost_id) %>
-                      <% {provider, _short, _tier} = parse_model(ghost_rec && ghost_rec[:assigned_model]) %>
-                      <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(ghost_rec[:name] || short_id(ghost_id), ghost_rec[:assigned_model])}</span>
-                    <% else %>
-                      <span style="color:#6b7280">-</span>
-                    <% end %>
-                  </td>
-                  <td style="min-width:7rem">
-                    <% {ctx_pct, ctx_used, ctx_limit} = ghost_context_info(op) %>
-                    <%= if ctx_pct > 0 do %>
-                      <% bar_width = max(ctx_pct, 2) %>
-                      <% label = if ctx_pct < 1, do: "<1%", else: "#{trunc(ctx_pct)}%" %>
-                      <div style="display:flex; align-items:center; gap:0.3rem" title={"#{format_tokens_mb(ctx_used)} / #{format_tokens_mb(ctx_limit)}"}>
-                        <div style="flex:1; height:6px; background:#1f2937; border-radius:3px; overflow:hidden">
-                          <div style={"width:#{bar_width}%; height:100%; border-radius:3px; background:#{context_gauge_color(ctx_pct)}"}></div>
-                        </div>
-                        <span style={"font-size:0.65rem; font-family:monospace; color:#{context_gauge_color(ctx_pct)}"}>{label}</span>
+      <%!-- ═══ TWO-COLUMN: OPS + SIDEBAR ═══ --%>
+      <div class="mission-detail-layout">
+      <div>
+        <%!-- Ops Card List --%>
+        <div class="panel">
+          <div class="panel-title" style="margin-bottom:0.5rem">Ops</div>
+          <div class="op-filters">
+            <button phx-click="filter_ops" phx-value-filter="active" class={"op-filter-chip #{if @op_filter == "active", do: "op-filter-active"}"}>
+              Active <span class="op-filter-count">{@counts.running + @counts.blocked + @counts.pending}</span>
+            </button>
+            <button :if={@counts.done > 0} phx-click="filter_ops" phx-value-filter="done" class={"op-filter-chip op-filter-green #{if @op_filter == "done", do: "op-filter-active"}"}>
+              Done <span class="op-filter-count">{@counts.done}</span>
+            </button>
+            <button :if={@counts.running > 0} phx-click="filter_ops" phx-value-filter="running" class={"op-filter-chip op-filter-blue #{if @op_filter == "running", do: "op-filter-active"}"}>
+              Running <span class="op-filter-count">{@counts.running}</span>
+            </button>
+            <button :if={@counts.blocked > 0} phx-click="filter_ops" phx-value-filter="blocked" class={"op-filter-chip op-filter-yellow #{if @op_filter == "blocked", do: "op-filter-active"}"}>
+              Blocked <span class="op-filter-count">{@counts.blocked}</span>
+            </button>
+            <button :if={@counts.failed > 0} phx-click="filter_ops" phx-value-filter="failed" class={"op-filter-chip op-filter-red #{if @op_filter == "failed", do: "op-filter-active"}"}>
+              Failed <span class="op-filter-count">{@counts.failed}</span>
+            </button>
+            <button :if={@phase_op_count > 0} phx-click="filter_ops" phx-value-filter="phase" class={"op-filter-chip op-filter-purple #{if @op_filter == "phase", do: "op-filter-active"}"}>
+              Phase <span class="op-filter-count">{@phase_op_count}</span>
+            </button>
+            <button phx-click="filter_ops" phx-value-filter="all" class={"op-filter-chip #{if @op_filter == "all", do: "op-filter-active"}"}>
+              All <span class="op-filter-count">{@total_ops}</span>
+            </button>
+          </div>
+          <%= if @visible_ops == [] do %>
+            <div class="empty">No ops created yet.</div>
+          <% else %>
+            <%= for op <- @visible_ops do %>
+              <% op_status = Map.get(op, :status, "pending")
+                 status_class = case op_status do
+                   s when s in ["running", "assigned"] -> "op-card-running"
+                   "failed" -> "op-card-failed"
+                   "blocked" -> "op-card-blocked"
+                   "done" -> "op-card-done"
+                   _ -> ""
+                 end %>
+              <div
+                class={"op-card #{status_class}"}
+                phx-click="toggle_op"
+                phx-value-id={op.id}
+              >
+                <%!-- Line 1: status icon + title --%>
+                <div class="op-card-title">
+                  <span class={"status-icon status-icon-#{status_icon_class(op_status)}"}>{status_icon(op_status)}</span>
+                  <a href={"/dashboard/ops/#{op.id}"} style="color:#f0f6fc; font-size:0.9rem; flex:1" phx-click="toggle_op" phx-value-id={op.id}>
+                    {Map.get(op, :title, "-")}
+                  </a>
+                  <%= if Map.get(op, :status) == "failed" do %>
+                    <button phx-click="reset_op" phx-value-id={op.id} class="btn btn-grey" style="padding:0.15rem 0.4rem; font-size:0.7rem; flex-shrink:0">
+                      Reset
+                    </button>
+                  <% end %>
+                </div>
+                <%!-- Line 2: badges + ghost + context --%>
+                <div class="op-card-meta">
+                  <span class={"badge #{status_badge(op_status)}"}>{op_status}</span>
+                  <%= if Map.get(op, :verification_status) do %>
+                    <span class={"badge #{verification_badge(op.verification_status)}"}>{op.verification_status}</span>
+                  <% end %>
+                  <% ghost_id = Map.get(op, :ghost_id) %>
+                  <%= if ghost_id do %>
+                    <% ghost_rec = GiTF.Archive.get(:ghosts, ghost_id) %>
+                    <% {provider, _short, _tier} = parse_model(ghost_rec && ghost_rec[:assigned_model]) %>
+                    <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(ghost_rec[:name] || short_id(ghost_id), ghost_rec[:assigned_model])}</span>
+                  <% end %>
+                  <% {ctx_pct, ctx_used, ctx_limit} = ghost_context_info(op) %>
+                  <%= if ctx_pct > 0 do %>
+                    <% bar_width = max(ctx_pct, 2) %>
+                    <% label = if ctx_pct < 1, do: "<1%", else: "#{trunc(ctx_pct)}%" %>
+                    <div style="display:flex; align-items:center; gap:0.3rem; min-width:5rem" title={"#{format_tokens_mb(ctx_used)} / #{format_tokens_mb(ctx_limit)}"}>
+                      <div style="flex:1; height:5px; background:#1f2937; border-radius:3px; overflow:hidden">
+                        <div style={"width:#{bar_width}%; height:100%; border-radius:3px; background:#{context_gauge_color(ctx_pct)}"}></div>
                       </div>
-                    <% else %>
-                      <span style="font-size:0.65rem; color:#6b7280">-</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <%= if Map.get(op, :status) == "failed" do %>
-                      <button phx-click="reset_op" phx-value-id={op.id} class="btn btn-grey" style="padding:0.2rem 0.5rem; font-size:0.75rem">
-                        Reset
-                      </button>
-                    <% end %>
-                  </td>
-                </tr>
-                <%= if MapSet.member?(@expanded_ops, op.id) do %>
-                  <tr>
-                    <td colspan="8" style="padding:0">
-                      <div class="detail-content">
-                        <dl class="metadata-grid">
-                          <dt>Type</dt><dd>{Map.get(op, :type, "-")}</dd>
-                          <dt>Complexity</dt><dd>{Map.get(op, :complexity, "-")}</dd>
-                          <dt>Risk</dt><dd>{Map.get(op, :risk_level, "-")}</dd>
-                          <dt>Retries</dt><dd>{Map.get(op, :retry_count, 0)}</dd>
-                        </dl>
-                        <%= if Map.get(op, :description) do %>
-                          <div style="margin-top:0.75rem; color:#8b949e; font-size:0.85rem">{op.description}</div>
-                        <% end %>
-                      </div>
-                    </td>
-                  </tr>
-                <% end %>
+                      <span style={"font-size:0.65rem; font-family:monospace; color:#{context_gauge_color(ctx_pct)}"}>{label}</span>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+              <%!-- Expanded detail --%>
+              <%= if MapSet.member?(@expanded_ops, op.id) do %>
+                <div class="plan-detail" style="border-bottom:1px solid #21262d">
+                  <dl class="metadata-grid" style="margin-bottom:0.75rem">
+                    <dt>Type</dt><dd>{Map.get(op, :type, "-")}</dd>
+                    <dt>Complexity</dt><dd>{Map.get(op, :complexity, "-")}</dd>
+                    <dt>Risk</dt><dd>{Map.get(op, :risk_level, "-")}</dd>
+                    <dt>Retries</dt><dd>{Map.get(op, :retry_count, 0)}</dd>
+                  </dl>
+                  <%= if Map.get(op, :description) do %>
+                    <div style="color:#8b949e; font-size:0.85rem; white-space:pre-wrap; line-height:1.5">{op.description}</div>
+                  <% end %>
+                </div>
               <% end %>
-            </tbody>
-          </table>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+
+      <%!-- ═══ SIDEBAR ═══ --%>
+      <div class="mission-sidebar">
+        <%!-- Stats --%>
+        <div class="panel" style="padding:0.85rem 1rem">
+          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="done">
+            <span class="sidebar-stat-label">Done</span>
+            <span class="sidebar-stat-value green">{@counts.done}</span>
+          </div>
+          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="running">
+            <span class="sidebar-stat-label">Running</span>
+            <span class={"sidebar-stat-value #{if @counts.running > 0, do: "blue", else: ""}"}>{@counts.running}</span>
+          </div>
+          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="blocked">
+            <span class="sidebar-stat-label">Blocked</span>
+            <span class={"sidebar-stat-value #{if @counts.blocked > 0, do: "yellow", else: ""}"}>{@counts.blocked}</span>
+          </div>
+          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="failed">
+            <span class="sidebar-stat-label">Failed</span>
+            <span class={"sidebar-stat-value #{if @counts.failed > 0, do: "red", else: ""}"}>{@counts.failed}</span>
+          </div>
+          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="pending">
+            <span class="sidebar-stat-label">Pending</span>
+            <span class="sidebar-stat-value">{@counts.pending}</span>
+          </div>
+          <div class="sidebar-stat-row" style="border-top:1px solid #30363d; margin-top:0.25rem; padding-top:0.5rem; cursor:pointer" phx-click="filter_ops" phx-value-filter="all">
+            <span class="sidebar-stat-label" style="font-weight:600; color:#f0f6fc">Total</span>
+            <span class="sidebar-stat-value">{@total_ops}</span>
+          </div>
+        </div>
+
+        <%!-- Actions --%>
+        <div class="panel" style="padding:0.85rem 1rem">
+          <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.75rem; padding-bottom:0.4rem">Actions</div>
+          <div class="sidebar-actions">
+            <%!-- View buttons --%>
+            <%= if has_artifacts?(@mission) do %>
+              <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
+            <% end %>
+            <%= if has_design_artifacts?(@mission) do %>
+              <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-purple">View Designs</a>
+            <% end %>
+
+            <%!-- Status-specific --%>
+            <%= case Map.get(@mission, :status, "pending") do %>
+              <% "pending" -> %>
+                <button phx-click="start" class="btn btn-green">Start Mission</button>
+              <% "active" -> %>
+                <button phx-click="kill" class="btn btn-orange" data-confirm="Kill this mission?">Kill Mission</button>
+              <% "completed" -> %>
+                <button phx-click="generate_report" class="btn btn-blue" disabled={@report_loading}>
+                  <%= if @report_loading do %>
+                    <span class="loading-spinner" style="width:14px;height:14px;border-width:2px"></span>
+                    Generating...
+                  <% else %>
+                    Generate Report
+                  <% end %>
+                </button>
+              <% _ -> %>
+            <% end %>
+
+            <%!-- Diagnose --%>
+            <%= if Map.get(@mission, :status) == "failed" || Enum.any?(@ops, &(Map.get(&1, :status) == "failed")) do %>
+              <a href={"/dashboard/missions/#{@mission.id}/diagnostics"} class="btn btn-blue">Diagnose</a>
+            <% end %>
+
+            <%!-- Sector --%>
+            <%= if is_nil(Map.get(@mission, :sector_id)) and @sectors != [] do %>
+              <form phx-submit="assign_sector" style="display:flex; gap:0.5rem">
+                <select name="sector_id" class="form-select" style="font-size:0.8rem; padding:0.3rem 0.5rem; flex:1">
+                  <%= for sector <- @sectors do %>
+                    <option value={sector.id}>{sector.name}</option>
+                  <% end %>
+                </select>
+                <button type="submit" class="btn btn-blue" style="font-size:0.8rem; padding:0.3rem 0.6rem; flex-shrink:0">Assign</button>
+              </form>
+            <% end %>
+
+            <%!-- Remove (always last, danger) --%>
+            <button phx-click="remove" class="btn btn-red" data-confirm="Permanently remove this mission and all its data? This cannot be undone." style="margin-top:0.25rem">Remove</button>
+          </div>
+        </div>
+
+        <%!-- Phase Artifact Viewer --%>
+        <%= if @selected_phase do %>
+          <div class="panel" style="padding:0.85rem 1rem">
+            <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.75rem; padding-bottom:0.4rem">Phase: {@selected_phase}</div>
+            <%= if @artifact do %>
+              <div class="pre-block" style="max-height:400px; overflow-y:auto; font-size:0.75rem">{inspect(@artifact, pretty: true, limit: :infinity)}</div>
+            <% else %>
+              <div class="empty" style="padding:1rem 0">No artifact stored.</div>
+            <% end %>
+          </div>
         <% end %>
       </div>
+    </div>
+
     </.live_component>
     """
   end

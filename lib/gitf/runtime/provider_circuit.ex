@@ -109,17 +109,17 @@ defmodule GiTF.Runtime.ProviderCircuit do
 
             fallback_key = @circuit_prefix <> fallback_provider
 
-            CircuitBreaker.call(fallback_key, fn ->
+            CircuitBreaker.call_with_retry(fallback_key, fn ->
               call_fn.(fallback_model)
-            end)
+            end, max_retries: 2)
 
           :none ->
             Logger.warning("All provider circuits unavailable, attempting probe on #{provider}")
-            CircuitBreaker.call(circuit_key, fn -> call_fn.(model) end)
+            CircuitBreaker.call_with_retry(circuit_key, fn -> call_fn.(model) end, max_retries: 2)
         end
 
       _closed_or_half_open ->
-        CircuitBreaker.call(circuit_key, fn -> call_fn.(model) end)
+        CircuitBreaker.call_with_retry(circuit_key, fn -> call_fn.(model) end, max_retries: 2)
     end
   end
 

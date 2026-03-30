@@ -258,6 +258,7 @@ defmodule GiTF.Major do
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.info("Audit passed for op #{op_id} (ghost #{ghost_id})")
     notify_run_job_completed(op_id)
+    GiTF.Ops.unblock_dependents(op_id)
     GiTF.Trust.update_after_job(op_id)
     state = advance_quest(ghost_id, state)
     {:noreply, state}

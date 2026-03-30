@@ -111,7 +111,7 @@ defmodule GiTF.Budget.Watchdog do
     # Stop active ghosts but don't fail their ops (they can resume)
     active_ghosts =
       Archive.filter(:ghosts, fn b ->
-        b.op_id != nil and b.status == GhostStatus.working()
+        b.op_id != nil && b.status == GhostStatus.working()
       end)
       |> Enum.filter(fn b ->
         case Archive.get(:ops, b.op_id) do

@@ -184,6 +184,8 @@ defmodule GiTF.Tachikoma do
     circuit_results = probe_provider_circuits()
     check_stuck_jobs()
     check_deadlocks()
+    retry_failed_ops()
+    check_blocked_ops()
 
     queen_results = check_major_heartbeat()
     all_results = results ++ budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ queen_results
@@ -736,6 +738,75 @@ defmodule GiTF.Tachikoma do
     e ->
       Logger.warning("Tachikoma: check_stuck_jobs failed: #{Exception.message(e)}")
       :ok
+  end
+
+  @max_auto_retries 3
+  @retry_cooldown_ms :timer.minutes(2)
+
+  defp retry_failed_ops do
+    active_ids = active_mission_ids()
+
+    if active_ids != [] do
+      GiTF.Archive.filter(:ops, fn op ->
+        op.status == "failed" && op[:mission_id] in active_ids
+      end)
+      |> Enum.filter(fn op ->
+        (op[:retry_count] || 0) < @max_auto_retries && !op[:phase_job]
+      end)
+      |> Enum.filter(fn op ->
+        case op[:updated_at] do
+          %DateTime{} = t -> DateTime.diff(DateTime.utc_now(), t, :millisecond) > @retry_cooldown_ms
+          _ -> true
+        end
+      end)
+      |> Enum.reject(&retry_already_handled?/1)
+      |> Enum.each(fn op ->
+        Logger.info("Tachikoma: auto-retrying failed op #{op.id} (retry #{(op[:retry_count] || 0) + 1}/#{@max_auto_retries})")
+        GiTF.Ops.reset(op.id, nil)
+      end)
+    end
+  rescue
+    e ->
+      Logger.warning("Tachikoma: retry_failed_ops failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp retry_already_handled?(op) do
+    # A separate retry op was already created by Major
+    GiTF.Archive.find_one(:ops, fn j -> Map.get(j, :retry_of) == op.id end) != nil ||
+      # Op is no longer failed (was reset by Major between filter and process)
+      case GiTF.Archive.get(:ops, op.id) do
+        %{status: "failed"} -> false
+        _ -> true
+      end
+  end
+
+  defp check_blocked_ops do
+    active_ids = active_mission_ids()
+
+    if active_ids != [] do
+      GiTF.Archive.filter(:ops, fn op ->
+        op.status == "blocked" && op[:mission_id] in active_ids
+      end)
+      |> Enum.each(fn op ->
+        if GiTF.Ops.ready?(op.id) do
+          Logger.info("Tachikoma: unblocking op #{op.id} (dependencies resolved)")
+          GiTF.Ops.unblock(op.id)
+        end
+      end)
+    end
+  rescue
+    e ->
+      Logger.warning("Tachikoma: check_blocked_ops failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp active_mission_ids do
+    GiTF.Missions.list()
+    |> Enum.reject(&(&1[:status] in ["completed", "closed", "killed"]))
+    |> Enum.map(& &1.id)
+  rescue
+    _ -> []
   end
 
   defp notify_major(issues) do
