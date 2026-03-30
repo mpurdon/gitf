@@ -21,17 +21,6 @@ defmodule GiTF.Runtime.Keys do
 
   require Logger
 
-  @key_env_map %{
-    "anthropic" => "ANTHROPIC_API_KEY",
-    "openai" => "OPENAI_API_KEY",
-    "google" => "GOOGLE_API_KEY",
-    "groq" => "GROQ_API_KEY",
-    "mistral" => "MISTRAL_API_KEY",
-    "cohere" => "COHERE_API_KEY",
-    "together" => "TOGETHER_API_KEY",
-    "fireworks" => "FIREWORKS_API_KEY"
-  }
-
   @aws_env_map %{
     "aws_access_key_id" => "AWS_ACCESS_KEY_ID",
     "aws_secret_access_key" => "AWS_SECRET_ACCESS_KEY",
@@ -50,31 +39,20 @@ defmodule GiTF.Runtime.Keys do
   def load do
     keys = read_keys_from_toml()
 
-    loaded =
-      Enum.count(keys, fn {raw_key, value} ->
-        env_var = resolve_env_var(raw_key)
+    # API keys are read directly from config by ProviderManager.api_key_for/1
+    # and injected into ReqLLM calls — no env vars needed.
 
-        if env_var && System.get_env(env_var) == nil and is_binary(value) and value != "" do
-          System.put_env(env_var, value)
-          true
-        else
-          false
-        end
-      end)
-
-    # Load AWS credentials from ~/.aws/credentials if configured
+    # AWS credentials still need env vars for SigV4 signing (BedrockDirect).
     aws_loaded = load_aws_credentials(keys)
 
-    total = loaded + aws_loaded
-
-    if total > 0 do
-      Logger.info("Loaded #{total} key(s) (#{loaded} API, #{aws_loaded} AWS)")
+    if aws_loaded > 0 do
+      Logger.info("Loaded #{aws_loaded} AWS credential(s)")
     end
 
-    total
+    aws_loaded
   rescue
     e ->
-      Logger.debug("Failed to load API keys: #{inspect(e)}")
+      Logger.debug("Failed to load credentials: #{inspect(e)}")
       0
   end
 
@@ -83,8 +61,10 @@ defmodule GiTF.Runtime.Keys do
   """
   @spec status() :: [{String.t(), boolean()}]
   def status do
-    api_keys = Enum.map(@key_env_map, fn {provider, env_var} ->
-      {provider, System.get_env(env_var) != nil}
+    providers = ~w(anthropic openai google groq mistral cohere together fireworks)
+
+    api_keys = Enum.map(providers, fn provider ->
+      {provider, GiTF.Runtime.ProviderManager.api_key_for(provider) != nil}
     end)
 
     aws_status = {"aws_bedrock",
@@ -106,16 +86,6 @@ defmodule GiTF.Runtime.Keys do
     end
   rescue
     _ -> %{}
-  end
-
-  # "google" -> "GOOGLE_API_KEY", "google_api_key" -> "GOOGLE_API_KEY"
-  defp resolve_env_var(raw_key) do
-    normalized =
-      raw_key
-      |> to_string()
-      |> String.replace(~r/_api_key$/, "")
-
-    Map.get(@key_env_map, normalized)
   end
 
   # -- AWS credentials loading -------------------------------------------------

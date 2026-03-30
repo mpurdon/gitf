@@ -162,21 +162,33 @@ defmodule GiTF.Runtime.AgentLoop do
     case classified.type do
       :final_answer ->
         text = classified.text || ""
-        result_event = build_result_event(state, :completed)
 
-        emit_progress(state.on_progress, %{
-          type: :completed,
-          iterations: state.iteration + 1,
-          usage: state.total_usage
-        })
+        # Guard: if the very first response has no tokens and no text, the LLM
+        # call didn't actually produce anything — treat as an error rather than
+        # a legitimate empty final answer.
+        total_input = state.total_usage[:input_tokens] || 0
+        total_output = state.total_usage[:output_tokens] || 0
 
-        {:ok, %{
-          text: text,
-          events: Enum.reverse([result_event | state.events]),
-          usage: state.total_usage,
-          iterations: state.iteration + 1,
-          status: :completed
-        }}
+        if state.iteration == 0 and total_input == 0 and total_output == 0 and text == "" do
+          Logger.error("AgentLoop: empty response with 0 tokens on first iteration — LLM call likely failed silently")
+          {:error, {:api_error, :empty_response}}
+        else
+          result_event = build_result_event(state, :completed)
+
+          emit_progress(state.on_progress, %{
+            type: :completed,
+            iterations: state.iteration + 1,
+            usage: state.total_usage
+          })
+
+          {:ok, %{
+            text: text,
+            events: Enum.reverse([result_event | state.events]),
+            usage: state.total_usage,
+            iterations: state.iteration + 1,
+            status: :completed
+          }}
+        end
 
       :tool_calls ->
         tool_calls = classified.tool_calls

@@ -40,16 +40,6 @@ defmodule GiTF.Runtime.ProviderManager do
     "fireworks" => %{color: "#8b949e", glyph: "F", auth: :api_key, thinking: "fireworks:llama-v3-70b", general: "fireworks:llama-v3-70b", fast: "fireworks:llama-v3-8b"}
   }
 
-  @key_env_map %{
-    "google" => "GOOGLE_API_KEY",
-    "anthropic" => "ANTHROPIC_API_KEY",
-    "openai" => "OPENAI_API_KEY",
-    "groq" => "GROQ_API_KEY",
-    "mistral" => "MISTRAL_API_KEY",
-    "together" => "TOGETHER_API_KEY",
-    "fireworks" => "FIREWORKS_API_KEY"
-  }
-
   # -- Read ------------------------------------------------------------------
 
   def known_providers, do: @known_providers
@@ -94,9 +84,9 @@ defmodule GiTF.Runtime.ProviderManager do
     config_overrides = get_provider_config(provider_name)
 
     %{
-      thinking: to_string(config_overrides[:thinking] || defaults[:thinking] || ""),
-      general: to_string(config_overrides[:general] || defaults[:general] || ""),
-      fast: to_string(config_overrides[:fast] || defaults[:fast] || "")
+      thinking: to_string(config_overrides[:thinking] || config_overrides["thinking"] || defaults[:thinking] || ""),
+      general: to_string(config_overrides[:general] || config_overrides["general"] || defaults[:general] || ""),
+      fast: to_string(config_overrides[:fast] || config_overrides["fast"] || defaults[:fast] || "")
     }
   end
 
@@ -142,7 +132,13 @@ defmodule GiTF.Runtime.ProviderManager do
     _ -> %{total_calls: 0, total_cost: 0.0}
   end
 
-  @doc "Tests connection to a provider's fast-tier model. Returns {:ok, latency_ms} or {:error, reason}."
+  @doc """
+  Tests a provider connection using the same code path ghosts use.
+
+  Sends "Say OK" via ReqLLM or BedrockDirect (bypassing circuit breaker
+  so we test THIS provider, not a fallback) and verifies the response
+  has actual content. If the test passes, ghosts will work too.
+  """
   def test_connection(name, opts \\ %{}) do
     model = to_string(opts[:fast] || opts[:general] || "")
 
@@ -154,108 +150,106 @@ defmodule GiTF.Runtime.ProviderManager do
         model
       end
 
-    cond do
-      model == "" ->
-        {:error, "No model configured for #{name}"}
-
-      name == "bedrock" ->
-        profile = to_string(opts[:aws_profile] || "")
+    if model == "" do
+      {:error, diagnostic("No model configured for #{name}", %{provider: name, step: :resolve_model})}
+    else
+      # For bedrock, ensure credentials are loaded before testing
+      if name == "bedrock" do
+        profile = to_string(opts[:aws_profile] || Config.get([:llm, :keys, :aws_profile]) || "")
         region = to_string(opts[:aws_region] || "us-east-1")
+        if profile != "", do: GiTF.Runtime.Keys.load_aws_profile(profile)
+        if region != "", do: System.put_env("AWS_REGION", region)
+      end
 
-        test_bedrock_direct(model, profile, region)
-
-      true ->
-        test_api_call(model)
+      test_via_llm_client(name, model)
     end
   rescue
-    e -> {:error, Exception.message(e)}
+    e ->
+      {:error, diagnostic(Exception.message(e), %{
+        provider: name,
+        step: :setup,
+        exception: e.__struct__,
+        stacktrace: Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
+      })}
   end
 
-  defp test_bedrock_direct(model, profile, region) do
-    args = [
-      "bedrock-runtime", "converse",
-      "--model-id", model,
-      "--messages", ~s([{"role":"user","content":[{"text":"Say OK"}]}]),
-      "--inference-config", ~s({"maxTokens":5}),
-      "--region", region
-    ]
-
-    args = if profile != "", do: args ++ ["--profile", profile], else: args
-
+  defp test_via_llm_client(provider_name, model) do
     start = System.monotonic_time(:millisecond)
+    messages = [%{role: "user", content: "Say OK"}]
 
-    case System.cmd("aws", args, stderr_to_stdout: true) do
-      {_output, 0} ->
-        latency = System.monotonic_time(:millisecond) - start
+    # Build diagnostic context
+    is_arn = is_binary(model) and String.starts_with?(model, "arn:aws:bedrock:")
+    has_key = api_key_for(provider_name) != nil
+    has_aws = System.get_env("AWS_ACCESS_KEY_ID") != nil
 
-        # Also load credentials so they're available for actual ghost API calls
-        if profile != "" do
-          System.put_env("AWS_REGION", region)
-          GiTF.Runtime.Keys.load_aws_profile(profile)
-          ensure_aws_credentials()
-        end
+    diag_base = %{
+      provider: provider_name,
+      model: model,
+      is_arn: is_arn,
+      has_api_key: has_key,
+      has_aws_creds: has_aws
+    }
 
-        {:ok, latency}
-
-      {error, _} ->
-        {:error, String.trim(error) |> String.slice(0, 300)}
+    # Call the same code path ghosts use, but bypass ProviderCircuit
+    # so we test THIS provider specifically (not a fallback).
+    opts = case api_key_for(provider_name) do
+      nil -> [max_tokens: 5]
+      key -> [max_tokens: 5, api_key: key]
     end
-  rescue
-    e -> {:error, Exception.message(e)}
-  end
 
-  defp test_api_call(model) do
-    model = normalize_model_for_reqllm(model)
-
-    require Logger
-    Logger.info("test_api_call: model=#{inspect(model)}, AWS_REGION=#{System.get_env("AWS_REGION")}, AWS_ACCESS_KEY_ID=#{String.slice(System.get_env("AWS_ACCESS_KEY_ID") || "", 0, 8)}...")
-
-    start = System.monotonic_time(:millisecond)
-
-    result = ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5, use_converse: true)
-
-    require Logger
-    Logger.info("test_api_call result: #{inspect(result, limit: 500)}")
+    result =
+      if is_arn do
+        GiTF.Runtime.BedrockDirect.converse(model, messages, opts)
+      else
+        ReqLLM.generate_text(normalize_model_for_reqllm(model), messages, opts)
+      end
 
     case result do
-      {:ok, _response} ->
+      {:ok, response} ->
+        text = ReqLLM.Response.text(response) || ""
+        usage = Map.get(response, :usage, %{})
         latency = System.monotonic_time(:millisecond) - start
-        {:ok, latency}
 
-      {:error, %{body: body}} when is_binary(body) ->
-        {:error, body}
-
-      {:error, %{status: status, body: %{"error" => %{"message" => msg}}}} ->
-        {:error, "HTTP #{status}: #{msg}"}
-
-      {:error, %{status: status}} ->
-        {:error, "HTTP #{status}"}
-
-      {:error, reason} when is_binary(reason) ->
-        {:error, reason}
+        if String.trim(text) != "" do
+          {:ok, latency}
+        else
+          {:error, diagnostic("Model returned 200 but empty response", Map.merge(diag_base, %{
+            step: :validate_response,
+            output_tokens: usage[:output_tokens] || 0,
+            response_text: text,
+            latency_ms: latency
+          }))}
+        end
 
       {:error, reason} ->
-        {:error, inspect(reason)}
+        {:error, diagnostic(format_error(reason), Map.merge(diag_base, %{
+          step: :api_call,
+          raw_error: inspect(reason, limit: 500)
+        }))}
     end
+  rescue
+    e ->
+      {:error, diagnostic(Exception.message(e), %{
+        provider: provider_name,
+        model: model,
+        step: :api_call,
+        exception: e.__struct__,
+        stacktrace: Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
+      })}
   end
 
-  @doc "Normalizes model strings for ReqLLM — ARNs become inline model structs."
-  def normalize_model_for_reqllm(model) when is_binary(model) do
-    if String.starts_with?(model, "arn:aws:bedrock:") do
-      ensure_aws_credentials()
-      # Inference profile ARNs: use the ARN as the model ID but set
-      # provider_model_id to a known Anthropic model for formatter detection.
-      # Set family explicitly so ReqLLM uses the anthropic formatter.
-      ReqLLM.model!(%{
-        provider: :amazon_bedrock,
-        id: model,
-        provider_model_id: "anthropic.claude-sonnet-4-6-20250514-v1:0",
-        family: "anthropic"
-      })
-    else
-      model
-    end
+  defp diagnostic(message, context) when is_binary(message) do
+    %{message: message, context: context}
   end
+
+  defp format_error(%{status: status, response_body: %{"error" => %{"message" => msg}}}),
+    do: "HTTP #{status}: #{msg}"
+  defp format_error(%{reason: reason}) when is_binary(reason), do: reason
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason, limit: 300)
+
+  @doc "Normalizes model strings for ReqLLM. ARNs are handled by BedrockDirect instead."
+  def normalize_model_for_reqllm(model) when is_binary(model), do: model
   def normalize_model_for_reqllm(model), do: model
 
   def ensure_aws_credentials do
@@ -396,21 +390,17 @@ defmodule GiTF.Runtime.ProviderManager do
     _ -> %{}
   end
 
-  defp has_api_key?(name) do
-    # Check config keys
+  @doc "Returns the API key for a provider from config, or nil."
+  def api_key_for(name) do
     key = Config.get([:llm, :keys, String.to_atom(name)]) ||
           Config.get([:llm, :keys, name])
 
-    if is_binary(key) and key != "" do
-      true
-    else
-      # Check env var
-      env_var = Map.get(@key_env_map, name)
-      env_var && System.get_env(env_var) != nil
-    end
+    if is_binary(key) and key != "", do: key
   rescue
-    _ -> false
+    _ -> nil
   end
+
+  defp has_api_key?(name), do: api_key_for(name) != nil
 
   defp bedrock_status do
     has_profile = (Config.get([:llm, :keys, :aws_profile]) || "") != ""

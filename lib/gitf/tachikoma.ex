@@ -23,6 +23,8 @@ defmodule GiTF.Tachikoma do
   use GenServer
   require Logger
 
+  alias GiTF.Runtime.{ProviderCircuit, ProviderManager}
+
   @default_poll_interval :timer.seconds(30)
   @registry_name GiTF.Registry
   @registry_key :tachikoma
@@ -179,11 +181,12 @@ defmodule GiTF.Tachikoma do
     budget_results = check_budgets()
     conflict_results = check_merge_conflicts()
     audit_results = check_verifications()
+    circuit_results = probe_provider_circuits()
     check_stuck_jobs()
     check_deadlocks()
 
     queen_results = check_major_heartbeat()
-    all_results = results ++ budget_results ++ conflict_results ++ audit_results ++ queen_results
+    all_results = results ++ budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ queen_results
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
     if issues != [] do
@@ -304,6 +307,82 @@ defmodule GiTF.Tachikoma do
     end)
   rescue
     _ -> []
+  end
+
+  # -- Provider Circuit Probe --------------------------------------------------
+  # Tests providers with open circuit breakers and resets them when they recover.
+  # Walks providers in priority order (highest first) so the most-preferred
+  # provider is healed first.
+
+  defp probe_provider_circuits do
+    open_providers = ProviderCircuit.open_providers()
+
+    if open_providers == [] do
+      []
+    else
+      # Order by priority so we heal the most-preferred provider first
+      priority = ProviderManager.provider_priority()
+
+      sorted =
+        Enum.sort_by(open_providers, fn p ->
+          Enum.find_index(priority, &(&1 == p)) || 999
+        end)
+
+      # Only probe providers whose interval has elapsed
+      {due, skipped} = Enum.split_with(sorted, &ProviderCircuit.probe_due?/1)
+
+      if skipped != [] do
+        intervals = Enum.map(skipped, fn p ->
+          mode = ProviderCircuit.failure_mode(p)
+          "#{p}(#{mode}, #{ProviderCircuit.probe_interval(p)}s)"
+        end)
+        Logger.debug("Tachikoma: skipping probe for #{Enum.join(intervals, ", ")} — not due yet")
+      end
+
+      if due != [] do
+        Logger.info("Tachikoma: probing #{length(due)} open provider circuit(s): #{Enum.join(due, ", ")}")
+      end
+
+      # Run probes under TaskSupervisor to avoid blocking the Tachikoma GenServer.
+      # test_connection makes real API calls / shells out to AWS CLI and can hang.
+      Enum.each(due, fn provider ->
+        ProviderCircuit.record_probe(provider)
+
+        Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+          case ProviderManager.test_connection(provider) do
+            {:ok, latency_ms} ->
+              ProviderCircuit.reset_provider(provider)
+              Logger.info("Tachikoma: provider #{provider} recovered (#{latency_ms}ms), circuit reset to closed")
+
+              Phoenix.PubSub.broadcast(
+                GiTF.PubSub,
+                "provider:circuit",
+                {:circuit_reset, provider, latency_ms}
+              )
+
+              GiTF.Telemetry.emit([:gitf, :provider, :circuit_reset], %{latency_ms: latency_ms}, %{
+                provider: provider
+              })
+
+            {:error, reason} ->
+              Logger.debug("Tachikoma: provider #{provider} still down: #{inspect(reason)}")
+          end
+        end)
+      end)
+
+      # Return current status for open circuits (actual probe results arrive async)
+      Enum.map(due, fn provider ->
+        %{
+          name: "provider_circuit",
+          status: :warn,
+          message: "Provider #{provider} circuit open, probe dispatched"
+        }
+      end)
+    end
+  rescue
+    e ->
+      Logger.warning("Tachikoma: probe_provider_circuits failed: #{Exception.message(e)}")
+      []
   end
 
   defp check_major_heartbeat do

@@ -106,10 +106,8 @@ defmodule GiTF.Runtime.GeminiCacheManager do
   end
 
   defp get_api_key do
-    # Try to find key in config or env
-    System.get_env("GOOGLE_API_KEY") ||
-      Application.get_env(:req_llm, :google_api_key) ||
-      raise "GOOGLE_API_KEY not found"
+    GiTF.Runtime.ProviderManager.api_key_for("google") ||
+      raise "Google API key not found in config — set [llm.keys] google in config.toml"
   end
 
   defp map_to_api_model(model) do

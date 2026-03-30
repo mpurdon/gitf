@@ -224,6 +224,20 @@ defmodule GiTF.MCPServer.Tools do
           },
           required: ["from", "to", "subject", "body", "confirm"]
         }
+      },
+      %{
+        name: "test_provider",
+        description:
+          "Test an LLM provider connection using the same code path ghosts use. " <>
+          "Sends 'Say OK' via ReqLLM or BedrockDirect and verifies the response has content. " <>
+          "Returns latency on success or diagnostic details on failure.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            provider: %{type: "string", description: "Provider name: google, bedrock, anthropic, openai, etc."},
+            all: %{type: "boolean", description: "Test ALL configured providers", default: false}
+          }
+        }
       }
     ]
   end

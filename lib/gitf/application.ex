@@ -67,6 +67,7 @@ defmodule GiTF.Application do
     GiTF.CircuitBreaker.init()
     # Reset any circuit breaker state from previous sessions
     GiTF.CircuitBreaker.reset("api:llm")
+    for key <- GiTF.CircuitBreaker.list_open("llm:"), do: GiTF.CircuitBreaker.reset(key)
     GiTF.Observability.Metrics.init()
     GiTF.Telemetry.attach_default_handlers()
     GiTF.Observability.Metrics.attach_handlers()

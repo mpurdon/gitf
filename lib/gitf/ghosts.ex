@@ -285,15 +285,8 @@ defmodule GiTF.Ghosts do
     if GiTF.Ops.ready?(op_id), do: :ok, else: {:error, :blocked}
   end
 
-  # Pre-flight check: don't waste a spawn attempt if the LLM circuit breaker is open
-  defp check_llm_available do
-    case GiTF.CircuitBreaker.get_state("api:llm") do
-      :open -> {:error, :circuit_open}
-      _ -> :ok
-    end
-  rescue
-    _ -> :ok
-  end
+  # Per-provider circuit breakers handle routing/fallback — no global gate needed
+  defp check_llm_available, do: :ok
 
   defp create_ghost_record(name, op_id) do
     # Get op to determine model assignment

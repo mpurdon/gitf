@@ -211,7 +211,7 @@ defmodule GiTF.Dashboard.DesignLive do
           <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Selected</div>
           <span class={"badge badge-#{design_strategy_badge(selected_strategy(@review))}"}>{strategy_label(selected_strategy(@review))}</span>
           <span :if={@review["approved"]} class="badge badge-green" style="margin-left:0.3rem">Approved</span>
-          <span :if={not @review["approved"]} class="badge badge-yellow" style="margin-left:0.3rem">Needs Review</span>
+          <span :if={@review["approved"] != true} class="badge badge-yellow" style="margin-left:0.3rem">Needs Review</span>
         </div>
       </div>
     </div>
@@ -265,7 +265,7 @@ defmodule GiTF.Dashboard.DesignLive do
               <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Coverage</div>
               <div :for={cov <- get_list(@review, "coverage")} class="coverage-item">
                 <span :if={cov["covered"]} class="coverage-ok">✓</span>
-                <span :if={not cov["covered"]} class="coverage-gap">✗</span>
+                <span :if={cov["covered"] != true} class="coverage-gap">✗</span>
                 <span>{cov["req_id"]}</span>
                 <span :if={cov["gap"]} style="color:#f85149; font-size:0.8rem; margin-left:0.3rem">({cov["gap"]})</span>
               </div>

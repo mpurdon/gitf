@@ -247,21 +247,29 @@ defmodule GiTF.Ghost.Worker do
       track_context_usage(state.ghost_id, [%{"type" => "result", "usage" => usage}])
     end
 
-    state = %{state |
-      parsed_events: Enum.reverse(events) ++ state.parsed_events,
-      output: [state.output, text],
-      handle: nil
-    }
+    # Guard: if the agent loop "succeeded" but consumed 0 tokens and produced
+    # no text, the LLM never actually ran — treat as failure.
+    if input_tokens == 0 and output_tokens == 0 and String.trim(text) == "" do
+      Logger.warning("Ghost #{state.ghost_id} completed with 0 tokens and empty output — treating as failure")
+      mark_failed(state, "Empty response: 0 tokens consumed, no output produced")
+      {:stop, :normal, %{state | status: :failed, handle: nil}}
+    else
+      state = %{state |
+        parsed_events: Enum.reverse(events) ++ state.parsed_events,
+        output: [state.output, text],
+        handle: nil
+      }
 
-    try do
-      mark_success(state)
-    rescue
-      e ->
-        Logger.error("Ghost #{state.ghost_id} mark_success crashed: #{Exception.message(e)}")
-        mark_failed(state, "Success handler crashed: #{Exception.message(e)}")
+      try do
+        mark_success(state)
+      rescue
+        e ->
+          Logger.error("Ghost #{state.ghost_id} mark_success crashed: #{Exception.message(e)}")
+          mark_failed(state, "Success handler crashed: #{Exception.message(e)}")
+      end
+
+      {:stop, :normal, %{state | status: :done}}
     end
-
-    {:stop, :normal, %{state | status: :done}}
   end
 
   def handle_info({ref, {:error, reason}}, %{handle: {:task, %Task{ref: ref}}} = state) do
@@ -274,7 +282,6 @@ defmodule GiTF.Ghost.Worker do
         {:noreply, %{state | handle: {:task, new_task}, fallback_attempted: true}}
 
       :no_fallback ->
-        GiTF.CircuitBreaker.call("api:llm", fn -> {:error, reason} end)
         mark_failed(state, "API error: #{inspect(reason)}")
         {:stop, :normal, %{state | status: :failed, handle: nil}}
     end

@@ -345,6 +345,47 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("send_link", _), do: {:error, "Missing required parameters: from, to, subject, body"}
 
+  def call("test_provider", %{"all" => true}) do
+    {configured, _} = GiTF.Runtime.ProviderManager.list_providers()
+
+    results =
+      Enum.map(configured, fn provider ->
+        result = GiTF.Runtime.ProviderManager.test_connection(provider.name)
+
+        case result do
+          {:ok, latency} ->
+            %{provider: provider.name, status: "ok", latency_ms: latency}
+
+          {:error, %{message: msg, context: ctx}} ->
+            %{provider: provider.name, status: "error", error: msg, details: ctx}
+
+          {:error, reason} ->
+            %{provider: provider.name, status: "error", error: inspect(reason)}
+        end
+      end)
+
+    {:ok, json_text(results)}
+  end
+
+  def call("test_provider", %{"provider" => name}) do
+    result = GiTF.Runtime.ProviderManager.test_connection(name)
+
+    case result do
+      {:ok, latency} ->
+        {:ok, json_text(%{provider: name, status: "ok", latency_ms: latency})}
+
+      {:error, %{message: msg, context: ctx}} ->
+        {:ok, json_text(%{provider: name, status: "error", error: msg, details: ctx})}
+
+      {:error, reason} ->
+        {:ok, json_text(%{provider: name, status: "error", error: inspect(reason)})}
+    end
+  end
+
+  def call("test_provider", _args) do
+    {:error, "Provide either 'provider' name or 'all: true'"}
+  end
+
   def call(tool_name, _args), do: {:error, "Unknown tool: #{tool_name}"}
 
   defp require_confirm(%{"confirm" => true}), do: :ok

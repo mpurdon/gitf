@@ -687,7 +687,7 @@ defmodule GiTF.Major.Orchestrator do
   defp check_and_advance(mission, phase, next_fn) do
     artifact = GiTF.Missions.get_artifact(mission.id, phase)
 
-    if artifact do
+    if artifact && !artifact_failed?(artifact) do
       # Refresh mission to get latest state
       {:ok, mission} = GiTF.Missions.get(mission.id)
       next_fn.(mission)
@@ -1553,4 +1553,11 @@ defmodule GiTF.Major.Orchestrator do
       {phase, summary}
     end)
   end
+
+  # Returns true if the artifact was a fallback from a failed parse (empty ghost output).
+  defp artifact_failed?(artifact) when is_map(artifact) do
+    Map.get(artifact, "parse_failed", false) == true
+  end
+
+  defp artifact_failed?(_), do: false
 end

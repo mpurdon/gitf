@@ -1026,11 +1026,7 @@ defmodule GiTF.Major do
   end
 
   defp do_spawn_ready_jobs(mission, state) do
-    # Check API circuit breaker — don't spawn into an outage
-    if GiTF.CircuitBreaker.get_state("api:llm") == :open do
-      Logger.warning("API circuit breaker is OPEN — skipping op spawning until recovery")
-      state
-    else
+    # Per-provider circuit breakers handle routing/fallback — no global gate needed.
     # Check budget proactively before spawning
     case check_quest_budget(mission.id) do
       {:error, :budget_exceeded} ->
@@ -1083,7 +1079,6 @@ defmodule GiTF.Major do
             spawn_single_job(op, acc, run)
           end
         end)
-    end
     end
   end
 

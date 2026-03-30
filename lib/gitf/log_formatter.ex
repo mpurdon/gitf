@@ -16,9 +16,20 @@ defmodule GiTF.LogFormatter do
   """
   @spec format(:logger.log_event(), :logger.formatter_config()) :: String.t()
   def format(event, config) do
-    event
-    |> :logger_formatter.format(config)
-    |> IO.iodata_to_binary()
-    |> GiTF.Redaction.redact()
+    formatted = :logger_formatter.format(event, config)
+
+    binary =
+      case :unicode.characters_to_binary(formatted) do
+        bin when is_binary(bin) -> bin
+        {:incomplete, partial, _} -> partial
+        {:error, _, _} ->
+          try do
+            IO.iodata_to_binary(formatted)
+          rescue
+            _ -> "(log encoding failed)"
+          end
+      end
+
+    GiTF.Redaction.redact(binary)
   end
 end

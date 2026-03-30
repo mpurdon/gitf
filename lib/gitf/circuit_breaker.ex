@@ -97,7 +97,71 @@ defmodule GiTF.CircuitBreaker do
   def reset(service_key) do
     set_state(service_key, :closed)
     set_failure_count(service_key, 0)
+    clear_last_reason(service_key)
+    clear_metadata(service_key, :last_probe)
     :ok
+  end
+
+  @doc "Returns the last failure reason stored for a service key."
+  @spec last_failure_reason(String.t()) :: term() | nil
+  def last_failure_reason(service_key) do
+    case :ets.lookup(@table, {:last_reason, service_key}) do
+      [{_, reason}] -> reason
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc "Stores arbitrary metadata for a service key (e.g., last probe timestamp)."
+  @spec put_metadata(String.t(), atom(), term()) :: :ok
+  def put_metadata(service_key, key, value) do
+    :ets.insert(@table, {{key, service_key}, value})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  @doc "Reads metadata for a service key."
+  @spec get_metadata(String.t(), atom()) :: term() | nil
+  def get_metadata(service_key, key) do
+    case :ets.lookup(@table, {key, service_key}) do
+      [{_, value}] -> value
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc "Clears metadata for a service key."
+  @spec clear_metadata(String.t(), atom()) :: :ok
+  def clear_metadata(service_key, key) do
+    :ets.delete(@table, {key, service_key})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  @doc """
+  Lists all circuit breaker keys matching a prefix that are currently open.
+
+  Used by the Tachikoma probe to discover which provider circuits need healing.
+
+  ## Examples
+
+      iex> CircuitBreaker.list_open("llm:")
+      ["llm:google"]
+  """
+  @spec list_open(String.t()) :: [String.t()]
+  def list_open(prefix) do
+    :ets.foldl(fn
+      {{:state, key}, :open}, acc ->
+        if String.starts_with?(key, prefix), do: [key | acc], else: acc
+      _, acc ->
+        acc
+    end, [], @table)
+  rescue
+    ArgumentError -> []
   end
 
   @doc "Returns the current failure count for a service."
@@ -185,23 +249,25 @@ defmodule GiTF.CircuitBreaker do
         {:ok, result}
 
       {:error, reason} ->
-        record_failure(service_key)
+        record_failure(service_key, reason)
         {:error, reason}
     end
   rescue
     e ->
-      record_failure(service_key)
+      record_failure(service_key, Exception.message(e))
       {:error, Exception.message(e)}
   end
 
   defp record_success(service_key) do
     set_state(service_key, :closed)
     set_failure_count(service_key, 0)
+    clear_last_reason(service_key)
   end
 
-  defp record_failure(service_key) do
+  defp record_failure(service_key, reason) do
     count = failure_count(service_key) + 1
     set_failure_count(service_key, count)
+    set_last_reason(service_key, reason)
 
     if count >= @failure_threshold do
       Logger.warning("Circuit breaker OPEN for #{service_key} after #{count} failures")
@@ -224,6 +290,18 @@ defmodule GiTF.CircuitBreaker do
 
   defp set_opened_at(service_key) do
     :ets.insert(@table, {{:opened_at, service_key}, System.monotonic_time(:millisecond)})
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp set_last_reason(service_key, reason) do
+    :ets.insert(@table, {{:last_reason, service_key}, reason})
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp clear_last_reason(service_key) do
+    :ets.delete(@table, {:last_reason, service_key})
   rescue
     ArgumentError -> :ok
   end
