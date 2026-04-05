@@ -59,6 +59,7 @@ defmodule GiTF.Dashboard.PlanLive do
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
+
     case GiTF.Missions.get(socket.assigns.mission.id) do
       {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
       _ -> {:noreply, socket}
@@ -336,18 +337,22 @@ defmodule GiTF.Dashboard.PlanLive do
 
   @doc false
   defp format_description(nil), do: ""
+
   defp format_description(text) when is_binary(text) do
     text
     |> String.split("\n")
     |> parse_desc_lines([])
     |> Phoenix.HTML.raw()
   end
+
   defp format_description(_), do: ""
 
   # Parse lines into structured HTML sections
   defp parse_desc_lines([], acc), do: acc |> Enum.reverse() |> Enum.join("\n")
+
   defp parse_desc_lines([line | rest], acc) do
     trimmed = String.trim(line)
+
     cond do
       # Empty line
       trimmed == "" ->
@@ -355,9 +360,11 @@ defmodule GiTF.Dashboard.PlanLive do
 
       # Numbered heading: "1. **file.tsx**:" or "1. file.tsx:"
       Regex.match?(~r/^\d+\.\s+/, trimmed) ->
-        heading_html = trimmed
+        heading_html =
+          trimmed
           |> String.replace(~r/^\d+\.\s+/, "")
           |> inline_md()
+
         html = ~s(<div class="plan-desc-heading">#{heading_html}</div>)
         parse_desc_lines(rest, [html | acc])
 

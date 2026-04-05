@@ -1,7 +1,7 @@
 defmodule GiTF.Distributed do
   @moduledoc """
   Foundation for distributed GiTF operations.
-  
+
   Provides node discovery, role management, and cluster-aware execution primitives.
   Allows the GiTF to scale across multiple machines (e.g. "Majors" vs "Workers").
   """

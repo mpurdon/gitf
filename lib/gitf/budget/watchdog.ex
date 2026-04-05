@@ -48,14 +48,23 @@ defmodule GiTF.Budget.Watchdog do
   defp check_active_quests(state) do
     active_quests =
       Archive.filter(:missions, fn q ->
-        q[:status] in ["active", "implementation", "research", "design",
-                        "review", "planning", "validation", "requirements"]
+        q[:status] in [
+          "active",
+          "implementation",
+          "research",
+          "design",
+          "review",
+          "planning",
+          "validation",
+          "requirements"
+        ]
       end)
 
     Enum.reduce(active_quests, state, fn mission, acc ->
       case Budget.check(mission.id) do
         {:error, :budget_exceeded, spent} ->
           handle_over_budget(mission, spent, acc)
+
         _ ->
           acc
       end
@@ -128,6 +137,7 @@ defmodule GiTF.Budget.Watchdog do
       rescue
         _ -> :ok
       end
+
       # Force-kill: GenServer.call(:stop) can hang if ghost is stuck
       case GiTF.Ghost.Worker.lookup(ghost.id) do
         {:ok, pid} ->
@@ -137,7 +147,9 @@ defmodule GiTF.Budget.Watchdog do
           catch
             :exit, _ -> Process.exit(pid, :kill)
           end
-        :error -> :ok
+
+        :error ->
+          :ok
       end
     end)
 
@@ -177,22 +189,31 @@ defmodule GiTF.Budget.Watchdog do
   end
 
   defp maybe_auto_fail_paused(mission) do
-    paused_at = Map.get(mission, :paused_at) || Map.get(mission, :updated_at) || Map.get(mission, :inserted_at)
+    paused_at =
+      Map.get(mission, :paused_at) || Map.get(mission, :updated_at) ||
+        Map.get(mission, :inserted_at)
 
     case paused_at do
       %DateTime{} = ts ->
         hours_paused = DateTime.diff(DateTime.utc_now(), ts, :second) / 3600
 
         if hours_paused > @pause_grace_hours do
-          Logger.warning("Quest #{mission.id} paused for #{Float.round(hours_paused, 1)}h (grace period exceeded), auto-failing")
+          Logger.warning(
+            "Quest #{mission.id} paused for #{Float.round(hours_paused, 1)}h (grace period exceeded), auto-failing"
+          )
 
-          GiTF.Missions.transition_phase(mission.id, "completed",
-            "Budget exhausted — auto-failed after #{@pause_grace_hours}h grace period")
+          GiTF.Missions.transition_phase(
+            mission.id,
+            "completed",
+            "Budget exhausted — auto-failed after #{@pause_grace_hours}h grace period"
+          )
+
           GiTF.Missions.update_status!(mission.id)
 
           GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
             type: :budget_auto_failed,
-            message: "Quest #{mission.id} auto-failed after #{@pause_grace_hours}h budget pause grace period"
+            message:
+              "Quest #{mission.id} auto-failed after #{@pause_grace_hours}h budget pause grace period"
           })
         end
 
@@ -201,7 +222,10 @@ defmodule GiTF.Budget.Watchdog do
     end
   rescue
     e ->
-      Logger.warning("Auto-fail check failed for paused mission #{mission.id}: #{Exception.message(e)}")
+      Logger.warning(
+        "Auto-fail check failed for paused mission #{mission.id}: #{Exception.message(e)}"
+      )
+
       :ok
   end
 

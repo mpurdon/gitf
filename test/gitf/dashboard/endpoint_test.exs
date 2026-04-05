@@ -8,19 +8,25 @@ defmodule GiTF.Dashboard.EndpointTest do
 
     # Ensure Archive is running (use the app's store)
     unless Process.whereis(GiTF.Archive) do
-      tmp_dir = Path.join(System.tmp_dir!(), "gitf_dashboard_test_#{:erlang.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "gitf_dashboard_test_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp_dir)
       GiTF.Archive.start_link(data_dir: tmp_dir)
     end
 
     # Ensure the Dashboard.Endpoint has required config
     current_config = Application.get_env(:gitf, GiTF.Dashboard.Endpoint, [])
+
     unless Keyword.has_key?(current_config, :secret_key_base) do
-      config = Keyword.merge(current_config, [
-        secret_key_base: "test_secret_key_base_at_least_64_bytes_long_for_phoenix_endpoint_testing_abcdefghij",
-        pubsub_server: GiTF.PubSub,
-        live_view: [signing_salt: "gitf_dashboard_test_salt"]
-      ])
+      config =
+        Keyword.merge(current_config,
+          secret_key_base:
+            "test_secret_key_base_at_least_64_bytes_long_for_phoenix_endpoint_testing_abcdefghij",
+          pubsub_server: GiTF.PubSub,
+          live_view: [signing_salt: "gitf_dashboard_test_salt"]
+        )
+
       Application.put_env(:gitf, GiTF.Dashboard.Endpoint, config)
     end
 

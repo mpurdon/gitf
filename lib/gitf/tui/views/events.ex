@@ -45,8 +45,12 @@ defmodule GiTF.TUI.Views.Events do
 
   defp event_summary(_), do: ""
 
-  defp type_color(t) when t in [:bee_spawned, :bee_completed, :bee_failed, :bee_stopped], do: :blue
-  defp type_color(t) when t in [:job_created, :job_transition, :job_verified, :job_rejected], do: :yellow
+  defp type_color(t) when t in [:bee_spawned, :bee_completed, :bee_failed, :bee_stopped],
+    do: :blue
+
+  defp type_color(t) when t in [:job_created, :job_transition, :job_verified, :job_rejected],
+    do: :yellow
+
   defp type_color(t) when t in [:quest_created, :quest_completed, :quest_failed], do: :green
   defp type_color(t) when t in [:merge_started, :merge_succeeded, :merge_failed], do: :magenta
   defp type_color(:error), do: :red

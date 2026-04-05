@@ -44,7 +44,9 @@ defmodule GiTF.Ops.ClassifierRiskTest do
     end
 
     test "migration files are high-risk" do
-      assert Classifier.classify_risk("Add column", nil, ["priv/repo/migrations/001_add_users.exs"]) == :medium
+      assert Classifier.classify_risk("Add column", nil, [
+               "priv/repo/migrations/001_add_users.exs"
+             ]) == :medium
     end
 
     test "no false positives on regular files" do

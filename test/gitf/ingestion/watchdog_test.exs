@@ -9,7 +9,7 @@ defmodule GiTF.Ingestion.WatchdogTest do
 
     # Create temp root
     root = Path.join(System.tmp_dir!(), "gitf_ingest_test_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(root)
+    GiTF.Test.StoreHelper.init_git_repo!(root)
 
     # Initialize Archive (needed for sectors/missions)
     GiTF.Test.StoreHelper.stop_store()
@@ -20,11 +20,12 @@ defmodule GiTF.Ingestion.WatchdogTest do
 
     # Terminate Ingestion.Watchdog from supervisor to prevent auto-restart conflicts
     try do
-      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Ingestion.Watchdog)
-      Supervisor.delete_child(GiTF.Supervisor, GiTF.Ingestion.Watchdog)
+      Supervisor.terminate_child(GiTF.Core.Supervisor, GiTF.Ingestion.Watchdog)
+      Supervisor.delete_child(GiTF.Core.Supervisor, GiTF.Ingestion.Watchdog)
     catch
       :exit, _ -> :ok
     end
+
     GiTF.Test.StoreHelper.safe_stop(GiTF.Ingestion.Watchdog)
     Process.sleep(10)
     {:ok, _} = Watchdog.start_link(gitf_root: root)
@@ -42,23 +43,24 @@ defmodule GiTF.Ingestion.WatchdogTest do
     file_path = Path.join(inbox, "fix_login_bug.md")
     content = "The login button is broken on mobile."
     File.write!(file_path, content)
-    
+
     # 2. Trigger scan (or wait)
     send(Watchdog, :scan)
-    
+
     # 3. Wait for processing
     # Give it a moment to process async
     Process.sleep(100)
-    
+
     # 4. Verify Quest created
     missions = Archive.all(:missions)
     assert length(missions) == 1
     mission = hd(missions)
-    assert mission.name == "Fix login bug" # Title derived from filename
+    # Title derived from filename
+    assert mission.name == "Fix login bug"
     assert mission.goal == content
     # source field may or may not be present depending on the ingestion implementation
     assert Map.get(mission, :source, nil) in [nil, "inbox:fix_login_bug.md"]
-    
+
     # 5. Verify file archived
     assert File.ls!(inbox) == []
     assert length(File.ls!(archive)) == 1

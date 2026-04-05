@@ -14,12 +14,13 @@ defmodule GiTF.Intel do
   def analyze_and_suggest(op_id) do
     with {:ok, analysis} <- FailureAnalysis.analyze_failure(op_id) do
       strategy = Retry.recommend_strategy(analysis.failure_type)
-      
-      {:ok, %{
-        analysis: analysis,
-        recommended_strategy: strategy,
-        suggestions: analysis.suggestions
-      }}
+
+      {:ok,
+       %{
+         analysis: analysis,
+         recommended_strategy: strategy,
+         suggestions: analysis.suggestions
+       }}
     end
   end
 
@@ -56,12 +57,12 @@ defmodule GiTF.Intel do
   """
   def get_insights(sector_id) do
     patterns = FailureAnalysis.get_failure_patterns(sector_id)
-    
+
     ops = Archive.filter(:ops, &(&1.sector_id == sector_id))
     total = length(ops)
     failed = Enum.count(ops, &(&1.status == "failed"))
     success_rate = if total > 0, do: (total - failed) / total * 100, else: 0
-    
+
     %{
       sector_id: sector_id,
       total_jobs: total,
@@ -82,6 +83,6 @@ defmodule GiTF.Intel do
   defp get_top_failure_type(patterns) when length(patterns) > 0 do
     hd(patterns).type
   end
-  
+
   defp get_top_failure_type(_), do: nil
 end

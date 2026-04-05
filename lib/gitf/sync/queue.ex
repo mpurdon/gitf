@@ -157,8 +157,12 @@ defmodule GiTF.Sync.Queue do
     Logger.error("Sync task crashed for op #{op_id}: #{inspect(reason)}")
     if state.merge_timer, do: Process.cancel_timer(state.merge_timer)
 
-    GiTF.Link.send("sync_queue", "major", "merge_failed",
-      "Sync task crashed for op #{op_id}: #{inspect(reason)}")
+    GiTF.Link.send(
+      "sync_queue",
+      "major",
+      "merge_failed",
+      "Sync task crashed for op #{op_id}: #{inspect(reason)}"
+    )
 
     GiTF.Telemetry.emit([:gitf, :sync, :crashed], %{}, %{
       op_id: op_id,
@@ -166,7 +170,14 @@ defmodule GiTF.Sync.Queue do
     })
 
     entry = {op_id, :crash, DateTime.utc_now()}
-    state = %{state | active: nil, merge_timer: nil, completed: [entry | Enum.take(state.completed, @max_history - 1)]}
+
+    state = %{
+      state
+      | active: nil,
+        merge_timer: nil,
+        completed: [entry | Enum.take(state.completed, @max_history - 1)]
+    }
+
     state = maybe_process_next(state)
     {:noreply, state}
   end
@@ -177,8 +188,7 @@ defmodule GiTF.Sync.Queue do
     Process.demonitor(ref, [:flush])
     Process.exit(task_pid, :kill)
 
-    GiTF.Link.send("sync_queue", "major", "merge_failed",
-      "Sync task timed out for op #{op_id}")
+    GiTF.Link.send("sync_queue", "major", "merge_failed", "Sync task timed out for op #{op_id}")
 
     GiTF.Telemetry.emit([:gitf, :sync, :timeout], %{}, %{
       op_id: op_id,
@@ -186,7 +196,14 @@ defmodule GiTF.Sync.Queue do
     })
 
     entry = {op_id, :timeout, DateTime.utc_now()}
-    state = %{state | active: nil, merge_timer: nil, completed: [entry | Enum.take(state.completed, @max_history - 1)]}
+
+    state = %{
+      state
+      | active: nil,
+        merge_timer: nil,
+        completed: [entry | Enum.take(state.completed, @max_history - 1)]
+    }
+
     state = maybe_process_next(state)
     {:noreply, state}
   end
@@ -253,12 +270,15 @@ defmodule GiTF.Sync.Queue do
       [{op_id, shell_id} | rest] ->
         Logger.info("SyncQueue processing op #{op_id}")
 
-        task = Task.async(fn ->
-          result = GiTF.Sync.Resolver.resolve(op_id, shell_id)
-          {:merge_result, op_id, result}
-        end)
+        task =
+          Task.async(fn ->
+            result = GiTF.Sync.Resolver.resolve(op_id, shell_id)
+            {:merge_result, op_id, result}
+          end)
 
-        timer = Process.send_after(self(), {:merge_timeout, task.ref, task.pid}, @merge_timeout_ms)
+        timer =
+          Process.send_after(self(), {:merge_timeout, task.ref, task.pid}, @merge_timeout_ms)
+
         %{state | active: {op_id, shell_id, task.ref}, pending: rest, merge_timer: timer}
 
       [] ->
@@ -282,8 +302,12 @@ defmodule GiTF.Sync.Queue do
     Logger.info("Job #{op_id} merged successfully at tier #{tier}")
     mark_op_merged(op_id)
 
-    GiTF.Link.send("sync_queue", "major", "job_merged",
-      "Job #{op_id} merged successfully (tier #{tier})")
+    GiTF.Link.send(
+      "sync_queue",
+      "major",
+      "job_merged",
+      "Job #{op_id} merged successfully (tier #{tier})"
+    )
 
     entry = {op_id, :success, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
@@ -293,8 +317,7 @@ defmodule GiTF.Sync.Queue do
     Logger.info("Job #{op_id} PR created successfully")
     mark_op_merged(op_id)
 
-    GiTF.Link.send("sync_queue", "major", "job_merged",
-      "Job #{op_id} synced via PR branch")
+    GiTF.Link.send("sync_queue", "major", "job_merged", "Job #{op_id} synced via PR branch")
 
     entry = {op_id, :pr_created, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
@@ -304,8 +327,12 @@ defmodule GiTF.Sync.Queue do
     Logger.info("Job #{op_id} sync strategy is manual, advancing pipeline")
     mark_op_merged(op_id)
 
-    GiTF.Link.send("sync_queue", "major", "job_merged",
-      "Job #{op_id} synced (manual strategy — branch ready)")
+    GiTF.Link.send(
+      "sync_queue",
+      "major",
+      "job_merged",
+      "Job #{op_id} synced (manual strategy — branch ready)"
+    )
 
     entry = {op_id, :manual, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
@@ -321,8 +348,12 @@ defmodule GiTF.Sync.Queue do
   defp handle_merge_result(op_id, {:error, reason, tier}, state) do
     Logger.warning("Job #{op_id} sync failed at tier #{tier}: #{inspect(reason)}")
 
-    GiTF.Link.send("sync_queue", "major", "merge_failed",
-      "Job #{op_id} sync failed at tier #{tier}: #{inspect(reason)}")
+    GiTF.Link.send(
+      "sync_queue",
+      "major",
+      "merge_failed",
+      "Job #{op_id} sync failed at tier #{tier}: #{inspect(reason)}"
+    )
 
     entry = {op_id, {:failure, reason}, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}

@@ -6,8 +6,8 @@ defmodule GiTF.Sandbox.Local do
   @behaviour GiTF.Sandbox
 
   def wrap_command(cmd, args, opts), do: {cmd, args, opts}
-  
+
   def available?, do: true
-  
+
   def name, do: "local"
 end

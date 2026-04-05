@@ -2,11 +2,11 @@
 # works in ReqLLM.Context.execute_and_append_tools error handling.
 # These use Splode.Error which provides message/1 but not String.Chars.
 for mod <- [
-  ReqLLM.Error.Validation.Error,
-  ReqLLM.Error.Invalid.Parameter,
-  ReqLLM.Error.Invalid.Schema,
-  ReqLLM.Error.Unknown.Unknown
-] do
+      ReqLLM.Error.Validation.Error,
+      ReqLLM.Error.Invalid.Parameter,
+      ReqLLM.Error.Invalid.Schema,
+      ReqLLM.Error.Unknown.Unknown
+    ] do
   defimpl String.Chars, for: mod do
     def to_string(error), do: Exception.message(error)
   end
@@ -128,13 +128,14 @@ defmodule GiTF.Runtime.AgentLoop do
 
     result_event = build_result_event(state, :max_iterations)
 
-    {:ok, %{
-      text: state.last_text,
-      events: Enum.reverse([result_event | state.events]),
-      usage: state.total_usage,
-      iterations: state.iteration,
-      status: :max_iterations
-    }}
+    {:ok,
+     %{
+       text: state.last_text,
+       events: Enum.reverse([result_event | state.events]),
+       usage: state.total_usage,
+       iterations: state.iteration,
+       status: :max_iterations
+     }}
   end
 
   defp loop(messages, model, tools, state) do
@@ -184,7 +185,10 @@ defmodule GiTF.Runtime.AgentLoop do
         total_output = state.total_usage[:output_tokens] || 0
 
         if state.iteration == 0 and total_input == 0 and total_output == 0 and text == "" do
-          Logger.error("AgentLoop: empty response with 0 tokens on first iteration — LLM call likely failed silently")
+          Logger.error(
+            "AgentLoop: empty response with 0 tokens on first iteration — LLM call likely failed silently"
+          )
+
           {:error, {:api_error, :empty_response}}
         else
           result_event = build_result_event(state, :completed)
@@ -195,13 +199,14 @@ defmodule GiTF.Runtime.AgentLoop do
             usage: state.total_usage
           })
 
-          {:ok, %{
-            text: text,
-            events: Enum.reverse([result_event | state.events]),
-            usage: state.total_usage,
-            iterations: state.iteration + 1,
-            status: :completed
-          }}
+          {:ok,
+           %{
+             text: text,
+             events: Enum.reverse([result_event | state.events]),
+             usage: state.total_usage,
+             iterations: state.iteration + 1,
+             status: :completed
+           }}
         end
 
       :tool_calls ->
@@ -232,9 +237,12 @@ defmodule GiTF.Runtime.AgentLoop do
 
         # Execute tool calls and append results to context using ReqLLM's
         # official method (handles provider-specific message formatting)
-        next_context = ReqLLM.Context.execute_and_append_tools(
-          response.context, tool_calls, tools
-        )
+        next_context =
+          ReqLLM.Context.execute_and_append_tools(
+            response.context,
+            tool_calls,
+            tools
+          )
 
         # Keep the original model spec (with provider prefix) — don't use
         # response.model which may strip the provider prefix (e.g. "gemini-2.5-flash"
@@ -272,7 +280,10 @@ defmodule GiTF.Runtime.AgentLoop do
   defp build_generate_opts(tools, state) do
     opts = [tools: tools, receive_timeout: state.receive_timeout]
     opts = if state.max_tokens, do: Keyword.put(opts, :max_tokens, state.max_tokens), else: opts
-    opts = if state.temperature, do: Keyword.put(opts, :temperature, state.temperature), else: opts
+
+    opts =
+      if state.temperature, do: Keyword.put(opts, :temperature, state.temperature), else: opts
+
     opts = Keyword.merge(opts, Map.get(state, :cache_opts, []))
     opts
   end
@@ -295,19 +306,25 @@ defmodule GiTF.Runtime.AgentLoop do
   defp normalize_usage(%{"usageMetadata" => meta}) when is_map(meta) do
     %{
       input_tokens: Map.get(meta, "promptTokenCount", 0),
-      output_tokens: Map.get(meta, "candidatesTokenCount", 0) ||
-        max(0, Map.get(meta, "totalTokenCount", 0) - Map.get(meta, "promptTokenCount", 0)),
+      output_tokens:
+        Map.get(meta, "candidatesTokenCount", 0) ||
+          max(0, Map.get(meta, "totalTokenCount", 0) - Map.get(meta, "promptTokenCount", 0)),
       total_cost: 0
     }
   end
+
   defp normalize_usage(_), do: %{input_tokens: 0, output_tokens: 0, total_cost: 0}
 
   defp normalize_usage_keys(usage) do
-    input = Map.get(usage, :input_tokens) || Map.get(usage, "input_tokens") ||
-            Map.get(usage, :prompt_tokens) || Map.get(usage, "prompt_tokens") || 0
-    output = Map.get(usage, :output_tokens) || Map.get(usage, "output_tokens") ||
-             Map.get(usage, :completion_tokens) || Map.get(usage, "completion_tokens") ||
-             Map.get(usage, :candidates_tokens) || Map.get(usage, "candidates_tokens") || 0
+    input =
+      Map.get(usage, :input_tokens) || Map.get(usage, "input_tokens") ||
+        Map.get(usage, :prompt_tokens) || Map.get(usage, "prompt_tokens") || 0
+
+    output =
+      Map.get(usage, :output_tokens) || Map.get(usage, "output_tokens") ||
+        Map.get(usage, :completion_tokens) || Map.get(usage, "completion_tokens") ||
+        Map.get(usage, :candidates_tokens) || Map.get(usage, "candidates_tokens") || 0
+
     cost = Map.get(usage, :total_cost) || Map.get(usage, "total_cost") || 0
     %{input_tokens: input, output_tokens: output, total_cost: cost}
   end

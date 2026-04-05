@@ -44,6 +44,18 @@ defmodule GiTF.Test.StoreHelper do
     safe_stop_pid(pid)
   end
 
+  @doc "Initializes a basic git repository with an initial commit for tests"
+  def init_git_repo!(path) do
+    File.mkdir_p!(path)
+    System.cmd("git", ["init"], cd: path)
+    System.cmd("git", ["config", "user.email", "test@example.com"], cd: path)
+    System.cmd("git", ["config", "user.name", "Test User"], cd: path)
+    File.write!(Path.join(path, "README.md"), "# Test Repo")
+    System.cmd("git", ["add", "README.md"], cd: path)
+    System.cmd("git", ["commit", "-m", "Initial commit"], cd: path)
+    :ok
+  end
+
   @doc """
   Ensures essential infrastructure (PubSub, Registry) is running.
   Call this in test setup if tests may have crashed these processes.
@@ -72,7 +84,9 @@ defmodule GiTF.Test.StoreHelper do
     unless registry_ok? do
       # Kill any zombie process
       case Process.whereis(GiTF.Registry) do
-        nil -> :ok
+        nil ->
+          :ok
+
         pid ->
           try do
             GenServer.stop(pid, :normal, 1000)
@@ -80,6 +94,7 @@ defmodule GiTF.Test.StoreHelper do
             :exit, _ -> :ok
           end
       end
+
       Process.sleep(10)
       Registry.start_link(keys: :unique, name: GiTF.Registry)
     end

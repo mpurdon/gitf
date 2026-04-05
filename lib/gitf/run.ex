@@ -90,11 +90,12 @@ defmodule GiTF.Run do
           {:ok, map()} | {:ok, map(), :run_complete} | {:error, :not_found}
   def job_completed(run_id, _op_id) do
     # Atomic increment via update_matching to prevent race on concurrent completions
-    count = Archive.update_matching(
-      :runs,
-      fn r -> r.id == run_id end,
-      fn r -> %{r | completed_jobs: r.completed_jobs + 1} end
-    )
+    count =
+      Archive.update_matching(
+        :runs,
+        fn r -> r.id == run_id end,
+        fn r -> %{r | completed_jobs: r.completed_jobs + 1} end
+      )
 
     if count == 0 do
       {:error, :not_found}
@@ -114,11 +115,12 @@ defmodule GiTF.Run do
   @spec job_failed(String.t(), String.t()) ::
           {:ok, map()} | {:ok, map(), :run_complete} | {:error, :not_found}
   def job_failed(run_id, _op_id) do
-    count = Archive.update_matching(
-      :runs,
-      fn r -> r.id == run_id end,
-      fn r -> %{r | failed_jobs: r.failed_jobs + 1} end
-    )
+    count =
+      Archive.update_matching(
+        :runs,
+        fn r -> r.id == run_id end,
+        fn r -> %{r | failed_jobs: r.failed_jobs + 1} end
+      )
 
     if count == 0 do
       {:error, :not_found}

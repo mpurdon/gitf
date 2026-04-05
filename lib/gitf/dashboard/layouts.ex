@@ -566,5 +566,4 @@ defmodule GiTF.Dashboard.Layouts do
     </html>
     """
   end
-
 end

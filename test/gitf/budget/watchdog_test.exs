@@ -7,7 +7,9 @@ defmodule GiTF.Budget.WatchdogTest do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
     # Use a fresh store to avoid stale data from other tests
-    tmp_dir = Path.join(System.tmp_dir!(), "gitf_budget_test_#{:erlang.unique_integer([:positive])}")
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "gitf_budget_test_#{:erlang.unique_integer([:positive])}")
+
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
     {:ok, _} = Archive.start_link(data_dir: tmp_dir)
@@ -15,11 +17,12 @@ defmodule GiTF.Budget.WatchdogTest do
 
     # Terminate Budget.Watchdog from supervisor to prevent auto-restart conflicts
     try do
-      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Budget.Watchdog)
-      Supervisor.delete_child(GiTF.Supervisor, GiTF.Budget.Watchdog)
+      Supervisor.terminate_child(GiTF.Core.Supervisor, GiTF.Budget.Watchdog)
+      Supervisor.delete_child(GiTF.Core.Supervisor, GiTF.Budget.Watchdog)
     catch
       :exit, _ -> :ok
     end
+
     GiTF.Test.StoreHelper.safe_stop(GiTF.Budget.Watchdog)
     Process.sleep(10)
     {:ok, _} = GiTF.Budget.Watchdog.start_link([])
@@ -32,7 +35,14 @@ defmodule GiTF.Budget.WatchdogTest do
 
     # Create test data
     Archive.insert(:missions, %{id: mission_id, status: "active", goal: "Test Budget"})
-    Archive.insert(:ops, %{id: op_id, mission_id: mission_id, ghost_id: ghost_id, status: "assigned"})
+
+    Archive.insert(:ops, %{
+      id: op_id,
+      mission_id: mission_id,
+      ghost_id: ghost_id,
+      status: "assigned"
+    })
+
     Archive.insert(:ghosts, %{id: ghost_id, op_id: op_id, status: "working", pid: "dummy"})
 
     {:ok, %{mission_id: mission_id, ghost_id: ghost_id}}
@@ -56,6 +66,9 @@ defmodule GiTF.Budget.WatchdogTest do
     # 4. Quest should be marked as failed_budget or paused_budget
     # (paused_budget when no active ghosts are running worker processes)
     mission = Archive.get(:missions, mission_id)
+    if mission == nil do
+      IO.inspect(Archive.all(:missions), label: "ALL MISSIONS")
+    end
     assert mission.status in ["failed_budget", "paused_budget"]
   end
 end

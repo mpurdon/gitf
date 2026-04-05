@@ -5,13 +5,13 @@ defmodule GiTF.GoalsTest do
   alias GiTF.Archive
 
   setup do
-    store_dir = Path.join(System.tmp_dir!(), "section-goals-test-#{:rand.uniform(100000)}")
+    store_dir = Path.join(System.tmp_dir!(), "section-goals-test-#{:rand.uniform(100_000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
     start_supervised!({Archive, data_dir: store_dir})
-    
+
     on_exit(fn -> File.rm_rf!(store_dir) end)
-    
+
     %{store_dir: store_dir}
   end
 
@@ -24,8 +24,9 @@ defmodule GiTF.GoalsTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:missions, mission)
-      
+
       op = %{
         id: "op-test",
         mission_id: "msn-test",
@@ -34,10 +35,11 @@ defmodule GiTF.GoalsTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ops, op)
-      
+
       result = Goals.validate_quest_completion("msn-test")
-      
+
       assert result.goal_achieved == {:achieved, "All ops completed"}
       assert result.simplicity_score > 0
       assert result.completeness.completed == 1
@@ -52,8 +54,9 @@ defmodule GiTF.GoalsTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:missions, mission)
-      
+
       op = %{
         id: "op-valid",
         mission_id: "msn-op",
@@ -64,10 +67,11 @@ defmodule GiTF.GoalsTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ops, op)
-      
+
       result = Goals.validate_job("op-valid")
-      
+
       assert result.goal_met == true
       assert result.simplicity == 100
     end

@@ -21,7 +21,9 @@ defmodule GiTF.Override do
   def requires_approval?(mission) do
     sector_requires? =
       case Map.get(mission, :sector_id) do
-        nil -> false
+        nil ->
+          false
+
         sector_id ->
           case Archive.get(:sectors, sector_id) do
             nil -> false
@@ -166,9 +168,14 @@ defmodule GiTF.Override do
           _ -> :not_required
         end
 
-      %{"approved" => true} -> :approved
-      %{"approved" => false} -> :rejected
-      _ -> :not_required
+      %{"approved" => true} ->
+        :approved
+
+      %{"approved" => false} ->
+        :rejected
+
+      _ ->
+        :not_required
     end
   end
 
@@ -189,7 +196,9 @@ defmodule GiTF.Override do
 
   defp update_request_status(mission_id, status) do
     case find_request(mission_id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       request ->
         updated = Map.put(request, :status, status)
         Archive.put(:approval_requests, updated)

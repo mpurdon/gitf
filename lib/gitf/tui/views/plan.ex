@@ -67,13 +67,19 @@ defmodule GiTF.TUI.Views.Plan do
             |> String.split("\n")
             |> Enum.take(3)
 
-          desc_labels = Enum.map(desc_lines, fn line ->
-            label(content: "     #{line}", color: :white)
-          end)
+          desc_labels =
+            Enum.map(desc_lines, fn line ->
+              label(content: "     #{line}", color: :white)
+            end)
 
           file_label =
             if section.target_files != [] do
-              [label(content: "     Files: #{Enum.join(section.target_files, ", ")}", color: :cyan)]
+              [
+                label(
+                  content: "     Files: #{Enum.join(section.target_files, ", ")}",
+                  color: :cyan
+                )
+              ]
             else
               []
             end

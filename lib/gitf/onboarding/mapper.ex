@@ -5,7 +5,7 @@ defmodule GiTF.Onboarding.Mapper do
 
   @doc """
   Creates a codebase map with key information.
-  
+
   Returns a map with:
   - :structure - Directory tree
   - :entry_points - Main files/modules
@@ -25,10 +25,10 @@ defmodule GiTF.Onboarding.Mapper do
 
   defp analyze_structure(path, language) do
     key_dirs = key_directories(language)
-    
+
     key_dirs
     |> Enum.filter(fn dir -> File.dir?(Path.join(path, dir)) end)
-    |> Enum.map(fn dir -> 
+    |> Enum.map(fn dir ->
       full_path = Path.join(path, dir)
       {dir, count_files_in_dir(full_path)}
     end)
@@ -68,8 +68,8 @@ defmodule GiTF.Onboarding.Mapper do
   end
 
   defp find_entry_points(path, %{language: :go}) do
-    find_files(path, "cmd", "main.go") ++ 
-    find_files(path, ".", "main.go")
+    (find_files(path, "cmd", "main.go") ++
+       find_files(path, ".", "main.go"))
     |> Enum.take(5)
   end
 
@@ -119,9 +119,11 @@ defmodule GiTF.Onboarding.Mapper do
 
   defp parse_package_json_deps(content) do
     case Jason.decode(content) do
-      {:ok, %{"dependencies" => deps}} -> 
+      {:ok, %{"dependencies" => deps}} ->
         deps |> Map.keys() |> Enum.take(10)
-      _ -> []
+
+      _ ->
+        []
     end
   end
 
@@ -140,7 +142,7 @@ defmodule GiTF.Onboarding.Mapper do
 
   defp count_files(path, language) do
     extensions = file_extensions(language)
-    
+
     extensions
     |> Enum.map(fn ext ->
       count = count_files_with_ext(path, ext)
@@ -175,8 +177,9 @@ defmodule GiTF.Onboarding.Mapper do
 
   defp is_application_file?(file) do
     content = File.read!(file)
+
     String.contains?(content, "use Application") or
-    String.contains?(content, "defmodule") and String.contains?(content, ".Application")
+      (String.contains?(content, "defmodule") and String.contains?(content, ".Application"))
   end
 
   defp generate_summary(path, project_info) do

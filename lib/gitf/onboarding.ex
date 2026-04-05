@@ -9,7 +9,7 @@ defmodule GiTF.Onboarding do
 
   @doc """
   Onboard a project with automatic detection and configuration.
-  
+
   Options:
   - :name - Sector name (defaults to directory name)
   - :skip_research - Skip initial research cache generation
@@ -35,17 +35,17 @@ defmodule GiTF.Onboarding do
 
   defp validate_path(path) do
     full_path = Path.expand(path)
-    
+
     cond do
       not File.exists?(full_path) ->
         {:error, "Path does not exist: #{path}"}
-      
+
       not File.dir?(full_path) ->
         {:error, "Path is not a directory: #{path}"}
-      
+
       not is_git_repo?(full_path) ->
         {:error, "Path is not a git repository: #{path}"}
-      
+
       true ->
         {:ok, full_path}
     end
@@ -57,7 +57,7 @@ defmodule GiTF.Onboarding do
 
   defp detect_project(path) do
     project_info = Detector.detect(path)
-    
+
     if project_info.language == :unknown do
       {:error, "Could not detect project language"}
     else
@@ -73,13 +73,13 @@ defmodule GiTF.Onboarding do
   defp create_sector(path, project_info, _codebase_map, opts) do
     name = opts[:name] || Path.basename(path)
     validation_cmd = opts[:validation_command] || project_info.validation_command
-    
+
     sector_opts = [
       name: name,
       validation_command: validation_cmd,
       sync_strategy: suggest_sync_strategy(project_info)
     ]
-    
+
     case Sector.add(path, sector_opts) do
       {:ok, sector} -> {:ok, sector}
       {:error, reason} -> {:error, "Failed to create sector: #{inspect(reason)}"}
@@ -101,15 +101,16 @@ defmodule GiTF.Onboarding do
     with {:ok, full_path} <- validate_path(path),
          {:ok, project_info} <- detect_project(full_path),
          {:ok, codebase_map} <- map_codebase(full_path, project_info) do
-      {:ok, %{
-        project_info: project_info,
-        codebase_map: codebase_map,
-        suggestions: %{
-          name: Path.basename(full_path),
-          validation_command: project_info.validation_command,
-          sync_strategy: suggest_sync_strategy(project_info)
-        }
-      }}
+      {:ok,
+       %{
+         project_info: project_info,
+         codebase_map: codebase_map,
+         suggestions: %{
+           name: Path.basename(full_path),
+           validation_command: project_info.validation_command,
+           sync_strategy: suggest_sync_strategy(project_info)
+         }
+       }}
     end
   end
 end

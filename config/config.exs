@@ -6,7 +6,8 @@ config :gitf, GiTF.Web.Endpoint,
   debug_errors: true,
   check_origin: false,
   watchers: [],
-  secret_key_base: "GITF_SECRET_KEY_BASE_CHANGEME_1234567890_extra_padding_to_reach_64_bytes_minimum!!",
+  secret_key_base:
+    "GITF_SECRET_KEY_BASE_CHANGEME_1234567890_extra_padding_to_reach_64_bytes_minimum!!",
   pubsub_server: GiTF.PubSub,
   live_view: [signing_salt: "gitf_live_salt_123"],
   render_errors: [

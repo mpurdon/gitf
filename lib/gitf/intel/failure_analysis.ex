@@ -12,7 +12,6 @@ defmodule GiTF.Intel.FailureAnalysis do
   def analyze_failure(op_id, feedback \\ nil) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
          true <- op.status == "failed" do
-
       failure_type = classify_failure(op, feedback)
       root_cause = identify_root_cause(op, failure_type)
       similar = find_similar_failures(op, failure_type)
@@ -28,7 +27,7 @@ defmodule GiTF.Intel.FailureAnalysis do
         feedback: feedback,
         analyzed_at: DateTime.utc_now()
       }
-      
+
       Archive.insert(:failure_analyses, analysis)
       {:ok, analysis}
     else
@@ -41,24 +40,26 @@ defmodule GiTF.Intel.FailureAnalysis do
   """
   def get_failure_patterns(sector_id) do
     ops = Archive.filter(:ops, &(&1.sector_id == sector_id and &1.status == "failed"))
-    
-    analyses = ops
-    |> Enum.map(&get_analysis(&1.id))
-    |> Enum.reject(&is_nil/1)
-    
+
+    analyses =
+      ops
+      |> Enum.map(&get_analysis(&1.id))
+      |> Enum.reject(&is_nil/1)
+
     # Group by failure type
-    patterns = analyses
-    |> Enum.group_by(& &1.failure_type)
-    |> Enum.map(fn {type, group} ->
-      %{
-        type: type,
-        count: length(group),
-        frequency: length(group) / max(length(ops), 1),
-        common_causes: extract_common_causes(group)
-      }
-    end)
-    |> Enum.sort_by(& &1.count, :desc)
-    
+    patterns =
+      analyses
+      |> Enum.group_by(& &1.failure_type)
+      |> Enum.map(fn {type, group} ->
+        %{
+          type: type,
+          count: length(group),
+          frequency: length(group) / max(length(ops), 1),
+          common_causes: extract_common_causes(group)
+        }
+      end)
+      |> Enum.sort_by(& &1.count, :desc)
+
     patterns
   end
 
@@ -67,7 +68,7 @@ defmodule GiTF.Intel.FailureAnalysis do
   """
   def learn_from_failures(sector_id) do
     patterns = get_failure_patterns(sector_id)
-    
+
     learning = %{
       id: generate_id("fl"),
       sector_id: sector_id,
@@ -75,7 +76,7 @@ defmodule GiTF.Intel.FailureAnalysis do
       total_failures: Enum.sum(Enum.map(patterns, & &1.count)),
       learned_at: DateTime.utc_now()
     }
-    
+
     Archive.insert(:failure_learnings, learning)
     {:ok, learning}
   end
@@ -116,7 +117,7 @@ defmodule GiTF.Intel.FailureAnalysis do
 
   defp extract_compilation_error(op) do
     error_msg = Map.get(op, :error_message, "")
-    
+
     # Try to extract specific error
     case Regex.run(~r/error: (.+)/, error_msg) do
       [_, error] -> String.slice(error, 0, 100)
@@ -126,7 +127,7 @@ defmodule GiTF.Intel.FailureAnalysis do
 
   defp extract_test_failure(op) do
     output = Map.get(op, :audit_result, "")
-    
+
     # Try to extract test name
     case Regex.run(~r/\d+\) test (.+)/, output) do
       [_, test] -> "Test failed: #{String.slice(test, 0, 50)}"
@@ -137,8 +138,8 @@ defmodule GiTF.Intel.FailureAnalysis do
   defp find_similar_failures(op, failure_type) do
     Archive.filter(:ops, fn j ->
       j.sector_id == op.sector_id and
-      j.status == "failed" and
-      j.id != op.id
+        j.status == "failed" and
+        j.id != op.id
     end)
     |> Enum.filter(fn j ->
       classify_failure(j, nil) == failure_type
@@ -147,42 +148,44 @@ defmodule GiTF.Intel.FailureAnalysis do
   end
 
   defp generate_suggestions(failure_type, _root_cause, similar) do
-    base_suggestions = case failure_type do
-      :timeout ->
-        ["Break op into smaller tasks", "Increase timeout limit", "Simplify requirements"]
-      
-      :compilation_error ->
-        ["Review syntax errors", "Check dependencies", "Verify imports"]
-      
-      :test_failure ->
-        ["Review test expectations", "Check test data", "Verify logic"]
-      
-      :context_overflow ->
-        ["Create transfer", "Simplify op scope", "Use more focused context"]
-      
-      :validation_failure ->
-        ["Fix validation errors", "Update validation command", "Review changes"]
-      
-      :quality_gate_failure ->
-        ["Improve code quality", "Fix linting issues", "Refactor complex code"]
-      
-      :security_gate_failure ->
-        ["Remove secrets", "Update dependencies", "Fix vulnerabilities"]
-      
-      :merge_conflict ->
-        ["Resolve conflicts manually", "Rebase on latest", "Retry with fresh worktree"]
-      
-      :unknown ->
-        ["Review error logs", "Check ghost status", "Retry with different model"]
-    end
-    
+    base_suggestions =
+      case failure_type do
+        :timeout ->
+          ["Break op into smaller tasks", "Increase timeout limit", "Simplify requirements"]
+
+        :compilation_error ->
+          ["Review syntax errors", "Check dependencies", "Verify imports"]
+
+        :test_failure ->
+          ["Review test expectations", "Check test data", "Verify logic"]
+
+        :context_overflow ->
+          ["Create transfer", "Simplify op scope", "Use more focused context"]
+
+        :validation_failure ->
+          ["Fix validation errors", "Update validation command", "Review changes"]
+
+        :quality_gate_failure ->
+          ["Improve code quality", "Fix linting issues", "Refactor complex code"]
+
+        :security_gate_failure ->
+          ["Remove secrets", "Update dependencies", "Fix vulnerabilities"]
+
+        :merge_conflict ->
+          ["Resolve conflicts manually", "Rebase on latest", "Retry with fresh worktree"]
+
+        :unknown ->
+          ["Review error logs", "Check ghost status", "Retry with different model"]
+      end
+
     # Add pattern-based suggestions
-    pattern_suggestions = if length(similar) > 2 do
-      ["This is a recurring issue (#{length(similar)} similar failures)"]
-    else
-      []
-    end
-    
+    pattern_suggestions =
+      if length(similar) > 2 do
+        ["This is a recurring issue (#{length(similar)} similar failures)"]
+      else
+        []
+      end
+
     base_suggestions ++ pattern_suggestions
   end
 

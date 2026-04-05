@@ -109,7 +109,10 @@ defmodule GiTF.Exfil do
       try do
         GiTF.Transfer.create(ghost.id)
       rescue
-        e -> Logger.warning("Exfil: checkpoint save failed for ghost #{ghost.id}: #{Exception.message(e)}")
+        e ->
+          Logger.warning(
+            "Exfil: checkpoint save failed for ghost #{ghost.id}: #{Exception.message(e)}"
+          )
       end
     end)
   rescue

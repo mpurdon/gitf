@@ -1,7 +1,7 @@
 defmodule GiTF.Major.Research do
   @moduledoc """
   Major's codebase research capabilities.
-  
+
   Analyzes sector structure, patterns, and architecture to inform planning.
   Uses caching to avoid redundant analysis of unchanged codebases.
   """
@@ -10,7 +10,7 @@ defmodule GiTF.Major.Research do
 
   @doc """
   Research a sector's codebase structure and patterns.
-  
+
   Returns cached results if available and valid, otherwise performs fresh analysis.
   """
   @spec research_sector(String.t()) :: {:ok, map()} | {:error, term()}
@@ -24,27 +24,26 @@ defmodule GiTF.Major.Research do
 
   @doc """
   Perform fresh codebase analysis.
-  
+
   Basic structure analysis - will be enhanced with model-based analysis later.
   """
   @spec perform_fresh_research(String.t()) :: {:ok, map()} | {:error, term()}
   def perform_fresh_research(sector_id) do
     with {:ok, sector} <- GiTF.Sector.get(sector_id),
          {:ok, structure} <- analyze_structure(sector.path) do
-      
       research = %{
         structure: structure,
         analyzed_at: DateTime.utc_now(),
         analysis_type: "basic_structure"
       }
-      
+
       Cache.store_research(sector_id, research)
     end
   end
 
   @doc """
   Analyze basic codebase structure.
-  
+
   Returns directory tree, file types, and basic patterns.
   """
   @spec analyze_structure(String.t()) :: {:ok, map()} | {:error, term()}
@@ -56,7 +55,7 @@ defmodule GiTF.Major.Research do
         directories: extract_directories(files),
         main_language: detect_main_language(files)
       }
-      
+
       {:ok, structure}
     end
   end
@@ -71,10 +70,10 @@ defmodule GiTF.Major.Research do
 
   def detect_main_language(files) do
     extensions = group_by_extension(files)
-    
+
     language_map = %{
       ".ex" => "elixir",
-      ".exs" => "elixir", 
+      ".exs" => "elixir",
       ".js" => "javascript",
       ".ts" => "typescript",
       ".py" => "python",
@@ -82,7 +81,7 @@ defmodule GiTF.Major.Research do
       ".go" => "go",
       ".rb" => "ruby"
     }
-    
+
     extensions
     |> Enum.map(fn {ext, count} -> {Map.get(language_map, ext, "other"), count} end)
     |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
@@ -94,9 +93,10 @@ defmodule GiTF.Major.Research do
   # Private helpers
 
   defp list_source_files(path) do
-    task = Task.async(fn ->
-      System.cmd("find", [path, "-type", "f", "-not", "-path", "*/.*"], stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("find", [path, "-type", "f", "-not", "-path", "*/.*"], stderr_to_stdout: true)
+      end)
 
     case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do
       {:ok, {output, 0}} ->
@@ -108,8 +108,11 @@ defmodule GiTF.Major.Research do
 
         {:ok, files}
 
-      {:ok, _} -> {:error, :find_failed}
-      nil -> {:error, :find_timeout}
+      {:ok, _} ->
+        {:error, :find_failed}
+
+      nil ->
+        {:error, :find_timeout}
     end
   end
 

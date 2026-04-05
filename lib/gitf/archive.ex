@@ -266,13 +266,21 @@ defmodule GiTF.Archive do
       data when data == %{} ->
         Logger.error("All backups exhausted, starting with empty store")
         GiTF.Telemetry.emit([:gitf, :store, :data_loss], %{}, %{reason: "all_backups_exhausted"})
+
         try do
-          Phoenix.PubSub.broadcast(GiTF.PubSub, "section:alerts", {:store_data_loss, "all_backups_exhausted"})
+          Phoenix.PubSub.broadcast(
+            GiTF.PubSub,
+            "section:alerts",
+            {:store_data_loss, "all_backups_exhausted"}
+          )
         rescue
           _ -> :ok
         end
+
         %{}
-      data -> data
+
+      data ->
+        data
     end
   end
 

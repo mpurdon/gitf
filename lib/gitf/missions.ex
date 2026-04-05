@@ -102,7 +102,9 @@ defmodule GiTF.Missions do
   @spec update(String.t(), map()) :: {:ok, map()} | {:error, :not_found}
   def update(mission_id, attrs) do
     case Archive.get(:missions, mission_id) do
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
       mission ->
         updated = Map.merge(mission, attrs)
         Archive.put(:missions, updated)
@@ -260,14 +262,16 @@ defmodule GiTF.Missions do
       impl_jobs = Enum.reject(mission.ops, & &1[:phase_job])
 
       # Exclude failed ops that have been retried (active retry exists)
-      retried_ids = impl_jobs
+      retried_ids =
+        impl_jobs
         |> Enum.map(& &1[:retry_of])
         |> Enum.reject(&is_nil/1)
         |> MapSet.new()
 
-      active_jobs = Enum.reject(impl_jobs, fn op ->
-        op.status == "failed" and MapSet.member?(retried_ids, op.id)
-      end)
+      active_jobs =
+        Enum.reject(impl_jobs, fn op ->
+          op.status == "failed" and MapSet.member?(retried_ids, op.id)
+        end)
 
       op_statuses = Enum.map(active_jobs, & &1.status)
 
@@ -343,8 +347,11 @@ defmodule GiTF.Missions do
   @spec get_artifact(String.t(), String.t()) :: map() | nil
   def get_artifact(mission_id, phase) do
     case Archive.get(:missions, mission_id) do
-      nil -> nil
-      mission -> get_in(mission, [:artifacts, phase]) || get_in(mission, [:artifacts, Access.key(phase)])
+      nil ->
+        nil
+
+      mission ->
+        get_in(mission, [:artifacts, phase]) || get_in(mission, [:artifacts, Access.key(phase)])
     end
   end
 
@@ -353,7 +360,8 @@ defmodule GiTF.Missions do
 
   Returns `{:ok, mission}` or `{:error, :not_found}`.
   """
-  @spec record_phase_job(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
+  @spec record_phase_job(String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, :not_found}
   def record_phase_job(mission_id, phase, op_id) do
     case Archive.get(:missions, mission_id) do
       nil ->
@@ -374,7 +382,8 @@ defmodule GiTF.Missions do
   Records the transition and updates the mission's current_phase.
   Returns `{:ok, mission}` or `{:error, reason}`.
   """
-  @spec transition_phase(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  @spec transition_phase(String.t(), String.t(), String.t() | nil) ::
+          {:ok, map()} | {:error, term()}
   def transition_phase(mission_id, to_phase, reason \\ nil) do
     case Archive.get(:missions, mission_id) do
       nil ->
@@ -391,6 +400,7 @@ defmodule GiTF.Missions do
           reason: reason,
           seq: System.monotonic_time(:microsecond)
         }
+
         Archive.insert(:mission_phase_transitions, transition)
 
         # Update mission phase and derive status from the phase

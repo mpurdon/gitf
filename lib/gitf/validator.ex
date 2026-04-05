@@ -58,13 +58,14 @@ defmodule GiTF.Validator do
   @doc "Runs a custom shell command in the shell worktree."
   @spec run_custom_validation(map(), String.t()) :: :ok | {:error, String.t()}
   def run_custom_validation(shell, command) do
-    task = Task.async(fn ->
-      System.cmd("sh", ["-c", command],
-        cd: shell.worktree_path,
-        stderr_to_stdout: true,
-        env: [{"MIX_ENV", "test"}]
-      )
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("sh", ["-c", command],
+          cd: shell.worktree_path,
+          stderr_to_stdout: true,
+          env: [{"MIX_ENV", "test"}]
+        )
+      end)
 
     case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {_output, 0}} ->
@@ -156,7 +157,7 @@ defmodule GiTF.Validator do
   end
 
   defp get_diff(shell) do
-    case GiTF.Git.safe_cmd( ["diff", "HEAD~1..HEAD"],
+    case GiTF.Git.safe_cmd(["diff", "HEAD~1..HEAD"],
            cd: shell.worktree_path,
            stderr_to_stdout: true
          ) do
@@ -165,7 +166,7 @@ defmodule GiTF.Validator do
 
       {_, _} ->
         # Fallback: diff against the working tree
-        case GiTF.Git.safe_cmd( ["diff"], cd: shell.worktree_path, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd(["diff"], cd: shell.worktree_path, stderr_to_stdout: true) do
           {output, 0} -> {:ok, output}
           {output, _} -> {:error, output}
         end

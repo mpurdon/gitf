@@ -14,7 +14,6 @@ defmodule GiTF.Intel.Retry do
   def retry_with_strategy(op_id, feedback \\ nil) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
          {:ok, analysis} <- FailureAnalysis.analyze_failure(op_id, feedback) do
-
       strategy = select_strategy(analysis)
       execute_retry(op, strategy, analysis)
     end
@@ -149,13 +148,13 @@ defmodule GiTF.Intel.Retry do
       created_at: DateTime.utc_now(),
       updated_at: DateTime.utc_now()
     }
-    
+
     Archive.insert(:ops, new_job)
-    
+
     # Update original op to mark it as retried
     updated_original = Map.put(op, :retried_as, new_job.id)
     Archive.put(:ops, updated_original)
-    
+
     {:ok, new_job}
   end
 

@@ -43,7 +43,9 @@ defmodule GiTF.Debrief do
         _ -> :ok
       end
 
-      Logger.info("Post-review started for mission #{mission_id}, expires in #{@review_duration_seconds}s")
+      Logger.info(
+        "Post-review started for mission #{mission_id}, expires in #{@review_duration_seconds}s"
+      )
 
       {:ok, stored}
     end
@@ -54,20 +56,20 @@ defmodule GiTF.Debrief do
 
   Returns `{:ok, :clean}` or `{:ok, :regression, findings}`.
   """
-  @spec check_regressions(String.t()) :: {:ok, :clean} | {:ok, :regression, String.t()} | {:error, term()}
+  @spec check_regressions(String.t()) ::
+          {:ok, :clean} | {:ok, :regression, String.t()} | {:error, term()}
   def check_regressions(mission_id) do
     with {:ok, review} <- get_review(mission_id),
          {:ok, sector} <- Archive.fetch(:sectors, review.sector_id) do
-
       validation_command = Map.get(sector, :validation_command)
 
       if is_nil(validation_command) do
         {:ok, :clean}
       else
-        task = Task.async(fn ->
-          System.cmd("sh", ["-c", validation_command],
-            cd: sector.path, stderr_to_stdout: true)
-        end)
+        task =
+          Task.async(fn ->
+            System.cmd("sh", ["-c", validation_command], cd: sector.path, stderr_to_stdout: true)
+          end)
 
         case Task.yield(task, 120_000) || Task.shutdown(task, 5_000) do
           {:ok, {_output, 0}} ->
@@ -96,10 +98,11 @@ defmodule GiTF.Debrief do
   def handle_regression(mission_id, findings) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       # Create follow-up mission
-      {:ok, followup} = GiTF.Missions.create(%{
-        goal: "Fix regression from mission \"#{mission.name}\"",
-        sector_id: mission.sector_id
-      })
+      {:ok, followup} =
+        GiTF.Missions.create(%{
+          goal: "Fix regression from mission \"#{mission.name}\"",
+          sector_id: mission.sector_id
+        })
 
       # Apply trust penalty
       GiTF.Trust.apply_regression_penalty(mission_id)
@@ -125,7 +128,9 @@ defmodule GiTF.Debrief do
         _ -> :ok
       end
 
-      Logger.warning("Regression detected for mission #{mission_id}, follow-up mission #{followup.id} created")
+      Logger.warning(
+        "Regression detected for mission #{mission_id}, follow-up mission #{followup.id} created"
+      )
 
       {:ok, followup}
     end
@@ -187,7 +192,9 @@ defmodule GiTF.Debrief do
 
   defp update_review(mission_id, updates) do
     case get_review_raw(mission_id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       review ->
         updated = Map.merge(review, updates)
         Archive.put(:debriefs, updated)

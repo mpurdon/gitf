@@ -5,13 +5,13 @@ defmodule GiTF.QualityTest do
   alias GiTF.Archive
 
   setup do
-    store_dir = Path.join(System.tmp_dir!(), "section-quality-test-#{:rand.uniform(100000)}")
+    store_dir = Path.join(System.tmp_dir!(), "section-quality-test-#{:rand.uniform(100_000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
     start_supervised!({Archive, data_dir: store_dir})
-    
+
     on_exit(fn -> File.rm_rf!(store_dir) end)
-    
+
     %{store_dir: store_dir}
   end
 
@@ -19,9 +19,9 @@ defmodule GiTF.QualityTest do
     test "creates quality report" do
       op_id = "op-test"
       shell_path = "/tmp"
-      
+
       {:ok, report} = Quality.analyze_static(op_id, shell_path, :unknown)
-      
+
       assert report.op_id == op_id
       assert report.analysis_type == "static"
       assert report.score == 100
@@ -30,9 +30,9 @@ defmodule GiTF.QualityTest do
 
     test "stores report in database" do
       op_id = "op-test2"
-      
+
       {:ok, _report} = Quality.analyze_static(op_id, "/tmp", :unknown)
-      
+
       reports = Quality.get_reports(op_id)
       assert length(reports) == 1
       assert hd(reports).op_id == op_id
@@ -47,10 +47,10 @@ defmodule GiTF.QualityTest do
 
     test "returns all reports for a op" do
       op_id = "op-multi"
-      
+
       {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
       {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
-      
+
       reports = Quality.get_reports(op_id)
       assert length(reports) == 2
     end
@@ -60,9 +60,9 @@ defmodule GiTF.QualityTest do
     test "creates security report" do
       op_id = "op-sec-test"
       shell_path = "/tmp"
-      
+
       {:ok, report} = Quality.analyze_security(op_id, shell_path, :unknown)
-      
+
       assert report.op_id == op_id
       assert report.analysis_type == "security"
       assert is_integer(report.score)
@@ -71,9 +71,9 @@ defmodule GiTF.QualityTest do
 
     test "stores security report in database" do
       op_id = "op-sec-test2"
-      
+
       {:ok, _report} = Quality.analyze_security(op_id, "/tmp", :unknown)
-      
+
       reports = Quality.get_reports(op_id)
       assert length(reports) == 1
       assert hd(reports).analysis_type == "security"
@@ -84,9 +84,9 @@ defmodule GiTF.QualityTest do
     test "creates performance report" do
       op_id = "op-perf-test"
       sector = %{id: "sector-test", path: "/tmp"}
-      
+
       {:ok, report} = Quality.analyze_performance(op_id, "/tmp", sector)
-      
+
       assert report.op_id == op_id
       assert report.analysis_type == "performance"
       assert is_integer(report.score)
@@ -95,9 +95,9 @@ defmodule GiTF.QualityTest do
     test "stores performance report in database" do
       op_id = "op-perf-test2"
       sector = %{id: "sector-test", path: "/tmp"}
-      
+
       {:ok, _report} = Quality.analyze_performance(op_id, "/tmp", sector)
-      
+
       reports = Quality.get_reports(op_id)
       assert length(reports) == 1
       assert hd(reports).analysis_type == "performance"
@@ -108,9 +108,9 @@ defmodule GiTF.QualityTest do
     test "set and get baseline" do
       sector_id = "sector-baseline"
       metrics = [%{name: "test", value: 100, unit: "ms"}]
-      
+
       {:ok, _} = Quality.set_performance_baseline(sector_id, metrics)
-      
+
       baseline = Quality.get_performance_baseline(sector_id)
       assert baseline.sector_id == sector_id
       assert baseline.metrics == metrics
@@ -130,19 +130,19 @@ defmodule GiTF.QualityTest do
 
     test "returns static analysis score" do
       op_id = "op-score"
-      
+
       {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
-      
+
       score = Quality.calculate_composite_score(op_id)
       assert score == 100
     end
 
     test "returns weighted composite with both static and security" do
       op_id = "op-composite"
-      
+
       {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
       {:ok, _} = Quality.analyze_security(op_id, "/tmp", :unknown)
-      
+
       score = Quality.calculate_composite_score(op_id)
       # Should be weighted average: static * 0.6 + security * 0.4
       assert is_integer(score)
@@ -152,11 +152,11 @@ defmodule GiTF.QualityTest do
     test "returns weighted composite with all three types" do
       op_id = "op-composite-all"
       sector = %{id: "sector-test", path: "/tmp"}
-      
+
       {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
       {:ok, _} = Quality.analyze_security(op_id, "/tmp", :unknown)
       {:ok, _} = Quality.analyze_performance(op_id, "/tmp", sector)
-      
+
       score = Quality.calculate_composite_score(op_id)
       # Should be weighted: static * 0.5 + security * 0.3 + performance * 0.2
       assert is_integer(score)
@@ -167,9 +167,9 @@ defmodule GiTF.QualityTest do
   describe "check_quality_gate/2" do
     test "passes when score meets threshold" do
       op_id = "op-gate-pass"
-      
+
       {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
-      
+
       assert {:ok, 100} = Quality.check_quality_gate(op_id, 70)
     end
 
@@ -181,7 +181,7 @@ defmodule GiTF.QualityTest do
   describe "threshold management" do
     test "returns default thresholds for unconfigured sector" do
       thresholds = Quality.get_thresholds("nonexistent")
-      
+
       assert thresholds.composite == 70
       assert thresholds.static == 70
       assert thresholds.security == 60
@@ -192,10 +192,10 @@ defmodule GiTF.QualityTest do
       sector_id = "sector-thresh"
       sector = %{id: sector_id, path: "/tmp"}
       Archive.insert(:sectors, sector)
-      
+
       custom = %{composite: 80, static: 75, security: 70, performance: 60}
       {:ok, _} = Quality.set_thresholds(sector_id, custom)
-      
+
       thresholds = Quality.get_thresholds(sector_id)
       assert thresholds.composite == 80
       assert thresholds.static == 75
@@ -210,7 +210,7 @@ defmodule GiTF.QualityTest do
 
     test "calculates quality statistics" do
       sector_id = "sector-stats"
-      
+
       # Create some ops with quality reports
       for i <- 1..3 do
         op = %{
@@ -219,12 +219,13 @@ defmodule GiTF.QualityTest do
           status: "done",
           updated_at: DateTime.utc_now()
         }
+
         Archive.insert(:ops, op)
         {:ok, _} = Quality.analyze_static(op.id, "/tmp", :unknown)
       end
-      
+
       stats = Quality.get_quality_stats(sector_id)
-      
+
       assert stats.total_jobs == 3
       assert stats.average == 100.0
       assert stats.min == 100

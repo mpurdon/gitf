@@ -136,7 +136,9 @@ defmodule GiTF.CostsTest do
   describe "for_quest/1" do
     test "returns costs for ghosts working on mission ops", %{ghost: ghost} do
       {:ok, sector} =
-        Archive.insert(:sectors, %{name: "cost-mission-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{
+          name: "cost-mission-sector-#{:erlang.unique_integer([:positive])}"
+        })
 
       {:ok, mission} =
         Archive.insert(:missions, %{

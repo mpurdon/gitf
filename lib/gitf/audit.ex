@@ -1,7 +1,7 @@
 defmodule GiTF.Audit do
   @moduledoc """
   Job verification system.
-  
+
   Verifies completed ops by running validation commands and checking
   against verification criteria.
   """
@@ -12,7 +12,7 @@ defmodule GiTF.Audit do
 
   @doc """
   Verifies a completed op.
-  
+
   Runs validation command and quality checks.
   Returns {:ok, :pass | :fail, result} or {:error, reason}.
   """
@@ -21,7 +21,6 @@ defmodule GiTF.Audit do
     with {:ok, op} <- GiTF.Ops.get(op_id),
          {:ok, shell} <- get_job_cell(op),
          {:ok, sector} <- Archive.fetch(:sectors, op.sector_id) do
-
       # Check graduated clearance — auto-approve eligible ops
       authority_level = GiTF.Clearance.verification_level(op)
 
@@ -56,6 +55,7 @@ defmodule GiTF.Audit do
             case run_validation_command(shell, sector.validation_command) do
               {:ok, output} ->
                 %{result | status: "passed", output: output, exit_code: 0}
+
               {:error, {output, exit_code}} ->
                 %{result | status: "failed", output: output, exit_code: exit_code}
             end
@@ -72,6 +72,7 @@ defmodule GiTF.Audit do
             case GiTF.Runtime.CrossModelAudit.audit_job(op_id) do
               {:ok, audit} ->
                 %{cross_audit_score: audit.score, cross_audit_issues: audit.issues}
+
               {:error, reason} ->
                 Logger.warning("Cross-model audit failed for op #{op_id}: #{inspect(reason)}")
                 %{cross_audit_error: inspect(reason)}
@@ -110,13 +111,16 @@ defmodule GiTF.Audit do
   @spec get_verification_status(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_verification_status(op_id) do
     case Archive.get(:ops, op_id) do
-      nil -> {:error, :not_found}
-      op -> 
-        {:ok, %{
-          status: Map.get(op, :verification_status, "pending"),
-          result: Map.get(op, :audit_result),
-          verified_at: Map.get(op, :verified_at)
-        }}
+      nil ->
+        {:error, :not_found}
+
+      op ->
+        {:ok,
+         %{
+           status: Map.get(op, :verification_status, "pending"),
+           result: Map.get(op, :audit_result),
+           verified_at: Map.get(op, :verified_at)
+         }}
     end
   end
 
@@ -128,17 +132,21 @@ defmodule GiTF.Audit do
     # Archive in audit_results collection
     record = Map.put(result, :op_id, op_id)
     {:ok, vr} = Archive.insert(:audit_results, record)
-    
+
     # Update op verification status
     case Archive.get(:ops, op_id) do
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
       op ->
         verification_status = result.status
-        updated = op
-        |> Map.put(:verification_status, verification_status)
-        |> Map.put(:audit_result, result[:output])
-        |> Map.put(:verified_at, DateTime.utc_now())
-        
+
+        updated =
+          op
+          |> Map.put(:verification_status, verification_status)
+          |> Map.put(:audit_result, result[:output])
+          |> Map.put(:verified_at, DateTime.utc_now())
+
         Archive.put(:ops, updated)
         {:ok, vr}
     end
@@ -150,17 +158,17 @@ defmodule GiTF.Audit do
   @spec jobs_needing_verification() :: [map()]
   def jobs_needing_verification do
     Archive.filter(:ops, fn op ->
-      op.status == "done" and 
-      Map.get(op, :verification_status, "pending") == "pending"
+      op.status == "done" and
+        Map.get(op, :verification_status, "pending") == "pending"
     end)
   end
 
   # Private functions
 
   defp get_job_cell(op) do
-    case Archive.find_one(:shells, fn c -> 
-      c.ghost_id == op.ghost_id and c.status == "active" 
-    end) do
+    case Archive.find_one(:shells, fn c ->
+           c.ghost_id == op.ghost_id and c.status == "active"
+         end) do
       nil -> {:error, :no_cell}
       shell -> {:ok, shell}
     end
@@ -169,16 +177,23 @@ defmodule GiTF.Audit do
   @validation_timeout_ms 120_000
 
   defp run_validation_command(shell, command) do
-    task = Task.async(fn ->
-      System.cmd("sh", ["-c", command],
-        cd: shell.worktree_path,
-        stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("sh", ["-c", command],
+          cd: shell.worktree_path,
+          stderr_to_stdout: true
+        )
+      end)
 
     case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, 0}} -> {:ok, output}
-      {:ok, {output, exit_code}} -> {:error, {output, exit_code}}
-      nil -> {:error, {"Validation command timed out after #{div(@validation_timeout_ms, 1000)}s", 1}}
+      {:ok, {output, 0}} ->
+        {:ok, output}
+
+      {:ok, {output, exit_code}} ->
+        {:error, {output, exit_code}}
+
+      nil ->
+        {:error, {"Validation command timed out after #{div(@validation_timeout_ms, 1000)}s", 1}}
     end
   rescue
     e -> {:error, {Exception.message(e), 1}}
@@ -186,16 +201,19 @@ defmodule GiTF.Audit do
 
   defp update_job_verification(op_id, status, result) do
     case Archive.get(:ops, op_id) do
-      nil -> :error
+      nil ->
+        :error
+
       op ->
         verification_status = if status == :pass, do: "passed", else: "failed"
-        
-        updated = op
-        |> Map.put(:verification_status, verification_status)
-        |> Map.put(:audit_result, result.output)
-        |> Map.put(:quality_score, result[:quality_score])
-        |> Map.put(:verified_at, DateTime.utc_now())
-        
+
+        updated =
+          op
+          |> Map.put(:verification_status, verification_status)
+          |> Map.put(:audit_result, result.output)
+          |> Map.put(:quality_score, result[:quality_score])
+          |> Map.put(:verified_at, DateTime.utc_now())
+
         Archive.put(:ops, updated)
     end
   end
@@ -204,26 +222,36 @@ defmodule GiTF.Audit do
     language = detect_language(sector)
 
     # Run static analysis
-    static_result = case Quality.analyze_static(op_id, shell.worktree_path, language) do
-      {:ok, report} -> %{static_score: report.score, static_issues: length(report.issues)}
-      {:error, reason} ->
-        Logger.warning("Static analysis failed for op #{op_id}: #{inspect(reason)}")
-        %{static_score: 0, static_issues: 0, static_error: inspect(reason)}
-    end
+    static_result =
+      case Quality.analyze_static(op_id, shell.worktree_path, language) do
+        {:ok, report} ->
+          %{static_score: report.score, static_issues: length(report.issues)}
+
+        {:error, reason} ->
+          Logger.warning("Static analysis failed for op #{op_id}: #{inspect(reason)}")
+          %{static_score: 0, static_issues: 0, static_error: inspect(reason)}
+      end
 
     # Run security scan
-    security_result = case Quality.analyze_security(op_id, shell.worktree_path, language) do
-      {:ok, report} -> %{security_score: report.score, security_findings: length(report.issues)}
-      {:error, reason} ->
-        Logger.warning("Security scan failed for op #{op_id}: #{inspect(reason)}")
-        %{security_score: 0, security_findings: 0, security_error: inspect(reason)}
-    end
+    security_result =
+      case Quality.analyze_security(op_id, shell.worktree_path, language) do
+        {:ok, report} ->
+          %{security_score: report.score, security_findings: length(report.issues)}
+
+        {:error, reason} ->
+          Logger.warning("Security scan failed for op #{op_id}: #{inspect(reason)}")
+          %{security_score: 0, security_findings: 0, security_error: inspect(reason)}
+      end
 
     # Run performance benchmarks (if configured)
-    performance_result = case Quality.analyze_performance(op_id, shell.worktree_path, sector) do
-      {:ok, report} -> %{performance_score: report.score, performance_metrics: length(report.issues)}
-      {:error, _} -> %{performance_score: nil, performance_metrics: 0}
-    end
+    performance_result =
+      case Quality.analyze_performance(op_id, shell.worktree_path, sector) do
+        {:ok, report} ->
+          %{performance_score: report.score, performance_metrics: length(report.issues)}
+
+        {:error, _} ->
+          %{performance_score: nil, performance_metrics: 0}
+      end
 
     # Calculate composite score
     composite = Quality.calculate_composite_score(op_id)

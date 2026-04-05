@@ -148,7 +148,12 @@ defmodule GiTF.AuditContract do
         if is_number(v), do: {k, min(v * 1.1, 100)}, else: {k, v}
       end)
 
-    %{contract | required_checks: required, thresholds: raised_thresholds, auto_approve_eligible: false}
+    %{
+      contract
+      | required_checks: required,
+        thresholds: raised_thresholds,
+        auto_approve_eligible: false
+    }
   end
 
   defp apply_risk_adjustments(contract, _risk), do: contract

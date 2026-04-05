@@ -102,7 +102,12 @@ defmodule GiTF.TUI.Views.Pipeline do
   end
 
   defp in_active?(%{active: nil}, _), do: false
-  defp in_active?(%{active: a}, id), do: (a[:op_id] || a.op_id) == id
+
+  defp in_active?(%{active: a}, id) do
+    val = Map.get(a, :op_id) || Map.get(a, "op_id")
+    val == id
+  end
+
   defp in_active?(_, _), do: false
 
   defp in_pending?(%{pending: p}, id), do: Enum.any?(p, fn {jid, _} -> jid == id end)

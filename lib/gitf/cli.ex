@@ -57,13 +57,17 @@ defmodule GiTF.CLI do
         start_major()
 
         Process.flag(:trap_exit, true)
+
         try do
           Ratatouille.run(GiTF.TUI.App,
             quit_events: [{:key, Ratatouille.Constants.key(:ctrl_c)}]
           )
         rescue
           _e in MatchError ->
-            Format.warn("TUI failed to initialize (this is normal when running as a global escript).")
+            Format.warn(
+              "TUI failed to initialize (this is normal when running as a global escript)."
+            )
+
             Format.info("Please use standard CLI commands instead (e.g. gitf --help).")
         end
 
@@ -95,9 +99,14 @@ defmodule GiTF.CLI do
 
         if GiTF.Client.remote?() do
           case GiTF.Client.ping() do
-            :ok -> :ok
+            :ok ->
+              :ok
+
             {:error, reason} ->
-              Format.error("Cannot connect to GiTF server at #{GiTF.Client.server_url()}. Is it running?")
+              Format.error(
+                "Cannot connect to GiTF server at #{GiTF.Client.server_url()}. Is it running?"
+              )
+
               Format.error("  #{reason}")
               System.halt(1)
           end
@@ -148,7 +157,9 @@ defmodule GiTF.CLI do
   # This lets all commands operate on a different workspace without cd-ing.
   defp extract_workspace_flag(argv) do
     case find_flag_value(argv, "--workspace", "-w") do
-      {cleaned, nil} -> cleaned
+      {cleaned, nil} ->
+        cleaned
+
       {cleaned, path} ->
         expanded = Path.expand(path)
         System.put_env("GITF_PATH", expanded)
@@ -161,12 +172,18 @@ defmodule GiTF.CLI do
   @valid_modes ~w(api cli ollama bedrock)
   defp extract_mode_flag(argv) do
     case find_mode_flag(argv, [], nil) do
-      {cleaned, nil} -> cleaned
+      {cleaned, nil} ->
+        cleaned
+
       {cleaned, mode} when mode in @valid_modes ->
         System.put_env("GITF_EXECUTION_MODE", mode)
         cleaned
+
       {cleaned, bad_mode} ->
-        Format.warn("Unknown mode '#{bad_mode}', ignoring. Valid: #{Enum.join(@valid_modes, ", ")}")
+        Format.warn(
+          "Unknown mode '#{bad_mode}', ignoring. Valid: #{Enum.join(@valid_modes, ", ")}"
+        )
+
         cleaned
     end
   end
@@ -240,15 +257,22 @@ defmodule GiTF.CLI do
   end
 
   defp start_major do
-    File.write("/tmp/gitf_tui_debug.log",
-      "[#{DateTime.utc_now()}] start_major called, gitf_dir=#{inspect(GiTF.gitf_dir())}\n", [:append])
+    File.write(
+      "/tmp/gitf_tui_debug.log",
+      "[#{DateTime.utc_now()}] start_major called, gitf_dir=#{inspect(GiTF.gitf_dir())}\n",
+      [:append]
+    )
 
     case GiTF.gitf_dir() do
       {:ok, root} ->
         # Use GenServer.start (not start_link) so a Major crash doesn't kill the TUI.
         result = GenServer.start(GiTF.Major, %{gitf_root: root}, name: GiTF.Major)
-        File.write("/tmp/gitf_tui_debug.log",
-          "[#{DateTime.utc_now()}] Major start: #{inspect(result)}\n", [:append])
+
+        File.write(
+          "/tmp/gitf_tui_debug.log",
+          "[#{DateTime.utc_now()}] Major start: #{inspect(result)}\n",
+          [:append]
+        )
 
         case result do
           {:ok, _pid} ->
@@ -288,7 +312,9 @@ defmodule GiTF.CLI do
               end
 
               case Process.whereis(GiTF.Archive) do
-                nil -> :ok
+                nil ->
+                  :ok
+
                 pid ->
                   try do
                     GenServer.stop(pid, :normal, 5_000)
@@ -303,6 +329,7 @@ defmodule GiTF.CLI do
               # Reload API keys from the correct workspace config
               GiTF.Runtime.Keys.load()
             end
+
             :ok
 
           {:error, reason} ->
@@ -388,7 +415,9 @@ defmodule GiTF.CLI do
 
     opts = []
     opts = if name, do: Keyword.put(opts, :name, name), else: opts
-    opts = if validation_cmd, do: Keyword.put(opts, :validation_command, validation_cmd), else: opts
+
+    opts =
+      if validation_cmd, do: Keyword.put(opts, :validation_command, validation_cmd), else: opts
 
     cond do
       preview ->
@@ -396,18 +425,29 @@ defmodule GiTF.CLI do
           {:ok, info} ->
             Format.info("Project Detection Results:")
             Format.info("  Language: #{info.project_info.language}")
-            if info.project_info.framework, do: Format.info("  Framework: #{info.project_info.framework}")
+
+            if info.project_info.framework,
+              do: Format.info("  Framework: #{info.project_info.framework}")
+
             Format.info("  Build Tool: #{info.project_info.build_tool}")
-            if info.project_info.test_framework, do: Format.info("  Test Framework: #{info.project_info.test_framework}")
+
+            if info.project_info.test_framework,
+              do: Format.info("  Test Framework: #{info.project_info.test_framework}")
+
             Format.info("  Project Type: #{info.project_info.project_type}")
             Format.info("\nSuggested Configuration:")
             Format.info("  Name: #{info.suggestions.name}")
-            if info.suggestions.validation_command, do: Format.info("  Validation: #{info.suggestions.validation_command}")
+
+            if info.suggestions.validation_command,
+              do: Format.info("  Validation: #{info.suggestions.validation_command}")
+
             Format.info("  Sync Strategy: #{info.suggestions.sync_strategy}")
             Format.info("\nFile Counts:")
+
             Enum.each(info.codebase_map.file_count, fn {ext, count} ->
               Format.info("  #{ext}: #{count} files")
             end)
+
           {:error, reason} ->
             Format.error("Preview failed: #{reason}")
         end
@@ -422,6 +462,7 @@ defmodule GiTF.CLI do
             Format.info("  Language: #{result.project_info.language}")
             Format.info("  Path: #{result.sector.path}")
             GiTF.CLI.Help.show_tip(:comb_added)
+
           {:error, reason} ->
             Format.error("Onboarding failed: #{reason}")
         end
@@ -434,11 +475,18 @@ defmodule GiTF.CLI do
           {:ok, result} ->
             Format.success("✓ Onboarded: #{result.sector.name}")
             Format.info("  Language: #{result.project_info.language}")
-            if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
+
+            if result.project_info.framework,
+              do: Format.info("  Framework: #{result.project_info.framework}")
+
             Format.info("  Build Tool: #{result.project_info.build_tool}")
-            if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
+
+            if result.project_info.validation_command,
+              do: Format.info("  Validation: #{result.project_info.validation_command}")
+
             Format.info("  Path: #{result.sector.path}")
             GiTF.CLI.Help.show_tip(:comb_added)
+
           {:error, reason} ->
             Format.error("Onboarding failed: #{reason}")
         end
@@ -454,29 +502,38 @@ defmodule GiTF.CLI do
         case GiTF.Audit.verify_job(op_id) do
           {:ok, :pass, result} ->
             Format.success("Job #{op_id} verification passed")
+
             if result[:quality_score] do
               Format.info("  Quality score: #{result.quality_score}/100")
             end
+
             if result[:security_score] do
               Format.info("  Security score: #{result.security_score}/100")
             end
+
             if result[:performance_score] do
               Format.info("  Performance score: #{result.performance_score}/100")
             end
+
           {:ok, :fail, result} ->
             Format.error("Job #{op_id} verification failed")
+
             if result[:quality_score] do
               Format.warn("  Quality score: #{result.quality_score}/100")
             end
+
             if result[:security_score] do
               Format.warn("  Security score: #{result.security_score}/100")
             end
+
             if result[:performance_score] do
               Format.warn("  Performance score: #{result.performance_score}/100")
             end
+
             if result[:output] && result.output != "" do
               Format.error("  #{result.output}")
             end
+
           {:error, reason} ->
             Format.error("Audit error: #{inspect(reason)}")
         end
@@ -485,20 +542,22 @@ defmodule GiTF.CLI do
         case GiTF.Missions.get(mission_id) do
           {:ok, _quest} ->
             ops = GiTF.Ops.list(mission_id: mission_id)
-            results = Enum.map(ops, fn op ->
-              if op.status == "done" do
-                case GiTF.Audit.verify_job(op.id) do
-                  {:ok, status, _} -> {op.id, status}
-                  {:error, _} -> {op.id, :error}
+
+            results =
+              Enum.map(ops, fn op ->
+                if op.status == "done" do
+                  case GiTF.Audit.verify_job(op.id) do
+                    {:ok, status, _} -> {op.id, status}
+                    {:error, _} -> {op.id, :error}
+                  end
+                else
+                  {op.id, :skipped}
                 end
-              else
-                {op.id, :skipped}
-              end
-            end)
-            
+              end)
+
             passed = Enum.count(results, fn {_, status} -> status == :pass end)
             failed = Enum.count(results, fn {_, status} -> status == :fail end)
-            
+
             Format.info("Quest #{mission_id} verification: #{passed} passed, #{failed} failed")
 
           {:error, :not_found} ->
@@ -512,26 +571,32 @@ defmodule GiTF.CLI do
 
   defp dispatch([:quality], result) do
     subcommand = result_get(result, :args, :subcommand)
-    
+
     case subcommand do
       "check" ->
         op_id = result_get(result, :options, :op)
+
         if op_id do
           reports = GiTF.Quality.get_reports(op_id)
+
           if Enum.empty?(reports) do
             Format.warn("No quality reports for op #{op_id}")
           else
             Enum.each(reports, fn report ->
               Format.info("#{report.analysis_type}: #{report.score}/100 (#{report.tool})")
+
               if report.issues && length(report.issues) > 0 do
                 count = length(report.issues)
-                type = case report.analysis_type do
-                  "security" -> "findings"
-                  "performance" -> "metrics"
-                  _ -> "issues"
-                end
+
+                type =
+                  case report.analysis_type do
+                    "security" -> "findings"
+                    "performance" -> "metrics"
+                    _ -> "issues"
+                  end
+
                 Format.warn("  #{count} #{type}")
-                
+
                 # Show top 3 items
                 report.issues
                 |> Enum.take(3)
@@ -543,12 +608,13 @@ defmodule GiTF.CLI do
                       value = Map.get(issue, :value, "")
                       unit = Map.get(issue, :unit, "")
                       Format.info("    • #{name}: #{value} #{unit}")
-                    
+
                     _ ->
                       # Show issue/finding
                       msg = Map.get(issue, :message, "")
                       file = Map.get(issue, :file, "")
                       line = Map.get(issue, :line)
+
                       if line do
                         Format.warn("    • #{msg} (#{file}:#{line})")
                       else
@@ -562,17 +628,20 @@ defmodule GiTF.CLI do
         else
           Format.error("Usage: section quality check --op <id>")
         end
-      
+
       "report" ->
         mission_id = result_get(result, :options, :mission)
+
         if mission_id do
           ops = GiTF.Ops.list(mission_id: mission_id)
-          scores = Enum.map(ops, fn op ->
-            score = GiTF.Quality.calculate_composite_score(op.id)
-            {op.id, score}
-          end)
-          
-          avg_score = 
+
+          scores =
+            Enum.map(ops, fn op ->
+              score = GiTF.Quality.calculate_composite_score(op.id)
+              {op.id, score}
+            end)
+
+          avg_score =
             scores
             |> Enum.reject(fn {_, s} -> is_nil(s) end)
             |> Enum.map(fn {_, s} -> s end)
@@ -580,7 +649,7 @@ defmodule GiTF.CLI do
               [] -> nil
               list -> Enum.sum(list) / length(list)
             end
-          
+
           if avg_score do
             Format.info("Quest #{mission_id} average quality: #{Float.round(avg_score, 1)}/100")
           else
@@ -589,44 +658,45 @@ defmodule GiTF.CLI do
         else
           Format.error("Usage: section quality report --mission <id>")
         end
-      
+
       "baseline" ->
         sector_id = result_get(result, :options, :sector)
         op_id = result_get(result, :options, :op)
-        
+
         cond do
           sector_id && op_id ->
             # Set baseline from op's performance report
             reports = GiTF.Quality.get_reports(op_id)
             perf_report = Enum.find(reports, &(&1.analysis_type == "performance"))
-            
+
             if perf_report do
               {:ok, _} = GiTF.Quality.set_performance_baseline(sector_id, perf_report.issues)
               Format.success("Performance baseline set for sector #{sector_id}")
             else
               Format.error("No performance report found for op #{op_id}")
             end
-          
+
           sector_id ->
             # Show current baseline
             case GiTF.Quality.get_performance_baseline(sector_id) do
               nil ->
                 Format.warn("No baseline set for sector #{sector_id}")
-              
+
               baseline ->
                 Format.info("Performance baseline for sector #{sector_id}:")
+
                 Enum.each(baseline.metrics, fn metric ->
                   Format.info("  • #{metric.name}: #{metric.value} #{metric.unit}")
                 end)
             end
-          
+
           true ->
             Format.error("Usage: section quality baseline --sector <id> [--op <id>]")
         end
-      
+
       "thresholds" ->
         sector_id = result_get(result, :options, :sector)
-        
+
         if sector_id do
           thresholds = GiTF.Quality.get_thresholds(sector_id)
           Format.info("Quality thresholds for sector #{sector_id}:")
@@ -637,13 +707,13 @@ defmodule GiTF.CLI do
         else
           Format.error("Usage: section quality thresholds --sector <id>")
         end
-      
+
       "trends" ->
         sector_id = result_get(result, :options, :sector)
-        
+
         if sector_id do
           stats = GiTF.Quality.get_quality_stats(sector_id)
-          
+
           if stats.total_jobs == 0 do
             Format.warn("No quality data for sector #{sector_id}")
           else
@@ -653,10 +723,11 @@ defmodule GiTF.CLI do
             Format.info("  • Max: #{stats.max}/100")
             Format.info("  • Trend: #{stats.trend}")
             Format.info("  • Total ops: #{stats.total_jobs}")
-            
+
             IO.puts("")
             Format.info("Recent scores:")
             trends = GiTF.Quality.get_quality_trends(sector_id, 5)
+
             Enum.each(trends, fn t ->
               Format.info("  • #{t.op_id}: #{t.score}/100")
             end)
@@ -664,7 +735,7 @@ defmodule GiTF.CLI do
         else
           Format.error("Usage: section quality trends --sector <id>")
         end
-      
+
       _ ->
         Format.error("Usage: section quality <check|report|baseline|thresholds|trends> [options]")
     end
@@ -672,11 +743,11 @@ defmodule GiTF.CLI do
 
   defp dispatch([:intel], result) do
     subcommand = result_get(result, :args, :subcommand)
-    
+
     case subcommand do
       "analyze" ->
         op_id = result_get(result, :options, :op)
-        
+
         if op_id do
           case GiTF.Intel.analyze_and_suggest(op_id) do
             {:ok, result} ->
@@ -685,59 +756,65 @@ defmodule GiTF.CLI do
               Format.info("  Cause: #{result.analysis.root_cause}")
               Format.info("  Similar failures: #{result.analysis.similar_count}")
               Format.info("  Recommended strategy: #{result.recommended_strategy}")
-              
+
               IO.puts("")
               Format.info("Suggestions:")
+
               Enum.each(result.suggestions, fn s ->
                 Format.info("  • #{s}")
               end)
-            
+
             {:error, reason} ->
               Format.error("Analysis failed: #{inspect(reason)}")
           end
         else
           Format.error("Usage: section intel analyze --op <id>")
         end
-      
+
       "retry" ->
         op_id = result_get(result, :options, :op)
-        
+
         if op_id do
           case GiTF.Intel.auto_retry(op_id) do
             {:ok, new_job} ->
               Format.success("Created retry op: #{new_job.id}")
               Format.info("  Strategy: #{new_job.retry_strategy}")
+
               if new_job.retry_metadata[:note] do
                 Format.info("  Note: #{new_job.retry_metadata.note}")
               end
-            
+
             {:error, reason} ->
               Format.error("Retry failed: #{inspect(reason)}")
           end
         else
           Format.error("Usage: section intel retry --op <id>")
         end
-      
+
       "insights" ->
         sector_id = result_get(result, :options, :sector)
-        
+
         if sector_id do
           insights = GiTF.Intel.get_insights(sector_id)
-          
+
           Format.info("Intel Insights for sector #{sector_id}:")
           Format.info("  Total ops: #{insights.total_jobs}")
           Format.info("  Failed ops: #{insights.failed_jobs}")
           Format.info("  Success rate: #{insights.success_rate}%")
-          
+
           if insights.top_failure_type do
             Format.info("  Top failure type: #{insights.top_failure_type}")
           end
-          
+
           if length(insights.failure_patterns) > 0 do
             IO.puts("")
             Format.info("Failure Patterns:")
+
             Enum.each(insights.failure_patterns, fn pattern ->
-              Format.warn("  • #{pattern.type}: #{pattern.count} occurrences (#{Float.round(pattern.frequency * 100, 1)}%)")
+              Format.warn(
+                "  • #{pattern.type}: #{pattern.count} occurrences (#{Float.round(pattern.frequency * 100, 1)}%)"
+              )
+
               if length(pattern.common_causes) > 0 do
                 Format.info("    Common causes: #{Enum.join(pattern.common_causes, ", ")}")
               end
@@ -746,54 +823,56 @@ defmodule GiTF.CLI do
         else
           Format.error("Usage: section intel insights --sector <id>")
         end
-      
+
       "learn" ->
         sector_id = result_get(result, :options, :sector)
-        
+
         if sector_id do
           case GiTF.Intel.learn(sector_id) do
             {:ok, learning} ->
               Format.success("Learned from #{learning.total_failures} failures")
               Format.info("  Patterns identified: #{length(learning.patterns)}")
-            
+
             {:error, reason} ->
               Format.error("Learning failed: #{inspect(reason)}")
           end
         else
           Format.error("Usage: section intel learn --sector <id>")
         end
-      
+
       "best-practices" ->
         sector_id = result_get(result, :options, :sector)
-        
+
         if sector_id do
           practices = GiTF.Intel.get_best_practices(sector_id)
-          
+
           if Enum.empty?(practices.common_factors || []) do
             Format.warn("No success patterns found for sector #{sector_id}")
           else
             Format.info("Best Practices for sector #{sector_id}:")
-            
+
             if practices.recommended_model do
               Format.info("  Recommended model: #{practices.recommended_model}")
             end
-            
+
             if practices.average_quality do
               Format.info("  Average quality: #{practices.average_quality}/100")
             end
-            
+
             if length(practices.common_factors) > 0 do
               IO.puts("")
               Format.info("Common Success Factors:")
+
               Enum.each(practices.common_factors, fn factor ->
                 freq = Float.round(factor.frequency * 100, 1)
                 Format.info("  • #{factor.factor} (#{freq}%)")
               end)
             end
-            
+
             if length(practices.high_quality_examples || []) > 0 do
               IO.puts("")
               Format.info("High Quality Examples:")
+
               Enum.each(practices.high_quality_examples, fn op_id ->
                 Format.info("  • #{op_id}")
               end)
@@ -802,32 +881,35 @@ defmodule GiTF.CLI do
         else
           Format.error("Usage: section intel best-practices --sector <id>")
         end
-      
+
       "recommend" ->
         sector_id = result_get(result, :options, :sector)
-        
+
         if sector_id do
           recommendation = GiTF.Intel.recommend_approach(sector_id)
-          
+
           Format.info("Recommended Approach for sector #{sector_id}:")
           Format.info("  Model: #{recommendation.model}")
           Format.info("  Confidence: #{recommendation.confidence}")
-          
+
           if recommendation.quality_expectation do
             Format.info("  Expected quality: #{recommendation.quality_expectation}/100")
           end
-          
+
           IO.puts("")
           Format.info("Suggestions:")
+
           Enum.each(recommendation.suggestions, fn s ->
             Format.info("  • #{s}")
           end)
         else
           Format.error("Usage: section intel recommend --sector <id>")
         end
-      
+
       _ ->
-        Format.error("Usage: section intel <analyze|retry|insights|learn|best-practices|recommend> [options]")
+        Format.error(
+          "Usage: section intel <analyze|retry|insights|learn|best-practices|recommend> [options]"
+        )
     end
   end
 
@@ -857,8 +939,10 @@ defmodule GiTF.CLI do
 
     # Also run autonomy self-heal for higher-level recovery
     auto_results = GiTF.Autonomy.self_heal()
+
     unless Enum.empty?(auto_results) do
       Format.success("Auto-repairs:")
+
       Enum.each(auto_results, fn {action, count} ->
         Format.info("  #{action}: #{count}")
       end)
@@ -872,15 +956,16 @@ defmodule GiTF.CLI do
     end
 
     sector_id = result_get(result, :options, :sector)
-    
+
     if sector_id do
       # Predict issues
       predictions = GiTF.Autonomy.predict_issues(sector_id)
-      
+
       if Enum.empty?(predictions) do
         Format.success("No issues predicted for sector #{sector_id}")
       else
         Format.warn("Predicted Issues for sector #{sector_id}:")
+
         Enum.each(predictions, fn {type, message} ->
           Format.warn("  • #{type}: #{message}")
         end)
@@ -888,11 +973,12 @@ defmodule GiTF.CLI do
     else
       # Optimize resources
       recommendations = GiTF.Autonomy.optimize_resources()
-      
+
       if Enum.empty?(recommendations) do
         Format.success("Resource allocation is optimal")
       else
         Format.info("Resource Optimization Recommendations:")
+
         Enum.each(recommendations, fn {action, message} ->
           Format.info("  • #{action}: #{message}")
         end)
@@ -907,22 +993,23 @@ defmodule GiTF.CLI do
     end
 
     mission_id = result_get(result, :options, :mission)
-    
+
     if mission_id do
       case GiTF.Resilience.detect_deadlock(mission_id) do
         {:ok, :no_deadlock} ->
           Format.success("No deadlock detected in mission #{mission_id}")
-        
+
         {:error, {:deadlock, cycles}} ->
           Format.error("Deadlock detected in mission #{mission_id}!")
           Format.warn("Circular dependencies found:")
+
           Enum.each(cycles, fn cycle ->
             Format.warn("  • #{Enum.join(cycle, " → ")}")
           end)
-          
+
           IO.puts("")
           Format.info("Attempting to resolve...")
-          
+
           {:ok, :deadlock_resolved} = GiTF.Resilience.resolve_deadlock(mission_id, cycles)
           Format.success("Deadlock resolved")
       end
@@ -938,39 +1025,45 @@ defmodule GiTF.CLI do
     end
 
     action = result_get(result, :args, :action)
-    
+
     case action do
       "start" ->
         interval = result_get(result, :options, :interval) || 60
         Format.info("Starting monitoring (interval: #{interval}s)...")
         GiTF.Observability.start_monitoring(interval)
         Format.success("Monitoring started")
-      
+
       "status" ->
         status = GiTF.Observability.status()
-        
+
         Format.info("System Status:")
         IO.puts("  Health: #{status.health.status}")
-        IO.puts("  Quests: #{status.metrics.missions.active} active, #{status.metrics.missions.completed} completed")
+
+        IO.puts(
+          "  Quests: #{status.metrics.missions.active} active, #{status.metrics.missions.completed} completed"
+        )
+
         IO.puts("  Ghosts: #{status.metrics.ghosts.active} active")
         IO.puts("  Quality: #{Float.round(status.metrics.quality.average, 1)}")
         IO.puts("  Cost: $#{Float.round(status.metrics.costs.total, 2)}")
-        
+
         if !Enum.empty?(status.alerts) do
           IO.puts("")
           Format.warn("Active Alerts:")
+
           Enum.each(status.alerts, fn {type, msg} ->
             Format.warn("  • #{type}: #{msg}")
           end)
         end
-      
+
       "metrics" ->
         metrics = GiTF.Observability.Metrics.export_prometheus()
         IO.puts(metrics)
-      
+
       "health" ->
         # Same as `gitf medic`
         results = GiTF.Medic.run_all(fix: false)
+
         Enum.each(results, fn r ->
           case r.status do
             :ok -> Format.success("  #{r.name}: ok")
@@ -987,45 +1080,46 @@ defmodule GiTF.CLI do
   defp dispatch([:accept], result) do
     op_id = result_get(result, :options, :op)
     mission_id = result_get(result, :options, :mission)
-    
+
     cond do
       op_id ->
         Format.info("Testing acceptance criteria for op #{op_id}...")
         result = GiTF.Acceptance.test_acceptance(op_id)
-        
+
         IO.puts("\nAcceptance Test Results:")
         IO.puts("  Goal Met: #{if result.goal_met, do: "✓", else: "✗"}")
         IO.puts("  In Scope: #{if result.in_scope, do: "✓", else: "✗"}")
         IO.puts("  Minimal: #{if result.is_minimal, do: "✓", else: "✗"}")
         IO.puts("  Quality: #{if result.quality_passed, do: "✓", else: "✗"}")
         IO.puts("")
-        
+
         if result.ready_to_merge do
           Format.success("✓ Ready to sync")
         else
           Format.warn("✗ Not ready to sync")
           IO.puts("\nBlockers:")
+
           Enum.each(result.blockers, fn blocker ->
             Format.warn("  • #{blocker}")
           end)
         end
-      
+
       mission_id ->
         Format.info("Testing acceptance criteria for mission #{mission_id}...")
         result = GiTF.Acceptance.test_quest_acceptance(mission_id)
-        
+
         IO.puts("\nQuest Acceptance:")
         IO.puts("  Goal Achieved: #{if result.goal_achieved, do: "✓", else: "✗"}")
         IO.puts("  Scope Clean: #{if result.scope_clean, do: "✓", else: "✗"}")
         IO.puts("  Simplicity: #{result.simplicity_score}")
         IO.puts("")
-        
+
         if result.ready_to_complete do
           Format.success("✓ Quest ready to complete")
         else
           Format.warn("Recommendation: #{result.recommendation}")
         end
-      
+
       true ->
         Format.error("Usage: section accept --op <id> OR --mission <id>")
     end
@@ -1034,37 +1128,39 @@ defmodule GiTF.CLI do
   defp dispatch([:scope], result) do
     op_id = result_get(result, :options, :op)
     mission_id = result_get(result, :options, :mission)
-    
+
     cond do
       op_id ->
         result = GiTF.Barrier.check_scope(op_id)
-        
+
         IO.puts("Scope Check for op #{op_id}:")
         IO.puts("  In Scope: #{if result.in_scope, do: "✓", else: "✗"}")
-        
+
         if !Enum.empty?(result.warnings) do
           IO.puts("\nWarnings:")
+
           Enum.each(result.warnings, fn {type, msg} ->
             Format.warn("  • #{type}: #{msg}")
           end)
         end
-        
+
         IO.puts("\nRecommendation: #{result.recommendation}")
-      
+
       mission_id ->
         result = GiTF.Barrier.check_quest_scope(mission_id)
-        
+
         IO.puts("Scope Check for mission #{mission_id}:")
         IO.puts("  Total Jobs: #{result.total_jobs}")
         IO.puts("  Status: #{result.overall_status}")
-        
+
         if !Enum.empty?(result.scope_warnings) do
           IO.puts("\nWarnings:")
+
           Enum.each(result.scope_warnings, fn {type, msg} ->
             Format.warn("  • #{type}: #{msg}")
           end)
         end
-      
+
       true ->
         Format.error("Usage: section scope --op <id> OR --mission <id>")
     end
@@ -1129,15 +1225,28 @@ defmodule GiTF.CLI do
 
         opts = []
         opts = if name, do: Keyword.put(opts, :name, name), else: opts
-        opts = if validation_command, do: Keyword.put(opts, :validation_command, validation_command), else: opts
+
+        opts =
+          if validation_command,
+            do: Keyword.put(opts, :validation_command, validation_command),
+            else: opts
+
         opts = Keyword.put(opts, :skip_research, true)
 
         case GiTF.Onboarding.onboard(path, opts) do
           {:ok, result} ->
-            Format.success("Sector \"#{result.sector.name}\" auto-configured (#{result.sector.id})")
+            Format.success(
+              "Sector \"#{result.sector.name}\" auto-configured (#{result.sector.id})"
+            )
+
             Format.info("  Language: #{result.project_info.language}")
-            if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
-            if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
+
+            if result.project_info.framework,
+              do: Format.info("  Framework: #{result.project_info.framework}")
+
+            if result.project_info.validation_command,
+              do: Format.info("  Validation: #{result.project_info.validation_command}")
+
           {:error, reason} ->
             Format.error("Auto-configuration failed: #{reason}")
         end
@@ -1179,8 +1288,12 @@ defmodule GiTF.CLI do
     sectors =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_sectors() do
-          {:ok, c} -> c
-          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+          {:ok, c} ->
+            c
+
+          {:error, reason} ->
+            Format.error("Remote error: #{inspect(reason)}")
+            []
         end
       else
         GiTF.Sector.list()
@@ -1457,8 +1570,12 @@ defmodule GiTF.CLI do
     ghosts =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_bees() do
-          {:ok, b} -> b
-          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+          {:ok, b} ->
+            b
+
+          {:error, reason} ->
+            Format.error("Remote error: #{inspect(reason)}")
+            []
         end
       else
         GiTF.Ghosts.list()
@@ -1584,6 +1701,7 @@ defmodule GiTF.CLI do
             ghost_id: ghost_id,
             error: reason
           })
+
           Format.success("Ghost #{ghost_id} marked as failed: #{reason}")
 
         {:error, :not_found} ->
@@ -1660,8 +1778,11 @@ defmodule GiTF.CLI do
 
     if GiTF.Client.remote?() do
       case GiTF.Client.quest_merge(id) do
-        {:ok, data} -> Format.success("All ghost branches merged into #{data[:branch] || "mission branch"}")
-        {:error, reason} -> Format.error("Quest sync failed: #{format_error(reason)}")
+        {:ok, data} ->
+          Format.success("All ghost branches merged into #{data[:branch] || "mission branch"}")
+
+        {:error, reason} ->
+          Format.error("Quest sync failed: #{format_error(reason)}")
       end
     else
       case GiTF.Sync.merge_quest(id) do
@@ -1705,14 +1826,19 @@ defmodule GiTF.CLI do
 
     sector_id =
       case resolve_sector_id(result_get(result, :options, :sector)) do
-        {:ok, cid} -> cid
+        {:ok, cid} ->
+          cid
+
         {:error, :no_sector} ->
           # Auto-pick the first sector if only one exists
           case GiTF.Sector.list() do
-            [sector] -> sector.id
+            [sector] ->
+              sector.id
+
             [] ->
               Format.error("No sectors registered. Run `gitf init` first.")
               System.halt(1)
+
             _multiple ->
               Format.error("Multiple sectors found. Specify one with --sector.")
               System.halt(1)
@@ -1734,7 +1860,9 @@ defmodule GiTF.CLI do
               Format.info("Ghost working via API (waiting for completion)...")
               wait_for_mission(mission.id)
             else
-              Format.info("Ghost is working. Track progress with: gitf mission show #{mission.id}")
+              Format.info(
+                "Ghost is working. Track progress with: gitf mission show #{mission.id}"
+              )
             end
 
           {:error, reason} ->
@@ -1771,12 +1899,13 @@ defmodule GiTF.CLI do
           Format.error("Failed to create mission: #{inspect(reason)}")
       end
     else
-      goal = if goal == nil or goal == "" do
-        answer = safe_gets("What do you want to build? ")
-        if answer == "", do: System.halt(0), else: answer
-      else
-        goal
-      end
+      goal =
+        if goal == nil or goal == "" do
+          answer = safe_gets("What do you want to build? ")
+          if answer == "", do: System.halt(0), else: answer
+        else
+          goal
+        end
 
       quest_result =
         case resolve_sector_id(result_get(result, :options, :sector)) do
@@ -1841,8 +1970,12 @@ defmodule GiTF.CLI do
     missions =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_quests() do
-          {:ok, q} -> q
-          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+          {:ok, q} ->
+            q
+
+          {:error, reason} ->
+            Format.error("Remote error: #{inspect(reason)}")
+            []
         end
       else
         GiTF.Missions.list()
@@ -1858,7 +1991,10 @@ defmodule GiTF.CLI do
         rows =
           Enum.map(missions, fn q ->
             sector_name =
-              if GiTF.Client.remote?(), do: q[:sector_id] || "-", else: resolve_sector_name(q[:sector_id])
+              if GiTF.Client.remote?(),
+                do: q[:sector_id] || "-",
+                else: resolve_sector_name(q[:sector_id])
+
             phase = q[:current_phase] || "-"
             [q[:id], q[:name] || q[:goal] || "-", phase, q[:status] || "pending", sector_name]
           end)
@@ -1883,7 +2019,10 @@ defmodule GiTF.CLI do
 
         if mission[:sector_id] do
           sector_name =
-            if GiTF.Client.remote?(), do: mission[:sector_id], else: resolve_sector_name(mission[:sector_id])
+            if GiTF.Client.remote?(),
+              do: mission[:sector_id],
+              else: resolve_sector_name(mission[:sector_id])
+
           IO.puts("Sector: #{sector_name}")
         end
 
@@ -1928,8 +2067,12 @@ defmodule GiTF.CLI do
     ops =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_jobs() do
-          {:ok, j} -> j
-          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+          {:ok, j} ->
+            j
+
+          {:error, reason} ->
+            Format.error("Remote error: #{inspect(reason)}")
+            []
         end
       else
         GiTF.Ops.list()
@@ -2034,7 +2177,9 @@ defmodule GiTF.CLI do
     summary =
       if GiTF.Client.remote?() do
         case GiTF.Client.costs_summary() do
-          {:ok, s} -> s
+          {:ok, s} ->
+            s
+
           {:error, reason} ->
             Format.error("Remote error: #{inspect(reason)}")
             System.halt(1)
@@ -2050,6 +2195,7 @@ defmodule GiTF.CLI do
     IO.puts("")
 
     by_model = summary[:by_model] || %{}
+
     if map_size(by_model) > 0 do
       IO.puts("By model:")
       headers = ["Model", "Cost", "Input Tokens", "Output Tokens"]
@@ -2057,6 +2203,7 @@ defmodule GiTF.CLI do
       rows =
         Enum.map(by_model, fn {model, data} ->
           cost = (data[:cost] || 0.0) / 1
+
           [
             model,
             "$#{:erlang.float_to_binary(cost, decimals: 4)}",
@@ -2070,6 +2217,7 @@ defmodule GiTF.CLI do
     end
 
     by_category = summary[:by_category] || %{}
+
     if map_size(by_category) > 0 do
       IO.puts("By category:")
       headers = ["Category", "Cost", "Input Tokens", "Output Tokens"]
@@ -2077,6 +2225,7 @@ defmodule GiTF.CLI do
       rows =
         Enum.map(by_category, fn {category, data} ->
           cost = (data[:cost] || 0.0) / 1
+
           [
             category,
             "$#{:erlang.float_to_binary(cost, decimals: 4)}",
@@ -2090,6 +2239,7 @@ defmodule GiTF.CLI do
     end
 
     by_bee = summary[:by_bee] || %{}
+
     if map_size(by_bee) > 0 do
       IO.puts("By ghost:")
       headers = ["Ghost ID", "Cost", "Input Tokens", "Output Tokens"]
@@ -2097,6 +2247,7 @@ defmodule GiTF.CLI do
       rows =
         Enum.map(by_bee, fn {ghost_id, data} ->
           cost = (data[:cost] || 0.0) / 1
+
           [
             ghost_id,
             "$#{:erlang.float_to_binary(cost, decimals: 4)}",
@@ -2225,7 +2376,9 @@ defmodule GiTF.CLI do
 
     case GiTF.Tachikoma.start_link(auto_fix: !no_fix, verify: verify) do
       {:ok, _pid} ->
-        msg = if verify, do: "Tachikoma started with verification enabled", else: "Tachikoma started"
+        msg =
+          if verify, do: "Tachikoma started with verification enabled", else: "Tachikoma started"
+
         Format.success("#{msg}. Running health patrols...")
         Process.sleep(:infinity)
 
@@ -2391,7 +2544,9 @@ defmodule GiTF.CLI do
       case GiTF.Ghosts.get(ghost_id) do
         {:ok, ghost} ->
           shell =
-            GiTF.Archive.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+            GiTF.Archive.find_one(:shells, fn c ->
+              c.ghost_id == ghost.id and c.status == "active"
+            end)
 
           if shell do
             case GiTF.Conflict.check(shell.id) do
@@ -2433,7 +2588,8 @@ defmodule GiTF.CLI do
 
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
          {:ok, op} <- GiTF.Ops.get(ghost.op_id) do
-      shell = GiTF.Archive.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+      shell =
+        GiTF.Archive.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
 
       if shell do
         Format.info("Running validation for ghost #{ghost_id}...")
@@ -2543,7 +2699,9 @@ defmodule GiTF.CLI do
                 Format.error("Issue ##{issue_number} not found")
 
               {:error, :no_github_config} ->
-                Format.error("Sector #{sector.name} has no GitHub config. Use --github-owner and --github-repo when adding.")
+                Format.error(
+                  "Sector #{sector.name} has no GitHub config. Use --github-owner and --github-repo when adding."
+                )
 
               {:error, reason} ->
                 Format.error("Failed: #{inspect(reason)}")
@@ -2586,7 +2744,9 @@ defmodule GiTF.CLI do
           Format.success("Spec written: #{path}")
 
         {:error, {:invalid_phase, p}} ->
-          Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(GiTF.Specs.phases(), ", ")}")
+          Format.error(
+            "Invalid phase: #{p}. Valid phases: #{Enum.join(GiTF.Specs.phases(), ", ")}"
+          )
 
         {:error, reason} ->
           Format.error("Failed to write spec: #{format_error(reason)}")
@@ -2613,7 +2773,9 @@ defmodule GiTF.CLI do
           Format.error("No #{phase} spec found for mission #{mission_id}")
 
         {:error, {:invalid_phase, p}} ->
-          Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(GiTF.Specs.phases(), ", ")}")
+          Format.error(
+            "Invalid phase: #{p}. Valid phases: #{Enum.join(GiTF.Specs.phases(), ", ")}"
+          )
       end
     end
   end
@@ -2639,8 +2801,10 @@ defmodule GiTF.CLI do
         end
 
         phase_history = status[:phase_history] || []
+
         if phase_history != [] do
           Format.info("Phase history:")
+
           Enum.each(phase_history, fn t ->
             IO.puts("  #{t[:from_phase]} → #{t[:to_phase]} (#{t[:reason]})")
           end)
@@ -2677,23 +2841,33 @@ defmodule GiTF.CLI do
   # -- Dispatch helpers (not dispatch/2 clauses) -----------------------------
 
   defp route_cli_completion(ghost_id, op_id) do
-    op = case GiTF.Ops.get(op_id) do
-      {:ok, j} -> j
-      _ -> nil
-    end
+    op =
+      case GiTF.Ops.get(op_id) do
+        {:ok, j} -> j
+        _ -> nil
+      end
 
-    shell = GiTF.Archive.find_one(:shells, fn c ->
-      c.ghost_id == ghost_id and c.status == "active"
-    end)
+    shell =
+      GiTF.Archive.find_one(:shells, fn c ->
+        c.ghost_id == ghost_id and c.status == "active"
+      end)
 
     cond do
       op && Map.get(op, :recon, false) ->
-        GiTF.Link.send(ghost_id, "major", "scout_complete",
-          Jason.encode!(%{scout_op_id: op_id, parent_op_id: Map.get(op, :scout_for)}))
+        GiTF.Link.send(
+          ghost_id,
+          "major",
+          "scout_complete",
+          Jason.encode!(%{scout_op_id: op_id, parent_op_id: Map.get(op, :scout_for)})
+        )
 
-      shell != nil && op && !Map.get(op, :phase_job, false) && !Map.get(op, :skip_verification, false) ->
-        Phoenix.PubSub.broadcast(GiTF.PubSub, "tachikoma:review",
-          {:review_job, op_id, ghost_id, shell.id})
+      shell != nil && op && !Map.get(op, :phase_job, false) &&
+          !Map.get(op, :skip_verification, false) ->
+        Phoenix.PubSub.broadcast(
+          GiTF.PubSub,
+          "tachikoma:review",
+          {:review_job, op_id, ghost_id, shell.id}
+        )
 
       true ->
         :ok
@@ -2730,7 +2904,13 @@ defmodule GiTF.CLI do
     end
   end
 
-  @empty_costs %{input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, model: nil}
+  @empty_costs %{
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    model: nil
+  }
 
   defp record_major_costs do
     # Read costs from the latest Major transcript if available
@@ -2750,6 +2930,7 @@ defmodule GiTF.CLI do
           }
 
           {:ok, cost} = GiTF.Costs.record("major", attrs)
+
           Format.success(
             "Major cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
           )
@@ -2765,24 +2946,30 @@ defmodule GiTF.CLI do
   defp extract_costs_from_transcripts(dir) do
     if File.dir?(dir) do
       case Path.wildcard(Path.join([dir, "**", "*.jsonl"])) |> Enum.sort() |> List.last() do
-        nil -> @empty_costs
+        nil ->
+          @empty_costs
+
         path ->
           path
           |> File.stream!()
           |> Enum.reduce(@empty_costs, fn line, acc ->
             case Jason.decode(line) do
               {:ok, %{"type" => "usage", "usage" => usage}} ->
-                %{acc |
-                  input_tokens: acc.input_tokens + (usage["input_tokens"] || 0),
-                  output_tokens: acc.output_tokens + (usage["output_tokens"] || 0),
-                  cache_read_tokens: acc.cache_read_tokens + (usage["cache_read_input_tokens"] || 0),
-                  cache_write_tokens: acc.cache_write_tokens + (usage["cache_creation_input_tokens"] || 0)
+                %{
+                  acc
+                  | input_tokens: acc.input_tokens + (usage["input_tokens"] || 0),
+                    output_tokens: acc.output_tokens + (usage["output_tokens"] || 0),
+                    cache_read_tokens:
+                      acc.cache_read_tokens + (usage["cache_read_input_tokens"] || 0),
+                    cache_write_tokens:
+                      acc.cache_write_tokens + (usage["cache_creation_input_tokens"] || 0)
                 }
 
               {:ok, %{"type" => "result", "model" => model}} when is_binary(model) ->
                 %{acc | model: model}
 
-              _ -> acc
+              _ ->
+                acc
             end
           end)
       end
@@ -2798,7 +2985,9 @@ defmodule GiTF.CLI do
   defp return_early, do: throw(:return_early)
 
   @doc false
-  def format_error(:unknown_provider), do: "LLM provider not configured. Set GOOGLE_API_KEY or ANTHROPIC_API_KEY."
+  def format_error(:unknown_provider),
+    do: "LLM provider not configured. Set GOOGLE_API_KEY or ANTHROPIC_API_KEY."
+
   def format_error(:not_found), do: "Not found."
   def format_error({:api_error, reason}), do: "API error: #{inspect(reason)}"
   def format_error(reason) when is_binary(reason), do: reason
@@ -3038,11 +3227,13 @@ defmodule GiTF.CLI do
         ],
         run: [
           name: "run",
-          about: "Quick-run a focused task (bug fix, single feature). Skips the full phase pipeline.",
+          about:
+            "Quick-run a focused task (bug fix, single feature). Skips the full phase pipeline.",
           args: [
             goal: [
               value_name: "GOAL",
-              help: "What to do, e.g. \"fix the login bug\" or \"add pagination to the users endpoint\"",
+              help:
+                "What to do, e.g. \"fix the login bug\" or \"add pagination to the users endpoint\"",
               required: true,
               parser: :string
             ]
@@ -3195,7 +3386,8 @@ defmodule GiTF.CLI do
                 quick: [
                   short: "-q",
                   long: "--quick",
-                  help: "Skip full pipeline — create a single op and go (for bug fixes, focused tasks)"
+                  help:
+                    "Skip full pipeline — create a single op and go (for bug fixes, focused tasks)"
                 ]
               ]
             ],

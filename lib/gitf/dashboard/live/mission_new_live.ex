@@ -61,9 +61,10 @@ defmodule GiTF.Dashboard.MissionNewLive do
           # Full pipeline: auto-start, will pause at planning if review requested
           case GiTF.Major.Orchestrator.start_quest(mission.id, force_full_pipeline: true) do
             {:ok, _} ->
-              flash = if review,
-                do: "Mission started — will pause at planning for your review.",
-                else: "Mission started — running full pipeline."
+              flash =
+                if review,
+                  do: "Mission started — will pause at planning for your review.",
+                  else: "Mission started — running full pipeline."
 
               {:noreply,
                socket

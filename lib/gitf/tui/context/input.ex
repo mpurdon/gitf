@@ -17,12 +17,16 @@ defmodule GiTF.TUI.Context.Input do
   end
 
   def insert_char(%__MODULE__{text: text, cursor: cursor} = state, char) when is_binary(char) do
-    new_text = String.slice(text, 0, cursor) <> char <> String.slice(text, cursor, String.length(text))
+    new_text =
+      String.slice(text, 0, cursor) <> char <> String.slice(text, cursor, String.length(text))
+
     %{state | text: new_text, cursor: cursor + String.length(char)}
   end
 
   def delete_char(%__MODULE__{text: text, cursor: cursor} = state) when cursor > 0 do
-    new_text = String.slice(text, 0, cursor - 1) <> String.slice(text, cursor, String.length(text))
+    new_text =
+      String.slice(text, 0, cursor - 1) <> String.slice(text, cursor, String.length(text))
+
     %{state | text: new_text, cursor: cursor - 1}
   end
 
@@ -30,7 +34,9 @@ defmodule GiTF.TUI.Context.Input do
 
   def delete_char_forward(%__MODULE__{text: text, cursor: cursor} = state) do
     if cursor < String.length(text) do
-      new_text = String.slice(text, 0, cursor) <> String.slice(text, cursor + 1, String.length(text))
+      new_text =
+        String.slice(text, 0, cursor) <> String.slice(text, cursor + 1, String.length(text))
+
       %{state | text: new_text}
     else
       state

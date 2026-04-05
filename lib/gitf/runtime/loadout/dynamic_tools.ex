@@ -76,8 +76,7 @@ defmodule GiTF.Runtime.Loadout.DynamicTools do
           _ -> :string
         end
 
-      {String.to_atom(key),
-       [type: type, doc: spec["description"] || ""]}
+      {String.to_atom(key), [type: type, doc: spec["description"] || ""]}
     end)
   end
 
@@ -106,9 +105,14 @@ defmodule GiTF.Runtime.Loadout.DynamicTools do
       [
         ReqLLM.Tool.new!(
           name: "get_diagnostics",
-          description: "Get language server diagnostics for a file. Returns compiler errors, warnings, and hints.",
+          description:
+            "Get language server diagnostics for a file. Returns compiler errors, warnings, and hints.",
           parameter_schema: [
-            file_uri: [type: :string, required: true, doc: "File URI (e.g. file:///path/to/file.ex)"]
+            file_uri: [
+              type: :string,
+              required: true,
+              doc: "File URI (e.g. file:///path/to/file.ex)"
+            ]
           ],
           callback: fn args ->
             uri = args["file_uri"] || args[:file_uri]

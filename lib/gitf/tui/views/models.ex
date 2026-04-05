@@ -11,11 +11,13 @@ defmodule GiTF.TUI.Views.Models do
       else
         Enum.flat_map(identities, fn id ->
           pass_rate = if id.total_jobs > 0, do: id.total_passed / id.total_jobs * 100, else: 0
-          rate_color = cond do
-            pass_rate >= 80 -> :green
-            pass_rate >= 60 -> :yellow
-            true -> :red
-          end
+
+          rate_color =
+            cond do
+              pass_rate >= 80 -> :green
+              pass_rate >= 60 -> :yellow
+              true -> :red
+            end
 
           scores = id.avg_scores || %{}
 
@@ -23,7 +25,12 @@ defmodule GiTF.TUI.Views.Models do
             label do
               text(content: id.model, color: :yellow, attributes: [:bold])
               text(content: "  #{id.total_jobs} ops  ", color: :white)
-              text(content: "#{Float.round(pass_rate, 0)}%", color: rate_color, attributes: [:bold])
+
+              text(
+                content: "#{Float.round(pass_rate, 0)}%",
+                color: rate_color,
+                attributes: [:bold]
+              )
             end,
             label do
               score_bar("cor", scores[:correctness])
@@ -46,11 +53,13 @@ defmodule GiTF.TUI.Views.Models do
 
   defp score_bar(label, score) do
     pct = Float.round(score * 100, 0)
-    color = cond do
-      pct >= 80 -> :green
-      pct >= 60 -> :yellow
-      true -> :red
-    end
+
+    color =
+      cond do
+        pct >= 80 -> :green
+        pct >= 60 -> :yellow
+        true -> :red
+      end
 
     text(content: "#{label}:#{trunc(pct)}%", color: color)
   end

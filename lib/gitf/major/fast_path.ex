@@ -57,8 +57,8 @@ defmodule GiTF.Major.FastPath do
   @spec execute(String.t()) :: {:ok, String.t()} | {:error, term()}
   def execute(mission_id) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
-         {:ok, _} <- GiTF.Missions.transition_phase(mission_id, "implementation", "Fast path: focused task") do
-
+         {:ok, _} <-
+           GiTF.Missions.transition_phase(mission_id, "implementation", "Fast path: focused task") do
       # Create a single implementation op (verification enabled)
       job_attrs = %{
         title: mission.goal,
@@ -82,12 +82,18 @@ defmodule GiTF.Major.FastPath do
                   {:ok, "implementation"}
 
                 {:error, reason} ->
-                  Logger.error("Fast path: ghost spawn failed for mission #{mission_id}: #{inspect(reason)}")
+                  Logger.error(
+                    "Fast path: ghost spawn failed for mission #{mission_id}: #{inspect(reason)}"
+                  )
+
                   {:error, {:spawn_failed, reason}}
               end
 
             {:error, _} ->
-              Logger.warning("Fast path: no gitf root, op #{op.id} will be picked up by scheduler")
+              Logger.warning(
+                "Fast path: no gitf root, op #{op.id} will be picked up by scheduler"
+              )
+
               {:ok, "implementation"}
           end
 

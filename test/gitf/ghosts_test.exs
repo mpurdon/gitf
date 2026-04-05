@@ -16,7 +16,9 @@ defmodule GiTF.GhostsTest do
     gitf_root = create_gitf_workspace()
 
     {:ok, sector} =
-      GiTF.Sector.add(repo_path, name: "ghosts-test-sector-#{:erlang.unique_integer([:positive])}")
+      GiTF.Sector.add(repo_path,
+        name: "ghosts-test-sector-#{:erlang.unique_integer([:positive])}"
+      )
 
     {:ok, mission} =
       Archive.insert(:missions, %{
@@ -157,7 +159,9 @@ defmodule GiTF.GhostsTest do
       assert new_ghost.op_id == ghost.op_id
 
       # Cell should be reassigned to new ghost
-      shell = Archive.find_one(:shells, fn c -> c.ghost_id == new_ghost.id and c.status == "active" end)
+      shell =
+        Archive.find_one(:shells, fn c -> c.ghost_id == new_ghost.id and c.status == "active" end)
+
       assert shell != nil
 
       Process.sleep(1_000)

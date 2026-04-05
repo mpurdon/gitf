@@ -1,7 +1,7 @@
 defmodule GiTF.Major.Planner do
   @moduledoc """
   Major's planning capabilities for Phase 2.3.
-  
+
   Takes research summary and generates structured implementation plans
   with ops, verification criteria, and context estimates.
   """
@@ -11,7 +11,7 @@ defmodule GiTF.Major.Planner do
 
   @doc """
   Generate implementation plan from research summary.
-  
+
   Creates structured plan with ops, dependencies, and verification criteria.
   Focuses on MINIMAL implementation to achieve stated goal.
   """
@@ -19,47 +19,48 @@ defmodule GiTF.Major.Planner do
   def generate_plan(mission_id, research_summary) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          {:ok, plan} <- create_implementation_plan(mission, research_summary) do
-      
       # Add acceptance criteria and scope boundaries
-      enhanced_plan = Map.merge(plan, %{
-        acceptance_criteria: define_acceptance_criteria(mission),
-        scope_boundaries: define_scope_boundaries(mission),
-        simplicity_target: calculate_simplicity_target(plan)
-      })
-      
+      enhanced_plan =
+        Map.merge(plan, %{
+          acceptance_criteria: define_acceptance_criteria(mission),
+          scope_boundaries: define_scope_boundaries(mission),
+          simplicity_target: calculate_simplicity_target(plan)
+        })
+
       # Archive plan in mission
       quest_record = Archive.get(:missions, mission_id)
       updated = Map.put(quest_record, :implementation_plan, enhanced_plan)
       Archive.put(:missions, updated)
-      
+
       {:ok, enhanced_plan}
     end
   end
 
   @doc """
   Create ops from implementation plan.
-  
+
   Converts plan structure into actual op records with dependencies.
   """
   @spec create_jobs_from_plan(String.t(), map()) :: {:ok, [map()]} | {:error, term()}
   def create_jobs_from_plan(mission_id, plan) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
-      ops = 
+      ops =
         plan.tasks
         |> Enum.with_index()
         |> Enum.map(fn {task, index} ->
           create_job_from_task(mission_id, mission.sector_id, task, index)
         end)
-      
+
       # Create op records
-      created_jobs = Enum.map(ops, fn job_attrs ->
-        {:ok, op} = GiTF.Ops.create(job_attrs)
-        op
-      end)
-      
+      created_jobs =
+        Enum.map(ops, fn job_attrs ->
+          {:ok, op} = GiTF.Ops.create(job_attrs)
+          op
+        end)
+
       # Add dependencies
       add_job_dependencies(created_jobs, plan.dependencies)
-      
+
       {:ok, created_jobs}
     end
   end
@@ -78,14 +79,14 @@ defmodule GiTF.Major.Planner do
       estimated_duration: "2-4 hours",
       created_at: DateTime.utc_now()
     }
-    
+
     {:ok, plan}
   end
 
   defp generate_basic_tasks(mission, research_summary) do
     # Generate basic task structure based on mission goal and research
     main_language = research_summary[:structure][:main_language] || "unknown"
-    
+
     base_tasks = [
       %{
         title: "Setup and preparation",
@@ -104,47 +105,53 @@ defmodule GiTF.Major.Planner do
         verification_criteria: ["Core functionality works", "Basic tests pass"]
       }
     ]
-    
+
     # Add language-specific tasks
-    language_tasks = case main_language do
-      "elixir" -> [
-        %{
-          title: "Add tests",
-          description: "Write comprehensive ExUnit tests",
-          type: :audit,
-          complexity: :simple,
-          estimated_tokens: 8000,
-          verification_criteria: ["All tests pass", "Coverage > 80%"]
-        }
-      ]
-      "javascript" -> [
-        %{
-          title: "Add tests",
-          description: "Write Jest/Mocha tests",
-          type: :audit,
-          complexity: :simple,
-          estimated_tokens: 8000,
-          verification_criteria: ["All tests pass", "Coverage > 80%"]
-        }
-      ]
-      _ -> [
-        %{
-          title: "Add validation",
-          description: "Add basic validation and error handling",
-          type: :audit,
-          complexity: :simple,
-          estimated_tokens: 5000,
-          verification_criteria: ["Error handling works", "Input validation"]
-        }
-      ]
-    end
-    
+    language_tasks =
+      case main_language do
+        "elixir" ->
+          [
+            %{
+              title: "Add tests",
+              description: "Write comprehensive ExUnit tests",
+              type: :audit,
+              complexity: :simple,
+              estimated_tokens: 8000,
+              verification_criteria: ["All tests pass", "Coverage > 80%"]
+            }
+          ]
+
+        "javascript" ->
+          [
+            %{
+              title: "Add tests",
+              description: "Write Jest/Mocha tests",
+              type: :audit,
+              complexity: :simple,
+              estimated_tokens: 8000,
+              verification_criteria: ["All tests pass", "Coverage > 80%"]
+            }
+          ]
+
+        _ ->
+          [
+            %{
+              title: "Add validation",
+              description: "Add basic validation and error handling",
+              type: :audit,
+              complexity: :simple,
+              estimated_tokens: 5000,
+              verification_criteria: ["Error handling works", "Input validation"]
+            }
+          ]
+      end
+
     base_tasks ++ language_tasks
   end
 
   defp create_job_from_task(mission_id, sector_id, task, _index) do
     classification = Classifier.classify_and_recommend(task.title, task.description)
-    
+
     %{
       title: task.title,
       description: task.description,
@@ -168,12 +175,12 @@ defmodule GiTF.Major.Planner do
         GiTF.Ops.add_dependency(op.id, prev_job.id)
       end
     end)
-    
+
     # Add any custom dependencies from plan
     Enum.each(dependencies, fn {from_idx, to_idx} ->
       from_job = Enum.at(ops, from_idx)
       to_job = Enum.at(ops, to_idx)
-      
+
       if from_job && to_job do
         GiTF.Ops.add_dependency(to_job.id, from_job.id)
       end
@@ -224,18 +231,21 @@ defmodule GiTF.Major.Planner do
 
             {:error, :parse_failed} ->
               # Fallback: return raw text as a single-task plan
-              {:ok, %{
-                mission_id: mission_id,
-                goal: mission.goal,
-                tasks: [%{
-                  "title" => "Implementation",
-                  "description" => text,
-                  "target_files" => [],
-                  "model_recommendation" => "general"
-                }],
-                estimated_duration: "unknown",
-                created_at: DateTime.utc_now()
-              }}
+              {:ok,
+               %{
+                 mission_id: mission_id,
+                 goal: mission.goal,
+                 tasks: [
+                   %{
+                     "title" => "Implementation",
+                     "description" => text,
+                     "target_files" => [],
+                     "model_recommendation" => "general"
+                   }
+                 ],
+                 estimated_duration: "unknown",
+                 created_at: DateTime.utc_now()
+               }}
           end
 
         {:error, reason} ->
@@ -271,8 +281,12 @@ defmodule GiTF.Major.Planner do
 
         artifacts_section =
           [
-            if(research, do: "## Research\n```json\n#{Jason.encode!(research, pretty: true)}\n```"),
-            if(requirements, do: "## Requirements\n```json\n#{Jason.encode!(requirements, pretty: true)}\n```"),
+            if(research,
+              do: "## Research\n```json\n#{Jason.encode!(research, pretty: true)}\n```"
+            ),
+            if(requirements,
+              do: "## Requirements\n```json\n#{Jason.encode!(requirements, pretty: true)}\n```"
+            ),
             if(design, do: "## Design\n```json\n#{Jason.encode!(design, pretty: true)}\n```"),
             if(review, do: "## Review\n```json\n#{Jason.encode!(review, pretty: true)}\n```")
           ]
@@ -421,7 +435,7 @@ defmodule GiTF.Major.Planner do
         case GiTF.Ops.create(job_attrs) do
           {:ok, op} ->
             # Resolve dependencies by index
-            for dep_idx <- (spec["depends_on_indices"] || []) do
+            for dep_idx <- spec["depends_on_indices"] || [] do
               case Map.get(id_map, dep_idx) do
                 nil -> :ok
                 dep_id -> GiTF.Ops.add_dependency(op.id, dep_id)
@@ -449,7 +463,10 @@ defmodule GiTF.Major.Planner do
   @default_strategies [
     %{name: "minimal", hint: "Bare-minimum implementation to achieve the goal"},
     %{name: "normal", hint: "Standard implementation with reasonable completeness"},
-    %{name: "complex", hint: "Comprehensive implementation with thorough testing, edge cases, and documentation"}
+    %{
+      name: "complex",
+      hint: "Comprehensive implementation with thorough testing, edge cases, and documentation"
+    }
   ]
 
   @doc """
@@ -511,14 +528,15 @@ defmodule GiTF.Major.Planner do
       else
         # Archive all candidates
         GiTF.Missions.store_artifact(mission_id, "plan_candidates", %{
-          "candidates" => Enum.map(candidates, fn c ->
-            %{
-              "strategy" => c.strategy,
-              "score" => c.score,
-              "task_count" => length(c.tasks),
-              "estimated_duration" => c.estimated_duration
-            }
-          end),
+          "candidates" =>
+            Enum.map(candidates, fn c ->
+              %{
+                "strategy" => c.strategy,
+                "score" => c.score,
+                "task_count" => length(c.tasks),
+                "estimated_duration" => c.estimated_duration
+              }
+            end),
           "generated_at" => DateTime.utc_now() |> DateTime.to_iso8601()
         })
 
@@ -768,7 +786,7 @@ defmodule GiTF.Major.Planner do
   end
 
   # Goal-focused planning helpers
-  
+
   defp define_acceptance_criteria(mission) do
     goal = Map.get(mission, :goal, Map.get(mission, :description, ""))
 
@@ -799,7 +817,7 @@ defmodule GiTF.Major.Planner do
 
   defp calculate_simplicity_target(plan) do
     task_count = length(plan.tasks)
-    
+
     cond do
       task_count <= 3 -> :very_simple
       task_count <= 5 -> :simple

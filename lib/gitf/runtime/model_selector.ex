@@ -1,7 +1,7 @@
 defmodule GiTF.Runtime.ModelSelector do
   @moduledoc """
   Intelligent model selection based on op type and capabilities.
-  
+
   Selects the optimal model for each op type to balance quality and cost:
   - Planning/Architecture: Opus (complex reasoning)
   - Implementation: Opus (complex) or Sonnet (standard)
@@ -57,9 +57,9 @@ defmodule GiTF.Runtime.ModelSelector do
 
   @doc """
   Select the optimal model for a op based on type and complexity.
-  
+
   ## Examples
-  
+
       iex> select_model_for_job(:planning, :complex)
       "claude-opus"
       
@@ -200,6 +200,7 @@ defmodule GiTF.Runtime.ModelSelector do
 
   defp parse_op_type(nil), do: :implementation
   defp parse_op_type(type) when is_atom(type), do: type
+
   defp parse_op_type(type) when is_binary(type) do
     String.to_existing_atom(type)
   rescue
@@ -208,6 +209,7 @@ defmodule GiTF.Runtime.ModelSelector do
 
   defp parse_complexity(nil), do: :moderate
   defp parse_complexity(complexity) when is_atom(complexity), do: complexity
+
   defp parse_complexity(complexity) when is_binary(complexity) do
     String.to_existing_atom(complexity)
   rescue
@@ -244,12 +246,15 @@ defmodule GiTF.Runtime.ModelSelector do
         # Emergency: <5% budget — force haiku for everything
         GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
           type: :budget_emergency,
-          message: "Quest #{mission_id} at #{Float.round(remaining / total * 100, 1)}% budget — forcing haiku"
+          message:
+            "Quest #{mission_id} at #{Float.round(remaining / total * 100, 1)}% budget — forcing haiku"
         })
+
         "haiku"
 
       remaining / total < budget_pct ->
         downgraded = downgrade(model)
+
         if downgraded != model do
           GiTF.Telemetry.emit([:gitf, :model, :downgraded], %{}, %{
             mission_id: mission_id,
@@ -258,6 +263,7 @@ defmodule GiTF.Runtime.ModelSelector do
             budget_remaining_pct: Float.round(remaining / total * 100, 1)
           })
         end
+
         downgraded
 
       true ->

@@ -20,7 +20,7 @@ defmodule GiTF.CLI.Progress do
   """
   def with_progress(items, message, fun) do
     total = length(items)
-    
+
     items
     |> Enum.with_index(1)
     |> Enum.map(fn {item, index} ->
@@ -33,7 +33,7 @@ defmodule GiTF.CLI.Progress do
 
   defp spawn_spinner(message) do
     parent = self()
-    
+
     spawn(fn ->
       Stream.cycle(@spinner_frames)
       |> Enum.reduce_while(0, fn frame, _count ->
@@ -45,13 +45,14 @@ defmodule GiTF.CLI.Progress do
             {:cont, 0}
         end
       end)
-      
+
       send(parent, :spinner_stopped)
     end)
   end
 
   defp stop_spinner(pid) do
     send(pid, :stop)
+
     receive do
       :spinner_stopped -> IO.write("\r\e[K")
     after
@@ -64,7 +65,7 @@ defmodule GiTF.CLI.Progress do
     bar_width = 30
     filled = div(bar_width * current, total)
     empty = bar_width - filled
-    
+
     bar = String.duplicate("█", filled) <> String.duplicate("░", empty)
     IO.write("\r#{message} [#{bar}] #{current}/#{total} (#{percentage}%)")
   end

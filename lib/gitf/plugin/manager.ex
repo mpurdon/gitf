@@ -148,52 +148,83 @@ defmodule GiTF.Plugin.Manager do
   end
 
   defp load_external_mcp_servers do
-    mcp_config = GiTF.Config.Provider.get([:plugins, :mcp]) || %{}
+    global_mcp_config = GiTF.Config.Provider.get([:plugins, :mcp]) || %{}
+    local_mcp_config = load_local_mcp_json()
+    mcp_config = Map.merge(global_mcp_config, local_mcp_config)
 
-    Enum.each(mcp_config, fn {name, config} when is_map(config) ->
-      name_str = to_string(name)
-      command = config[:command] || config["command"]
-      args = config[:args] || config["args"] || []
-      env = config[:env] || config["env"] || %{}
+    Enum.each(mcp_config, fn {name, config} ->
+      if is_map(config) do
+        name_str = to_string(name)
+        command = config[:command] || config["command"]
+        args = config[:args] || config["args"] || []
+        env = config[:env] || config["env"] || %{}
 
-      if command do
-        module_name = Module.concat(GiTF.Plugin.External.MCP, Macro.camelize(name_str))
+        if command do
+          module_name = Module.concat(GiTF.Plugin.External.MCP, Macro.camelize(name_str))
 
-        {:module, module, _, _} =
-          Module.create(
-            module_name,
-            quote do
-              @behaviour GiTF.Plugin.MCP
+          {:module, module, _, _} =
+            Module.create(
+              module_name,
+              quote do
+                @behaviour GiTF.Plugin.MCP
 
-              def __plugin_type__, do: :mcp
-              def name, do: unquote(name_str)
-              def description, do: "External MCP server: #{unquote(name_str)}"
-              def command, do: {unquote(command), unquote(Macro.escape(args))}
+                def __plugin_type__, do: :mcp
+                def name, do: unquote(name_str)
+                def description, do: "External MCP server: #{unquote(name_str)}"
+                def command, do: {unquote(command), unquote(Macro.escape(args))}
 
-              def env do
-                unquote(Macro.escape(env))
-                |> Enum.into(%{}, fn {k, v} ->
-                  {to_string(k), interpolate_env(to_string(v))}
-                end)
-              end
+                def env do
+                  unquote(Macro.escape(env))
+                  |> Enum.into(%{}, fn {k, v} ->
+                    {to_string(k), interpolate_env(to_string(v))}
+                  end)
+                end
 
-              defp interpolate_env(value) do
-                Regex.replace(~r/\$\{(\w+)\}/, value, fn _, var ->
-                  System.get_env(var) || ""
-                end)
-              end
-            end,
-            Macro.Env.location(__ENV__)
-          )
+                defp interpolate_env(value) do
+                  Regex.replace(~r/\$\{(\w+)\}/, value, fn _, var ->
+                    System.get_env(var) || ""
+                  end)
+                end
+              end,
+              Macro.Env.location(__ENV__)
+            )
 
-        do_load(module)
-      else
-        Logger.warning("External MCP #{name_str}: missing 'command' in config")
+          do_load(module)
+        else
+          Logger.warning("External MCP #{name_str}: missing 'command' in config")
+        end
       end
     end)
   rescue
     e ->
       Logger.warning("Failed to load external MCP servers: #{Exception.message(e)}")
+  end
+
+  defp load_local_mcp_json do
+    case GiTF.gitf_dir() do
+      {:ok, root} ->
+        # Look for .claude.json, mcp.json, or .mcp.json
+        paths = [
+          Path.join(root, ".claude.json"),
+          Path.join(root, "mcp.json"),
+          Path.join(root, ".mcp.json"),
+          Path.join(root, ".gitf/mcp.json")
+        ]
+
+        Enum.find_value(paths, %{}, fn path ->
+          case File.read(path) do
+            {:ok, content} ->
+              case Jason.decode(content) do
+                {:ok, %{"mcpServers" => servers}} when is_map(servers) -> servers
+                {:ok, servers} when is_map(servers) -> servers
+                _ -> nil
+              end
+            _ -> nil
+          end
+        end) || %{}
+
+      _ -> %{}
+    end
   end
 
   defp do_load(module) do

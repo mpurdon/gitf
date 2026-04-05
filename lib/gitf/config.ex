@@ -12,6 +12,11 @@ defmodule GiTF.Config do
 
   @global_default_config %{
     "major" => %{"max_ghosts" => 5},
+    "ghost" => %{"spawn_timeout_ms" => 30_000},
+    "tachikoma" => %{
+      "patrol_interval_ms" => 30_000,
+      "archive_prune_age_hours" => 48
+    },
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
@@ -100,6 +105,9 @@ defmodule GiTF.Config do
   defp config_path(:api_key), do: [:server, :api_key]
   defp config_path(:max_ghosts), do: [:major, :max_ghosts]
   defp config_path(:budget_usd), do: [:costs, :budget_usd]
+  defp config_path(:spawn_timeout_ms), do: [:ghost, :spawn_timeout_ms]
+  defp config_path(:patrol_interval_ms), do: [:tachikoma, :patrol_interval_ms]
+  defp config_path(:archive_prune_age_hours), do: [:tachikoma, :archive_prune_age_hours]
   defp config_path(_key), do: []
 
   # -- Private: TOML encoding ------------------------------------------------
@@ -123,15 +131,18 @@ defmodule GiTF.Config do
       end)
 
     header = "[#{section}]"
-    body = Enum.map_join(flat, "\n", fn {key, value} ->
-      "#{key} = #{encode_value(value)}"
-    end)
 
-    subsections = Enum.map_join(nested, "\n", fn {key, sub_map} ->
-      Enum.map_join(sub_map, "\n", fn {sub_key, sub_values} ->
-        encode_section({"#{section}.#{key}.#{sub_key}", sub_values})
+    body =
+      Enum.map_join(flat, "\n", fn {key, value} ->
+        "#{key} = #{encode_value(value)}"
       end)
-    end)
+
+    subsections =
+      Enum.map_join(nested, "\n", fn {key, sub_map} ->
+        Enum.map_join(sub_map, "\n", fn {sub_key, sub_values} ->
+          encode_section({"#{section}.#{key}.#{sub_key}", sub_values})
+        end)
+      end)
 
     parts = [if(body != "", do: "#{header}\n#{body}\n"), if(subsections != "", do: subsections)]
     parts |> Enum.reject(&is_nil/1) |> Enum.join("\n")

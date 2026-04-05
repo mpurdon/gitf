@@ -185,11 +185,12 @@ defmodule GiTF.TestDriver.Harness do
   def start_major(env) do
     # Terminate Major from supervisor to prevent auto-restart conflicts
     try do
-      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Major)
-      Supervisor.delete_child(GiTF.Supervisor, GiTF.Major)
+      Supervisor.terminate_child(GiTF.Core.Supervisor, GiTF.Major)
+      Supervisor.delete_child(GiTF.Core.Supervisor, GiTF.Major)
     catch
       :exit, _ -> :ok
     end
+
     safe_stop(Process.whereis(GiTF.Major))
     Process.sleep(10)
 

@@ -123,20 +123,17 @@ defmodule GiTF.Telemetry do
 
   defp map_event([:gitf, :ghost, :provision_failed], measurements, meta) do
     {:bee_failed, Map.get(meta, :ghost_id, "unknown"),
-     Map.merge(measurements, %{step: meta[:step], reason: meta[:reason]}),
-     %{op_id: meta[:op_id]}}
+     Map.merge(measurements, %{step: meta[:step], reason: meta[:reason]}), %{op_id: meta[:op_id]}}
   end
 
   defp map_event([:gitf, :op, :started], measurements, meta) do
     {:job_transition, Map.get(meta, :op_id, "unknown"),
-     Map.merge(measurements, %{action: :start}),
-     %{mission_id: meta[:mission_id]}}
+     Map.merge(measurements, %{action: :start}), %{mission_id: meta[:mission_id]}}
   end
 
   defp map_event([:gitf, :op, :completed], measurements, meta) do
     {:job_transition, Map.get(meta, :op_id, "unknown"),
-     Map.merge(measurements, %{action: :complete}),
-     %{mission_id: meta[:mission_id]}}
+     Map.merge(measurements, %{action: :complete}), %{mission_id: meta[:mission_id]}}
   end
 
   defp map_event([:gitf, :mission, :created], measurements, meta) do
@@ -151,8 +148,7 @@ defmodule GiTF.Telemetry do
 
   defp map_event([:gitf, :tachikoma, :review_failed], measurements, meta) do
     {:error, Map.get(meta, :op_id, "tachikoma"),
-     Map.merge(measurements, %{step: meta[:step], reason: meta[:reason]}),
-     %{op_id: meta[:op_id]}}
+     Map.merge(measurements, %{step: meta[:step], reason: meta[:reason]}), %{op_id: meta[:op_id]}}
   end
 
   defp map_event([:gitf, :phase, :spawn_failed], measurements, meta) do
@@ -180,8 +176,7 @@ defmodule GiTF.Telemetry do
 
   defp map_event([:gitf, :sync, :exhausted], measurements, meta) do
     {:merge_failed, Map.get(meta, :op_id, "unknown"),
-     Map.merge(measurements, %{failure_type: :exhausted}),
-     %{op_id: meta[:op_id]}}
+     Map.merge(measurements, %{failure_type: :exhausted}), %{op_id: meta[:op_id]}}
   end
 
   defp map_event([:gitf, :sync, :tier_failed], measurements, meta) do
@@ -191,13 +186,12 @@ defmodule GiTF.Telemetry do
   end
 
   defp map_event([:gitf, :store, :data_loss], measurements, meta) do
-    {:error, "store",
-     Map.merge(measurements, %{event: :data_loss, message: meta[:message]}), %{}}
+    {:error, "store", Map.merge(measurements, %{event: :data_loss, message: meta[:message]}), %{}}
   end
 
   defp map_event([:gitf, :store, :write_error], measurements, meta) do
-    {:error, "store",
-     Map.merge(measurements, %{event: :write_error, message: meta[:message]}), %{}}
+    {:error, "store", Map.merge(measurements, %{event: :write_error, message: meta[:message]}),
+     %{}}
   end
 
   defp map_event([:gitf, :model, :downgraded], measurements, meta) do

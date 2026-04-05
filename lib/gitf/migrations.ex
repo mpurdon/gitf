@@ -1,7 +1,7 @@
 defmodule GiTF.Migrations do
   @moduledoc """
   Schema migration system for the GiTF store.
-  
+
   Migrations are applied automatically on store initialization to ensure
   the data structure matches the current version.
   """
@@ -126,5 +126,4 @@ defmodule GiTF.Migrations do
     # Initialize audit_results collection (empty)
     :ok
   end
-
 end

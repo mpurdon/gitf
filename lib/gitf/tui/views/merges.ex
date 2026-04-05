@@ -7,17 +7,19 @@ defmodule GiTF.TUI.Views.Syncs do
 
     panel title: "Syncs [F4]", height: :fill do
       # Active
+      # Pending
+      # Completed
       [label(content: "ACTIVE", color: :white, attributes: [:bold])] ++
         render_active(mq[:active]) ++
         [label(content: "")] ++
-        # Pending
-        [label do
-          text(content: "PENDING ", color: :white, attributes: [:bold])
-          text(content: "(#{length(mq[:pending] || [])})", color: :yellow)
-        end] ++
+        [
+          label do
+            text(content: "PENDING ", color: :white, attributes: [:bold])
+            text(content: "(#{length(mq[:pending] || [])})", color: :yellow)
+          end
+        ] ++
         render_pending(mq[:pending] || []) ++
         [label(content: "")] ++
-        # Completed
         [label(content: "RECENT", color: :white, attributes: [:bold])] ++
         render_completed(mq[:completed] || [])
     end
@@ -26,8 +28,8 @@ defmodule GiTF.TUI.Views.Syncs do
   defp render_active(nil), do: [label(content: "  (idle)", color: :white)]
 
   defp render_active(active) do
-    op_id = short_id(active[:op_id] || active.op_id)
-    shell_id = to_string(active[:shell_id] || active.shell_id)
+    op_id = short_id(Map.get(active, :op_id) || Map.get(active, "op_id"))
+    shell_id = to_string(Map.get(active, :shell_id) || Map.get(active, "shell_id"))
 
     [
       label do
@@ -64,7 +66,12 @@ defmodule GiTF.TUI.Views.Syncs do
 
       label do
         text(content: "  #{short_id(op_id)} ", color: :cyan)
-        text(content: String.pad_trailing(format_outcome(outcome), 10), color: outcome_color(outcome))
+
+        text(
+          content: String.pad_trailing(format_outcome(outcome), 10),
+          color: outcome_color(outcome)
+        )
+
         text(content: ts, color: :white)
       end
     end)

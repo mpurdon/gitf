@@ -112,7 +112,14 @@ defmodule GiTF.Major.PhaseCollectorTest do
 
   describe "collect/3" do
     test "parses phase output with JSON in events" do
-      json = Jason.encode!(%{"architecture" => "OTP", "key_files" => [], "patterns" => [], "tech_stack" => []})
+      json =
+        Jason.encode!(%{
+          "architecture" => "OTP",
+          "key_files" => [],
+          "patterns" => [],
+          "tech_stack" => []
+        })
+
       events = [%{"type" => "assistant", "content" => "```json\n#{json}\n```"}]
 
       assert {:ok, %{"architecture" => "OTP"}} = PhaseCollector.collect("research", "", events)

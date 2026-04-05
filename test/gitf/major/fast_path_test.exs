@@ -54,12 +54,18 @@ defmodule GiTF.Major.FastPathTest do
     end
 
     test "returns false for multi-system infrastructure changes" do
-      mission = %{goal: "Redesign distributed infrastructure for multi-service deployment", artifacts: %{}}
+      mission = %{
+        goal: "Redesign distributed infrastructure for multi-service deployment",
+        artifacts: %{}
+      }
+
       refute FastPath.eligible?(mission)
     end
 
     test "returns false for long goals (spec-length)" do
-      long_goal = String.duplicate("Implement the full user registration flow with validation. ", 25)
+      long_goal =
+        String.duplicate("Implement the full user registration flow with validation. ", 25)
+
       mission = %{goal: long_goal, artifacts: %{}}
       refute FastPath.eligible?(mission)
     end

@@ -5,7 +5,7 @@ defmodule GiTF.Onboarding.Detector do
 
   @doc """
   Detects project characteristics from a directory path.
-  
+
   Returns a map with:
   - :language - Primary language
   - :framework - Framework (if detected)
@@ -16,7 +16,7 @@ defmodule GiTF.Onboarding.Detector do
   """
   def detect(path) do
     files = list_files(path)
-    
+
     %{
       language: detect_language(files, path),
       framework: detect_framework(files, path),
@@ -147,7 +147,8 @@ defmodule GiTF.Onboarding.Detector do
   end
 
   defp has_flask?(files, path) do
-    has_file?(files, "requirements.txt") and read_file_contains?(path, "requirements.txt", "Flask")
+    has_file?(files, "requirements.txt") and
+      read_file_contains?(path, "requirements.txt", "Flask")
   end
 
   defp has_gin?(files, path) do
@@ -163,8 +164,10 @@ defmodule GiTF.Onboarding.Detector do
   end
 
   defp has_pytest?(files, path) do
-    (has_file?(files, "requirements.txt") and read_file_contains?(path, "requirements.txt", "pytest")) or
-    (has_file?(files, "pyproject.toml") and read_file_contains?(path, "pyproject.toml", "pytest"))
+    (has_file?(files, "requirements.txt") and
+       read_file_contains?(path, "requirements.txt", "pytest")) or
+      (has_file?(files, "pyproject.toml") and
+         read_file_contains?(path, "pyproject.toml", "pytest"))
   end
 
   defp has_rspec?(files, path) do
@@ -180,7 +183,7 @@ defmodule GiTF.Onboarding.Detector do
   end
 
   defp has_file?(files, name), do: Enum.member?(files, name)
-  
+
   defp has_dir?(files, name, path) do
     Enum.member?(files, name) and File.dir?(Path.join(path, name))
   end

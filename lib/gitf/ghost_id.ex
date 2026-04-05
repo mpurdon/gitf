@@ -259,7 +259,8 @@ defmodule GiTF.GhostID do
   # -- Private: summary formatting -------------------------------------------
 
   defp format_summary(id) do
-    pass_rate = if id.total_jobs > 0, do: Float.round(id.total_passed / id.total_jobs * 100, 1), else: 0.0
+    pass_rate =
+      if id.total_jobs > 0, do: Float.round(id.total_passed / id.total_jobs * 100, 1), else: 0.0
 
     strengths_text = format_traits(id.strengths)
     weaknesses_text = format_traits(id.weaknesses)

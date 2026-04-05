@@ -67,7 +67,9 @@ defmodule GiTF.MedicTest do
     test "reports warn when orphan shells exist" do
       # Create a sector, a stopped ghost, and an active shell for that ghost
       {:ok, sector} =
-        Archive.insert(:sectors, %{name: "orphan-test-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{
+          name: "orphan-test-sector-#{:erlang.unique_integer([:positive])}"
+        })
 
       {:ok, ghost} =
         Archive.insert(:ghosts, %{name: "orphan-ghost", status: "stopped"})
@@ -111,7 +113,9 @@ defmodule GiTF.MedicTest do
   describe "fix/1 - orphan_shells" do
     test "cleans up orphan shells" do
       {:ok, sector} =
-        Archive.insert(:sectors, %{name: "fix-orphan-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{
+          name: "fix-orphan-sector-#{:erlang.unique_integer([:positive])}"
+        })
 
       {:ok, ghost} =
         Archive.insert(:ghosts, %{name: "fix-orphan-ghost", status: "crashed"})

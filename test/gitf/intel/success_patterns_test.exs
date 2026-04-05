@@ -15,10 +15,11 @@ defmodule GiTF.Intel.SuccessPatternsTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ops, op)
-      
+
       {:ok, pattern} = SuccessPatterns.analyze_success(op.id)
-      
+
       assert pattern.op_id == op.id
       assert pattern.sector_id == op.sector_id
       assert is_list(pattern.success_factors)
@@ -35,10 +36,11 @@ defmodule GiTF.Intel.SuccessPatternsTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ops, op)
-      
+
       {:ok, pattern} = SuccessPatterns.analyze_success(op.id)
-      
+
       assert "verification_passed" in pattern.success_factors
       assert "first_attempt_success" in pattern.success_factors
     end
@@ -50,8 +52,9 @@ defmodule GiTF.Intel.SuccessPatternsTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ops, op)
-      
+
       assert {:error, :not_successful_job} = SuccessPatterns.analyze_success(op.id)
     end
   end
@@ -59,13 +62,13 @@ defmodule GiTF.Intel.SuccessPatternsTest do
   describe "get_best_practices/1" do
     test "returns empty for sector with no successes" do
       practices = SuccessPatterns.get_best_practices("nonexistent")
-      
+
       assert practices == []
     end
 
     test "identifies common success factors" do
       sector_id = "sector-practices"
-      
+
       # Create multiple successful ops
       for i <- 1..3 do
         op = %{
@@ -77,12 +80,13 @@ defmodule GiTF.Intel.SuccessPatternsTest do
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
+
         Archive.insert(:ops, op)
         SuccessPatterns.analyze_success(op.id)
       end
-      
+
       practices = SuccessPatterns.get_best_practices(sector_id)
-      
+
       assert is_list(practices.common_factors)
       assert length(practices.common_factors) > 0
     end
@@ -91,7 +95,7 @@ defmodule GiTF.Intel.SuccessPatternsTest do
   describe "recommend_approach/2" do
     test "provides recommendations based on patterns" do
       sector_id = "sector-recommend"
-      
+
       # Create multiple successful ops to establish pattern
       for i <- 1..3 do
         op = %{
@@ -102,12 +106,13 @@ defmodule GiTF.Intel.SuccessPatternsTest do
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
+
         Archive.insert(:ops, op)
         SuccessPatterns.analyze_success(op.id)
       end
-      
+
       recommendation = SuccessPatterns.recommend_approach(sector_id, "test task")
-      
+
       # Should recommend the model that was used successfully
       assert is_binary(recommendation.model)
       assert recommendation.confidence in [:low, :medium, :high]
@@ -117,7 +122,7 @@ defmodule GiTF.Intel.SuccessPatternsTest do
 
     test "provides default recommendation with no data" do
       recommendation = SuccessPatterns.recommend_approach("nonexistent", "test")
-      
+
       assert recommendation.model == GiTF.Runtime.ModelResolver.resolve("sonnet")
       assert recommendation.confidence == :low
       assert "No historical data available" in recommendation.suggestions

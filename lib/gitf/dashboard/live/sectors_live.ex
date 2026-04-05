@@ -3,7 +3,6 @@ defmodule GiTF.Dashboard.SectorsLive do
 
   use Phoenix.LiveView
 
-
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -77,18 +76,28 @@ defmodule GiTF.Dashboard.SectorsLive do
         {:noreply,
          assign(socket,
            github_loading: false,
-           github_error: "No GitHub token found. Set GITHUB_TOKEN or add [github] token to .gitf/config.toml"
+           github_error:
+             "No GitHub token found. Set GITHUB_TOKEN or add [github] token to .gitf/config.toml"
          )}
 
       {:error, :unauthorized} ->
-        {:noreply, assign(socket, github_loading: false, github_error: "GitHub token is invalid or expired.")}
+        {:noreply,
+         assign(socket,
+           github_loading: false,
+           github_error: "GitHub token is invalid or expired."
+         )}
 
       {:error, reason} ->
-        {:noreply, assign(socket, github_loading: false, github_error: "Failed: #{inspect(reason)}")}
+        {:noreply,
+         assign(socket, github_loading: false, github_error: "Failed: #{inspect(reason)}")}
     end
   end
 
-  def handle_event("add_github", %{"clone_url" => url, "name" => name, "owner" => owner, "repo" => repo_name}, socket) do
+  def handle_event(
+        "add_github",
+        %{"clone_url" => url, "name" => name, "owner" => owner, "repo" => repo_name},
+        socket
+      ) do
     opts = [name: name, github_owner: owner, github_repo: repo_name]
 
     case GiTF.Sector.add(url, opts) do

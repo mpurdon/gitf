@@ -218,8 +218,13 @@ defmodule GiTF.Sector do
       {:error, {:invalid_repo, "Not a git repository (no .git directory)"}}
     else
       case System.cmd("git", ["rev-parse", "HEAD"], cd: path, stderr_to_stdout: true) do
-        {_, 0} -> :ok
-        {_, _} -> {:error, {:invalid_repo, "Git repo has no commits. Run: git add -A && git commit -m \"Initial commit\""}}
+        {_, 0} ->
+          :ok
+
+        {_, _} ->
+          {:error,
+           {:invalid_repo,
+            "Git repo has no commits. Run: git add -A && git commit -m \"Initial commit\""}}
       end
     end
   end

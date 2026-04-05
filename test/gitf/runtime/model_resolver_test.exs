@@ -7,8 +7,8 @@ defmodule GiTF.Runtime.ModelResolverTest do
     test "resolves tier names to provider-qualified specs" do
       assert ModelResolver.resolve("opus") == "google:gemini-2.5-pro"
       assert ModelResolver.resolve("sonnet") == "google:gemini-2.5-flash"
-      assert ModelResolver.resolve("haiku") == "google:gemini-2.0-flash"
-      assert ModelResolver.resolve("fast") == "google:gemini-2.0-flash"
+      assert ModelResolver.resolve("haiku") == "google:gemini-2.5-flash"
+      assert ModelResolver.resolve("fast") == "google:gemini-2.5-flash"
     end
 
     test "resolves legacy names" do
@@ -31,7 +31,7 @@ defmodule GiTF.Runtime.ModelResolverTest do
   describe "provider/1" do
     test "extracts provider from qualified name" do
       assert ModelResolver.provider("anthropic:claude-opus-4-6") == "anthropic"
-      assert ModelResolver.provider("google:gemini-2.0-flash") == "google"
+      assert ModelResolver.provider("google:gemini-2.5-flash") == "google"
       assert ModelResolver.provider("openai:gpt-4o") == "openai"
     end
 
@@ -48,12 +48,12 @@ defmodule GiTF.Runtime.ModelResolverTest do
   describe "model_id/1" do
     test "extracts model id from qualified name" do
       assert ModelResolver.model_id("anthropic:claude-opus-4-6") == "claude-opus-4-6"
-      assert ModelResolver.model_id("google:gemini-2.0-flash") == "gemini-2.0-flash"
+      assert ModelResolver.model_id("google:gemini-2.5-flash") == "gemini-2.5-flash"
     end
 
     test "resolves tier then extracts model id" do
       assert ModelResolver.model_id("sonnet") == "gemini-2.5-flash"
-      assert ModelResolver.model_id("fast") == "gemini-2.0-flash"
+      assert ModelResolver.model_id("fast") == "gemini-2.5-flash"
     end
   end
 

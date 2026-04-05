@@ -7,6 +7,14 @@ defmodule GiTF.CombTest do
   setup do
     tmp = Path.join(System.tmp_dir!(), "gitf_comb_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
+    
+    System.cmd("git", ["init"], cd: tmp)
+    System.cmd("git", ["config", "user.email", "test@example.com"], cd: tmp)
+    System.cmd("git", ["config", "user.name", "Test User"], cd: tmp)
+    File.write!(Path.join(tmp, "README.md"), "# Test Repo")
+    System.cmd("git", ["add", "README.md"], cd: tmp)
+    System.cmd("git", ["commit", "-m", "Initial commit"], cd: tmp)
+
     on_exit(fn -> File.rm_rf!(tmp) end)
 
     %{tmp: tmp}
@@ -28,7 +36,8 @@ defmodule GiTF.CombTest do
     end
 
     test "returns error for non-existent path" do
-      assert {:error, :path_not_found} = Sector.add("/nonexistent/path/#{System.unique_integer()}")
+      assert {:error, :path_not_found} =
+               Sector.add("/nonexistent/path/#{System.unique_integer()}")
     end
   end
 
@@ -40,8 +49,8 @@ defmodule GiTF.CombTest do
     test "returns all registered sectors", %{tmp: tmp} do
       sub1 = Path.join(tmp, "project-a")
       sub2 = Path.join(tmp, "project-b")
-      File.mkdir_p!(sub1)
-      File.mkdir_p!(sub2)
+      GiTF.Test.StoreHelper.init_git_repo!(sub1)
+      GiTF.Test.StoreHelper.init_git_repo!(sub2)
 
       {:ok, _} = Sector.add(sub1, name: "project-a")
       {:ok, _} = Sector.add(sub2, name: "project-b")
@@ -91,7 +100,7 @@ defmodule GiTF.CombTest do
   describe "rename/2" do
     test "updates sector name in store", %{tmp: tmp} do
       dir = Path.join(tmp, "original")
-      File.mkdir_p!(dir)
+      GiTF.Test.StoreHelper.init_git_repo!(dir)
       {:ok, sector} = Sector.add(dir, name: "original")
 
       assert {:ok, renamed} = Sector.rename("original", "new-name")
@@ -109,8 +118,8 @@ defmodule GiTF.CombTest do
     test "rejects duplicate name", %{tmp: tmp} do
       dir1 = Path.join(tmp, "alpha")
       dir2 = Path.join(tmp, "beta")
-      File.mkdir_p!(dir1)
-      File.mkdir_p!(dir2)
+      GiTF.Test.StoreHelper.init_git_repo!(dir1)
+      GiTF.Test.StoreHelper.init_git_repo!(dir2)
       {:ok, _} = Sector.add(dir1, name: "alpha")
       {:ok, _} = Sector.add(dir2, name: "beta")
 
@@ -119,7 +128,7 @@ defmodule GiTF.CombTest do
 
     test "moves directory when basename matches old name", %{tmp: tmp} do
       dir = Path.join(tmp, "moveme")
-      File.mkdir_p!(dir)
+      GiTF.Test.StoreHelper.init_git_repo!(dir)
       File.write!(Path.join(dir, "marker.txt"), "hello")
       {:ok, _} = Sector.add(dir, name: "moveme")
 
@@ -134,7 +143,7 @@ defmodule GiTF.CombTest do
 
     test "updates shell worktree_path and ghost shell_path when path changes", %{tmp: tmp} do
       dir = Path.join(tmp, "repo")
-      File.mkdir_p!(dir)
+      GiTF.Test.StoreHelper.init_git_repo!(dir)
       {:ok, sector} = Sector.add(dir, name: "repo")
 
       # Create a shell with a worktree_path under the sector
@@ -169,7 +178,7 @@ defmodule GiTF.CombTest do
     test "does NOT move directory when basename doesn't match old name", %{tmp: tmp} do
       # Add a sector with a custom name different from the directory basename
       dir = Path.join(tmp, "actual-dir")
-      File.mkdir_p!(dir)
+      GiTF.Test.StoreHelper.init_git_repo!(dir)
       {:ok, sector} = Sector.add(dir, name: "custom-name")
 
       assert {:ok, renamed} = Sector.rename("custom-name", "new-custom")

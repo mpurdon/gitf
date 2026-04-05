@@ -8,21 +8,23 @@ defmodule GiTF.Quality.Security do
   Returns {:ok, results} with security score and findings.
   """
   def scan(shell_path, language) do
-    findings = [
-      check_secrets(shell_path),
-      check_dependencies(shell_path, language),
-      check_vulnerabilities(shell_path, language)
-    ]
-    |> List.flatten()
-    |> Enum.reject(&is_nil/1)
+    findings =
+      [
+        check_secrets(shell_path),
+        check_dependencies(shell_path, language),
+        check_vulnerabilities(shell_path, language)
+      ]
+      |> List.flatten()
+      |> Enum.reject(&is_nil/1)
 
     score = calculate_security_score(findings)
 
-    {:ok, %{
-      findings: findings,
-      score: score,
-      tool: "section-security"
-    }}
+    {:ok,
+     %{
+       findings: findings,
+       score: score,
+       tool: "section-security"
+     }}
   end
 
   # Secret detection
@@ -53,13 +55,14 @@ defmodule GiTF.Quality.Security do
 
   # Common vulnerability patterns
   defp check_vulnerabilities(path, language) do
-    patterns = case language do
-      :elixir -> elixir_vuln_patterns()
-      :javascript -> js_vuln_patterns()
-      :typescript -> js_vuln_patterns()
-      :python -> python_vuln_patterns()
-      _ -> []
-    end
+    patterns =
+      case language do
+        :elixir -> elixir_vuln_patterns()
+        :javascript -> js_vuln_patterns()
+        :typescript -> js_vuln_patterns()
+        :python -> python_vuln_patterns()
+        _ -> []
+      end
 
     find_in_files(path, patterns, "vulnerability")
   end
@@ -67,9 +70,10 @@ defmodule GiTF.Quality.Security do
   @audit_timeout_ms 60_000
 
   defp check_mix_audit(path) do
-    task = Task.async(fn ->
-      System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true)
+      end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {_output, 0}} -> []
@@ -81,9 +85,10 @@ defmodule GiTF.Quality.Security do
   end
 
   defp check_npm_audit(path) do
-    task = Task.async(fn ->
-      System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+      end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} -> parse_npm_audit(output)
@@ -94,9 +99,10 @@ defmodule GiTF.Quality.Security do
   end
 
   defp check_cargo_audit(path) do
-    task = Task.async(fn ->
-      System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+      end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} -> parse_cargo_audit(output)
@@ -107,9 +113,10 @@ defmodule GiTF.Quality.Security do
   end
 
   defp check_pip_audit(path) do
-    task = Task.async(fn ->
-      System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true)
+      end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} -> parse_pip_audit(output)
@@ -148,10 +155,14 @@ defmodule GiTF.Quality.Security do
                   file: "package.json"
                 }
               end)
-            _ -> []
+
+            _ ->
+              []
           end
         end)
-      _ -> []
+
+      _ ->
+        []
     end
   end
 
@@ -166,7 +177,9 @@ defmodule GiTF.Quality.Security do
             file: "Cargo.lock"
           }
         end)
-      _ -> []
+
+      _ ->
+        []
     end
   end
 
@@ -181,7 +194,9 @@ defmodule GiTF.Quality.Security do
             file: "requirements.txt"
           }
         end)
-      _ -> []
+
+      _ ->
+        []
     end
   end
 
@@ -218,7 +233,8 @@ defmodule GiTF.Quality.Security do
 
   defp find_in_files(path, patterns, type) do
     Path.wildcard(Path.join(path, "**/*.{ex,exs,js,jsx,ts,tsx,py,rs}"))
-    |> Enum.take(500)  # Limit files scanned
+    # Limit files scanned
+    |> Enum.take(500)
     |> Enum.flat_map(fn file ->
       case File.read(file) do
         {:ok, content} ->
@@ -238,19 +254,25 @@ defmodule GiTF.Quality.Security do
               }
             end)
           end)
-        _ -> []
+
+        _ ->
+          []
       end
     end)
   end
 
   defp calculate_security_score(findings) do
-    penalty = Enum.reduce(findings, 0, fn finding, acc ->
-      case finding.severity do
-        3 -> acc + 20  # Critical: -20 points
-        2 -> acc + 10  # Warning: -10 points
-        _ -> acc + 5   # Info: -5 points
-      end
-    end)
+    penalty =
+      Enum.reduce(findings, 0, fn finding, acc ->
+        case finding.severity do
+          # Critical: -20 points
+          3 -> acc + 20
+          # Warning: -10 points
+          2 -> acc + 10
+          # Info: -5 points
+          _ -> acc + 5
+        end
+      end)
 
     max(0, 100 - penalty)
   end

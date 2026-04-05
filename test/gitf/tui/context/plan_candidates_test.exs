@@ -7,7 +7,11 @@ defmodule GiTF.TUI.Context.PlanCandidatesTest do
     test "stores candidates when provided" do
       candidates = [
         %{strategy: "minimal", score: 0.6, tasks: [%{"title" => "Min task"}]},
-        %{strategy: "balanced", score: 0.8, tasks: [%{"title" => "Bal task 1"}, %{"title" => "Bal task 2"}]},
+        %{
+          strategy: "balanced",
+          score: 0.8,
+          tasks: [%{"title" => "Bal task 1"}, %{"title" => "Bal task 2"}]
+        },
         %{strategy: "thorough", score: 0.7, tasks: [%{"title" => "Thor task"}]}
       ]
 
@@ -110,11 +114,12 @@ defmodule GiTF.TUI.Context.PlanCandidatesTest do
     test "resets candidates and index" do
       candidates = [%{strategy: "minimal", score: 0.6, tasks: []}]
 
-      state = %{Plan.new() |
-        candidates: candidates,
-        candidate_index: 1,
-        mode: :reviewing,
-        mission_id: "msn-123"
+      state = %{
+        Plan.new()
+        | candidates: candidates,
+          candidate_index: 1,
+          mode: :reviewing,
+          mission_id: "msn-123"
       }
 
       dismissed = Plan.dismiss(state)

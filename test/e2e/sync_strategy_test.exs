@@ -58,7 +58,9 @@ defmodule GiTF.E2E.SyncStrategyTest do
   # Start SyncQueue if not running (skipped in test env)
   defp ensure_sync_queue do
     case GiTF.Sync.Queue.lookup() do
-      {:ok, _pid} -> :ok
+      {:ok, _pid} ->
+        :ok
+
       :error ->
         {:ok, _pid} = GiTF.Sync.Queue.start_link()
         :ok
@@ -78,7 +80,9 @@ defmodule GiTF.E2E.SyncStrategyTest do
 
   defp current_branch(repo_path) do
     case System.cmd("git", ["rev-parse", "--abbrev-ref", "HEAD"],
-           cd: repo_path, stderr_to_stdout: true) do
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {output, 0} -> String.trim(output)
       _ -> nil
     end
@@ -89,16 +93,16 @@ defmodule GiTF.E2E.SyncStrategyTest do
   end
 
   defp await_sync_idle(timeout \\ 10_000) do
-    await(fn ->
-      status = GiTF.Sync.Queue.status()
-      status.active == nil
-    end, timeout: timeout, message: "SyncQueue did not become idle")
+    await(
+      fn ->
+        status = GiTF.Sync.Queue.status()
+        status.active == nil
+      end, timeout: timeout, message: "SyncQueue did not become idle")
   end
 
   defp spawn_ghost_with_file(env, op_id, sector_id, filename, content) do
     script = write_file_creating_mock(env.mock_dir, filename, content)
-    GiTF.Ghosts.spawn(op_id, sector_id, env.gitf_root,
-      claude_executable: script, prompt: "test")
+    GiTF.Ghosts.spawn(op_id, sector_id, env.gitf_root, claude_executable: script, prompt: "test")
   end
 
   # =========================================================================
@@ -116,8 +120,8 @@ defmodule GiTF.E2E.SyncStrategyTest do
         ops: [%{title: "Create a file"}]
       )
 
-    {:ok, ghost} = spawn_ghost_with_file(env, op.id, sector.id,
-      "auto_merge_result.txt", "auto merged")
+    {:ok, ghost} =
+      spawn_ghost_with_file(env, op.id, sector.id, "auto_merge_result.txt", "auto merged")
 
     # Wait for ghost to complete
     await({:job_done, op.id}, timeout: 20_000)
@@ -129,7 +133,9 @@ defmodule GiTF.E2E.SyncStrategyTest do
 
     {log_output, 0} =
       System.cmd("git", ["log", "--oneline", "-1"],
-        cd: shell.worktree_path, stderr_to_stdout: true)
+        cd: shell.worktree_path,
+        stderr_to_stdout: true
+      )
 
     assert String.contains?(log_output, "gitf:"),
            "Expected auto-commit in worktree, got: #{String.trim(log_output)}"
@@ -146,6 +152,7 @@ defmodule GiTF.E2E.SyncStrategyTest do
     repo_path = sector.path
     System.cmd("git", ["checkout", "main"], cd: repo_path, stderr_to_stdout: true)
     assert current_branch(repo_path) == "main"
+
     assert file_on_branch?(repo_path, "auto_merge_result.txt"),
            "File should be present on main after auto_merge"
 
@@ -164,8 +171,8 @@ defmodule GiTF.E2E.SyncStrategyTest do
         ops: [%{title: "Create a file for PR"}]
       )
 
-    {:ok, ghost} = spawn_ghost_with_file(env, op.id, sector.id,
-      "pr_branch_result.txt", "pr branch")
+    {:ok, ghost} =
+      spawn_ghost_with_file(env, op.id, sector.id, "pr_branch_result.txt", "pr branch")
 
     await({:job_done, op.id}, timeout: 20_000)
     await({:bee_stopped, ghost.id}, timeout: 10_000)
@@ -176,7 +183,10 @@ defmodule GiTF.E2E.SyncStrategyTest do
     # Verify auto-commit in worktree
     {log_output, 0} =
       System.cmd("git", ["log", "--oneline", "-1"],
-        cd: shell.worktree_path, stderr_to_stdout: true)
+        cd: shell.worktree_path,
+        stderr_to_stdout: true
+      )
+
     assert String.contains?(log_output, "gitf:")
 
     # Bridge to SyncQueue
@@ -185,6 +195,7 @@ defmodule GiTF.E2E.SyncStrategyTest do
 
     # Pipeline advanced (op marked as merged)
     {:ok, merged_op} = GiTF.Ops.get(op.id)
+
     assert Map.get(merged_op, :merged_at) != nil,
            "Op should have merged_at after pr_branch sync"
 
@@ -192,11 +203,13 @@ defmodule GiTF.E2E.SyncStrategyTest do
     repo_path = sector.path
     System.cmd("git", ["checkout", "main"], cd: repo_path, stderr_to_stdout: true)
     assert current_branch(repo_path) == "main"
+
     refute file_on_branch?(repo_path, "pr_branch_result.txt"),
            "File should NOT be on main for pr_branch strategy"
 
     # Ghost branch should still exist
     ghost_branch = shell.branch
+
     assert GiTF.Git.branch_exists?(repo_path, ghost_branch),
            "Ghost branch #{ghost_branch} should still exist"
 
@@ -214,8 +227,8 @@ defmodule GiTF.E2E.SyncStrategyTest do
         ops: [%{title: "Create a file (manual)"}]
       )
 
-    {:ok, ghost} = spawn_ghost_with_file(env, op.id, sector.id,
-      "manual_result.txt", "manual mode")
+    {:ok, ghost} =
+      spawn_ghost_with_file(env, op.id, sector.id, "manual_result.txt", "manual mode")
 
     await({:job_done, op.id}, timeout: 20_000)
     await({:bee_stopped, ghost.id}, timeout: 10_000)
@@ -226,7 +239,10 @@ defmodule GiTF.E2E.SyncStrategyTest do
     # Verify auto-commit
     {log_output, 0} =
       System.cmd("git", ["log", "--oneline", "-1"],
-        cd: shell.worktree_path, stderr_to_stdout: true)
+        cd: shell.worktree_path,
+        stderr_to_stdout: true
+      )
+
     assert String.contains?(log_output, "gitf:")
 
     # Bridge to SyncQueue
@@ -240,11 +256,13 @@ defmodule GiTF.E2E.SyncStrategyTest do
     # Main should NOT have the file
     repo_path = sector.path
     System.cmd("git", ["checkout", "main"], cd: repo_path, stderr_to_stdout: true)
+
     refute file_on_branch?(repo_path, "manual_result.txt"),
            "File should NOT be on main for manual strategy"
 
     # Ghost branch should exist for manual merge later
     ghost_branch = shell.branch
+
     assert GiTF.Git.branch_exists?(repo_path, ghost_branch),
            "Ghost branch #{ghost_branch} should exist for manual merge"
 
@@ -265,10 +283,8 @@ defmodule GiTF.E2E.SyncStrategyTest do
         ]
       )
 
-    {:ok, ghost1} = spawn_ghost_with_file(env, op1.id, sector.id,
-      "file_a.txt", "from op 1")
-    {:ok, ghost2} = spawn_ghost_with_file(env, op2.id, sector.id,
-      "file_b.txt", "from op 2")
+    {:ok, ghost1} = spawn_ghost_with_file(env, op1.id, sector.id, "file_a.txt", "from op 1")
+    {:ok, ghost2} = spawn_ghost_with_file(env, op2.id, sector.id, "file_b.txt", "from op 2")
 
     await({:job_done, op1.id}, timeout: 20_000)
     await({:job_done, op2.id}, timeout: 20_000)
@@ -282,11 +298,12 @@ defmodule GiTF.E2E.SyncStrategyTest do
     bridge_to_sync_queue(op2.id, shell2.id)
 
     # Wait for both to be merged
-    await(fn ->
-      {:ok, j1} = GiTF.Ops.get(op1.id)
-      {:ok, j2} = GiTF.Ops.get(op2.id)
-      Map.get(j1, :merged_at) != nil and Map.get(j2, :merged_at) != nil
-    end, timeout: 30_000, message: "Both ops should be merged")
+    await(
+      fn ->
+        {:ok, j1} = GiTF.Ops.get(op1.id)
+        {:ok, j2} = GiTF.Ops.get(op2.id)
+        Map.get(j1, :merged_at) != nil and Map.get(j2, :merged_at) != nil
+      end, timeout: 30_000, message: "Both ops should be merged")
 
     # Both files should be on main
     repo_path = sector.path

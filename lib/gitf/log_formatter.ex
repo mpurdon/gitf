@@ -20,8 +20,12 @@ defmodule GiTF.LogFormatter do
 
     binary =
       case :unicode.characters_to_binary(formatted) do
-        bin when is_binary(bin) -> bin
-        {:incomplete, partial, _} -> partial
+        bin when is_binary(bin) ->
+          bin
+
+        {:incomplete, partial, _} ->
+          partial
+
         {:error, _, _} ->
           try do
             IO.iodata_to_binary(formatted)

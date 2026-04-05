@@ -5,39 +5,77 @@ defmodule GiTF.Runtime.ProviderManager do
 
   @known_providers %{
     "google" => %{
-      color: "#58a6ff", glyph: "G", auth: :api_key,
+      color: "#58a6ff",
+      glyph: "G",
+      auth: :api_key,
       thinking: "google:gemini-2.5-pro",
       general: "google:gemini-2.5-flash",
       fast: "google:gemini-2.5-flash"
     },
     "anthropic" => %{
-      color: "#f07070", glyph: "A", auth: :api_key,
+      color: "#f07070",
+      glyph: "A",
+      auth: :api_key,
       thinking: "anthropic:claude-opus-4-6",
       general: "anthropic:claude-sonnet-4-6",
       fast: "anthropic:claude-haiku-4-5"
     },
     "bedrock" => %{
-      color: "#f0983e", glyph: "B", auth: :aws_profile,
+      color: "#f0983e",
+      glyph: "B",
+      auth: :aws_profile,
       thinking: "amazon_bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
       general: "amazon_bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
       fast: "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
     },
     "openai" => %{
-      color: "#3fb950", glyph: "O", auth: :api_key,
+      color: "#3fb950",
+      glyph: "O",
+      auth: :api_key,
       thinking: "openai:gpt-4o",
       general: "openai:gpt-4o",
       fast: "openai:gpt-4o-mini"
     },
     "ollama" => %{
-      color: "#3fb950", glyph: "L", auth: :none,
-      thinking: "openai:qwen2.5-coder:32b",
-      general: "openai:qwen2.5-coder:14b",
-      fast: "openai:qwen2.5-coder:7b"
+      color: "#3fb950",
+      glyph: "L",
+      auth: :none,
+      thinking: "ollama:qwen2.5-coder:32b",
+      general: "ollama:qwen2.5-coder:14b",
+      fast: "ollama:qwen2.5-coder:7b"
     },
-    "groq" => %{color: "#8b949e", glyph: "Q", auth: :api_key, thinking: "groq:llama3-70b", general: "groq:llama3-70b", fast: "groq:llama3-8b"},
-    "mistral" => %{color: "#8b949e", glyph: "M", auth: :api_key, thinking: "mistral:mistral-large", general: "mistral:mistral-medium", fast: "mistral:mistral-small"},
-    "together" => %{color: "#8b949e", glyph: "T", auth: :api_key, thinking: "together:meta-llama/Llama-3-70b", general: "together:meta-llama/Llama-3-70b", fast: "together:meta-llama/Llama-3-8b"},
-    "fireworks" => %{color: "#8b949e", glyph: "F", auth: :api_key, thinking: "fireworks:llama-v3-70b", general: "fireworks:llama-v3-70b", fast: "fireworks:llama-v3-8b"}
+    "groq" => %{
+      color: "#8b949e",
+      glyph: "Q",
+      auth: :api_key,
+      thinking: "groq:llama3-70b",
+      general: "groq:llama3-70b",
+      fast: "groq:llama3-8b"
+    },
+    "mistral" => %{
+      color: "#8b949e",
+      glyph: "M",
+      auth: :api_key,
+      thinking: "mistral:mistral-large",
+      general: "mistral:mistral-medium",
+      fast: "mistral:mistral-small"
+    },
+    "together" => %{
+      color: "#8b949e",
+      glyph: "T",
+      auth: :api_key,
+      thinking: "together:meta-llama/Llama-3-70b",
+      general: "together:meta-llama/Llama-3-70b",
+      fast: "together:meta-llama/Llama-3-8b"
+    },
+    "fireworks" => %{
+      color: "#8b949e",
+      glyph: "F",
+      auth: :api_key,
+      thinking: "fireworks:llama-v3-70b",
+      general: "fireworks:llama-v3-70b",
+      fast: "fireworks:llama-v3-8b"
+    }
   }
 
   # -- Read ------------------------------------------------------------------
@@ -84,9 +122,16 @@ defmodule GiTF.Runtime.ProviderManager do
     config_overrides = get_provider_config(provider_name)
 
     %{
-      thinking: to_string(config_overrides[:thinking] || config_overrides["thinking"] || defaults[:thinking] || ""),
-      general: to_string(config_overrides[:general] || config_overrides["general"] || defaults[:general] || ""),
-      fast: to_string(config_overrides[:fast] || config_overrides["fast"] || defaults[:fast] || "")
+      thinking:
+        to_string(
+          config_overrides[:thinking] || config_overrides["thinking"] || defaults[:thinking] || ""
+        ),
+      general:
+        to_string(
+          config_overrides[:general] || config_overrides["general"] || defaults[:general] || ""
+        ),
+      fast:
+        to_string(config_overrides[:fast] || config_overrides["fast"] || defaults[:fast] || "")
     }
   end
 
@@ -116,13 +161,14 @@ defmodule GiTF.Runtime.ProviderManager do
   def provider_stats(name) do
     costs = GiTF.Archive.all(:costs)
 
-    provider_costs = Enum.filter(costs, fn c ->
-      model = to_string(c[:model] || "")
-      String.starts_with?(model, name <> ":")
-    end)
+    provider_costs =
+      Enum.filter(costs, fn c ->
+        model = to_string(c[:model] || "")
+        String.starts_with?(model, name <> ":")
+      end)
 
     total = length(provider_costs)
-    total_cost = Enum.sum(Enum.map(provider_costs, &(Map.get(&1, :cost_usd, 0.0))))
+    total_cost = Enum.sum(Enum.map(provider_costs, &Map.get(&1, :cost_usd, 0.0)))
 
     %{
       total_calls: total,
@@ -151,7 +197,8 @@ defmodule GiTF.Runtime.ProviderManager do
       end
 
     if model == "" do
-      {:error, diagnostic("No model configured for #{name}", %{provider: name, step: :resolve_model})}
+      {:error,
+       diagnostic("No model configured for #{name}", %{provider: name, step: :resolve_model})}
     else
       # For bedrock, ensure credentials are loaded before testing
       if name == "bedrock" do
@@ -165,12 +212,13 @@ defmodule GiTF.Runtime.ProviderManager do
     end
   rescue
     e ->
-      {:error, diagnostic(Exception.message(e), %{
-        provider: name,
-        step: :setup,
-        exception: e.__struct__,
-        stacktrace: Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
-      })}
+      {:error,
+       diagnostic(Exception.message(e), %{
+         provider: name,
+         step: :setup,
+         exception: e.__struct__,
+         stacktrace: Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
+       })}
   end
 
   defp test_via_llm_client(provider_name, model) do
@@ -192,10 +240,22 @@ defmodule GiTF.Runtime.ProviderManager do
 
     # Call the same code path ghosts use, but bypass ProviderCircuit
     # so we test THIS provider specifically (not a fallback).
-    opts = case api_key_for(provider_name) do
-      nil -> [max_tokens: 5]
-      key -> [max_tokens: 5, api_key: key]
-    end
+    opts =
+      case api_key_for(provider_name) do
+        nil -> [max_tokens: 5]
+        key -> [max_tokens: 5, api_key: key]
+      end
+
+    opts =
+      if provider_name == "ollama" do
+        base = System.get_env("OLLAMA_BASE_URL") || "http://localhost:11434"
+
+        opts
+        |> Keyword.put(:base_url, base <> "/v1")
+        |> Keyword.put_new(:api_key, "ollama")
+      else
+        opts
+      end
 
     result =
       if is_arn do
@@ -213,29 +273,38 @@ defmodule GiTF.Runtime.ProviderManager do
         if String.trim(text) != "" do
           {:ok, latency}
         else
-          {:error, diagnostic("Model returned 200 but empty response", Map.merge(diag_base, %{
-            step: :validate_response,
-            output_tokens: usage[:output_tokens] || 0,
-            response_text: text,
-            latency_ms: latency
-          }))}
+          {:error,
+           diagnostic(
+             "Model returned 200 but empty response",
+             Map.merge(diag_base, %{
+               step: :validate_response,
+               output_tokens: usage[:output_tokens] || 0,
+               response_text: text,
+               latency_ms: latency
+             })
+           )}
         end
 
       {:error, reason} ->
-        {:error, diagnostic(format_error(reason), Map.merge(diag_base, %{
-          step: :api_call,
-          raw_error: inspect(reason, limit: 500)
-        }))}
+        {:error,
+         diagnostic(
+           format_error(reason),
+           Map.merge(diag_base, %{
+             step: :api_call,
+             raw_error: inspect(reason, limit: 500)
+           })
+         )}
     end
   rescue
     e ->
-      {:error, diagnostic(Exception.message(e), %{
-        provider: provider_name,
-        model: model,
-        step: :api_call,
-        exception: e.__struct__,
-        stacktrace: Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
-      })}
+      {:error,
+       diagnostic(Exception.message(e), %{
+         provider: provider_name,
+         model: model,
+         step: :api_call,
+         exception: e.__struct__,
+         stacktrace: Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
+       })}
   end
 
   defp diagnostic(message, context) when is_binary(message) do
@@ -244,21 +313,25 @@ defmodule GiTF.Runtime.ProviderManager do
 
   defp format_error(%{status: status, response_body: %{"error" => %{"message" => msg}}}),
     do: "HTTP #{status}: #{msg}"
+
   defp format_error(%{reason: reason}) when is_binary(reason), do: reason
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason), do: inspect(reason, limit: 300)
 
   @doc "Normalizes model strings for ReqLLM. ARNs are handled by BedrockDirect instead."
+  def normalize_model_for_reqllm("ollama:" <> model), do: %{id: model, provider: :openai}
   def normalize_model_for_reqllm(model) when is_binary(model), do: model
   def normalize_model_for_reqllm(model), do: model
 
   def ensure_aws_credentials do
-    profile = Config.get([:llm, :keys, :aws_profile]) ||
-              Config.get([:llm, :keys, "aws_profile"])
+    profile =
+      Config.get([:llm, :keys, :aws_profile]) ||
+        Config.get([:llm, :keys, "aws_profile"])
 
-    region = Config.get([:llm, :keys, :aws_region]) ||
-             Config.get([:llm, :keys, "aws_region"]) ||
-             System.get_env("AWS_REGION") || "us-east-1"
+    region =
+      Config.get([:llm, :keys, :aws_region]) ||
+        Config.get([:llm, :keys, "aws_region"]) ||
+        System.get_env("AWS_REGION") || "us-east-1"
 
     System.put_env("AWS_REGION", region)
 
@@ -302,11 +375,12 @@ defmodule GiTF.Runtime.ProviderManager do
     llm = Map.get(existing, "llm", %{})
 
     # Update priority and strategy
-    llm = Map.merge(llm, %{
-      "provider_priority" => priority,
-      "fallback_strategy" => strategy,
-      "provider" => List.first(priority) || "google"
-    })
+    llm =
+      Map.merge(llm, %{
+        "provider_priority" => priority,
+        "fallback_strategy" => strategy,
+        "provider" => List.first(priority) || "google"
+      })
 
     # Update per-provider configs
     providers =
@@ -330,18 +404,22 @@ defmodule GiTF.Runtime.ProviderManager do
     # Handle AWS profile + region for bedrock
     keys =
       case get_in(provider_configs, ["bedrock", "aws_profile"]) ||
-           get_in(provider_configs, ["bedrock", :aws_profile]) do
+             get_in(provider_configs, ["bedrock", :aws_profile]) do
         profile when is_binary(profile) and profile != "" ->
           Map.put(keys, "aws_profile", profile)
-        _ -> keys
+
+        _ ->
+          keys
       end
 
     keys =
       case get_in(provider_configs, ["bedrock", "aws_region"]) ||
-           get_in(provider_configs, ["bedrock", :aws_region]) do
+             get_in(provider_configs, ["bedrock", :aws_region]) do
         region when is_binary(region) and region != "" ->
           Map.put(keys, "aws_region", region)
-        _ -> keys
+
+        _ ->
+          keys
       end
 
     llm = Map.put(llm, "keys", keys)
@@ -379,7 +457,9 @@ defmodule GiTF.Runtime.ProviderManager do
 
   defp get_provider_config(name) do
     case Config.get([:llm, :providers, String.to_atom(name)]) do
-      config when is_map(config) -> config
+      config when is_map(config) ->
+        config
+
       _ ->
         case Config.get([:llm, :providers, name]) do
           config when is_map(config) -> config
@@ -392,8 +472,9 @@ defmodule GiTF.Runtime.ProviderManager do
 
   @doc "Returns the API key for a provider from config, or nil."
   def api_key_for(name) do
-    key = Config.get([:llm, :keys, String.to_atom(name)]) ||
-          Config.get([:llm, :keys, name])
+    key =
+      Config.get([:llm, :keys, String.to_atom(name)]) ||
+        Config.get([:llm, :keys, name])
 
     if is_binary(key) and key != "", do: key
   rescue

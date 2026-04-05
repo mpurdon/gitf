@@ -9,9 +9,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   # Derive display phases from the orchestrator's canonical list,
   # adding "pending" and "completed" bookends, removing "awaiting_approval" (shown as sync)
-  @phases (["pending"] ++
-    (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++
-    ["completed"])
+  @phases ["pending"] ++
+            (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++
+            ["completed"]
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -148,8 +148,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   def handle_event("reset_op", %{"id" => op_id}, socket) do
     case GiTF.Ops.reset(op_id, nil) do
-      {:ok, _} -> {:noreply, reload(socket)}
-      {:error, reason} -> {:noreply, put_flash(socket, :error, "Reset failed: #{inspect(reason)}")}
+      {:ok, _} ->
+        {:noreply, reload(socket)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Reset failed: #{inspect(reason)}")}
     end
   end
 
@@ -201,17 +204,35 @@ defmodule GiTF.Dashboard.MissionDetailLive do
       pending: Enum.count(impl_ops, &(Map.get(&1, :status) == "pending"))
     }
 
-    visible_ops = case op_filter do
-      "all" -> all_ops
-      "active" -> Enum.reject(all_ops, &(Map.get(&1, :status) in ["done", "failed"] or &1[:phase_job]))
-      "done" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "done"))
-      "failed" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "failed"))
-      "running" -> Enum.filter(all_ops, &(Map.get(&1, :status) in ["running", "assigned"]))
-      "blocked" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "blocked"))
-      "pending" -> Enum.filter(all_ops, &(Map.get(&1, :status) == "pending"))
-      "phase" -> phase_ops
-      _ -> all_ops
-    end
+    visible_ops =
+      case op_filter do
+        "all" ->
+          all_ops
+
+        "active" ->
+          Enum.reject(all_ops, &(Map.get(&1, :status) in ["done", "failed"] or &1[:phase_job]))
+
+        "done" ->
+          Enum.filter(all_ops, &(Map.get(&1, :status) == "done"))
+
+        "failed" ->
+          Enum.filter(all_ops, &(Map.get(&1, :status) == "failed"))
+
+        "running" ->
+          Enum.filter(all_ops, &(Map.get(&1, :status) in ["running", "assigned"]))
+
+        "blocked" ->
+          Enum.filter(all_ops, &(Map.get(&1, :status) == "blocked"))
+
+        "pending" ->
+          Enum.filter(all_ops, &(Map.get(&1, :status) == "pending"))
+
+        "phase" ->
+          phase_ops
+
+        _ ->
+          all_ops
+      end
 
     assign(socket,
       visible_ops: visible_ops,
@@ -251,7 +272,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             %{mission_id: ^mission_id} -> true
             _ -> false
           end
-        _ -> false
+
+        _ ->
+          false
       end
     end)
     |> Enum.each(fn c -> GiTF.Archive.delete(:costs, c.id) end)
@@ -558,17 +581,37 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   # nearest visual equivalent.  "awaiting_approval" sits between validation
   # and sync, so we display it as if the mission is at the "sync" step.
   defp phase_icon(%{phase: "pending"} = assigns), do: ~H"<Heroicons.clock mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "research"} = assigns), do: ~H"<Heroicons.magnifying_glass mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "requirements"} = assigns), do: ~H"<Heroicons.clipboard_document_list mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "design"} = assigns), do: ~H"<Heroicons.cube_transparent mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "research"} = assigns),
+    do: ~H"<Heroicons.magnifying_glass mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "requirements"} = assigns),
+    do: ~H"<Heroicons.clipboard_document_list mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "design"} = assigns),
+    do: ~H"<Heroicons.cube_transparent mini class='w-4 h-4' />"
+
   defp phase_icon(%{phase: "review"} = assigns), do: ~H"<Heroicons.eye mini class='w-4 h-4' />"
   defp phase_icon(%{phase: "planning"} = assigns), do: ~H"<Heroicons.map mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "implementation"} = assigns), do: ~H"<Heroicons.wrench_screwdriver mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "validation"} = assigns), do: ~H"<Heroicons.shield_check mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "sync"} = assigns), do: ~H"<Heroicons.arrow_path_rounded_square mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "simplify"} = assigns), do: ~H"<Heroicons.sparkles mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "scoring"} = assigns), do: ~H"<Heroicons.chart_bar mini class='w-4 h-4' />"
-  defp phase_icon(%{phase: "completed"} = assigns), do: ~H"<Heroicons.flag mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "implementation"} = assigns),
+    do: ~H"<Heroicons.wrench_screwdriver mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "validation"} = assigns),
+    do: ~H"<Heroicons.shield_check mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "sync"} = assigns),
+    do: ~H"<Heroicons.arrow_path_rounded_square mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "simplify"} = assigns),
+    do: ~H"<Heroicons.sparkles mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "scoring"} = assigns),
+    do: ~H"<Heroicons.chart_bar mini class='w-4 h-4' />"
+
+  defp phase_icon(%{phase: "completed"} = assigns),
+    do: ~H"<Heroicons.flag mini class='w-4 h-4' />"
+
   defp phase_icon(assigns), do: ~H"<span>{@phase |> String.first() |> String.upcase()}</span>"
 
   defp normalise_phase("awaiting_approval"), do: "sync"
@@ -601,15 +644,20 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   defp ghost_context_info(op) do
     case Map.get(op, :ghost_id) do
-      nil -> {0.0, 0, 0}
+      nil ->
+        {0.0, 0, 0}
+
       ghost_id ->
         case GiTF.Archive.get(:ghosts, ghost_id) do
           %{context_percentage: pct, context_tokens_used: used, context_tokens_limit: limit}
-            when is_number(pct) ->
+          when is_number(pct) ->
             {pct * 100, used || 0, limit || 0}
+
           %{context_percentage: pct} when is_number(pct) ->
             {pct * 100, 0, 0}
-          _ -> {0.0, 0, 0}
+
+          _ ->
+            {0.0, 0, 0}
         end
     end
   rescue
@@ -618,14 +666,17 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   # ~4 chars per token average, so tokens * 4 bytes ≈ context size
   defp format_tokens_mb(0), do: "-"
+
   defp format_tokens_mb(tokens) when is_number(tokens) do
     kb = tokens / 250
+
     if kb >= 1000 do
       "#{Float.round(kb / 1000, 1)}MB"
     else
       "#{Float.round(kb, 0) |> trunc()}KB"
     end
   end
+
   defp format_tokens_mb(_), do: "-"
 
   defp has_artifacts?(mission) do
@@ -635,8 +686,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   defp has_design_artifacts?(mission) do
     artifacts = Map.get(mission, :artifacts, %{})
+
     is_map(artifacts) and
-      Enum.any?(["design_minimal", "design_normal", "design_complex", "design"], &Map.has_key?(artifacts, &1))
+      Enum.any?(
+        ["design_minimal", "design_normal", "design_complex", "design"],
+        &Map.has_key?(artifacts, &1)
+      )
   end
 
   defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"

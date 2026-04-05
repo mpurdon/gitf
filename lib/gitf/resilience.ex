@@ -10,13 +10,15 @@ defmodule GiTF.Resilience do
   """
   def handle_failure(component, error, context \\ %{}) do
     Logger.warning("Component failure: #{component} - #{inspect(error)}")
-    
+
     case component do
       :model_api -> fallback_model(context)
       :git_operation -> retry_git_operation(context)
       :audit -> skip_and_flag(context)
       :research_cache -> regenerate_research(context)
       :quality_check -> continue_without_quality(context)
+      :shell_provision -> cleanup_and_retry_shell(context)
+      :task_dispatch -> reassess_task_model(context)
       _ -> {:error, :unhandled_failure}
     end
   end
@@ -34,7 +36,7 @@ defmodule GiTF.Resilience do
           {:halt, {:ok, result}}
 
         {:error, reason} when attempt < max_attempts ->
-          backoff = :math.pow(2, attempt) * 1000 |> round()
+          backoff = (:math.pow(2, attempt) * 1000) |> round()
           Logger.info("Retry attempt #{attempt}/#{max_attempts}, waiting #{backoff}ms")
           Process.sleep(backoff)
           {:cont, {:error, reason}}
@@ -121,23 +123,57 @@ defmodule GiTF.Resilience do
   # Private functions
 
   defp fallback_model(%{model: current_model} = context) do
-    fallback = case current_model do
-      "claude-haiku" -> "claude-sonnet"
-      "claude-sonnet" -> "claude-opus"
-      _ -> "claude-sonnet"
+    fallback = GiTF.Runtime.ModelResolver.fallback(current_model)
+
+    if fallback do
+      Logger.info("Falling back from #{current_model} to #{fallback}")
+      {:ok, Map.put(context, :model, fallback)}
+    else
+      Logger.warning(
+        "No fallback available for model #{current_model}, falling back to general tier"
+      )
+
+      {:ok, Map.put(context, :model, GiTF.Runtime.ModelResolver.resolve("general"))}
     end
-    
-    Logger.info("Falling back from #{current_model} to #{fallback}")
-    {:ok, Map.put(context, :model, fallback)}
   end
 
   defp fallback_model(context) do
-    {:ok, Map.put(context, :model, "claude-sonnet")}
+    {:ok, Map.put(context, :model, GiTF.Runtime.ModelResolver.resolve("general"))}
+  end
+
+  defp cleanup_and_retry_shell(%{sector_id: _sector_id, ghost_id: ghost_id} = context) do
+    Logger.info("Cleaning up orphaned shells for ghost #{ghost_id} after provision failure")
+    GiTF.Shell.cleanup_orphans()
+    {:retry, context}
+  end
+
+  defp cleanup_and_retry_shell(context), do: {:retry, context}
+
+  defp reassess_task_model(%{op_id: op_id} = context) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        # Escalating to a higher intelligence tier for dispatch failures
+        current = op.assigned_model
+        escalated = GiTF.Runtime.ModelResolver.escalate(current)
+
+        if escalated do
+          Logger.info(
+            "Escalating op #{op_id} from #{current} to #{escalated} due to dispatch failure"
+          )
+
+          {:ok, Map.put(context, :model, escalated)}
+        else
+          {:error, :cannot_escalate}
+        end
+
+      _ ->
+        {:error, :op_not_found}
+    end
   end
 
   defp retry_git_operation(%{operation: op, attempt: attempt}) do
     if attempt < 3 do
-      backoff = :math.pow(2, attempt) * 1000 |> round()
+      backoff = (:math.pow(2, attempt) * 1000) |> round()
       Process.sleep(backoff)
       {:retry, %{operation: op, attempt: attempt + 1}}
     else
@@ -152,8 +188,9 @@ defmodule GiTF.Resilience do
         updated = Map.put(op, :needs_review, true)
         GiTF.Archive.put(:ops, updated)
         {:ok, :flagged_for_review}
-      
-      error -> error
+
+      error ->
+        error
     end
   end
 
@@ -172,5 +209,4 @@ defmodule GiTF.Resilience do
   end
 
   defp continue_without_quality(_context), do: {:ok, :skipped}
-
 end

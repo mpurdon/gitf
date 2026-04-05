@@ -154,12 +154,17 @@ defmodule GiTF.CircuitBreaker do
   """
   @spec list_open(String.t()) :: [String.t()]
   def list_open(prefix) do
-    :ets.foldl(fn
-      {{:state, key}, :open}, acc ->
-        if String.starts_with?(key, prefix), do: [key | acc], else: acc
-      _, acc ->
-        acc
-    end, [], @table)
+    :ets.foldl(
+      fn
+        {{:state, key}, :open}, acc ->
+          if String.starts_with?(key, prefix), do: [key | acc], else: acc
+
+        _, acc ->
+          acc
+      end,
+      [],
+      @table
+    )
   rescue
     ArgumentError -> []
   end
@@ -194,14 +199,22 @@ defmodule GiTF.CircuitBreaker do
       {:error, :circuit_open} ->
         # Wait for circuit reset
         delay = backoff_delay(attempt)
-        Logger.info("Circuit open for #{service_key}, waiting #{delay}ms (attempt #{attempt + 1}/#{max + 1})")
+
+        Logger.info(
+          "Circuit open for #{service_key}, waiting #{delay}ms (attempt #{attempt + 1}/#{max + 1})"
+        )
+
         Process.sleep(delay)
         do_retry(service_key, fun, attempt + 1, max, fallback)
 
       {:error, reason} ->
         if retryable_error?(reason) and attempt < max do
           delay = backoff_delay(attempt)
-          Logger.info("Retryable error for #{service_key}: #{inspect(reason)}, retrying in #{delay}ms (#{attempt + 1}/#{max + 1})")
+
+          Logger.info(
+            "Retryable error for #{service_key}: #{inspect(reason)}, retrying in #{delay}ms (#{attempt + 1}/#{max + 1})"
+          )
+
           Process.sleep(delay)
           do_retry(service_key, fun, attempt + 1, max, fallback)
         else
@@ -222,8 +235,10 @@ defmodule GiTF.CircuitBreaker do
   defp retryable_error?(:timeout), do: true
   defp retryable_error?(:econnrefused), do: true
   defp retryable_error?(:closed), do: true
+
   defp retryable_error?(msg) when is_binary(msg) do
     lower = String.downcase(msg)
+
     String.contains?(lower, "rate") or
       String.contains?(lower, "429") or
       String.contains?(lower, "503") or
@@ -231,11 +246,12 @@ defmodule GiTF.CircuitBreaker do
       String.contains?(lower, "timeout") or
       String.contains?(lower, "connection")
   end
+
   defp retryable_error?(_), do: false
 
   defp backoff_delay(attempt) do
     # Exponential backoff with jitter: base * 2^attempt + random(0..base)
-    base = @base_delay_ms * :math.pow(2, attempt) |> trunc()
+    base = (@base_delay_ms * :math.pow(2, attempt)) |> trunc()
     jitter = :rand.uniform(max(@base_delay_ms, 1))
     min(base + jitter, 60_000)
   end

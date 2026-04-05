@@ -32,10 +32,11 @@ defmodule GiTF.Application do
     File.mkdir_p!(Path.join(GiTF.global_config_dir(), "llm_db"))
 
     # Determine project root for config overlay (nil if not in a project)
-    gitf_root = case GiTF.gitf_dir() do
-      {:ok, root} -> root
-      _ -> nil
-    end
+    gitf_root =
+      case GiTF.gitf_dir() do
+        {:ok, root} -> root
+        _ -> nil
+      end
 
     setup_file_logging()
 
@@ -94,7 +95,8 @@ defmodule GiTF.Application do
 
     foundation = [
       {Phoenix.PubSub, name: GiTF.PubSub},
-      {GiTF.Archive, data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!, ".gitf/store"))},
+      {GiTF.Archive,
+       data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!(), ".gitf/store"))},
       {Registry, keys: :unique, name: GiTF.Registry},
       {Task.Supervisor, name: GiTF.TaskSupervisor}
     ]
@@ -102,45 +104,53 @@ defmodule GiTF.Application do
     core = %{
       id: GiTF.Core.Supervisor,
       type: :supervisor,
-      start: {Supervisor, :start_link, [
-        [
-          {GiTF.RateLimiter, name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
-          {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!)},
-          {GiTF.SectorSupervisor, []},
-          {GiTF.Budget.Watchdog, []},
-          {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}
-        ],
-        [strategy: :rest_for_one, name: GiTF.Core.Supervisor]
-      ]}
+      start:
+        {Supervisor, :start_link,
+         [
+           [
+             {GiTF.RateLimiter,
+              name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
+             {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!())},
+             {GiTF.SectorSupervisor, []},
+             {GiTF.Budget.Watchdog, []},
+             {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}
+           ],
+           [strategy: :rest_for_one, name: GiTF.Core.Supervisor]
+         ]}
     }
 
     interface_children =
-      endpoint_child() ++ [
-        {GiTF.MCPServer.SocketListener, []},
-        {GiTF.ViewModel, []},
-        {GiTF.PubSubBridge, []}
-      ]
+      endpoint_child() ++
+        [
+          {GiTF.MCPServer.SocketListener, []},
+          {GiTF.ViewModel, []},
+          {GiTF.PubSubBridge, []}
+        ]
 
     interface = %{
       id: GiTF.Interface.Supervisor,
       type: :supervisor,
-      start: {Supervisor, :start_link, [
-        interface_children,
-        [strategy: :one_for_one, name: GiTF.Interface.Supervisor]
-      ]}
+      start:
+        {Supervisor, :start_link,
+         [
+           interface_children,
+           [strategy: :one_for_one, name: GiTF.Interface.Supervisor]
+         ]}
     }
 
     plugins = %{
       id: GiTF.Plugin.Supervisor,
       type: :supervisor,
-      start: {Supervisor, :start_link, [
-        [
-          {GiTF.Plugin.MCPSupervisor, []},
-          {GiTF.Plugin.ChannelSupervisor, []},
-          {GiTF.Plugin.Manager, []}
-        ],
-        [strategy: :one_for_one, name: GiTF.Plugin.Supervisor]
-      ]}
+      start:
+        {Supervisor, :start_link,
+         [
+           [
+             {GiTF.Plugin.MCPSupervisor, []},
+             {GiTF.Plugin.ChannelSupervisor, []},
+             {GiTF.Plugin.Manager, []}
+           ],
+           [strategy: :one_for_one, name: GiTF.Plugin.Supervisor]
+         ]}
     }
 
     children = foundation ++ [core, interface, plugins] ++ background_children()
@@ -162,7 +172,7 @@ defmodule GiTF.Application do
   end
 
   defp try_bind_port(port, retries) do
-    case :gen_tcp.listen(port, [reuseaddr: true]) do
+    case :gen_tcp.listen(port, reuseaddr: true) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
         [{GiTF.Web.Endpoint, []}]
@@ -173,8 +183,11 @@ defmodule GiTF.Application do
           Process.sleep(1000)
           try_bind_port(port, retries - 1)
         else
-          Logger.info("Port #{port} already in use, skipping web endpoint. " <>
-            "A GiTF server may already be running.")
+          Logger.info(
+            "Port #{port} already in use, skipping web endpoint. " <>
+              "A GiTF server may already be running."
+          )
+
           []
         end
 
@@ -208,14 +221,18 @@ defmodule GiTF.Application do
 
     bg_children = bg ++ optional
 
-    [%{
-      id: GiTF.Background.Supervisor,
-      type: :supervisor,
-      start: {Supervisor, :start_link, [
-        bg_children,
-        [strategy: :one_for_one, name: GiTF.Background.Supervisor]
-      ]}
-    }]
+    [
+      %{
+        id: GiTF.Background.Supervisor,
+        type: :supervisor,
+        start:
+          {Supervisor, :start_link,
+           [
+             bg_children,
+             [strategy: :one_for_one, name: GiTF.Background.Supervisor]
+           ]}
+      }
+    ]
   end
 
   defp validate_config do
@@ -269,9 +286,13 @@ defmodule GiTF.Application do
         {GiTF.LogFormatter,
          %{
            template: [
-             :time, ~c" ", :level, ~c" ",
+             :time,
+             ~c" ",
+             :level,
+             ~c" ",
              :msg,
-             ~c" ", :mfa,
+             ~c" ",
+             :mfa,
              ~c"\n"
            ],
            single_line: true

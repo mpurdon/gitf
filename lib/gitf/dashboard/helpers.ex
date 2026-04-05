@@ -76,7 +76,10 @@ defmodule GiTF.Dashboard.Helpers do
   def strategy_label(:increase_context), do: "Increase Context"
   def strategy_label(:fresh_start), do: "Fresh Start"
   def strategy_label(:split_task), do: "Split Task"
-  def strategy_label(strategy) when is_atom(strategy), do: strategy |> Atom.to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  def strategy_label(strategy) when is_atom(strategy),
+    do: strategy |> Atom.to_string() |> String.replace("_", " ") |> String.capitalize()
+
   def strategy_label(strategy) when is_binary(strategy), do: String.capitalize(strategy)
   def strategy_label(strategy), do: "#{strategy}"
 
@@ -120,6 +123,7 @@ defmodule GiTF.Dashboard.Helpers do
 
   @doc "Parses a model string into {provider, short_name, tier} for display."
   def parse_model(nil), do: {nil, nil, nil}
+
   def parse_model(model) when is_binary(model) do
     {provider, model_id} =
       case String.split(model, ":", parts: 2) do
@@ -154,6 +158,7 @@ defmodule GiTF.Dashboard.Helpers do
 
   defp infer_tier(model) do
     m = String.downcase(model || "")
+
     cond do
       String.contains?(m, "opus") -> "thinking"
       String.contains?(m, "pro") and not String.contains?(m, "provision") -> "thinking"
@@ -164,6 +169,7 @@ defmodule GiTF.Dashboard.Helpers do
   end
 
   defp shorten_model(nil), do: "-"
+
   defp shorten_model(model) do
     model
     |> String.replace(~r/^(gemini|claude)-/, "")

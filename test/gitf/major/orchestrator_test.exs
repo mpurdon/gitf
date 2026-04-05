@@ -16,7 +16,7 @@ defmodule GiTF.Major.OrchestratorTest do
 
     # Force API mode for mocking
     original_config = Application.get_env(:gitf, :llm, [])
-    Application.put_env(:gitf, :llm, Keyword.merge(original_config, [execution_mode: :api]))
+    Application.put_env(:gitf, :llm, Keyword.merge(original_config, execution_mode: :api))
 
     # Use Mock LLM Client
     Application.put_env(:gitf, :llm_client, GiTF.Runtime.LLMClient.Mock)
@@ -28,17 +28,19 @@ defmodule GiTF.Major.OrchestratorTest do
 
     # Create test sector and mission
     {:ok, sector} = Archive.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
-    {:ok, mission} = Archive.insert(:missions, %{
-      name: "test-mission",
-      goal: "Build a test feature",
-      sector_id: sector.id,
-      status: "pending",
-      current_phase: "pending",
-      artifacts: %{},
-      phase_jobs: %{},
-      research_summary: nil,
-      implementation_plan: nil
-    })
+
+    {:ok, mission} =
+      Archive.insert(:missions, %{
+        name: "test-mission",
+        goal: "Build a test feature",
+        sector_id: sector.id,
+        status: "pending",
+        current_phase: "pending",
+        artifacts: %{},
+        phase_jobs: %{},
+        research_summary: nil,
+        implementation_plan: nil
+      })
 
     %{mission: mission, sector: sector}
   end
@@ -104,11 +106,12 @@ defmodule GiTF.Major.OrchestratorTest do
 
     test "detects when ops are created", %{mission: mission} do
       # Create a op for the mission
-      {:ok, _job} = GiTF.Ops.create(%{
-        title: "Test op",
-        mission_id: mission.id,
-        sector_id: mission.sector_id
-      })
+      {:ok, _job} =
+        GiTF.Ops.create(%{
+          title: "Test op",
+          mission_id: mission.id,
+          sector_id: mission.sector_id
+        })
 
       {:ok, status} = Orchestrator.get_quest_status(mission.id)
       assert status.jobs_created == true
@@ -120,7 +123,9 @@ defmodule GiTF.Major.OrchestratorTest do
   end
 
   describe "advance_quest/1" do
-    test "advances from research to requirements when research artifact exists", %{mission: mission} do
+    test "advances from research to requirements when research artifact exists", %{
+      mission: mission
+    } do
       # Set up mission in research phase with artifact
       quest_record = Archive.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "research")
@@ -148,13 +153,14 @@ defmodule GiTF.Major.OrchestratorTest do
 
     test "completes mission when all implementation ops are done", %{mission: mission} do
       # Create completed non-phase op
-      {:ok, _job} = GiTF.Ops.create(%{
-        title: "Test op",
-        mission_id: mission.id,
-        sector_id: mission.sector_id,
-        status: "done",
-        phase_job: false
-      })
+      {:ok, _job} =
+        GiTF.Ops.create(%{
+          title: "Test op",
+          mission_id: mission.id,
+          sector_id: mission.sector_id,
+          status: "done",
+          phase_job: false
+        })
 
       # Set mission to implementation phase
       quest_record = Archive.get(:missions, mission.id)
@@ -168,13 +174,14 @@ defmodule GiTF.Major.OrchestratorTest do
 
     test "stays in implementation when ops are not complete", %{mission: mission} do
       # Create pending op
-      {:ok, _job} = GiTF.Ops.create(%{
-        title: "Test op",
-        mission_id: mission.id,
-        sector_id: mission.sector_id,
-        status: "pending",
-        phase_job: false
-      })
+      {:ok, _job} =
+        GiTF.Ops.create(%{
+          title: "Test op",
+          mission_id: mission.id,
+          sector_id: mission.sector_id,
+          status: "pending",
+          phase_job: false
+        })
 
       # Set mission to implementation phase
       quest_record = Archive.get(:missions, mission.id)
@@ -205,13 +212,14 @@ defmodule GiTF.Major.OrchestratorTest do
     test "handles review rejection with redesign", %{mission: mission} do
       # Expect call for expert discovery
       stub(GiTF.Runtime.LLMClient.Mock, :generate_text, fn _model, _messages, _opts ->
-        {:ok, %ReqLLM.Response{
+        {:ok,
+         %ReqLLM.Response{
            message: %{content: "[]", role: :assistant},
            usage: %{},
            model: "mock-model",
            context: [],
            id: "mock-id"
-        }}
+         }}
       end)
 
       quest_record = Archive.get(:missions, mission.id)

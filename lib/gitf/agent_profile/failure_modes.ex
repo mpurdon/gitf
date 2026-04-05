@@ -36,8 +36,7 @@ defmodule GiTF.AgentProfile.FailureModes do
     skip_tests: %{
       key: :skip_tests,
       name: "SKIP_TESTS",
-      description:
-        "DO NOT skip writing or running tests. Every change must be validated.",
+      description: "DO NOT skip writing or running tests. Every change must be validated.",
       severity: :critical
     },
     ignore_errors: %{
@@ -50,8 +49,7 @@ defmodule GiTF.AgentProfile.FailureModes do
     premature_optimization: %{
       key: :premature_optimization,
       name: "PREMATURE_OPTIMIZATION",
-      description:
-        "DO NOT optimize code that isn't a bottleneck. Focus on correctness first.",
+      description: "DO NOT optimize code that isn't a bottleneck. Focus on correctness first.",
       severity: :medium
     },
     yak_shaving: %{

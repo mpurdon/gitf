@@ -187,6 +187,7 @@ defmodule GiTF.Trust do
   end
 
   defp normalize_model(nil), do: nil
+
   defp normalize_model(model) when is_binary(model) do
     model
     |> String.split(":")
@@ -195,5 +196,6 @@ defmodule GiTF.Trust do
     |> String.split("-")
     |> hd()
   end
+
   defp normalize_model(model) when is_atom(model), do: normalize_model(Atom.to_string(model))
 end

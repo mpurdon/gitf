@@ -202,6 +202,7 @@ defmodule GiTF.CLI.Errors do
 
   defp indent(text, spaces) do
     padding = String.duplicate(" ", spaces)
+
     text
     |> String.split("\n")
     |> Enum.map(&(padding <> &1))

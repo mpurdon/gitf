@@ -24,7 +24,8 @@ defmodule GiTF.Runtime.Models do
   In API mode, delegates to `run_agent/3` instead.
   Resolves the active plugin and delegates to its `spawn_headless/3`.
   """
-  @spec spawn_headless(String.t(), String.t(), keyword()) :: {:ok, port()} | {:ok, map()} | {:error, term()}
+  @spec spawn_headless(String.t(), String.t(), keyword()) ::
+          {:ok, port()} | {:ok, map()} | {:error, term()}
   def spawn_headless(prompt, cwd, opts \\ []) do
     {:ok, plugin} = resolve_plugin(opts)
 
@@ -45,14 +46,14 @@ defmodule GiTF.Runtime.Models do
   In API mode, delegates to `run_agent/3` with queen tools.
   Resolves the active plugin and delegates to its `spawn_interactive/2`.
   """
-  @spec spawn_interactive(String.t(), keyword()) :: {:ok, port()} | {:ok, map()} | {:error, term()}
+  @spec spawn_interactive(String.t(), keyword()) ::
+          {:ok, port()} | {:ok, map()} | {:error, term()}
   def spawn_interactive(cwd, opts \\ []) do
     {:ok, plugin} = resolve_plugin(opts)
 
     if api_mode?(plugin) do
       prompt = Keyword.get(opts, :prompt, "You are the Major orchestrator. Manage the section.")
-      run_agent(prompt, cwd,
-        Keyword.merge(opts, tool_set: :major, max_iterations: 200))
+      run_agent(prompt, cwd, Keyword.merge(opts, tool_set: :major, max_iterations: 200))
     else
       service_key = plugin_service_key(plugin)
 
@@ -170,7 +171,7 @@ defmodule GiTF.Runtime.Models do
 
   @doc """
   Get the context limit for a model.
-  
+
   Returns the maximum context window size in tokens.
   """
   @spec get_context_limit(String.t(), keyword()) :: {:ok, integer()} | {:error, term()}

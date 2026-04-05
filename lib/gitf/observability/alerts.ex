@@ -8,11 +8,16 @@ defmodule GiTF.Observability.Alerts do
   alias GiTF.Archive
 
   @alert_rules [
-    {:quest_stuck, 30 * 60},      # 30 minutes
-    {:quality_drop, 70},          # Below 70%
-    {:cost_spike, 2.0},           # 2x average
-    {:failure_rate_high, 0.3},    # 30%
-    {:validation_failed, 5 * 60}  # Failed in last 5 mins
+    # 30 minutes
+    {:quest_stuck, 30 * 60},
+    # Below 70%
+    {:quality_drop, 70},
+    # 2x average
+    {:cost_spike, 2.0},
+    # 30%
+    {:failure_rate_high, 0.3},
+    # Failed in last 5 mins
+    {:validation_failed, 5 * 60}
   ]
 
   @doc "Check all alert rules and return triggered alerts"
@@ -54,7 +59,9 @@ defmodule GiTF.Observability.Alerts do
     Logger.warning("[ALERT] #{type}: #{message}")
 
     case webhook_url() do
-      nil -> :ok
+      nil ->
+        :ok
+
       _url ->
         # Fire-and-forget: avoid blocking the caller during retries
         Task.start(fn -> send_notification(:webhook, type, message) end)
@@ -90,12 +97,13 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:validation_failed, threshold_seconds, data) do
-    recent_failures = Enum.filter(data.ops, fn j ->
-      j.status == "done" &&
-      Map.get(j, :verification_status) == "failed" &&
-      j.verified_at &&
-      DateTime.diff(DateTime.utc_now(), j.verified_at) < threshold_seconds
-    end)
+    recent_failures =
+      Enum.filter(data.ops, fn j ->
+        j.status == "done" &&
+          Map.get(j, :verification_status) == "failed" &&
+          j.verified_at &&
+          DateTime.diff(DateTime.utc_now(), j.verified_at) < threshold_seconds
+      end)
 
     if length(recent_failures) > 0 do
       msg = Enum.map(recent_failures, &"Job #{&1.id} failed validation") |> Enum.join(", ")
@@ -106,10 +114,11 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:quest_stuck, threshold_seconds, data) do
-    stuck = Enum.filter(data.missions, fn q ->
-      q.status == "active" &&
-      DateTime.diff(DateTime.utc_now(), q.updated_at) > threshold_seconds
-    end)
+    stuck =
+      Enum.filter(data.missions, fn q ->
+        q.status == "active" &&
+          DateTime.diff(DateTime.utc_now(), q.updated_at) > threshold_seconds
+      end)
 
     if length(stuck) > 0 do
       {:alert, "#{length(stuck)} mission(s) stuck for > #{threshold_seconds}s"}
@@ -124,7 +133,10 @@ defmodule GiTF.Observability.Alerts do
 
     if !Enum.empty?(scores) do
       avg = Enum.sum(scores) / length(scores)
-      if avg < threshold, do: {:alert, "Quality score dropped to #{Float.round(avg, 1)}"}, else: :ok
+
+      if avg < threshold,
+        do: {:alert, "Quality score dropped to #{Float.round(avg, 1)}"},
+        else: :ok
     else
       :ok
     end
@@ -134,8 +146,10 @@ defmodule GiTF.Observability.Alerts do
     if length(data.costs) < 10 do
       :ok
     else
-      recent = Enum.take(data.costs, -5) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
-      older = Enum.slice(data.costs, -15..-6) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
+      recent = Enum.take(data.costs, -5) |> Enum.map(&(&1[:total_cost_usd] || &1[:cost_usd] || 0))
+
+      older =
+        Enum.slice(data.costs, -15..-6) |> Enum.map(&(&1[:total_cost_usd] || &1[:cost_usd] || 0))
 
       recent_avg = Enum.sum(recent) / length(recent)
       older_avg = Enum.sum(older) / length(older)
@@ -152,7 +166,7 @@ defmodule GiTF.Observability.Alerts do
     recent = Enum.take(data.ops, -20)
 
     if length(recent) > 0 do
-      failed = Enum.count(recent, & &1.status == "failed")
+      failed = Enum.count(recent, &(&1.status == "failed"))
       rate = failed / length(recent)
       if rate > threshold, do: {:alert, "Failure rate: #{Float.round(rate * 100, 1)}%"}, else: :ok
     else
@@ -187,7 +201,8 @@ defmodule GiTF.Observability.Alerts do
     Logger.warning("[#{channel}] #{type}: #{message}")
   end
 
-  defp send_webhook_with_retry(_url, _payload, type, attempt) when attempt >= @webhook_max_retries do
+  defp send_webhook_with_retry(_url, _payload, type, attempt)
+       when attempt >= @webhook_max_retries do
     Logger.warning("Webhook exhausted #{@webhook_max_retries} retries for alert: #{type}")
   end
 
@@ -198,7 +213,11 @@ defmodule GiTF.Observability.Alerts do
 
       {:ok, %{status: status}} when status in [429, 500, 502, 503, 504] ->
         delay = min(:timer.seconds(2) * Integer.pow(2, attempt), :timer.seconds(30))
-        Logger.warning("Webhook returned #{status} for alert #{type}, retrying in #{div(delay, 1000)}s (attempt #{attempt + 1}/#{@webhook_max_retries})")
+
+        Logger.warning(
+          "Webhook returned #{status} for alert #{type}, retrying in #{div(delay, 1000)}s (attempt #{attempt + 1}/#{@webhook_max_retries})"
+        )
+
         Process.sleep(delay)
         send_webhook_with_retry(url, payload, type, attempt + 1)
 
@@ -207,7 +226,11 @@ defmodule GiTF.Observability.Alerts do
 
       {:error, reason} ->
         delay = min(:timer.seconds(1) * Integer.pow(2, attempt), :timer.seconds(15))
-        Logger.warning("Webhook failed for alert #{type}: #{inspect(reason)}, retrying in #{div(delay, 1000)}s (attempt #{attempt + 1}/#{@webhook_max_retries})")
+
+        Logger.warning(
+          "Webhook failed for alert #{type}: #{inspect(reason)}, retrying in #{div(delay, 1000)}s (attempt #{attempt + 1}/#{@webhook_max_retries})"
+        )
+
         Process.sleep(delay)
         send_webhook_with_retry(url, payload, type, attempt + 1)
     end

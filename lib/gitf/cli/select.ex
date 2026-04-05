@@ -54,7 +54,8 @@ defmodule GiTF.CLI.Select do
   end
 
   defp do_interactive(prompt, opts, multi?) do
-    IO.write("\e[?25l") # hide cursor
+    # hide cursor
+    IO.write("\e[?25l")
     stty_save = System.cmd("stty", ["-g"], stderr_to_stdout: true) |> elem(0) |> String.trim()
     System.cmd("stty", ["raw", "-echo"], stderr_to_stdout: true)
 
@@ -72,8 +73,10 @@ defmodule GiTF.CLI.Select do
 
       # Clear menu
       IO.write("\r\e[#{lines_to_clear}A\e[J")
-      IO.write("\e[1A\e[J") # clear empty line above
-      IO.write("\e[1A\e[J") # clear prompt line
+      # clear empty line above
+      IO.write("\e[1A\e[J")
+      # clear prompt line
+      IO.write("\e[1A\e[J")
 
       case result do
         {:ok, selected} ->
@@ -85,6 +88,7 @@ defmodule GiTF.CLI.Select do
             IO.write("\r  \e[1;36m#{prompt}\e[0m\r\n")
             IO.write("\r  \e[32m→ \e[0m#{selected.label}\r\n\r\n")
           end
+
           {:ok, selected}
 
         :cancel ->
@@ -94,35 +98,50 @@ defmodule GiTF.CLI.Select do
       end
     after
       System.cmd("stty", [stty_save], stderr_to_stdout: true)
-      IO.write("\e[?25h") # show cursor
+      # show cursor
+      IO.write("\e[?25h")
     end
   end
 
   defp loop(opts, cursor, selected, multi?, lines_to_clear) do
     count = length(opts)
+
     case IO.getn(:stdio, "", 1) do
       "\r" ->
         if multi? do
-          {:ok, Enum.filter(Enum.with_index(opts), fn {_, i} -> MapSet.member?(selected, i) end) |> Enum.map(&elem(&1, 0))}
+          {:ok,
+           Enum.filter(Enum.with_index(opts), fn {_, i} -> MapSet.member?(selected, i) end)
+           |> Enum.map(&elem(&1, 0))}
         else
           {:ok, Enum.at(opts, cursor)}
         end
+
       "\n" ->
         if multi? do
-          {:ok, Enum.filter(Enum.with_index(opts), fn {_, i} -> MapSet.member?(selected, i) end) |> Enum.map(&elem(&1, 0))}
+          {:ok,
+           Enum.filter(Enum.with_index(opts), fn {_, i} -> MapSet.member?(selected, i) end)
+           |> Enum.map(&elem(&1, 0))}
         else
           {:ok, Enum.at(opts, cursor)}
         end
+
       " " ->
         if multi? do
-          new_selected = if MapSet.member?(selected, cursor), do: MapSet.delete(selected, cursor), else: MapSet.put(selected, cursor)
+          new_selected =
+            if MapSet.member?(selected, cursor),
+              do: MapSet.delete(selected, cursor),
+              else: MapSet.put(selected, cursor)
+
           IO.write("\r\e[#{lines_to_clear}A")
           render_options(opts, cursor, new_selected, multi?)
           loop(opts, cursor, new_selected, multi?, lines_to_clear)
         else
           loop(opts, cursor, selected, multi?, lines_to_clear)
         end
-      "q" -> :cancel
+
+      "q" ->
+        :cancel
+
       "\e" ->
         case IO.getn(:stdio, "", 2) do
           "[A" ->
@@ -130,16 +149,25 @@ defmodule GiTF.CLI.Select do
             IO.write("\r\e[#{lines_to_clear}A")
             render_options(opts, new_cursor, selected, multi?)
             loop(opts, new_cursor, selected, multi?, lines_to_clear)
+
           "[B" ->
             new_cursor = min(count - 1, cursor + 1)
             IO.write("\r\e[#{lines_to_clear}A")
             render_options(opts, new_cursor, selected, multi?)
             loop(opts, new_cursor, selected, multi?, lines_to_clear)
+
           _ ->
             loop(opts, cursor, selected, multi?, lines_to_clear)
         end
-      <<3>> -> :cancel # Ctrl+C
-      <<4>> -> :cancel # Ctrl+D
+
+      # Ctrl+C
+      <<3>> ->
+        :cancel
+
+      # Ctrl+D
+      <<4>> ->
+        :cancel
+
       _ ->
         loop(opts, cursor, selected, multi?, lines_to_clear)
     end
@@ -153,11 +181,12 @@ defmodule GiTF.CLI.Select do
 
       pointer = if is_active, do: "\e[36m❯\e[0m", else: " "
 
-      checkbox = cond do
-        multi? and is_selected -> "\e[32m◉\e[0m"
-        multi? -> "◯"
-        true -> ""
-      end
+      checkbox =
+        cond do
+          multi? and is_selected -> "\e[32m◉\e[0m"
+          multi? -> "◯"
+          true -> ""
+        end
 
       star = if opt.recommended, do: " \e[33m★\e[0m", else: ""
 

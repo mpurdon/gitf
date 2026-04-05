@@ -66,7 +66,7 @@ defmodule GiTF.E2E.CostTrackingTest do
         mock_opts: [events: events1]
       )
 
-    {:ok, _bee2} =
+    {:ok, bee2} =
       Harness.spawn_mock_bee(env, job2.id, sector.id,
         delay_ms: 100,
         mock_opts: [events: events2]
@@ -74,6 +74,8 @@ defmodule GiTF.E2E.CostTrackingTest do
 
     await({:job_done, job1.id}, timeout: 15_000)
     await({:job_done, job2.id}, timeout: 15_000)
+    await({:bee_stopped, bee1.id}, timeout: 5_000)
+    await({:bee_stopped, bee2.id}, timeout: 5_000)
 
     # Check aggregate summary
     summary = GiTF.Costs.summary()
@@ -82,6 +84,7 @@ defmodule GiTF.E2E.CostTrackingTest do
     assert summary.total_output_tokens >= 150
 
     # by_bee should have entries for both ghosts
-    assert Map.has_key?(summary.by_bee, bee1.id) or map_size(summary.by_bee) >= 2
+    assert Map.has_key?(summary.by_bee, bee1.id)
+    assert Map.has_key?(summary.by_bee, bee2.id)
   end
 end

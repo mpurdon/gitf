@@ -1,12 +1,13 @@
 defmodule GiTF.Sandbox do
   @moduledoc """
   Behaviour for command execution sandboxing.
-  
+
   Allows wrapping command execution in isolated environments like Bubblewrap
   or Docker to prevent accidental damage to the host system.
   """
 
-  @callback wrap_command(String.t(), [String.t()], keyword()) :: {String.t(), [String.t()], keyword()}
+  @callback wrap_command(String.t(), [String.t()], keyword()) ::
+              {String.t(), [String.t()], keyword()}
   @callback available?() :: boolean()
   @callback name() :: String.t()
 
@@ -46,7 +47,7 @@ defmodule GiTF.Sandbox do
 
   defp adapter do
     configured = Application.get_env(:gitf, :sandbox_adapter)
-    
+
     cond do
       configured -> configured
       GiTF.Sandbox.Bubblewrap.available?() -> GiTF.Sandbox.Bubblewrap

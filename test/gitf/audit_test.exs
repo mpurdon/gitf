@@ -14,19 +14,24 @@ defmodule GiTF.AuditTest do
     # Create test data
     {:ok, sector} = Archive.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
     {:ok, mission} = Archive.insert(:missions, %{name: "test-mission", goal: "test"})
-    {:ok, op} = Ops.create(%{
-      title: "Test op",
-      mission_id: mission.id,
-      sector_id: sector.id
-    })
+
+    {:ok, op} =
+      Ops.create(%{
+        title: "Test op",
+        mission_id: mission.id,
+        sector_id: sector.id
+      })
+
     {:ok, ghost} = Archive.insert(:ghosts, %{name: "test-ghost", status: "stopped"})
-    {:ok, shell} = Archive.insert(:shells, %{
-      ghost_id: ghost.id,
-      sector_id: sector.id,
-      worktree_path: "/tmp/test-shell",
-      branch: "test-branch",
-      status: "active"
-    })
+
+    {:ok, shell} =
+      Archive.insert(:shells, %{
+        ghost_id: ghost.id,
+        sector_id: sector.id,
+        worktree_path: "/tmp/test-shell",
+        branch: "test-branch",
+        status: "active"
+      })
 
     # Assign op to ghost and complete it
     {:ok, op} = Ops.assign(op.id, ghost.id)

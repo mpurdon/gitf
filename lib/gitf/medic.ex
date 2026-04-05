@@ -52,7 +52,14 @@ defmodule GiTF.Medic do
   """
   @spec run_all(keyword()) :: [check_result()]
   def run_all(opts \\ []) do
-    results = Enum.map(@checks, &check/1)
+    checks_to_run =
+      if "ollama" in GiTF.Runtime.ProviderManager.provider_priority() do
+        @checks ++ [:ollama_running]
+      else
+        @checks
+      end
+
+    results = Enum.map(checks_to_run, &check/1)
 
     if Keyword.get(opts, :fix, false) do
       Enum.map(results, &maybe_fix/1)
@@ -77,6 +84,7 @@ defmodule GiTF.Medic do
   def check(:stale_ghosts), do: check_stale_ghosts()
   def check(:major_workspace), do: check_major_workspace()
   def check(:disk_space), do: check_disk_space()
+  def check(:ollama_running), do: check_ollama_running()
 
   @doc """
   Attempts to fix a specific check by name.
@@ -90,6 +98,7 @@ defmodule GiTF.Medic do
   def fix(:major_workspace), do: fix_major_workspace()
   def fix(:config_valid), do: fix_config_valid()
   def fix(:settings_valid), do: fix_settings_valid()
+  def fix(:ollama_running), do: fix_ollama_running()
   def fix(name), do: %{name: name, status: :error, message: "Not fixable", fixable: false}
 
   @doc """
@@ -99,6 +108,20 @@ defmodule GiTF.Medic do
   def checks, do: @checks
 
   # -- Individual checks -----------------------------------------------------
+
+  defp check_ollama_running do
+    if GiTF.Runtime.Ollama.running?() do
+      case GiTF.Runtime.Ollama.list_models() do
+        {:ok, models} ->
+          result(:ollama_running, :ok, "Ollama running (#{length(models)} models)")
+
+        _ ->
+          result(:ollama_running, :ok, "Ollama running")
+      end
+    else
+      result(:ollama_running, :error, "Ollama is not running (start with `ollama serve`)", true)
+    end
+  end
 
   defp check_git_installed do
     case GiTF.Git.git_version() do
@@ -117,17 +140,26 @@ defmodule GiTF.Medic do
 
       case provider do
         "google" ->
-          if has_key?("GOOGLE_API_KEY") || has_key?("GEMINI_API_KEY") || config_key("google_api_key") do
+          if has_key?("GOOGLE_API_KEY") || has_key?("GEMINI_API_KEY") ||
+               config_key("google_api_key") do
             result(:model_configured, :ok, "API mode with Google (key set)")
           else
-            result(:model_configured, :error, "GOOGLE_API_KEY not set. Set env var or [llm] keys.google_api_key in .gitf/config.toml.")
+            result(
+              :model_configured,
+              :error,
+              "GOOGLE_API_KEY not set. Set env var or [llm] keys.google_api_key in .gitf/config.toml."
+            )
           end
 
         "anthropic" ->
           if has_key?("ANTHROPIC_API_KEY") || config_key("anthropic_api_key") do
             result(:model_configured, :ok, "API mode with Anthropic (key set)")
           else
-            result(:model_configured, :error, "ANTHROPIC_API_KEY not set. Set env var or [llm] keys.anthropic_api_key in .gitf/config.toml.")
+            result(
+              :model_configured,
+              :error,
+              "ANTHROPIC_API_KEY not set. Set env var or [llm] keys.anthropic_api_key in .gitf/config.toml."
+            )
           end
 
         "openai" ->
@@ -147,7 +179,11 @@ defmodule GiTF.Medic do
           result(:model_configured, :ok, "CLI mode, found at #{path}")
 
         {:error, :not_found} ->
-          result(:model_configured, :error, "CLI executable not found. Switch to API mode or install the CLI.")
+          result(
+            :model_configured,
+            :error,
+            "CLI executable not found. Switch to API mode or install the CLI."
+          )
       end
     end
   end
@@ -292,10 +328,31 @@ defmodule GiTF.Medic do
     case GiTF.gitf_dir() do
       {:ok, path} ->
         section_path = Path.join(path, ".gitf")
+
+        # Use df -m to get MB values and a robust regex to extract available space
+        {output, 0} = System.cmd("df", ["-m", section_path], stderr_to_stdout: true)
+
+        available_mb =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.find_value(fn line ->
+            case Regex.run(~r/(\d+)\s+\d+%\s+/, line) do
+              [_, available] ->
+                {n, _} = Integer.parse(available)
+                n
+
+              _ ->
+                nil
+            end
+          end)
+
         size_bytes = dir_size(section_path)
         size_mb = size_bytes / (1024 * 1024)
 
         cond do
+          available_mb && available_mb < 200 ->
+            result(:disk_space, :error, "Critical: low disk space (#{available_mb} MB available)")
+
           size_mb > 1024 ->
             result(
               :disk_space,
@@ -304,7 +361,11 @@ defmodule GiTF.Medic do
             )
 
           true ->
-            result(:disk_space, :ok, ".gitf directory is #{format_size(size_bytes)}")
+            result(
+              :disk_space,
+              :ok,
+              ".gitf directory is #{format_size(size_bytes)} (#{available_mb} MB available)"
+            )
         end
 
       {:error, _} ->
@@ -313,6 +374,24 @@ defmodule GiTF.Medic do
   end
 
   # -- Fix implementations ---------------------------------------------------
+
+  defp fix_ollama_running do
+    case GiTF.Runtime.Ollama.start_server() do
+      {:ok, _} ->
+        result(:ollama_running, :ok, "Started Ollama server in the background")
+
+      {:error, :not_installed} ->
+        result(
+          :ollama_running,
+          :error,
+          "Ollama is not installed. Please install it from ollama.com",
+          false
+        )
+
+      {:error, reason} ->
+        result(:ollama_running, :error, "Failed to start Ollama: #{inspect(reason)}", false)
+    end
+  end
 
   defp fix_orphan_cells do
     case GiTF.Shell.cleanup_orphans() do

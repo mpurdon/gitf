@@ -175,11 +175,12 @@ defmodule GiTF.Runtime.ModelResolver do
   def configured_models do
     mode = execution_mode()
 
-    base = cond do
-      mode == :ollama -> provider_tier_map("ollama") |> Map.merge(mode_defaults(:ollama))
-      mode == :bedrock -> provider_tier_map("bedrock") |> Map.merge(mode_defaults(:bedrock))
-      true -> provider_tier_map(configured_provider())
-    end
+    base =
+      cond do
+        mode == :ollama -> provider_tier_map("ollama") |> Map.merge(mode_defaults(:ollama))
+        mode == :bedrock -> provider_tier_map("bedrock") |> Map.merge(mode_defaults(:bedrock))
+        true -> provider_tier_map(configured_provider())
+      end
 
     # Add legacy aliases that resolve to canonical tier specs
     with_aliases = Map.merge(base, resolve_aliases(base))
@@ -228,9 +229,9 @@ defmodule GiTF.Runtime.ModelResolver do
   end
 
   @ollama_defaults %{
-    "thinking" => "openai:qwen2.5-coder:32b",
-    "general" => "openai:qwen2.5-coder:14b",
-    "fast" => "openai:qwen2.5-coder:7b"
+    "thinking" => "ollama:qwen2.5-coder:32b",
+    "general" => "ollama:qwen2.5-coder:14b",
+    "fast" => "ollama:qwen2.5-coder:7b"
   }
 
   @bedrock_defaults %{
@@ -241,9 +242,14 @@ defmodule GiTF.Runtime.ModelResolver do
 
   defp mode_defaults(:ollama) do
     case GiTF.Config.Provider.get([:llm, :ollama_models]) do
-      nil -> @ollama_defaults
-      custom when is_map(custom) -> Map.merge(@ollama_defaults, Map.new(custom, fn {k, v} -> {to_string(k), v} end))
-      _ -> @ollama_defaults
+      nil ->
+        @ollama_defaults
+
+      custom when is_map(custom) ->
+        Map.merge(@ollama_defaults, Map.new(custom, fn {k, v} -> {to_string(k), v} end))
+
+      _ ->
+        @ollama_defaults
     end
   rescue
     _ -> @ollama_defaults
@@ -251,9 +257,14 @@ defmodule GiTF.Runtime.ModelResolver do
 
   defp mode_defaults(:bedrock) do
     case GiTF.Config.Provider.get([:llm, :bedrock_models]) do
-      nil -> @bedrock_defaults
-      custom when is_map(custom) -> Map.merge(@bedrock_defaults, Map.new(custom, fn {k, v} -> {to_string(k), v} end))
-      _ -> @bedrock_defaults
+      nil ->
+        @bedrock_defaults
+
+      custom when is_map(custom) ->
+        Map.merge(@bedrock_defaults, Map.new(custom, fn {k, v} -> {to_string(k), v} end))
+
+      _ ->
+        @bedrock_defaults
     end
   rescue
     _ -> @bedrock_defaults
@@ -284,11 +295,12 @@ defmodule GiTF.Runtime.ModelResolver do
   end
 
   defp tier_fallback(tier, current_provider) do
-    next_tier = case tier do
-      t when t in ["thinking", "opus"] -> "general"
-      t when t in ["general", "sonnet"] -> "fast"
-      _ -> nil
-    end
+    next_tier =
+      case tier do
+        t when t in ["thinking", "opus"] -> "general"
+        t when t in ["general", "sonnet"] -> "fast"
+        _ -> nil
+      end
 
     if next_tier do
       models = GiTF.Runtime.ProviderManager.tier_models(current_provider)

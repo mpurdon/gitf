@@ -51,74 +51,117 @@ defmodule GiTF.Runtime.Loadout do
 
   defp readonly_tools(working_dir) do
     [
-      build_tool("read_file", "Read a file's contents", [
-        path: [type: :string, required: true, doc: "Relative path to the file"]
-      ], &read_file(&1, working_dir)),
-
-      build_tool("list_directory", "List files and directories", [
-        path: [type: :string, doc: "Relative path to list (default: working directory root)"]
-      ], &list_directory(&1, working_dir)),
-
-      build_tool("search_files", "Search for text patterns in files using grep", [
-        pattern: [type: :string, required: true, doc: "Search pattern (regex)"],
-        path: [type: :string, doc: "Relative directory to search in (default: .)"],
-        glob: [type: :string, doc: "File glob filter (e.g. \"*.ex\")"]
-      ], &search_files(&1, working_dir)),
-
-      build_tool("git_diff", "Show git diff", [
-        ref: [type: :string, doc: "Git ref to diff against (default: HEAD)"]
-      ], &git_diff(&1, working_dir)),
-
+      build_tool(
+        "read_file",
+        "Read a file's contents",
+        [
+          path: [type: :string, required: true, doc: "Relative path to the file"]
+        ],
+        &read_file(&1, working_dir)
+      ),
+      build_tool(
+        "list_directory",
+        "List files and directories",
+        [
+          path: [type: :string, doc: "Relative path to list (default: working directory root)"]
+        ],
+        &list_directory(&1, working_dir)
+      ),
+      build_tool(
+        "search_files",
+        "Search for text patterns in files using grep",
+        [
+          pattern: [type: :string, required: true, doc: "Search pattern (regex)"],
+          path: [type: :string, doc: "Relative directory to search in (default: .)"],
+          glob: [type: :string, doc: "File glob filter (e.g. \"*.ex\")"]
+        ],
+        &search_files(&1, working_dir)
+      ),
+      build_tool(
+        "git_diff",
+        "Show git diff",
+        [
+          ref: [type: :string, doc: "Git ref to diff against (default: HEAD)"]
+        ],
+        &git_diff(&1, working_dir)
+      ),
       build_tool("git_status", "Show git status", [], &git_status(&1, working_dir)),
-
-      build_tool("github_issue", "Fetch a GitHub issue or PR by repo and number", [
-        repo: [type: :string, required: true, doc: "Repository in owner/repo format"],
-        number: [type: :string, required: true, doc: "Issue or PR number"],
-        type: [type: :string, doc: "Type: 'issue' (default) or 'pr'"]
-      ], &github_fetch/1),
-
-      build_tool("fetch_url", "Fetch content from a URL (for docs, APIs, etc.)", [
-        url: [type: :string, required: true, doc: "The URL to fetch"]
-      ], &fetch_url/1)
+      build_tool(
+        "github_issue",
+        "Fetch a GitHub issue or PR by repo and number",
+        [
+          repo: [type: :string, required: true, doc: "Repository in owner/repo format"],
+          number: [type: :string, required: true, doc: "Issue or PR number"],
+          type: [type: :string, doc: "Type: 'issue' (default) or 'pr'"]
+        ],
+        &github_fetch/1
+      ),
+      build_tool(
+        "fetch_url",
+        "Fetch content from a URL (for docs, APIs, etc.)",
+        [
+          url: [type: :string, required: true, doc: "The URL to fetch"]
+        ],
+        &fetch_url/1
+      )
     ]
   end
 
   # -- Standard Tools ----------------------------------------------------------
 
   defp standard_tools(working_dir) do
-    readonly_tools(working_dir) ++ [
-      build_tool("write_file", "Create or overwrite a file with the given content", [
-        path: [type: :string, required: true, doc: "Relative path to the file"],
-        content: [type: :string, required: true, doc: "File content to write"]
-      ], &write_file(&1, working_dir)),
-
-      build_tool("run_bash", "Execute a bash command", [
-        command: [type: :string, required: true, doc: "The bash command to execute"],
-        timeout_ms: [type: :pos_integer, doc: "Timeout in milliseconds (default: 120000)"]
-      ], &run_bash(&1, working_dir)),
-
-      build_tool("git_add", "Stage files for commit", [
-        paths: [type: :string, required: true, doc: "Space-separated file paths to stage"]
-      ], &git_add(&1, working_dir)),
-
-      build_tool("git_commit", "Create a git commit", [
-        message: [type: :string, required: true, doc: "Commit message"]
-      ], &git_commit(&1, working_dir))
-    ]
+    readonly_tools(working_dir) ++
+      [
+        build_tool(
+          "write_file",
+          "Create or overwrite a file with the given content",
+          [
+            path: [type: :string, required: true, doc: "Relative path to the file"],
+            content: [type: :string, required: true, doc: "File content to write"]
+          ],
+          &write_file(&1, working_dir)
+        ),
+        build_tool(
+          "run_bash",
+          "Execute a bash command",
+          [
+            command: [type: :string, required: true, doc: "The bash command to execute"],
+            timeout_ms: [type: :pos_integer, doc: "Timeout in milliseconds (default: 120000)"]
+          ],
+          &run_bash(&1, working_dir)
+        ),
+        build_tool(
+          "git_add",
+          "Stage files for commit",
+          [
+            paths: [type: :string, required: true, doc: "Space-separated file paths to stage"]
+          ],
+          &git_add(&1, working_dir)
+        ),
+        build_tool(
+          "git_commit",
+          "Create a git commit",
+          [
+            message: [type: :string, required: true, doc: "Commit message"]
+          ],
+          &git_commit(&1, working_dir)
+        )
+      ]
   end
 
   # -- Major Tools -------------------------------------------------------------
 
   defp queen_tools do
     [
-      build_tool("list_quests", "List all active missions and their statuses", [],
-        fn _args -> list_quests() end),
-
-      build_tool("list_bees", "List all active ghosts and their statuses", [],
-        fn _args -> list_bees() end),
-
-      build_tool("check_costs", "Check total cost summary for the section", [],
-        fn _args -> check_costs() end)
+      build_tool("list_quests", "List all active missions and their statuses", [], fn _args ->
+        list_quests()
+      end),
+      build_tool("list_bees", "List all active ghosts and their statuses", [], fn _args ->
+        list_bees()
+      end),
+      build_tool("check_costs", "Check total cost summary for the section", [], fn _args ->
+        check_costs()
+      end)
     ]
   end
 
@@ -170,9 +213,10 @@ defmodule GiTF.Runtime.Loadout do
     grep_args = if glob, do: grep_args ++ ["--include=#{glob}"], else: grep_args
     grep_args = grep_args ++ [pattern, path]
 
-    task = Task.async(fn ->
-      System.cmd("grep", grep_args, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        System.cmd("grep", grep_args, stderr_to_stdout: true)
+      end)
 
     case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do
       {:ok, {output, 0}} -> {:ok, String.slice(output, 0, 10_000)}
@@ -188,23 +232,27 @@ defmodule GiTF.Runtime.Loadout do
     command = args["command"] || args[:command]
     timeout = args["timeout_ms"] || args[:timeout_ms] || @bash_timeout_ms
 
-    task = Task.async(fn ->
-      # Use Sandbox to wrap the command if available
-      {cmd, cmd_args, cmd_opts} =
-        if GiTF.Sandbox.available?() do
-          # When sandboxed, we don't pass host HOME, we rely on sandbox HOME (/tmp or similar)
-          GiTF.Sandbox.wrap_command("bash", ["-c", command], cd: working_dir, env: [{"HOME", "/tmp"}])
-        else
-          # Fallback for local execution
-          {"bash", ["-c", command],
-           cd: working_dir, env: [{"HOME", System.get_env("HOME", "/tmp")}]}
-        end
+    task =
+      Task.async(fn ->
+        # Use Sandbox to wrap the command if available
+        {cmd, cmd_args, cmd_opts} =
+          if GiTF.Sandbox.available?() do
+            # When sandboxed, we don't pass host HOME, we rely on sandbox HOME (/tmp or similar)
+            GiTF.Sandbox.wrap_command("bash", ["-c", command],
+              cd: working_dir,
+              env: [{"HOME", "/tmp"}]
+            )
+          else
+            # Fallback for local execution
+            {"bash", ["-c", command],
+             cd: working_dir, env: [{"HOME", System.get_env("HOME", "/tmp")}]}
+          end
 
-      # Ensure output is captured
-      cmd_opts = Keyword.put(cmd_opts, :stderr_to_stdout, true)
+        # Ensure output is captured
+        cmd_opts = Keyword.put(cmd_opts, :stderr_to_stdout, true)
 
-      System.cmd(cmd, cmd_args, cmd_opts)
-    end)
+        System.cmd(cmd, cmd_args, cmd_opts)
+      end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, 5_000) do
       {:ok, {output, exit_code}} ->
@@ -221,7 +269,7 @@ defmodule GiTF.Runtime.Loadout do
   defp git_diff(args, working_dir) do
     ref = args["ref"] || args[:ref] || "HEAD"
 
-    case GiTF.Git.safe_cmd( ["diff", ref], cd: working_dir, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["diff", ref], cd: working_dir, stderr_to_stdout: true) do
       {output, 0} -> {:ok, String.slice(output, 0, 15_000)}
       {output, _} -> {:ok, "git diff error: #{String.slice(output, 0, 2_000)}"}
     end
@@ -230,7 +278,7 @@ defmodule GiTF.Runtime.Loadout do
   end
 
   defp git_status(_args, working_dir) do
-    case GiTF.Git.safe_cmd( ["status", "--short"], cd: working_dir, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["status", "--short"], cd: working_dir, stderr_to_stdout: true) do
       {output, 0} -> {:ok, output}
       {output, _} -> {:ok, "git status error: #{output}"}
     end
@@ -241,7 +289,7 @@ defmodule GiTF.Runtime.Loadout do
   defp git_add(args, working_dir) do
     paths = String.split(args["paths"] || args[:paths] || "", " ", trim: true)
 
-    case GiTF.Git.safe_cmd( ["add" | paths], cd: working_dir, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["add" | paths], cd: working_dir, stderr_to_stdout: true) do
       {_, 0} -> {:ok, "Files staged: #{Enum.join(paths, ", ")}"}
       {output, _} -> {:ok, "git add error: #{output}"}
     end
@@ -252,7 +300,7 @@ defmodule GiTF.Runtime.Loadout do
   defp git_commit(args, working_dir) do
     message = args["message"] || args[:message]
 
-    case GiTF.Git.safe_cmd( ["commit", "-m", message], cd: working_dir, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["commit", "-m", message], cd: working_dir, stderr_to_stdout: true) do
       {output, 0} -> {:ok, output}
       {output, _} -> {:ok, "git commit error: #{output}"}
     end
@@ -293,12 +341,13 @@ defmodule GiTF.Runtime.Loadout do
   defp check_costs do
     summary = GiTF.Costs.summary()
 
-    {:ok, """
-    Total cost: $#{Float.round(summary.total_cost, 4)}
-    Input tokens: #{summary.total_input_tokens}
-    Output tokens: #{summary.total_output_tokens}
-    Models: #{summary.by_model |> Map.keys() |> Enum.join(", ")}
-    """}
+    {:ok,
+     """
+     Total cost: $#{Float.round(summary.total_cost, 4)}
+     Input tokens: #{summary.total_input_tokens}
+     Output tokens: #{summary.total_output_tokens}
+     Models: #{summary.by_model |> Map.keys() |> Enum.join(", ")}
+     """}
   rescue
     _ -> {:ok, "Error checking costs"}
   end
@@ -312,7 +361,9 @@ defmodule GiTF.Runtime.Loadout do
 
     cmd = if type == "pr", do: "pr", else: "issue"
 
-    case System.cmd("gh", [cmd, "view", to_string(number), "--repo", repo], stderr_to_stdout: true) do
+    case System.cmd("gh", [cmd, "view", to_string(number), "--repo", repo],
+           stderr_to_stdout: true
+         ) do
       {output, 0} -> {:ok, output}
       {output, _} -> {:ok, "gh #{cmd} view error: #{output}"}
     end

@@ -158,23 +158,29 @@ defmodule GiTF.Ghost.Worker do
         {:noreply, updated_state}
 
       {:error, {step, reason}} ->
-        Logger.error("Ghost #{state.ghost_id} failed to provision at step #{step}: #{inspect(reason)}")
+        Logger.error(
+          "Ghost #{state.ghost_id} failed to provision at step #{step}: #{inspect(reason)}"
+        )
+
         GiTF.Telemetry.emit([:gitf, :ghost, :provision_failed], %{}, %{
           ghost_id: state.ghost_id,
           op_id: state.op_id,
           step: step,
           reason: inspect(reason)
         })
+
         mark_failed(state, "Provision failed at #{step}: #{inspect(reason)}")
         {:stop, :normal, %{state | status: :failed}}
 
       {:error, reason} ->
         Logger.error("Ghost #{state.ghost_id} failed to provision: #{inspect(reason)}")
+
         GiTF.Telemetry.emit([:gitf, :ghost, :provision_failed], %{}, %{
           ghost_id: state.ghost_id,
           op_id: state.op_id,
           reason: inspect(reason)
         })
+
         mark_failed(state, "Provision failed: #{inspect(reason)}")
         {:stop, :normal, %{state | status: :failed}}
     end
@@ -202,12 +208,16 @@ defmodule GiTF.Ghost.Worker do
   def handle_info({port, {:data, data}}, %{handle: {:port, port}} = state) do
     events = GiTF.Runtime.Models.parse_output(data)
     update_progress(state.ghost_id, events)
-    
+
     # Track context usage from events
     track_context_usage(state.ghost_id, events)
 
     {:noreply,
-     %{state | output: [state.output, data], parsed_events: Enum.reverse(events) ++ state.parsed_events}}
+     %{
+       state
+       | output: [state.output, data],
+         parsed_events: Enum.reverse(events) ++ state.parsed_events
+     }}
   end
 
   def handle_info({port, {:exit_status, 0}}, %{handle: {:port, port}} = state) do
@@ -243,6 +253,7 @@ defmodule GiTF.Ghost.Worker do
 
     input_tokens = Map.get(usage, :input_tokens, 0)
     output_tokens = Map.get(usage, :output_tokens, 0)
+
     if input_tokens > 0 or output_tokens > 0 do
       track_context_usage(state.ghost_id, [%{"type" => "result", "usage" => usage}])
     end
@@ -250,14 +261,18 @@ defmodule GiTF.Ghost.Worker do
     # Guard: if the agent loop "succeeded" but consumed 0 tokens and produced
     # no text, the LLM never actually ran — treat as failure.
     if input_tokens == 0 and output_tokens == 0 and String.trim(text) == "" do
-      Logger.warning("Ghost #{state.ghost_id} completed with 0 tokens and empty output — treating as failure")
+      Logger.warning(
+        "Ghost #{state.ghost_id} completed with 0 tokens and empty output — treating as failure"
+      )
+
       mark_failed(state, "Empty response: 0 tokens consumed, no output produced")
       {:stop, :normal, %{state | status: :failed, handle: nil}}
     else
-      state = %{state |
-        parsed_events: Enum.reverse(events) ++ state.parsed_events,
-        output: [state.output, text],
-        handle: nil
+      state = %{
+        state
+        | parsed_events: Enum.reverse(events) ++ state.parsed_events,
+          output: [state.output, text],
+          handle: nil
       }
 
       try do
@@ -287,7 +302,10 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{handle: {:task, %Task{ref: ref}}} = state) do
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{handle: {:task, %Task{ref: ref}}} = state
+      ) do
     Logger.error("Ghost #{state.ghost_id} API task crashed: #{inspect(reason)}")
     mark_failed(state, "Task crash: #{inspect(reason)}")
     {:stop, :normal, %{state | status: :failed, handle: nil}}
@@ -299,7 +317,8 @@ defmodule GiTF.Ghost.Worker do
 
     # Track context from per-response usage events (input_tokens = actual window size)
     case event do
-      %{type: :response_usage, input_tokens: input, output_tokens: output} when input > 0 or output > 0 ->
+      %{type: :response_usage, input_tokens: input, output_tokens: output}
+      when input > 0 or output > 0 ->
         GiTF.Runtime.ContextMonitor.record_usage(ghost_id, input, output)
 
       _ ->
@@ -331,6 +350,7 @@ defmodule GiTF.Ghost.Worker do
     case GiTF.Ops.get(state.op_id) do
       {:ok, op} ->
         Archive.put(:ops, %{op | status: "pending"})
+
       _ ->
         :ok
     end
@@ -399,7 +419,10 @@ defmodule GiTF.Ghost.Worker do
         if state.status in [:provisioning, :running] do
           save_crash_context(state)
           update_ghost_status(state.ghost_id, GhostStatus.restarting())
-          Logger.info("Ghost #{state.ghost_id} saving context for auto-resume (reason: #{inspect(reason)})")
+
+          Logger.info(
+            "Ghost #{state.ghost_id} saving context for auto-resume (reason: #{inspect(reason)})"
+          )
         end
 
       :shutdown ->
@@ -558,7 +581,10 @@ defmodule GiTF.Ghost.Worker do
           {:ok, attach_handle(state, shell, handle)}
 
         {:error, reason} ->
-          Logger.warning("Spawn failed for ghost #{state.ghost_id}, rolling back shell #{shell.id}")
+          Logger.warning(
+            "Spawn failed for ghost #{state.ghost_id}, rolling back shell #{shell.id}"
+          )
+
           rollback_cell(shell.id)
           {:error, reason}
       end
@@ -618,11 +644,17 @@ defmodule GiTF.Ghost.Worker do
             {:ok, attach_handle(state, shell, handle)}
           else
             error ->
-              Logger.warning("Auto-resume failed for ghost #{state.ghost_id}: #{inspect(error)}, falling back to fresh")
+              Logger.warning(
+                "Auto-resume failed for ghost #{state.ghost_id}: #{inspect(error)}, falling back to fresh"
+              )
+
               provision_fresh(state)
           end
         else
-          Logger.warning("Shell path #{path} gone for ghost #{state.ghost_id}, falling back to fresh")
+          Logger.warning(
+            "Shell path #{path} gone for ghost #{state.ghost_id}, falling back to fresh"
+          )
+
           provision_fresh(state)
         end
 
@@ -731,10 +763,9 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  @spawn_timeout_ms 30_000
-
   defp spawn_process_with_timeout(state, shell) do
     caller = self()
+    timeout = GiTF.Config.get(:spawn_timeout_ms) || 30_000
 
     # Run spawn in a monitored process so we can enforce a timeout,
     # but transfer port ownership back to the caller (Worker GenServer)
@@ -764,10 +795,10 @@ defmodule GiTF.Ghost.Worker do
       {:DOWN, ^ref, :process, ^pid, reason} ->
         {:error, {:spawn_crash, reason}}
     after
-      @spawn_timeout_ms ->
+      timeout ->
         Process.demonitor(ref, [:flush])
         Process.exit(pid, :kill)
-        Logger.error("Ghost #{state.ghost_id} spawn timed out after #{@spawn_timeout_ms}ms")
+        Logger.error("Ghost #{state.ghost_id} spawn timed out after #{timeout}ms")
         {:error, :spawn_timeout}
     end
   end
@@ -812,7 +843,8 @@ defmodule GiTF.Ghost.Worker do
     # Determine tool_set based on phase op type
     tool_set =
       case GiTF.Ops.get(state.op_id) do
-        {:ok, %{phase_job: true, phase: phase}} when phase in ["research", "requirements", "review", "validation"] ->
+        {:ok, %{phase_job: true, phase: phase}}
+        when phase in ["research", "requirements", "review", "validation"] ->
           :readonly
 
         _ ->
@@ -829,15 +861,16 @@ defmodule GiTF.Ghost.Worker do
         send(worker_pid, {:agent_progress, ghost_id, event})
       end)
 
-    task = Task.async(fn ->
-      try do
-        GiTF.Runtime.AgentLoop.run(prompt, working_dir, agent_opts)
-      rescue
-        e ->
-          Logger.error("AgentLoop crashed for ghost #{ghost_id}: #{Exception.message(e)}")
-          {:error, {:agent_loop_crash, Exception.message(e)}}
-      end
-    end)
+    task =
+      Task.async(fn ->
+        try do
+          GiTF.Runtime.AgentLoop.run(prompt, working_dir, agent_opts)
+        rescue
+          e ->
+            Logger.error("AgentLoop crashed for ghost #{ghost_id}: #{Exception.message(e)}")
+            {:error, {:agent_loop_crash, Exception.message(e)}}
+        end
+      end)
 
     {:ok, task}
   end
@@ -872,8 +905,10 @@ defmodule GiTF.Ghost.Worker do
     case File.stat(path) do
       {:ok, %{mtime: mtime}} ->
         # Convert file mtime to Unix timestamp for comparison
-        mtime_seconds = :calendar.datetime_to_gregorian_seconds(mtime) -
-          :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
+        mtime_seconds =
+          :calendar.datetime_to_gregorian_seconds(mtime) -
+            :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
+
         now_seconds = System.os_time(:second)
         # Consider fresh if written within the last hour
         now_seconds - mtime_seconds < 3600
@@ -908,7 +943,12 @@ defmodule GiTF.Ghost.Worker do
     Keep under 500 words.
     """
 
-    case GiTF.Runtime.Models.generate_text(research_prompt, model: "haiku", max_tokens: 1024) do
+    research_model = GiTF.Runtime.ModelResolver.resolve("fast")
+
+    case GiTF.Runtime.Models.generate_text(research_prompt,
+           model: research_model,
+           max_tokens: 1024
+         ) do
       {:ok, skill_content} when is_binary(skill_content) and skill_content != "" ->
         agents_dir = Path.join([working_dir, ".claude", "agents"])
         File.mkdir_p!(agents_dir)
@@ -965,10 +1005,11 @@ defmodule GiTF.Ghost.Worker do
 
     # Collect phase output or auto-commit BEFORE marking op as done,
     # so that downstream consumers (SyncQueue, tests) see committed changes.
-    op = case GiTF.Ops.get(state.op_id) do
-      {:ok, j} -> j
-      _ -> nil
-    end
+    op =
+      case GiTF.Ops.get(state.op_id) do
+        {:ok, j} -> j
+        _ -> nil
+      end
 
     is_phase_job = op && Map.get(op, :phase_job, false)
 
@@ -1004,11 +1045,12 @@ defmodule GiTF.Ghost.Worker do
         output = IO.iodata_to_binary(state.output)
         parent_op_id = Map.get(op, :scout_for)
 
-        body = Jason.encode!(%{
-          scout_op_id: state.op_id,
-          parent_op_id: parent_op_id,
-          output: output
-        })
+        body =
+          Jason.encode!(%{
+            scout_op_id: state.op_id,
+            parent_op_id: parent_op_id,
+            output: output
+          })
 
         GiTF.Link.send(state.ghost_id, "major", "scout_complete", body)
 
@@ -1021,15 +1063,22 @@ defmodule GiTF.Ghost.Worker do
 
         # Direct delivery to Major — Link.send goes through PubSub which can be unreliable
         try do
-          GenServer.cast(GiTF.Major, {:phase_complete, state.ghost_id, state.op_id, op.mission_id})
+          GenServer.cast(
+            GiTF.Major,
+            {:phase_complete, state.ghost_id, state.op_id, op.mission_id}
+          )
         rescue
           _ -> :ok
         end
 
       skip_verification ->
         # Simple ops skip tachikoma verification, go straight to Major
-        GiTF.Link.send(state.ghost_id, "major", "job_complete",
-          "Job #{state.op_id} completed (skip_verification)")
+        GiTF.Link.send(
+          state.ghost_id,
+          "major",
+          "job_complete",
+          "Job #{state.op_id} completed (skip_verification)"
+        )
 
       true ->
         # Standard ops: broadcast to Tachikoma for independent verification.
@@ -1059,23 +1108,29 @@ defmodule GiTF.Ghost.Worker do
         GiTF.Missions.store_artifact(op.mission_id, artifact_key, artifact)
 
       {:error, reason} ->
-        Logger.warning("Phase output parse failed for #{op.phase}: #{inspect(reason)}, storing raw output as fallback")
+        Logger.warning(
+          "Phase output parse failed for #{op.phase}: #{inspect(reason)}, storing raw output as fallback"
+        )
+
         fallback_artifact = %{
           "raw_output" => String.slice(raw_output, 0, 50_000),
           "parse_failed" => true,
           "parse_error" => inspect(reason)
         }
+
         GiTF.Missions.store_artifact(op.mission_id, artifact_key, fallback_artifact)
     end
   rescue
     e ->
       Logger.warning("Phase output collection error: #{inspect(e)}, storing minimal fallback")
       raw_output = IO.iodata_to_binary(state.output)
+
       fallback_artifact = %{
         "raw_output" => String.slice(raw_output, 0, 50_000),
         "parse_failed" => true,
         "parse_error" => inspect(e)
       }
+
       artifact_key = planning_artifact_key(op)
       GiTF.Missions.store_artifact(op.mission_id, artifact_key, fallback_artifact)
   end
@@ -1100,8 +1155,7 @@ defmodule GiTF.Ghost.Worker do
       %{worktree_path: path} when is_binary(path) ->
         # Use System.cmd directly (not safe_cmd which uses Task.async/link)
         # to avoid linked-task crashes killing the Worker
-        case System.cmd("git", ["status", "--porcelain"],
-               cd: path, stderr_to_stdout: true) do
+        case System.cmd("git", ["status", "--porcelain"], cd: path, stderr_to_stdout: true) do
           {output, 0} when output != "" ->
             op_title =
               case GiTF.Ops.get(state.op_id) do
@@ -1111,16 +1165,25 @@ defmodule GiTF.Ghost.Worker do
 
             # Add all changes except .claude/ (generated settings that cause merge conflicts)
             System.cmd("git", ["add", "-A"], cd: path, stderr_to_stdout: true)
+
             System.cmd("git", ["reset", "HEAD", "--", ".claude/"],
-              cd: path, stderr_to_stdout: true)
+              cd: path,
+              stderr_to_stdout: true
+            )
 
             # Only commit if there are staged changes left
-            {staged, 0} = System.cmd("git", ["diff", "--cached", "--name-only"],
-              cd: path, stderr_to_stdout: true)
+            {staged, 0} =
+              System.cmd("git", ["diff", "--cached", "--name-only"],
+                cd: path,
+                stderr_to_stdout: true
+              )
 
             if String.trim(staged) != "" do
               System.cmd("git", ["commit", "-m", "gitf: #{op_title}"],
-                cd: path, stderr_to_stdout: true)
+                cd: path,
+                stderr_to_stdout: true
+              )
+
               Logger.debug("Auto-committed changes in worktree for ghost #{state.ghost_id}")
             end
 
@@ -1140,17 +1203,22 @@ defmodule GiTF.Ghost.Worker do
   defp record_files_changed(state) do
     case Archive.get(:shells, state.shell_id) do
       %{worktree_path: path} when is_binary(path) ->
-        case GiTF.Git.safe_cmd( ["diff", "--name-only", "HEAD~1..HEAD"],
-               cd: path, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd(["diff", "--name-only", "HEAD~1..HEAD"],
+               cd: path,
+               stderr_to_stdout: true
+             ) do
           {output, 0} ->
             files = String.split(output, "\n", trim: true)
 
             case GiTF.Ops.get(state.op_id) do
               {:ok, op} ->
-                Archive.put(:ops, Map.merge(op, %{
-                  files_changed: length(files),
-                  changed_files: files
-                }))
+                Archive.put(
+                  :ops,
+                  Map.merge(op, %{
+                    files_changed: length(files),
+                    changed_files: files
+                  })
+                )
 
               _ ->
                 :ok
@@ -1246,7 +1314,10 @@ defmodule GiTF.Ghost.Worker do
       if input > 0 or output > 0 do
         case GiTF.Runtime.ContextMonitor.record_usage(ghost_id, input, output) do
           {:ok, :transfer_needed} ->
-            Logger.warning("Ghost #{ghost_id} needs transfer - context at critical level, triggering")
+            Logger.warning(
+              "Ghost #{ghost_id} needs transfer - context at critical level, triggering"
+            )
+
             send(self(), :context_handoff)
 
           {:ok, :critical} ->
@@ -1291,13 +1362,16 @@ defmodule GiTF.Ghost.Worker do
         case Archive.get(:shells, state.shell_id) do
           %{worktree_path: path} ->
             prompt = build_prompt(state)
-            task = Task.async(fn ->
-              GiTF.Runtime.AgentLoop.run(prompt, path,
-                model: fallback,
-                tool_set: :standard,
-                include_dynamic: true
-              )
-            end)
+
+            task =
+              Task.async(fn ->
+                GiTF.Runtime.AgentLoop.run(prompt, path,
+                  model: fallback,
+                  tool_set: :standard,
+                  include_dynamic: true
+                )
+              end)
+
             {:ok, task, fallback}
 
           _ ->

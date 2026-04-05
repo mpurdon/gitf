@@ -26,7 +26,7 @@ defmodule GiTF.Transfer do
 
   Captures the ghost's current op state, recent links, shell info, and
   stores it as a link_msg from the ghost to itself with subject "transfer".
-  
+
   Also creates a context snapshot for tracking purposes.
 
   Returns `{:ok, link_msg}` with the transfer content.
@@ -226,7 +226,12 @@ defmodule GiTF.Transfer do
     error_waggles =
       Archive.filter(:links, fn w ->
         w.from == ghost_id and
-          w.subject in ["job_failed", "verification_failed", "validation_failed", "merge_conflict"]
+          w.subject in [
+            "job_failed",
+            "verification_failed",
+            "validation_failed",
+            "merge_conflict"
+          ]
       end)
       |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
       |> Enum.take(5)

@@ -47,7 +47,12 @@ defmodule GiTF.Brief do
 
   defp build_major_state_summary do
     ghosts = Archive.all(:ghosts)
-    active_ghosts = Enum.filter(ghosts, &(&1.status in [GhostStatus.working(), GhostStatus.idle(), GhostStatus.starting()]))
+
+    active_ghosts =
+      Enum.filter(
+        ghosts,
+        &(&1.status in [GhostStatus.working(), GhostStatus.idle(), GhostStatus.starting()])
+      )
 
     pending_quests =
       Archive.filter(:missions, fn q -> q.status in ["pending", "active", "planning"] end)
@@ -281,7 +286,8 @@ defmodule GiTF.Brief do
     else
       mission = Archive.get(:missions, op.mission_id)
 
-      if is_nil(mission) or is_nil(Map.get(mission, :artifacts)) or map_size(Map.get(mission, :artifacts, %{})) == 0 do
+      if is_nil(mission) or is_nil(Map.get(mission, :artifacts)) or
+           map_size(Map.get(mission, :artifacts, %{})) == 0 do
         ""
       else
         sections = []
@@ -299,7 +305,8 @@ defmodule GiTF.Brief do
               formatted =
                 Enum.map_join(func_reqs, "\n", fn req ->
                   criteria = Map.get(req, "acceptance_criteria", [])
-                  criteria_str = Enum.map_join(criteria, "\n", &("    - #{&1}"))
+                  criteria_str = Enum.map_join(criteria, "\n", &"    - #{&1}")
+
                   "- **#{Map.get(req, "id", "?")}**: #{Map.get(req, "description", "")}\n#{criteria_str}"
                 end)
 
@@ -324,7 +331,7 @@ defmodule GiTF.Brief do
               sections
 
             criteria ->
-              formatted = Enum.map_join(criteria, "\n", &("- [ ] #{&1}"))
+              formatted = Enum.map_join(criteria, "\n", &"- [ ] #{&1}")
               sections ++ ["## Acceptance Criteria (Your Job)\n", formatted, ""]
           end
 

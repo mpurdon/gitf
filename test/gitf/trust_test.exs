@@ -31,7 +31,7 @@ defmodule GiTF.TrustTest do
 
   describe "model_reputation/2" do
     test "returns nil when no data exists" do
-      assert Trust.model_reputation("sonnet", :implementation) == nil
+      assert Trust.model_reputation("general", :implementation) == nil
     end
 
     test "computes success rate from op history", %{mission: mission, sector: sector} do
@@ -43,8 +43,8 @@ defmodule GiTF.TrustTest do
             mission_id: mission.id,
             sector_id: sector.id,
             op_type: :implementation,
-            recommended_model: "sonnet",
-            assigned_model: "sonnet",
+            recommended_model: "general",
+            assigned_model: "general",
             status: "done"
           })
       end
@@ -56,12 +56,12 @@ defmodule GiTF.TrustTest do
           mission_id: mission.id,
           sector_id: sector.id,
           op_type: :implementation,
-          recommended_model: "sonnet",
-          assigned_model: "sonnet",
+          recommended_model: "general",
+          assigned_model: "general",
           status: "failed"
         })
 
-      rep = Trust.model_reputation("sonnet", :implementation)
+      rep = Trust.model_reputation("general", :implementation)
       assert rep != nil
       assert rep.success_rate == 0.75
       assert rep.total_jobs == 4
@@ -74,17 +74,17 @@ defmodule GiTF.TrustTest do
           mission_id: mission.id,
           sector_id: sector.id,
           op_type: :research,
-          recommended_model: "haiku",
-          assigned_model: "haiku",
+          recommended_model: "fast",
+          assigned_model: "fast",
           status: "done"
         })
 
       # First call computes
-      rep1 = Trust.model_reputation("haiku", :research)
+      rep1 = Trust.model_reputation("fast", :research)
       assert rep1.success_rate == 1.0
 
       # Second call should return cached
-      rep2 = Trust.model_reputation("haiku", :research)
+      rep2 = Trust.model_reputation("fast", :research)
       assert rep2.computed_at == rep1.computed_at
     end
   end
@@ -93,7 +93,7 @@ defmodule GiTF.TrustTest do
     test "falls back to ModelSelector when no trust data" do
       model = Trust.recommend_model(:implementation, :complex)
       # Should return something valid
-      assert model in ["opus", "sonnet", "haiku"]
+      assert model in ["thinking", "general", "fast"]
     end
 
     test "uses trust data when available", %{mission: mission, sector: sector} do
@@ -105,14 +105,14 @@ defmodule GiTF.TrustTest do
             mission_id: mission.id,
             sector_id: sector.id,
             op_type: :research,
-            recommended_model: "haiku",
-            assigned_model: "haiku",
+            recommended_model: "fast",
+            assigned_model: "fast",
             status: "done"
           })
       end
 
       model = Trust.recommend_model(:research, :simple)
-      assert model == "haiku"
+      assert model == "fast"
     end
   end
 
@@ -124,19 +124,19 @@ defmodule GiTF.TrustTest do
           mission_id: mission.id,
           sector_id: sector.id,
           op_type: :implementation,
-          recommended_model: "sonnet",
-          assigned_model: "sonnet",
+          recommended_model: "general",
+          assigned_model: "general",
           status: "done"
         })
 
       # Compute trust to cache it
-      _rep = Trust.model_reputation("sonnet", :implementation)
+      _rep = Trust.model_reputation("general", :implementation)
 
       # Invalidate
       assert :ok == Trust.update_after_job(op.id)
 
       # Next call should recompute (may return same data but with fresh timestamp)
-      rep2 = Trust.model_reputation("sonnet", :implementation)
+      rep2 = Trust.model_reputation("general", :implementation)
       assert rep2 != nil
     end
 

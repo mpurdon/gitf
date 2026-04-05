@@ -106,7 +106,9 @@ defmodule GiTF.Sync do
   defp create_pr_via_gh(repo_path, branch, title, body) do
     # Push the branch to origin
     case GiTF.Git.safe_cmd(["push", "-u", "origin", branch],
-           cd: repo_path, stderr_to_stdout: true) do
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {_, 0} ->
         :ok
 
@@ -125,13 +127,20 @@ defmodule GiTF.Sync do
     {:ok, base} = detect_main_branch(repo_path)
 
     # Create PR via gh CLI
-    case System.cmd("gh", [
-           "pr", "create",
-           "--head", branch,
-           "--base", base,
-           "--title", title,
-           "--body", String.slice(body, 0, 4000)
-         ], cd: repo_path, stderr_to_stdout: true) do
+    case System.cmd(
+           "gh",
+           [
+             "pr",
+             "create",
+             "--head",
+             branch,
+             "--base",
+             base,
+             "--title",
+             title,
+             "--body",
+             String.slice(body, 0, 4000)
+           ], cd: repo_path, stderr_to_stdout: true) do
       {output, 0} ->
         url = output |> String.trim()
         Logger.info("PR created via gh CLI: #{url}")
@@ -333,7 +342,7 @@ defmodule GiTF.Sync do
           {:error, reason} ->
             Logger.warning("Failed to sync #{shell.branch}: #{inspect(reason)}")
             # Abort the failed sync so subsequent merges can proceed
-            GiTF.Git.safe_cmd( ["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
+            GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
             {:error, shell.branch, reason}
         end
       end)
@@ -345,8 +354,11 @@ defmodule GiTF.Sync do
       {:ok, quest_branch}
     else
       # Roll back to savepoint — none of the merges should persist if any failed
-      Logger.warning("Rolling back mission branch #{quest_branch} to savepoint due to sync failures")
-      GiTF.Git.safe_cmd( ["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
+      Logger.warning(
+        "Rolling back mission branch #{quest_branch} to savepoint due to sync failures"
+      )
+
+      GiTF.Git.safe_cmd(["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
       failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
       {:error, {:merge_conflicts, quest_branch, failed_branches}}
     end
@@ -355,7 +367,7 @@ defmodule GiTF.Sync do
   # -- Private: git helpers ----------------------------------------------------
 
   defp get_head(repo_path) do
-    case GiTF.Git.safe_cmd( ["rev-parse", "HEAD"],
+    case GiTF.Git.safe_cmd(["rev-parse", "HEAD"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -366,6 +378,7 @@ defmodule GiTF.Sync do
 
   defp cleanup_stale_merge_state(repo_path) do
     merge_head = Path.join([repo_path, ".git", "MERGE_HEAD"])
+
     if File.exists?(merge_head) do
       Logger.warning("Stale MERGE_HEAD found in #{repo_path}, aborting interrupted sync")
       GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
@@ -376,21 +389,21 @@ defmodule GiTF.Sync do
 
   defp rollback_merge(repo_path, original_head) do
     # First try to abort any in-progress sync
-    GiTF.Git.safe_cmd( ["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
+    GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
 
     # Then restore the original HEAD
     if original_head do
-      GiTF.Git.safe_cmd( ["reset", "--hard", original_head], cd: repo_path, stderr_to_stdout: true)
+      GiTF.Git.safe_cmd(["reset", "--hard", original_head], cd: repo_path, stderr_to_stdout: true)
     end
 
     # Verify the repo is in a clean state
-    case GiTF.Git.safe_cmd( ["status", "--porcelain"], cd: repo_path, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["status", "--porcelain"], cd: repo_path, stderr_to_stdout: true) do
       {output, 0} ->
         if String.contains?(output, "UU") or String.contains?(output, "AA") do
           # Still has unresolved conflicts — force clean
           Logger.warning("Repo still dirty after rollback, force-cleaning #{repo_path}")
-          GiTF.Git.safe_cmd( ["checkout", "--", "."], cd: repo_path, stderr_to_stdout: true)
-          GiTF.Git.safe_cmd( ["clean", "-fd"], cd: repo_path, stderr_to_stdout: true)
+          GiTF.Git.safe_cmd(["checkout", "--", "."], cd: repo_path, stderr_to_stdout: true)
+          GiTF.Git.safe_cmd(["clean", "-fd"], cd: repo_path, stderr_to_stdout: true)
         end
 
       {_, _code} ->
@@ -406,8 +419,11 @@ defmodule GiTF.Sync do
 
   defp repair_repo(repo_path) do
     # Try fsck first
-    case GiTF.Git.safe_cmd( ["fsck", "--no-dangling"],
-           cd: repo_path, stderr_to_stdout: true, env: [{"GIT_DIR", ".git"}]) do
+    case GiTF.Git.safe_cmd(["fsck", "--no-dangling"],
+           cd: repo_path,
+           stderr_to_stdout: true,
+           env: [{"GIT_DIR", ".git"}]
+         ) do
       {_, 0} ->
         Logger.info("Git fsck passed for #{repo_path}")
 
@@ -416,7 +432,8 @@ defmodule GiTF.Sync do
         # Force checkout to recover
         case detect_main_branch(repo_path) do
           {:ok, main} ->
-            GiTF.Git.safe_cmd( ["checkout", "-f", main], cd: repo_path, stderr_to_stdout: true)
+            GiTF.Git.safe_cmd(["checkout", "-f", main], cd: repo_path, stderr_to_stdout: true)
+
           _ ->
             :ok
         end
@@ -426,7 +443,7 @@ defmodule GiTF.Sync do
   end
 
   defp rebase_branch(worktree_path, main_branch) do
-    case GiTF.Git.safe_cmd( ["rebase", main_branch],
+    case GiTF.Git.safe_cmd(["rebase", main_branch],
            cd: worktree_path,
            stderr_to_stdout: true
          ) do
@@ -434,7 +451,7 @@ defmodule GiTF.Sync do
         :ok
 
       {output, _code} ->
-        GiTF.Git.safe_cmd( ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
+        GiTF.Git.safe_cmd(["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
         {:error, {:rebase_failed, String.slice(output, 0, 200)}}
     end
   end

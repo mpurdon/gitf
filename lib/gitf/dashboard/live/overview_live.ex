@@ -20,6 +20,10 @@ defmodule GiTF.Dashboard.OverviewLive do
     if connected?(socket) do
       # Subscribe to all link_msg traffic for live updates
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "ops")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "ghosts")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "costs")
+
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
@@ -33,6 +37,18 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   def handle_info({:waggle_received, _waggle}, socket) do
+    {:noreply, assign_data(socket)}
+  end
+
+  def handle_info({:op_updated, _op}, socket) do
+    {:noreply, assign_data(socket)}
+  end
+
+  def handle_info({:ghost_updated, _ghost}, socket) do
+    {:noreply, assign_data(socket)}
+  end
+
+  def handle_info({:cost_recorded, _cost}, socket) do
     {:noreply, assign_data(socket)}
   end
 
@@ -58,10 +74,12 @@ defmodule GiTF.Dashboard.OverviewLive do
       {:noreply, put_flash(socket, :error, "Goal cannot be empty")}
     else
       sectors = GiTF.Sector.list()
-      sector_id = case sectors do
-        [s] -> s.id
-        _ -> nil
-      end
+
+      sector_id =
+        case sectors do
+          [s] -> s.id
+          _ -> nil
+        end
 
       attrs = %{goal: goal}
       attrs = if sector_id, do: Map.put(attrs, :sector_id, sector_id), else: attrs
@@ -111,30 +129,39 @@ defmodule GiTF.Dashboard.OverviewLive do
 
     # "Fuel remaining" = inverse of average usage (100% = full tank, 0% = empty)
     fuel_remaining = max(0.0, 100.0 - avg_context)
-    
+
     # Audit stats
     ops = GiTF.Ops.list()
     verified_jobs = Enum.count(ops, &(Map.get(&1, :verification_status) == "passed"))
     failed_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "failed"))
-    pending_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "pending" and Map.get(&1, :status) == "done"))
+
+    pending_verification =
+      Enum.count(
+        ops,
+        &(Map.get(&1, :verification_status) == "pending" and Map.get(&1, :status) == "done")
+      )
 
     # Quest phases
     research_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "research"))
     planning_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "planning"))
-    implementation_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "implementation"))
+
+    implementation_quests =
+      Enum.count(missions, &(Map.get(&1, :current_phase) == "implementation"))
 
     # Approvals & sectors
-    pending_approvals = try do
-      length(GiTF.Override.pending_approvals())
-    rescue
-      _ -> 0
-    end
+    pending_approvals =
+      try do
+        length(GiTF.Override.pending_approvals())
+      rescue
+        _ -> 0
+      end
 
-    sectors = try do
-      GiTF.Sector.list()
-    rescue
-      _ -> []
-    end
+    sectors =
+      try do
+        GiTF.Sector.list()
+      rescue
+        _ -> []
+      end
 
     sector_count = length(sectors)
 
@@ -232,6 +259,7 @@ defmodule GiTF.Dashboard.OverviewLive do
 
   defp safe_unix_ts(record) do
     ts = Map.get(record, :updated_at) || Map.get(record, :inserted_at)
+
     case ts do
       %DateTime{} -> DateTime.to_unix(ts)
       _ -> 0
@@ -240,7 +268,8 @@ defmodule GiTF.Dashboard.OverviewLive do
 
   defp short_model_name(name) when is_binary(name) do
     name
-    |> String.replace(~r"^(google|anthropic):", "")
+    |> String.replace(~r"^(google|anthropic|bedrock|openai|amazon):", "")
+    |> String.replace(~r"^(anthropic\.|amazon\.)", "")
     |> String.replace("gemini-", "")
     |> String.replace("claude-", "")
   end
@@ -517,5 +546,4 @@ defmodule GiTF.Dashboard.OverviewLive do
     </.live_component>
     """
   end
-
 end

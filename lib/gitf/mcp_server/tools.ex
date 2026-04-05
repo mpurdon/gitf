@@ -15,8 +15,15 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{
           type: "object",
           properties: %{
-            status: %{type: "string", description: "Filter by status (pending, active, completed, closed, killed)"},
-            all: %{type: "boolean", description: "Include completed/closed missions", default: false}
+            status: %{
+              type: "string",
+              description: "Filter by status (pending, active, completed, closed, killed)"
+            },
+            all: %{
+              type: "boolean",
+              description: "Include completed/closed missions",
+              default: false
+            }
           }
         }
       },
@@ -68,7 +75,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "costs_summary",
-        description: "Get cost breakdown by model, ghost, and category. Shows total tokens and USD spent.",
+        description:
+          "Get cost breakdown by model, ghost, and category. Shows total tokens and USD spent.",
         inputSchema: %{type: "object", properties: %{}}
       },
       %{
@@ -85,7 +93,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "mission_report",
-        description: "Generate a formatted performance report for a mission (timing, tokens, cost, output).",
+        description:
+          "Generate a formatted performance report for a mission (timing, tokens, cost, output).",
         inputSchema: %{
           type: "object",
           properties: %{id: %{type: "string", description: "Mission ID"}},
@@ -94,17 +103,23 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "health_check",
-        description: "Run system health checks (pubsub, store, disk, memory, model API, git, major).",
+        description:
+          "Run system health checks (pubsub, store, disk, memory, model API, git, major).",
         inputSchema: %{type: "object", properties: %{}}
       },
       %{
         name: "mission_timeline",
-        description: "Get the full chronological event timeline for a mission. Shows every spawn, completion, failure, merge, and phase transition. Essential for diagnosing what went wrong.",
+        description:
+          "Get the full chronological event timeline for a mission. Shows every spawn, completion, failure, merge, and phase transition. Essential for diagnosing what went wrong.",
         inputSchema: %{
           type: "object",
           properties: %{
             id: %{type: "string", description: "Mission ID"},
-            limit: %{type: "integer", description: "Max events to return (default 50)", default: 50}
+            limit: %{
+              type: "integer",
+              description: "Max events to return (default 50)",
+              default: 50
+            }
           },
           required: ["id"]
         }
@@ -112,14 +127,22 @@ defmodule GiTF.MCPServer.Tools do
       # -- Write operations (require confirm: true) ----------------------------
       %{
         name: "create_mission",
-        description: "[WRITE] Create a new mission with a goal. Optionally assign to a sector. Requires confirm: true.",
+        description:
+          "[WRITE] Create a new mission with a goal. Optionally assign to a sector. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
             goal: %{type: "string", description: "The mission objective"},
             sector_id: %{type: "string", description: "Sector to assign the mission to"},
-            name: %{type: "string", description: "Human-friendly mission name (auto-generated if omitted)"},
-            review_plan: %{type: "boolean", description: "Pause at planning phase for manual review in the dashboard", default: false},
+            name: %{
+              type: "string",
+              description: "Human-friendly mission name (auto-generated if omitted)"
+            },
+            review_plan: %{
+              type: "boolean",
+              description: "Pause at planning phase for manual review in the dashboard",
+              default: false
+            },
             confirm: %{type: "boolean", description: "Must be true to execute"}
           },
           required: ["goal", "confirm"]
@@ -127,12 +150,17 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "start_mission",
-        description: "[WRITE] Start a mission (or restart a stalled one). Kicks off the phase pipeline from research. Requires confirm: true.",
+        description:
+          "[WRITE] Start a mission (or restart a stalled one). Kicks off the phase pipeline from research. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
             id: %{type: "string", description: "Mission ID"},
-            fast: %{type: "boolean", description: "Use fast path (skip full pipeline, single implementation op)", default: false},
+            fast: %{
+              type: "boolean",
+              description: "Use fast path (skip full pipeline, single implementation op)",
+              default: false
+            },
             confirm: %{type: "boolean", description: "Must be true to execute"}
           },
           required: ["id", "confirm"]
@@ -140,7 +168,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "kill_mission",
-        description: "[WRITE] Kill a mission and all its ops/ghosts. This is destructive. Requires confirm: true.",
+        description:
+          "[WRITE] Kill a mission and all its ops/ghosts. This is destructive. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
@@ -152,7 +181,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "close_mission",
-        description: "[WRITE] Close a completed mission and clean up its shells. Requires confirm: true.",
+        description:
+          "[WRITE] Close a completed mission and clean up its shells. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
@@ -164,7 +194,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "delete_mission",
-        description: "[WRITE] Permanently delete a mission record. This is destructive and irreversible. Requires confirm: true.",
+        description:
+          "[WRITE] Permanently delete a mission record. This is destructive and irreversible. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
@@ -176,7 +207,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "reset_op",
-        description: "[WRITE] Reset a failed or stuck op so it can be retried. Stops its ghost and cleans up its shell. Requires confirm: true.",
+        description:
+          "[WRITE] Reset a failed or stuck op so it can be retried. Stops its ghost and cleans up its shell. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
@@ -229,12 +261,15 @@ defmodule GiTF.MCPServer.Tools do
         name: "test_provider",
         description:
           "Test an LLM provider connection using the same code path ghosts use. " <>
-          "Sends 'Say OK' via ReqLLM or BedrockDirect and verifies the response has content. " <>
-          "Returns latency on success or diagnostic details on failure.",
+            "Sends 'Say OK' via ReqLLM or BedrockDirect and verifies the response has content. " <>
+            "Returns latency on success or diagnostic details on failure.",
         inputSchema: %{
           type: "object",
           properties: %{
-            provider: %{type: "string", description: "Provider name: google, bedrock, anthropic, openai, etc."},
+            provider: %{
+              type: "string",
+              description: "Provider name: google, bedrock, anthropic, openai, etc."
+            },
             all: %{type: "boolean", description: "Test ALL configured providers", default: false}
           }
         }

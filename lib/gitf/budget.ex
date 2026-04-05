@@ -79,7 +79,8 @@ defmodule GiTF.Budget do
   # Warn when estimated cost exceeds this fraction of remaining budget
   @warn_threshold 0.7
 
-  @spec preflight_check(String.t()) :: :ok | {:warn, float(), float()} | {:error, :would_exceed, float(), float()}
+  @spec preflight_check(String.t()) ::
+          :ok | {:warn, float(), float()} | {:error, :would_exceed, float(), float()}
   def preflight_check(mission_id) do
     remaining = remaining(mission_id)
     estimated = estimate_remaining_cost(mission_id)

@@ -86,8 +86,10 @@ defmodule GiTF.Sync.History do
   # -- Private -----------------------------------------------------------------
 
   defp files_overlap?(nil, _set), do: false
+
   defp files_overlap?(files, set) when is_list(files) do
     Enum.any?(files, &MapSet.member?(set, &1))
   end
+
   defp files_overlap?(_, _), do: false
 end

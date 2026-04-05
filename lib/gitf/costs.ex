@@ -22,6 +22,10 @@ defmodule GiTF.Costs do
   """
   @spec record(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def record(ghost_id, attrs) do
+    # Normalize model name early (e.g. AWS Bedrock ARNs to short names)
+    attrs = Map.update(attrs, :model, nil, &normalize_model/1)
+    attrs = Map.update(attrs, "model", nil, &normalize_model/1)
+
     attrs =
       attrs
       |> Map.put(:ghost_id, ghost_id)
@@ -37,7 +41,7 @@ defmodule GiTF.Costs do
       cache_read_tokens: attrs[:cache_read_tokens] || 0,
       cache_write_tokens: attrs[:cache_write_tokens] || 0,
       cost_usd: attrs[:cost_usd],
-      model: attrs[:model],
+      model: attrs[:model] || attrs["model"],
       category: category,
       recorded_at: attrs[:recorded_at]
     }
@@ -45,14 +49,18 @@ defmodule GiTF.Costs do
     {:ok, cost} = Archive.insert(:costs, record)
     broadcast_cost_update(cost)
 
-    GiTF.Telemetry.emit([:gitf, :token, :consumed], %{
-      input: cost.input_tokens,
-      output: cost.output_tokens,
-      cost: cost.cost_usd
-    }, %{
-      model: cost.model,
-      ghost_id: cost.ghost_id
-    })
+    GiTF.Telemetry.emit(
+      [:gitf, :token, :consumed],
+      %{
+        input: cost.input_tokens,
+        output: cost.output_tokens,
+        cost: cost.cost_usd
+      },
+      %{
+        model: cost.model,
+        ghost_id: cost.ghost_id
+      }
+    )
 
     {:ok, cost}
   end
@@ -98,13 +106,23 @@ defmodule GiTF.Costs do
   """
   @spec summary() :: map()
   def summary do
-    costs = Archive.all(:costs)
+    costs =
+      Archive.all(:costs)
+      |> Enum.map(fn c ->
+        c = Map.update(c, :model, nil, &normalize_model/1)
+
+        if Map.get(c, :cost_usd) in [nil, 0, 0.0] do
+          Map.put(c, :cost_usd, calculate_cost(c))
+        else
+          c
+        end
+      end)
 
     %{
       total_cost: total(costs),
       total_input_tokens: costs |> Enum.map(&Map.get(&1, :input_tokens, 0)) |> Enum.sum(),
       total_output_tokens: costs |> Enum.map(&Map.get(&1, :output_tokens, 0)) |> Enum.sum(),
-      by_model: group_costs_by(costs, &Map.get(&1, :model)),
+      by_model: group_costs_by(costs, fn c -> Map.get(c, :model) end),
       by_bee: group_costs_by(costs, &Map.get(&1, :ghost_id)),
       by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown"))
     }
@@ -161,6 +179,33 @@ defmodule GiTF.Costs do
   end
 
   defp derive_category(_), do: "unknown"
+
+  # Normalize complex model ARNs to base names for pricing/display
+  defp normalize_model(nil), do: nil
+
+  defp normalize_model(model) when is_binary(model) do
+    cond do
+      String.starts_with?(model, "arn:aws:bedrock:") and String.contains?(model, "sonnet") ->
+        "bedrock:anthropic.claude-sonnet-4-6"
+
+      String.starts_with?(model, "arn:aws:bedrock:") and String.contains?(model, "haiku") ->
+        "bedrock:anthropic.claude-haiku-4-5"
+
+      String.starts_with?(model, "arn:aws:bedrock:") and String.contains?(model, "opus") ->
+        "bedrock:anthropic.claude-opus-4-6"
+
+      String.starts_with?(model, "arn:aws:bedrock:") and String.contains?(model, "nova-pro") ->
+        "bedrock:amazon.nova-pro"
+
+      String.starts_with?(model, "arn:aws:bedrock:") and String.contains?(model, "nova-lite") ->
+        "bedrock:amazon.nova-lite"
+
+      true ->
+        model
+    end
+  end
+
+  defp normalize_model(model), do: model
 
   # Fallback pricing table — ensures existing tests pass without Plugin.Manager running
   defp default_pricing do
@@ -231,7 +276,25 @@ defmodule GiTF.Costs do
     Map.put(attrs, :recorded_at, DateTime.utc_now() |> DateTime.truncate(:second))
   end
 
+  defp maybe_calculate_cost(%{cost_usd: cost} = attrs)
+       when is_nil(cost) or cost == 0 or cost == 0.0 do
+    Map.put(attrs, :cost_usd, calculate_cost(attrs))
+  end
+
+  defp maybe_calculate_cost(%{"cost_usd" => cost} = attrs)
+       when is_nil(cost) or cost == 0 or cost == 0.0 do
+    attrs
+    |> Map.delete("cost_usd")
+    |> Map.put(:cost_usd, calculate_cost(attrs))
+  end
+
   defp maybe_calculate_cost(%{cost_usd: _} = attrs), do: attrs
+
+  defp maybe_calculate_cost(%{"cost_usd" => cost} = attrs) do
+    attrs
+    |> Map.delete("cost_usd")
+    |> Map.put(:cost_usd, cost)
+  end
 
   defp maybe_calculate_cost(attrs) do
     Map.put(attrs, :cost_usd, calculate_cost(attrs))

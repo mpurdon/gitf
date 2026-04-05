@@ -136,6 +136,7 @@ defmodule GiTF.MCPServer.SocketListener do
           process_alive?(old_pid) ->
             # Give the old process a moment to die (common after Ctrl+C a)
             Process.sleep(500)
+
             if process_alive?(old_pid) do
               {:error, :already_running}
             else

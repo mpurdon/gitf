@@ -78,7 +78,9 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
 
   defp find_retry_root(op, by_id) do
     case Map.get(op, :retry_of) do
-      nil -> op.id
+      nil ->
+        op.id
+
       parent_id ->
         case Map.get(by_id, parent_id) do
           nil -> parent_id
@@ -104,7 +106,9 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
   defp load_ghost_info(failed_ops) do
     Enum.reduce(failed_ops, %{}, fn op, acc ->
       case Map.get(op, :ghost_id) do
-        nil -> acc
+        nil ->
+          acc
+
         ghost_id ->
           case GiTF.Ghosts.get(ghost_id) do
             {:ok, ghost} ->
@@ -118,8 +122,11 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
                 rescue
                   _ -> nil
                 end
+
               Map.put(acc, op.id, %{ghost: ghost, checkpoint: backup})
-            _ -> acc
+
+            _ ->
+              acc
           end
       end
     end)

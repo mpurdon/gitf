@@ -54,14 +54,15 @@ defmodule GiTF.TUI.Context.Plan do
         }
       end)
 
-    %{state |
-      mission_id: mission_id,
-      goal: goal,
-      sections: sections,
-      selected: 0,
-      mode: :reviewing,
-      candidates: candidates,
-      candidate_index: 0
+    %{
+      state
+      | mission_id: mission_id,
+        goal: goal,
+        sections: sections,
+        selected: 0,
+        mode: :reviewing,
+        candidates: candidates,
+        candidate_index: 0
     }
   end
 
@@ -116,6 +117,7 @@ defmodule GiTF.TUI.Context.Plan do
 
   @doc "Cycle to the next candidate plan (wraps around)."
   def next_candidate(%{candidates: []} = state), do: state
+
   def next_candidate(%{candidates: candidates, candidate_index: idx} = state) do
     next_idx = rem(idx + 1, length(candidates))
     %{state | candidate_index: next_idx}
@@ -126,17 +128,28 @@ defmodule GiTF.TUI.Context.Plan do
 
   @doc "Returns {strategy, score} for the current candidate index."
   def current_strategy(%{candidates: [], candidate_index: _}), do: nil
+
   def current_strategy(%{candidates: candidates, candidate_index: idx}) do
     candidate = Enum.at(candidates, idx)
+
     if candidate do
-      strategy = candidate[:strategy] || candidate.strategy
-      score = candidate[:score] || candidate.score
+      strategy = candidate[:strategy] || candidate["strategy"] || "unknown"
+      score = candidate[:score] || candidate["score"] || 0.0
       {strategy, score}
     end
   end
 
   @doc "Reset to hidden state."
   def dismiss(state) do
-    %{state | mode: :hidden, sections: [], selected: 0, mission_id: nil, goal: nil, candidates: [], candidate_index: 0}
+    %{
+      state
+      | mode: :hidden,
+        sections: [],
+        selected: 0,
+        mission_id: nil,
+        goal: nil,
+        candidates: [],
+        candidate_index: 0
+    }
   end
 end

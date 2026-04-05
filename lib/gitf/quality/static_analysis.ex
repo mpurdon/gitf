@@ -21,13 +21,21 @@ defmodule GiTF.Quality.StaticAnalysis do
   @analysis_timeout_ms 120_000
 
   defp run_credo(path) do
-    task = Task.async(fn ->
-      System.cmd("mix", ["credo", "--format", "json", "--strict"],
-        cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        try do
+          System.cmd("mix", ["credo", "--format", "json", "--strict"],
+            cd: path,
+            stderr_to_stdout: true
+          )
+        rescue
+          _ -> :error
+        end
+      end)
 
     case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} -> parse_credo(output)
+      {:ok, :error} -> {:ok, %{issues: [], score: 100, tool: "credo", available: false}}
       nil -> {:ok, %{issues: [], score: 100, tool: "credo", available: false}}
     end
   rescue
@@ -35,13 +43,18 @@ defmodule GiTF.Quality.StaticAnalysis do
   end
 
   defp run_eslint(path) do
-    task = Task.async(fn ->
-      System.cmd("npx", ["eslint", ".", "--format", "json"],
-        cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        try do
+          System.cmd("npx", ["eslint", ".", "--format", "json"], cd: path, stderr_to_stdout: true)
+        rescue
+          _ -> :error
+        end
+      end)
 
     case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} -> parse_eslint(output)
+      {:ok, :error} -> {:ok, %{issues: [], score: 100, tool: "eslint", available: false}}
       nil -> {:ok, %{issues: [], score: 100, tool: "eslint", available: false}}
     end
   rescue
@@ -49,13 +62,21 @@ defmodule GiTF.Quality.StaticAnalysis do
   end
 
   defp run_clippy(path) do
-    task = Task.async(fn ->
-      System.cmd("cargo", ["clippy", "--message-format", "json"],
-        cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        try do
+          System.cmd("cargo", ["clippy", "--message-format", "json"],
+            cd: path,
+            stderr_to_stdout: true
+          )
+        rescue
+          _ -> :error
+        end
+      end)
 
     case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} -> parse_clippy(output)
+      {:ok, :error} -> {:ok, %{issues: [], score: 100, tool: "clippy", available: false}}
       nil -> {:ok, %{issues: [], score: 100, tool: "clippy", available: false}}
     end
   rescue
@@ -63,13 +84,18 @@ defmodule GiTF.Quality.StaticAnalysis do
   end
 
   defp run_pylint(path) do
-    task = Task.async(fn ->
-      System.cmd("pylint", [".", "--output-format", "json"],
-        cd: path, stderr_to_stdout: true)
-    end)
+    task =
+      Task.async(fn ->
+        try do
+          System.cmd("pylint", [".", "--output-format", "json"], cd: path, stderr_to_stdout: true)
+        rescue
+          _ -> :error
+        end
+      end)
 
     case Task.yield(task, @analysis_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} -> parse_pylint(output)
+      {:ok, :error} -> {:ok, %{issues: [], score: 100, tool: "pylint", available: false}}
       nil -> {:ok, %{issues: [], score: 100, tool: "pylint", available: false}}
     end
   rescue

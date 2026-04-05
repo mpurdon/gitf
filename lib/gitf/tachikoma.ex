@@ -85,7 +85,10 @@ defmodule GiTF.Tachikoma do
 
   @impl true
   def init(opts) do
-    interval = Keyword.get(opts, :poll_interval, @default_poll_interval)
+    interval =
+      Keyword.get(opts, :poll_interval) || GiTF.Config.get(:patrol_interval_ms) ||
+        @default_poll_interval
+
     auto_fix = Keyword.get(opts, :auto_fix, false)
     verify = Keyword.get(opts, :verify, false)
 
@@ -101,7 +104,11 @@ defmodule GiTF.Tachikoma do
     Phoenix.PubSub.subscribe(GiTF.PubSub, "tachikoma:review")
 
     schedule_patrol(interval)
-    Logger.info("Tachikoma started (interval: #{interval}ms, auto_fix: #{auto_fix}, verify: #{verify})")
+
+    Logger.info(
+      "Tachikoma started (interval: #{interval}ms, auto_fix: #{auto_fix}, verify: #{verify})"
+    )
+
     {:ok, state}
   end
 
@@ -188,7 +195,11 @@ defmodule GiTF.Tachikoma do
     check_blocked_ops()
 
     queen_results = check_major_heartbeat()
-    all_results = results ++ budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ queen_results
+
+    all_results =
+      results ++
+        budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ queen_results
+
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
     if issues != [] do
@@ -279,15 +290,18 @@ defmodule GiTF.Tachikoma do
       if age > @verification_max_age_seconds do
         # Job stuck in verification queue too long — skip verification, let it sync
         Logger.warning("Tachikoma: op #{op.id} stuck in verification for #{age}s, auto-passing")
+
         case GiTF.Ops.get(op.id) do
           {:ok, j} -> GiTF.Archive.put(:ops, Map.put(j, :verification_status, "passed"))
           _ -> :ok
         end
+
         []
       else
         case GiTF.Audit.verify_job(op.id) do
           {:ok, :pass, _result} ->
             []
+
           {:ok, :fail, result} ->
             [
               %{
@@ -296,6 +310,7 @@ defmodule GiTF.Tachikoma do
                 message: "Job #{op.id} verification failed: #{format_audit_result(result)}"
               }
             ]
+
           {:error, reason} ->
             [
               %{
@@ -334,15 +349,19 @@ defmodule GiTF.Tachikoma do
       {due, skipped} = Enum.split_with(sorted, &ProviderCircuit.probe_due?/1)
 
       if skipped != [] do
-        intervals = Enum.map(skipped, fn p ->
-          mode = ProviderCircuit.failure_mode(p)
-          "#{p}(#{mode}, #{ProviderCircuit.probe_interval(p)}s)"
-        end)
+        intervals =
+          Enum.map(skipped, fn p ->
+            mode = ProviderCircuit.failure_mode(p)
+            "#{p}(#{mode}, #{ProviderCircuit.probe_interval(p)}s)"
+          end)
+
         Logger.debug("Tachikoma: skipping probe for #{Enum.join(intervals, ", ")} — not due yet")
       end
 
       if due != [] do
-        Logger.info("Tachikoma: probing #{length(due)} open provider circuit(s): #{Enum.join(due, ", ")}")
+        Logger.info(
+          "Tachikoma: probing #{length(due)} open provider circuit(s): #{Enum.join(due, ", ")}"
+        )
       end
 
       # Run probes under TaskSupervisor to avoid blocking the Tachikoma GenServer.
@@ -354,7 +373,10 @@ defmodule GiTF.Tachikoma do
           case ProviderManager.test_connection(provider) do
             {:ok, latency_ms} ->
               ProviderCircuit.reset_provider(provider)
-              Logger.info("Tachikoma: provider #{provider} recovered (#{latency_ms}ms), circuit reset to closed")
+
+              Logger.info(
+                "Tachikoma: provider #{provider} recovered (#{latency_ms}ms), circuit reset to closed"
+              )
 
               Phoenix.PubSub.broadcast(
                 GiTF.PubSub,
@@ -362,9 +384,13 @@ defmodule GiTF.Tachikoma do
                 {:circuit_reset, provider, latency_ms}
               )
 
-              GiTF.Telemetry.emit([:gitf, :provider, :circuit_reset], %{latency_ms: latency_ms}, %{
-                provider: provider
-              })
+              GiTF.Telemetry.emit(
+                [:gitf, :provider, :circuit_reset],
+                %{latency_ms: latency_ms},
+                %{
+                  provider: provider
+                }
+              )
 
             {:error, reason} ->
               Logger.debug("Tachikoma: provider #{provider} still down: #{inspect(reason)}")
@@ -395,14 +421,18 @@ defmodule GiTF.Tachikoma do
       case GenServer.whereis(GiTF.Major) do
         nil ->
           # Major is dead — attempt auto-restart
-          Logger.warning("Major is not running but #{length(active_quests)} mission(s) are active, attempting restart")
+          Logger.warning(
+            "Major is not running but #{length(active_quests)} mission(s) are active, attempting restart"
+          )
+
           maybe_restart_major()
 
           [
             %{
               name: "queen_heartbeat",
               status: :error,
-              message: "Major is not running but #{length(active_quests)} mission(s) are active (restart attempted)"
+              message:
+                "Major is not running but #{length(active_quests)} mission(s) are active (restart attempted)"
             }
           ]
 
@@ -514,7 +544,12 @@ defmodule GiTF.Tachikoma do
               "Tachikoma: mission #{mission.id} has all ops failed/rejected with no active ghosts — marking failed"
             )
 
-            GiTF.Missions.transition_phase(mission.id, "completed", "All ops failed — auto-escalated by Tachikoma")
+            GiTF.Missions.transition_phase(
+              mission.id,
+              "completed",
+              "All ops failed — auto-escalated by Tachikoma"
+            )
+
             GiTF.Missions.update_status!(mission.id)
 
             GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
@@ -522,8 +557,12 @@ defmodule GiTF.Tachikoma do
               message: "Mission #{mission.id} auto-failed: all #{length(impl_jobs)} ops exhausted"
             })
 
-            GiTF.Link.send("tachikoma", "major", "mission_exhausted",
-              "Mission #{mission.id} auto-failed by Tachikoma: all ops exhausted retries")
+            GiTF.Link.send(
+              "tachikoma",
+              "major",
+              "mission_exhausted",
+              "Mission #{mission.id} auto-failed by Tachikoma: all ops exhausted retries"
+            )
           else
             # Mix of done + failed — let the orchestrator's check_implementation_complete handle it
             # Just trigger an advance attempt
@@ -579,21 +618,25 @@ defmodule GiTF.Tachikoma do
       {:ok, gitf_root} ->
         task = Task.async(fn -> System.cmd("df", ["-m", gitf_root], stderr_to_stdout: true) end)
 
-        df_result = case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
-          {:ok, cmd_result} -> cmd_result
-          nil -> {"", 1}
-        end
+        df_result =
+          case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
+            {:ok, cmd_result} -> cmd_result
+            nil -> {"", 1}
+          end
 
         case df_result do
           {output, 0} ->
-            # Parse df output: last line, 4th column is available MB
+            # Parse df output: find the line for the gitf root and extract available MB.
+            # Handles different df formats by matching the digits before the percentage.
             available_mb =
               output
               |> String.split("\n", trim: true)
-              |> List.last()
-              |> String.split(~r/\s+/)
-              |> Enum.at(3)
-              |> to_integer_safe()
+              |> Enum.find_value(fn line ->
+                case Regex.run(~r/(\d+)\s+\d+%\s+/, line) do
+                  [_, available] -> to_integer_safe(available)
+                  _ -> nil
+                end
+              end)
 
             if available_mb && available_mb < @low_disk_threshold_mb do
               Logger.warning("Low disk space (#{available_mb}MB), triggering cleanup")
@@ -611,6 +654,7 @@ defmodule GiTF.Tachikoma do
 
               # 2. Prune old store backups (keep only most recent)
               store_path = Path.join([gitf_root, ".gitf", "store"])
+
               if File.dir?(store_path) do
                 Path.wildcard(Path.join(store_path, "*.bak*"))
                 |> Enum.sort()
@@ -631,6 +675,7 @@ defmodule GiTF.Tachikoma do
   end
 
   defp to_integer_safe(nil), do: nil
+
   defp to_integer_safe(str) do
     case Integer.parse(str) do
       {n, _} -> n
@@ -649,10 +694,9 @@ defmodule GiTF.Tachikoma do
       :ok
   end
 
-  @prune_age_hours 48
-
   defp prune_old_store_data do
-    cutoff = DateTime.add(DateTime.utc_now(), -@prune_age_hours * 3600, :second)
+    prune_hours = GiTF.Config.get(:archive_prune_age_hours) || 48
+    cutoff = DateTime.add(DateTime.utc_now(), -prune_hours * 3600, :second)
 
     # Prune old read links (48h) and very old unread links (7d) to prevent unbounded growth
     unread_cutoff = DateTime.add(DateTime.utc_now(), -7 * 24 * 3600, :second)
@@ -686,6 +730,7 @@ defmodule GiTF.Tachikoma do
     prune_event_store()
 
     total = length(pruned_waggles) + length(pruned_runs)
+
     if total > 0 do
       Logger.info("Archive pruned: #{length(pruned_waggles)} links, #{length(pruned_runs)} runs")
     end
@@ -721,7 +766,9 @@ defmodule GiTF.Tachikoma do
     |> Enum.each(fn op ->
       worker_alive? =
         case op.ghost_id do
-          nil -> false
+          nil ->
+            false
+
           ghost_id ->
             case GiTF.Ghost.Worker.lookup(ghost_id) do
               {:ok, pid} -> Process.alive?(pid)
@@ -755,13 +802,19 @@ defmodule GiTF.Tachikoma do
       end)
       |> Enum.filter(fn op ->
         case op[:updated_at] do
-          %DateTime{} = t -> DateTime.diff(DateTime.utc_now(), t, :millisecond) > @retry_cooldown_ms
-          _ -> true
+          %DateTime{} = t ->
+            DateTime.diff(DateTime.utc_now(), t, :millisecond) > @retry_cooldown_ms
+
+          _ ->
+            true
         end
       end)
       |> Enum.reject(&retry_already_handled?/1)
       |> Enum.each(fn op ->
-        Logger.info("Tachikoma: auto-retrying failed op #{op.id} (retry #{(op[:retry_count] || 0) + 1}/#{@max_auto_retries})")
+        Logger.info(
+          "Tachikoma: auto-retrying failed op #{op.id} (retry #{(op[:retry_count] || 0) + 1}/#{@max_auto_retries})"
+        )
+
         GiTF.Ops.reset(op.id, nil)
       end)
     end
@@ -773,8 +826,8 @@ defmodule GiTF.Tachikoma do
 
   defp retry_already_handled?(op) do
     # A separate retry op was already created by Major
+    # Op is no longer failed (was reset by Major between filter and process)
     GiTF.Archive.find_one(:ops, fn j -> Map.get(j, :retry_of) == op.id end) != nil ||
-      # Op is no longer failed (was reset by Major between filter and process)
       case GiTF.Archive.get(:ops, op.id) do
         %{status: "failed"} -> false
         _ -> true
@@ -824,9 +877,12 @@ defmodule GiTF.Tachikoma do
 
   defp format_audit_result(result) do
     case Map.get(result, :validations) do
-      nil -> Map.get(result, :output, "Unknown failure")
+      nil ->
+        Map.get(result, :output, "Unknown failure")
+
       validations ->
         failed_validations = Enum.filter(validations, &(&1.status == "fail"))
+
         case failed_validations do
           [] -> "Unknown failure"
           [validation | _] -> validation.output || "Validation failed"
@@ -861,7 +917,10 @@ defmodule GiTF.Tachikoma do
 
       {:ok, :fail, result} ->
         if attempt < @verification_max_attempts do
-          Logger.info("Tachikoma: op #{op_id} failed verification (attempt #{attempt}/#{@verification_max_attempts}), retrying")
+          Logger.info(
+            "Tachikoma: op #{op_id} failed verification (attempt #{attempt}/#{@verification_max_attempts}), retrying"
+          )
+
           Process.sleep(attempt * 2_000)
           do_review_job_attempt(op_id, shell_id, attempt + 1)
         else
@@ -873,11 +932,17 @@ defmodule GiTF.Tachikoma do
 
       {:error, reason} ->
         if attempt < @verification_max_attempts do
-          Logger.info("Tachikoma: verification error for op #{op_id} (attempt #{attempt}/#{@verification_max_attempts}): #{inspect(reason)}, retrying")
+          Logger.info(
+            "Tachikoma: verification error for op #{op_id} (attempt #{attempt}/#{@verification_max_attempts}): #{inspect(reason)}, retrying"
+          )
+
           Process.sleep(attempt * 3_000)
           do_review_job_attempt(op_id, shell_id, attempt + 1)
         else
-          Logger.error("Tachikoma: verification error for op #{op_id} after #{attempt} attempts: #{inspect(reason)}")
+          Logger.error(
+            "Tachikoma: verification error for op #{op_id} after #{attempt} attempts: #{inspect(reason)}"
+          )
+
           reject_and_improve(op_id, shell_id, %{output: "Audit error: #{inspect(reason)}"})
         end
     end
@@ -901,7 +966,9 @@ defmodule GiTF.Tachikoma do
     create_retry_if_allowed(op_id, feedback)
   rescue
     e ->
-      Logger.error("Tachikoma: reject_and_improve failed for op #{op_id}: #{Exception.message(e)}")
+      Logger.error(
+        "Tachikoma: reject_and_improve failed for op #{op_id}: #{Exception.message(e)}"
+      )
 
       GiTF.Telemetry.emit([:gitf, :tachikoma, :review_failed], %{}, %{
         op_id: op_id,
@@ -911,6 +978,7 @@ defmodule GiTF.Tachikoma do
   end
 
   defp cleanup_cell(nil), do: :ok
+
   defp cleanup_cell(shell_id) do
     GiTF.Shell.remove(shell_id, force: true)
   rescue
@@ -1022,22 +1090,41 @@ defmodule GiTF.Tachikoma do
         if retry_count < 3 do
           case GiTF.Ops.create_retry(op_id, feedback: feedback) do
             {:ok, retry_job} ->
-              Logger.info("Tachikoma: created retry op #{retry_job.id} for #{op_id} (attempt #{retry_count + 1})")
-              GiTF.Link.send("tachikoma", "major", "job_retry_created",
-                "Retry #{retry_job.id} for failed op #{op_id} (attempt #{retry_count + 1})")
+              Logger.info(
+                "Tachikoma: created retry op #{retry_job.id} for #{op_id} (attempt #{retry_count + 1})"
+              )
+
+              GiTF.Link.send(
+                "tachikoma",
+                "major",
+                "job_retry_created",
+                "Retry #{retry_job.id} for failed op #{op_id} (attempt #{retry_count + 1})"
+              )
 
             {:error, :max_retries_exceeded} ->
               Logger.warning("Tachikoma: op #{op_id} exhausted retries")
-              GiTF.Link.send("tachikoma", "major", "job_exhausted_retries",
-                "Job #{op_id} exhausted all retries")
+
+              GiTF.Link.send(
+                "tachikoma",
+                "major",
+                "job_exhausted_retries",
+                "Job #{op_id} exhausted all retries"
+              )
 
             {:error, reason} ->
               Logger.warning("Tachikoma: retry creation failed for #{op_id}: #{inspect(reason)}")
           end
         else
-          Logger.warning("Tachikoma: op #{op_id} already at #{retry_count} retries, no more attempts")
-          GiTF.Link.send("tachikoma", "major", "job_exhausted_retries",
-            "Job #{op_id} exhausted #{retry_count} retries")
+          Logger.warning(
+            "Tachikoma: op #{op_id} already at #{retry_count} retries, no more attempts"
+          )
+
+          GiTF.Link.send(
+            "tachikoma",
+            "major",
+            "job_exhausted_retries",
+            "Job #{op_id} exhausted #{retry_count} retries"
+          )
         end
 
       _ ->

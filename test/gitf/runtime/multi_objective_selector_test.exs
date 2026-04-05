@@ -22,7 +22,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
 
       {model, breakdown} = MultiObjectiveSelector.select_optimal(op)
 
-      assert model in ["opus", "sonnet", "haiku"]
+      assert model in ["thinking", "general", "fast"]
       assert is_map(breakdown)
       assert is_number(breakdown.total)
       assert Map.has_key?(breakdown, :quality)
@@ -36,7 +36,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
       {model, _} = MultiObjectiveSelector.select_optimal(op)
 
       # With equal quality (0.5 each), haiku wins on cost
-      assert model == "haiku"
+      assert model == "fast"
     end
 
     test "high risk shifts weight toward quality" do
@@ -83,9 +83,9 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
       result = MultiObjectiveSelector.score_breakdown(op)
 
       assert Map.has_key?(result, :candidates)
-      assert Map.has_key?(result.candidates, "opus")
-      assert Map.has_key?(result.candidates, "sonnet")
-      assert Map.has_key?(result.candidates, "haiku")
+      assert Map.has_key?(result.candidates, "thinking")
+      assert Map.has_key?(result.candidates, "general")
+      assert Map.has_key?(result.candidates, "fast")
     end
 
     test "includes weights and risk level" do
@@ -121,7 +121,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
             status: "done",
             mission_id: "q1",
             sector_id: "c1",
-            assigned_model: "opus",
+            assigned_model: "thinking",
             op_type: :planning,
             quality_score: 90
           })

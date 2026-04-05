@@ -88,7 +88,9 @@ defmodule GiTF.Runtime.LoadoutTest do
       tools = Loadout.tools(working_dir: dir, tool_set: :standard)
       write_tool = Enum.find(tools, &(&1.name == "write_file"))
 
-      assert {:ok, _} = ReqLLM.Tool.execute(write_tool, %{"path" => "new.txt", "content" => "created"})
+      assert {:ok, _} =
+               ReqLLM.Tool.execute(write_tool, %{"path" => "new.txt", "content" => "created"})
+
       assert File.read!(Path.join(dir, "new.txt")) == "created"
     end
 

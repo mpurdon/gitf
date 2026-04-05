@@ -52,7 +52,11 @@ defmodule GiTF.BriefTest do
       gitf_root = create_gitf_workspace()
 
       {:ok, mission} =
-        Archive.insert(:missions, %{name: "plan-mission", goal: "Plan something", status: "planning"})
+        Archive.insert(:missions, %{
+          name: "plan-mission",
+          goal: "Plan something",
+          status: "planning"
+        })
 
       {:ok, markdown} = Brief.brief(:major, gitf_root)
       assert markdown =~ "plan-mission"
@@ -67,7 +71,11 @@ defmodule GiTF.BriefTest do
       on_exit(fn -> System.delete_env("GITF_PATH") end)
 
       {:ok, mission} =
-        Archive.insert(:missions, %{name: "spec-mission", goal: "Spec something", status: "planning"})
+        Archive.insert(:missions, %{
+          name: "spec-mission",
+          goal: "Spec something",
+          status: "planning"
+        })
 
       GiTF.Specs.write(mission.id, "requirements", "# Requirements\n\n- FR-1: Do the thing")
 

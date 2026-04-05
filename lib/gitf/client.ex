@@ -70,7 +70,9 @@ defmodule GiTF.Client do
   def list_bees, do: get("/api/v1/ghosts") |> unwrap_data()
   def stop_ghost(id), do: post("/api/v1/ghosts/#{id}/stop") |> unwrap_ok()
   def complete_bee(id), do: post("/api/v1/ghosts/#{id}/complete") |> unwrap_ok()
-  def fail_bee(id, reason \\ "unknown"), do: post("/api/v1/ghosts/#{id}/fail", %{reason: reason}) |> unwrap_ok()
+
+  def fail_bee(id, reason \\ "unknown"),
+    do: post("/api/v1/ghosts/#{id}/fail", %{reason: reason}) |> unwrap_ok()
 
   # Sectors
   def add_sector(path_or_url, opts \\ []) do
@@ -86,18 +88,31 @@ defmodule GiTF.Client do
   def quest_report(id), do: get("/api/v1/missions/#{id}/report") |> unwrap_data()
   def quest_merge(id), do: post("/api/v1/missions/#{id}/sync") |> unwrap_data()
   def quest_spec(id, phase), do: get("/api/v1/missions/#{id}/spec/#{phase}") |> unwrap_data()
-  def quest_spec_write(id, phase, content), do: put("/api/v1/missions/#{id}/spec/#{phase}", %{content: content}) |> unwrap_data()
+
+  def quest_spec_write(id, phase, content),
+    do: put("/api/v1/missions/#{id}/spec/#{phase}", %{content: content}) |> unwrap_data()
 
   # Plan confirmation
-  def confirm_plan(mission_id, specs), do: post("/api/v1/missions/#{mission_id}/plan/confirm", %{specs: specs}) |> unwrap_data()
-  def reject_plan(mission_id), do: post("/api/v1/missions/#{mission_id}/plan/reject") |> unwrap_ok()
-  def revise_plan(mission_id, feedback), do: post("/api/v1/missions/#{mission_id}/plan/revise", %{feedback: feedback}) |> unwrap_data()
-  def list_plan_candidates(mission_id), do: get("/api/v1/missions/#{mission_id}/plan/candidates") |> unwrap_data()
-  def select_plan_candidate(mission_id, strategy), do: post("/api/v1/missions/#{mission_id}/plan/select", %{strategy: strategy}) |> unwrap_data()
+  def confirm_plan(mission_id, specs),
+    do: post("/api/v1/missions/#{mission_id}/plan/confirm", %{specs: specs}) |> unwrap_data()
+
+  def reject_plan(mission_id),
+    do: post("/api/v1/missions/#{mission_id}/plan/reject") |> unwrap_ok()
+
+  def revise_plan(mission_id, feedback),
+    do: post("/api/v1/missions/#{mission_id}/plan/revise", %{feedback: feedback}) |> unwrap_data()
+
+  def list_plan_candidates(mission_id),
+    do: get("/api/v1/missions/#{mission_id}/plan/candidates") |> unwrap_data()
+
+  def select_plan_candidate(mission_id, strategy),
+    do: post("/api/v1/missions/#{mission_id}/plan/select", %{strategy: strategy}) |> unwrap_data()
 
   # Costs
   def costs_summary, do: get("/api/v1/costs/summary") |> unwrap_data()
-  def record_cost(ghost_id, attrs), do: post("/api/v1/costs/record", Map.put(attrs, :ghost_id, ghost_id)) |> unwrap_data()
+
+  def record_cost(ghost_id, attrs),
+    do: post("/api/v1/costs/record", Map.put(attrs, :ghost_id, ghost_id)) |> unwrap_data()
 
   # Health check
   def ping do

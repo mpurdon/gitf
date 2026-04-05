@@ -147,7 +147,6 @@ defmodule GiTF.OpsDepTest do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, _} = Ops.add_dependency(b.id, a.id)
-      {:ok, _} = Ops.block(b.id)
 
       # Complete A
       {:ok, _} = Ops.assign(a.id, ghost.id)
@@ -168,9 +167,8 @@ defmodule GiTF.OpsDepTest do
 
       {:ok, _} = Ops.add_dependency(cc.id, a.id)
       {:ok, _} = Ops.add_dependency(cc.id, b.id)
-      {:ok, _} = Ops.block(cc.id)
 
-      # Complete only A
+      # Complete A
       {:ok, _} = Ops.assign(a.id, ghost.id)
       {:ok, _} = Ops.start(a.id)
       {:ok, _} = Ops.complete(a.id)

@@ -27,7 +27,8 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   defp list_sectors_tool do
     ReqLLM.Tool.new!(
       name: "list_sectors",
-      description: "List all registered sectors (repositories/workspaces) with their IDs and paths.",
+      description:
+        "List all registered sectors (repositories/workspaces) with their IDs and paths.",
       callback: fn _args -> list_sectors() end
     )
   end

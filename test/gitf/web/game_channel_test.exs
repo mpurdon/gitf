@@ -28,13 +28,15 @@ defmodule GiTF.Web.GameChannelTest do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
     # Ensure PubSubBridge is alive (needed for forwarding telemetry events)
-    unless Process.whereis(GiTF.PubSubBridge) && Process.alive?(Process.whereis(GiTF.PubSubBridge)) do
+    unless Process.whereis(GiTF.PubSubBridge) &&
+             Process.alive?(Process.whereis(GiTF.PubSubBridge)) do
       try do
-        Supervisor.terminate_child(GiTF.Supervisor, GiTF.PubSubBridge)
-        Supervisor.delete_child(GiTF.Supervisor, GiTF.PubSubBridge)
+        Supervisor.terminate_child(GiTF.Interface.Supervisor, GiTF.PubSubBridge)
+        Supervisor.delete_child(GiTF.Interface.Supervisor, GiTF.PubSubBridge)
       catch
         :exit, _ -> :ok
       end
+
       GiTF.Test.StoreHelper.safe_stop(GiTF.PubSubBridge)
       {:ok, _} = GiTF.PubSubBridge.start_link([])
     end
@@ -44,9 +46,14 @@ defmodule GiTF.Web.GameChannelTest do
 
     # Create dummy sector data
     sector_name = "game-test-sector-#{System.os_time(:nanosecond)}"
+    repo_path = Path.join(System.tmp_dir!(), sector_name)
+    GiTF.Test.StoreHelper.init_git_repo!(repo_path)
+
     sector =
-      case GiTF.Sector.add("/tmp", name: sector_name) do
-        {:ok, c} -> c
+      case GiTF.Sector.add(repo_path, name: sector_name) do
+        {:ok, c} ->
+          c
+
         {:error, :name_already_taken} ->
           case GiTF.Sector.list() do
             [first | _] -> first
@@ -62,7 +69,7 @@ defmodule GiTF.Web.GameChannelTest do
   end
 
   test "receives initial world state on join", %{socket: _socket} do
-    assert_push "world_state", %{missions: _, ghosts: _, sectors: _}
+    assert_push("world_state", %{missions: _, ghosts: _, sectors: _})
   end
 
   test "receives section events", %{socket: _socket} do
@@ -70,12 +77,12 @@ defmodule GiTF.Web.GameChannelTest do
     GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{ghost_id: "test-ghost"})
 
     # Assert pushed to channel
-    assert_push "gitf_event", %{type: "gitf.ghost.spawned", data: %{ghost_id: "test-ghost"}}
+    assert_push("gitf_event", %{type: "gitf.ghost.spawned", data: %{ghost_id: "test-ghost"}})
   end
 
   test "can spawn mission via command", %{socket: socket} do
     ref = push(socket, "spawn_quest", %{"goal" => "Build a game"})
-    assert_reply ref, :ok, %{mission_id: _}
+    assert_reply(ref, :ok, %{mission_id: _})
   end
 
   # -- Helpers ----------------------------------------------------------------
@@ -97,13 +104,13 @@ defmodule GiTF.Web.GameChannelTest do
     else
       # Terminate from supervisor to avoid conflicts
       try do
-        Supervisor.terminate_child(GiTF.Supervisor, GiTF.Web.Endpoint)
+        Supervisor.terminate_child(GiTF.Interface.Supervisor, GiTF.Web.Endpoint)
       catch
         :exit, _ -> :ok
       end
 
       try do
-        Supervisor.delete_child(GiTF.Supervisor, GiTF.Web.Endpoint)
+        Supervisor.delete_child(GiTF.Interface.Supervisor, GiTF.Web.Endpoint)
       catch
         :exit, _ -> :ok
       end

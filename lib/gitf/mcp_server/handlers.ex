@@ -23,7 +23,9 @@ defmodule GiTF.MCPServer.Handlers do
           entity_id: event.entity_id,
           timestamp: to_string(event.timestamp),
           step: get_in(event, [:data, :step]),
-          reason: get_in(event, [:data, :reason]) || get_in(event, [:data, :error]) || get_in(event, [:data, :message]),
+          reason:
+            get_in(event, [:data, :reason]) || get_in(event, [:data, :error]) ||
+              get_in(event, [:data, :message]),
           op_id: get_in(event, [:metadata, :op_id]),
           mission_id: get_in(event, [:metadata, :mission_id])
         }
@@ -240,11 +242,12 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("start_mission", %{"id" => id} = args) do
     with :ok <- require_confirm(args) do
-      opts = cond do
-        args["fast"] == true -> [force_fast_path: true]
-        args["fast"] == false or args["full"] -> [force_full_pipeline: true]
-        true -> []
-      end
+      opts =
+        cond do
+          args["fast"] == true -> [force_fast_path: true]
+          args["fast"] == false or args["full"] -> [force_full_pipeline: true]
+          true -> []
+        end
 
       case GiTF.Major.Orchestrator.start_quest(id, opts) do
         {:ok, phase} ->
@@ -328,7 +331,13 @@ defmodule GiTF.MCPServer.Handlers do
 
             ghost ->
               GiTF.Archive.put(:ghosts, %{ghost | status: GhostStatus.stopped()})
-              {:ok, json_text(%{id: id, status: GhostStatus.stopped(), note: "Process already exited, record updated"})}
+
+              {:ok,
+               json_text(%{
+                 id: id,
+                 status: GhostStatus.stopped(),
+                 note: "Process already exited, record updated"
+               })}
           end
       end
     end
@@ -336,7 +345,10 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("stop_ghost", _), do: {:error, "Missing required parameter: id"}
 
-  def call("send_link", %{"from" => from, "to" => to, "subject" => subject, "body" => body} = args) do
+  def call(
+        "send_link",
+        %{"from" => from, "to" => to, "subject" => subject, "body" => body} = args
+      ) do
     with :ok <- require_confirm(args) do
       {:ok, link} = GiTF.Link.send(from, to, subject, body)
       {:ok, json_text(serialize_link(link))}

@@ -141,7 +141,10 @@ defmodule GiTF.Observability.Metrics do
     op_counts = tally_statuses(ops)
     mission_counts = tally_statuses(missions)
 
-    active_ghosts = Map.get(ghost_counts, GhostStatus.working(), 0) + Map.get(ghost_counts, GhostStatus.starting(), 0)
+    active_ghosts =
+      Map.get(ghost_counts, GhostStatus.working(), 0) +
+        Map.get(ghost_counts, GhostStatus.starting(), 0)
+
     scores = Enum.map(ops, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
 
     %{
@@ -168,7 +171,9 @@ defmodule GiTF.Observability.Metrics do
         total: length(ghosts),
         active: active_ghosts,
         idle: Map.get(ghost_counts, GhostStatus.idle(), 0),
-        stopped: Map.get(ghost_counts, GhostStatus.stopped(), 0) + Map.get(ghost_counts, GhostStatus.crashed(), 0)
+        stopped:
+          Map.get(ghost_counts, GhostStatus.stopped(), 0) +
+            Map.get(ghost_counts, GhostStatus.crashed(), 0)
       },
       quality: %{
         average: if(scores == [], do: 0, else: Enum.sum(scores) / length(scores)),
@@ -267,5 +272,4 @@ defmodule GiTF.Observability.Metrics do
   rescue
     ArgumentError -> :ok
   end
-
 end

@@ -195,21 +195,21 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
       assert Planner.strategy_instruction(nil, nil) == ""
     end
 
-    test "returns instruction with name and hint" do
-      result = Planner.strategy_instruction("minimal", "Bare-minimum impl")
-      assert result =~ "minimal"
-      assert result =~ "Bare-minimum impl"
-      assert result =~ "STRATEGY:"
+    test "returns hardcoded instruction for standard names ignoring hint" do
+      result = Planner.strategy_instruction("minimal", "ignored hint")
+      assert result =~ "MINIMAL"
+      refute result =~ "ignored hint"
+      assert result =~ "Strategy:"
     end
 
-    test "works with alternative approach names" do
+    test "works with alternative approach names using hint" do
       result = Planner.strategy_instruction("electron", "Cross-platform Electron app")
-      assert result =~ "electron"
+      assert result =~ "ELECTRON"
       assert result =~ "Cross-platform Electron app"
     end
 
-    test "returns empty string when hint is not a string" do
-      assert Planner.strategy_instruction("minimal", nil) == ""
+    test "returns empty string for custom name when hint is not a string" do
+      assert Planner.strategy_instruction("custom_name", nil) == ""
     end
   end
 

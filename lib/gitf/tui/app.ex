@@ -39,6 +39,13 @@ defmodule GiTF.TUI.App do
 
   @impl true
   def init(_context) do
+    if connected?() do
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "ops")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "ghosts")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "costs")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "section:alerts")
+    end
+
     planning_mission = Application.get_env(:gitf, :tui_planning_mission)
     Application.delete_env(:gitf, :tui_planning_mission)
 
@@ -70,11 +77,18 @@ defmodule GiTF.TUI.App do
 
     if planning_mission do
       # Auto-start the planning conversation
-      chat = Chat.add_message(model.chat, :system,
-        "Planning: #{planning_mission.goal || planning_mission.name}")
-      prompt = "I want to plan: \"#{planning_mission.goal}\". " <>
-        "Start by exploring the codebase to understand the current state, " <>
-        "then ask me clarifying questions about what I need."
+      chat =
+        Chat.add_message(
+          model.chat,
+          :system,
+          "Planning: #{planning_mission.goal || planning_mission.name}"
+        )
+
+      prompt =
+        "I want to plan: \"#{planning_mission.goal}\". " <>
+          "Start by exploring the codebase to understand the current state, " <>
+          "then ask me clarifying questions about what I need."
+
       model = %{model | chat: chat, busy: true, chat_scroll: 0}
       cmd = Command.new(fn -> query_claude(prompt, nil) end, :chat_response)
       {model, cmd}
@@ -95,10 +109,18 @@ defmodule GiTF.TUI.App do
         # In plan-review mode with empty input, single chars are shortcuts
         if model.plan.mode == :reviewing and model.input.text == "" do
           case List.to_string([ch]) do
-            "y" -> %{model | plan: Plan.accept_section(model.plan)}
-            "n" -> handle_plan_reject(model)
-            "a" -> %{model | plan: Plan.accept_all(model.plan)}
-            "q" -> handle_plan_cancel(model)
+            "y" ->
+              %{model | plan: Plan.accept_section(model.plan)}
+
+            "n" ->
+              handle_plan_reject(model)
+
+            "a" ->
+              %{model | plan: Plan.accept_all(model.plan)}
+
+            "q" ->
+              handle_plan_cancel(model)
+
             char ->
               input = Input.insert_char(model.input, char)
               %{model | input: input}
@@ -123,13 +145,18 @@ defmodule GiTF.TUI.App do
         |> refresh_dashboard(count)
 
       {:chat_response, {:ok, {:switch_plan, plan_data}, _session_id}} ->
-        strategy = plan_data[:strategy] || plan_data.strategy || "?"
-        score = plan_data[:score] || plan_data.score
+        strategy = plan_data[:strategy] || plan_data["strategy"] || "?"
+        score = plan_data[:score] || plan_data["score"]
         score_str = if score, do: " (#{Float.round(score, 2)})", else: ""
         chat = Chat.add_message(model.chat, :system, "Switched to #{strategy}#{score_str} plan.")
         plan = Plan.load_plan(model.plan, plan_data)
         # Preserve candidate_index from before load_plan reset it
-        plan = %{plan | candidate_index: model.plan.candidate_index, candidates: model.plan.candidates}
+        plan = %{
+          plan
+          | candidate_index: model.plan.candidate_index,
+            candidates: model.plan.candidates
+        }
+
         %{model | chat: chat, plan: plan, busy: false, chat_scroll: chat_bottom(chat)}
 
       {:chat_response, {:ok, content, session_id}} ->
@@ -141,11 +168,23 @@ defmodule GiTF.TUI.App do
               if remaining_text != "" do
                 Chat.add_message(model.chat, :assistant, remaining_text)
               else
-                Chat.add_message(model.chat, :assistant, "Plan generated. Review it in the right panel.")
+                Chat.add_message(
+                  model.chat,
+                  :assistant,
+                  "Plan generated. Review it in the right panel."
+                )
               end
 
             plan = Plan.load_plan(model.plan, plan_data)
-            %{model | chat: chat, plan: plan, busy: false, session_id: sid, chat_scroll: chat_bottom(chat)}
+
+            %{
+              model
+              | chat: chat,
+                plan: plan,
+                busy: false,
+                session_id: sid,
+                chat_scroll: chat_bottom(chat)
+            }
 
           :no_plan ->
             chat = Chat.add_message(model.chat, :assistant, content)
@@ -156,10 +195,25 @@ defmodule GiTF.TUI.App do
         chat = Chat.add_message(model.chat, :system, "Error: #{reason}")
         %{model | chat: chat, busy: false, chat_scroll: chat_bottom(chat)}
 
+      # Real-time PubSub updates
+      {:op_updated, _op} ->
+        refresh_dashboard(model, 1)
+
+      {:ghost_updated, _ghost} ->
+        refresh_dashboard(model, 1)
+
+      {:cost_recorded, _cost} ->
+        refresh_dashboard(model, 1)
+
+      {:alert_raised, alert} ->
+        %{model | alerts: [alert | model.alerts] |> Enum.take(10)}
+
       _ ->
         model
     end
   end
+
+  defp connected?, do: true
 
   defp handle_key(model, key) do
     plan_reviewing? = model.plan.mode == :reviewing
@@ -167,11 +221,20 @@ defmodule GiTF.TUI.App do
 
     case key do
       # Panel switching (F-keys)
-      @f1 -> %{model | right_panel: :activity}
-      @f2 -> %{model | right_panel: :pipeline}
-      @f3 -> %{model | right_panel: :events}
-      @f4 -> %{model | right_panel: :merges}
-      @f5 -> %{model | right_panel: :models}
+      @f1 ->
+        %{model | right_panel: :activity}
+
+      @f2 ->
+        %{model | right_panel: :pipeline}
+
+      @f3 ->
+        %{model | right_panel: :events}
+
+      @f4 ->
+        %{model | right_panel: :merges}
+
+      @f5 ->
+        %{model | right_panel: :models}
 
       @space ->
         input = Input.insert_char(model.input, " ")
@@ -248,8 +311,14 @@ defmodule GiTF.TUI.App do
   # Every 6th tick (~3s): alerts, stats
   defp maybe_refresh_medium(model, count) when rem(count, 6) == 0 do
     model
-    |> Map.put(:alerts, safe_call(fn -> GiTF.Observability.Alerts.check_alerts() end, model.alerts))
-    |> Map.put(:stats, safe_call(fn -> GiTF.Observability.Metrics.collect_metrics() end, model.stats))
+    |> Map.put(
+      :alerts,
+      safe_call(fn -> GiTF.Observability.Alerts.check_alerts() end, model.alerts)
+    )
+    |> Map.put(
+      :stats,
+      safe_call(fn -> GiTF.Observability.Metrics.collect_metrics() end, model.stats)
+    )
   end
 
   defp maybe_refresh_medium(model, _count), do: model
@@ -273,7 +342,10 @@ defmodule GiTF.TUI.App do
 
     model
     |> Map.put(:health, safe_call(fn -> GiTF.Observability.Health.check() end, model.health))
-    |> Map.put(:agent_identities, safe_call(fn -> GiTF.GhostID.list() end, model.agent_identities))
+    |> Map.put(
+      :agent_identities,
+      safe_call(fn -> GiTF.GhostID.list() end, model.agent_identities)
+    )
     |> Map.put(:backups, backups)
     |> Map.put(:budget_status, budget_status)
   end
@@ -282,7 +354,11 @@ defmodule GiTF.TUI.App do
 
   # Events: only when events panel is active, every 6th tick
   defp maybe_refresh_events(%{right_panel: :events} = model, count) when rem(count, 6) == 0 do
-    Map.put(model, :event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 30) end, model.event_store_events))
+    Map.put(
+      model,
+      :event_store_events,
+      safe_call(fn -> GiTF.EventStore.list(limit: 30) end, model.event_store_events)
+    )
   end
 
   defp maybe_refresh_events(model, _count), do: model
@@ -311,15 +387,17 @@ defmodule GiTF.TUI.App do
       plan_result = %{
         name: model.plan.goal || "",
         summary: "",
-        ops: Enum.map(specs, fn spec ->
-          %{
-            "title" => spec["title"] || spec[:title] || "",
-            "description" => spec["description"] || spec[:description] || "",
-            "op_type" => spec["op_type"] || spec[:op_type] || "implementation",
-            "depends_on" => spec["depends_on_indices"] || spec[:depends_on_indices] || []
-          }
-        end)
+        ops:
+          Enum.map(specs, fn spec ->
+            %{
+              "title" => spec["title"] || spec[:title] || "",
+              "description" => spec["description"] || spec[:description] || "",
+              "op_type" => spec["op_type"] || spec[:op_type] || "implementation",
+              "depends_on" => spec["depends_on_indices"] || spec[:depends_on_indices] || []
+            }
+          end)
       }
+
       Application.put_env(:gitf, :tui_plan_result, {:ok, plan_result})
     end
 
@@ -327,23 +405,27 @@ defmodule GiTF.TUI.App do
     plan = %{model.plan | mode: :confirmed}
     model = %{model | chat: chat, plan: plan, busy: true, chat_scroll: chat_bottom(chat)}
 
-    cmd = Command.new(fn ->
-      case GiTF.Client.confirm_plan(mission_id, specs) do
-        {:ok, data} ->
-          ops = data[:jobs_created] || 0
-          {:ok, "Plan confirmed. #{ops} op(s) created for mission #{mission_id}.", nil}
+    cmd =
+      Command.new(
+        fn ->
+          case GiTF.Client.confirm_plan(mission_id, specs) do
+            {:ok, data} ->
+              ops = data[:jobs_created] || 0
+              {:ok, "Plan confirmed. #{ops} op(s) created for mission #{mission_id}.", nil}
 
-        {:error, reason} ->
-          # Fallback to local if not remote
-          unless GiTF.Client.remote?() do
-            {:ok, ops} = GiTF.Major.Planner.create_jobs_from_specs(mission_id, specs)
-            GiTF.Missions.store_artifact(mission_id, "planning", specs)
-            {:ok, "Plan confirmed. #{length(ops)} op(s) created.", nil}
-          else
-            {:error, inspect(reason)}
+            {:error, reason} ->
+              # Fallback to local if not remote
+              unless GiTF.Client.remote?() do
+                {:ok, ops} = GiTF.Major.Planner.create_jobs_from_specs(mission_id, specs)
+                GiTF.Missions.store_artifact(mission_id, "planning", specs)
+                {:ok, "Plan confirmed. #{length(ops)} op(s) created.", nil}
+              else
+                {:error, inspect(reason)}
+              end
           end
-      end
-    end, :chat_response)
+        end,
+        :chat_response
+      )
 
     {model, cmd}
   end
@@ -352,7 +434,10 @@ defmodule GiTF.TUI.App do
     plan = Plan.reject_section(model.plan)
     section = Enum.at(plan.sections, plan.selected)
     title = if section, do: section.title, else: "this section"
-    chat = Chat.add_message(model.chat, :system, "Rejected: #{title}. Type feedback for revision.")
+
+    chat =
+      Chat.add_message(model.chat, :system, "Rejected: #{title}. Type feedback for revision.")
+
     %{model | plan: plan, chat: chat, chat_scroll: chat_bottom(chat)}
   end
 
@@ -371,34 +456,43 @@ defmodule GiTF.TUI.App do
         chat = Chat.add_message(model.chat, :system, "Switching to #{strategy} plan...")
         model = %{model | plan: plan, chat: chat, busy: true, chat_scroll: chat_bottom(chat)}
 
-        cmd = Command.new(fn ->
-          result =
-            if GiTF.Client.remote?() do
-              GiTF.Client.select_plan_candidate(mission_id, strategy)
-            else
-              # Local mode: find candidate from mission record
-              quest_record = GiTF.Archive.get(:missions, mission_id)
-              candidates = if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
+        cmd =
+          Command.new(
+            fn ->
+              result =
+                if GiTF.Client.remote?() do
+                  GiTF.Client.select_plan_candidate(mission_id, strategy)
+                else
+                  # Local mode: find candidate from mission record
+                  quest_record = GiTF.Archive.get(:missions, mission_id)
 
-              case Enum.find(candidates, fn c -> (c[:strategy] || c.strategy) == strategy end) do
-                nil -> {:error, "candidate not found"}
-                candidate ->
-                  if quest_record do
-                    updated = Map.put(quest_record, :draft_plan, candidate)
-                    GiTF.Archive.put(:missions, updated)
+                  candidates =
+                    if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
+
+                  case Enum.find(candidates, fn c -> (c[:strategy] || c.strategy) == strategy end) do
+                    nil ->
+                      {:error, "candidate not found"}
+
+                    candidate ->
+                      if quest_record do
+                        updated = Map.put(quest_record, :draft_plan, candidate)
+                        GiTF.Archive.put(:missions, updated)
+                      end
+
+                      {:ok, candidate}
                   end
-                  {:ok, candidate}
+                end
+
+              case result do
+                {:ok, plan_data} ->
+                  {:ok, {:switch_plan, plan_data}, nil}
+
+                {:error, reason} ->
+                  {:error, inspect(reason)}
               end
-            end
-
-          case result do
-            {:ok, plan_data} ->
-              {:ok, {:switch_plan, plan_data}, nil}
-
-            {:error, reason} ->
-              {:error, inspect(reason)}
-          end
-        end, :chat_response)
+            end,
+            :chat_response
+          )
 
         {model, cmd}
 
@@ -445,10 +539,11 @@ defmodule GiTF.TUI.App do
   end
 
   defp query_via_api(text, _session_id) do
-    cwd = case GiTF.gitf_dir() do
-      {:ok, root} -> root
-      _ -> File.cwd!()
-    end
+    cwd =
+      case GiTF.gitf_dir() do
+        {:ok, root} -> root
+        _ -> File.cwd!()
+      end
 
     system_prompt = build_system_prompt(cwd)
     debug("API mode query: #{String.slice(text, 0, 80)}")
@@ -479,10 +574,11 @@ defmodule GiTF.TUI.App do
   end
 
   defp query_via_cli(text, session_id) do
-    cwd = case GiTF.gitf_dir() do
-      {:ok, root} -> root
-      _ -> File.cwd!()
-    end
+    cwd =
+      case GiTF.gitf_dir() do
+        {:ok, root} -> root
+        _ -> File.cwd!()
+      end
 
     system_prompt = build_system_prompt(cwd)
 
@@ -502,30 +598,59 @@ defmodule GiTF.TUI.App do
   end
 
   defp build_system_prompt(cwd) do
-    ghosts = try do GiTF.Archive.all(:ghosts) rescue _ -> [] end
-    missions = try do GiTF.Archive.all(:missions) rescue _ -> [] end
-    ops = try do GiTF.Archive.all(:ops) rescue _ -> [] end
+    ghosts =
+      try do
+        GiTF.Archive.all(:ghosts)
+      rescue
+        _ -> []
+      end
+
+    missions =
+      try do
+        GiTF.Archive.all(:missions)
+      rescue
+        _ -> []
+      end
+
+    ops =
+      try do
+        GiTF.Archive.all(:ops)
+      rescue
+        _ -> []
+      end
 
     # Only show active ghosts in context — crashed/stopped are noise
-    active_ghosts = Enum.filter(ghosts, fn b -> (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()] end)
-
-    bee_summary = if active_ghosts == [], do: "None active", else:
-      Enum.map_join(active_ghosts, "\n", fn b ->
-        "  - #{b[:id] || b.id}: #{b[:status] || b[:state] || "unknown"} (op: #{b[:op_id] || "none"})"
+    active_ghosts =
+      Enum.filter(ghosts, fn b ->
+        (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()]
       end)
 
-    quest_summary = if missions == [], do: "None", else:
-      Enum.map_join(missions, "\n", fn q ->
-        phase = q[:current_phase] || q[:status] || "unknown"
-        "  - #{q[:id] || q.id}: #{q[:name] || q[:goal] || "unnamed"} [#{phase}]"
-      end)
+    bee_summary =
+      if active_ghosts == [],
+        do: "None active",
+        else:
+          Enum.map_join(active_ghosts, "\n", fn b ->
+            "  - #{b[:id] || b.id}: #{b[:status] || b[:state] || "unknown"} (op: #{b[:op_id] || "none"})"
+          end)
+
+    quest_summary =
+      if missions == [],
+        do: "None",
+        else:
+          Enum.map_join(missions, "\n", fn q ->
+            phase = q[:current_phase] || q[:status] || "unknown"
+            "  - #{q[:id] || q.id}: #{q[:name] || q[:goal] || "unnamed"} [#{phase}]"
+          end)
 
     active_jobs = Enum.reject(ops, fn j -> j[:status] in ["done"] end)
 
-    job_summary = if active_jobs == [], do: "All done", else:
-      Enum.map_join(Enum.take(active_jobs, 10), "\n", fn j ->
-        "  - #{j[:id] || j.id}: #{j[:title] || "untitled"} [#{j[:status] || "unknown"}]"
-      end)
+    job_summary =
+      if active_jobs == [],
+        do: "All done",
+        else:
+          Enum.map_join(Enum.take(active_jobs, 10), "\n", fn j ->
+            "  - #{j[:id] || j.id}: #{j[:title] || "untitled"} [#{j[:status] || "unknown"}]"
+          end)
 
     """
     You are the Major's assistant running inside the GiTF TUI dashboard.
@@ -589,23 +714,35 @@ defmodule GiTF.TUI.App do
   defp spawn_claude_with_closed_stdin(prompt, cwd, system_prompt, _session_id) do
     case GiTF.Runtime.Claude.find_executable() do
       {:ok, claude_path} ->
-        args = ["--print", "--dangerously-skip-permissions", "--verbose",
-                "--output-format", "stream-json",
-                "--system-prompt", system_prompt, prompt]
+        args = [
+          "--print",
+          "--dangerously-skip-permissions",
+          "--verbose",
+          "--output-format",
+          "stream-json",
+          "--system-prompt",
+          system_prompt,
+          prompt
+        ]
 
         # Spawn through shell with < /dev/null so Claude gets EOF on stdin
         # immediately instead of hanging waiting for the Erlang port's pipe.
-        escaped_args = Enum.map_join(args, " ", fn a ->
-          "'" <> String.replace(a, "'", "'\\''") <> "'"
-        end)
+        escaped_args =
+          Enum.map_join(args, " ", fn a ->
+            "'" <> String.replace(a, "'", "'\\''") <> "'"
+          end)
 
         cmd = "#{claude_path} #{escaped_args} < /dev/null"
 
-        port = Port.open({:spawn, cmd}, [
-          :binary, :exit_status, :use_stdio, :stderr_to_stdout,
-          {:cd, cwd},
-          {:env, [{~c"CLAUDECODE", false}]}
-        ])
+        port =
+          Port.open({:spawn, cmd}, [
+            :binary,
+            :exit_status,
+            :use_stdio,
+            :stderr_to_stdout,
+            {:cd, cwd},
+            {:env, [{~c"CLAUDECODE", false}]}
+          ])
 
         {:ok, port}
 
@@ -624,10 +761,13 @@ defmodule GiTF.TUI.App do
         debug("port exit: #{code}")
         raw = IO.iodata_to_binary(acc)
         {content, session_id} = extract_response(raw)
+
         if code == 0 do
           {:ok, content, session_id}
         else
-          if content != "", do: {:ok, content, session_id}, else: {:error, "Claude exited with code #{code}"}
+          if content != "",
+            do: {:ok, content, session_id},
+            else: {:error, "Claude exited with code #{code}"}
         end
 
       other ->
@@ -639,7 +779,10 @@ defmodule GiTF.TUI.App do
         Port.close(port)
         raw = IO.iodata_to_binary(acc)
         {content, session_id} = extract_response(raw)
-        if content != "", do: {:ok, content, session_id}, else: {:error, "Timed out waiting for Claude"}
+
+        if content != "",
+          do: {:ok, content, session_id},
+          else: {:error, "Timed out waiting for Claude"}
     end
   end
 
@@ -648,26 +791,31 @@ defmodule GiTF.TUI.App do
     # Parse the result text and session_id.
     lines = String.split(raw, "\n")
 
-    result_text = Enum.find_value(lines, fn line ->
-      case Jason.decode(line) do
-        {:ok, %{"type" => "result", "result" => result}} when is_binary(result) ->
-          String.trim(result)
-        _ -> nil
-      end
-    end)
+    result_text =
+      Enum.find_value(lines, fn line ->
+        case Jason.decode(line) do
+          {:ok, %{"type" => "result", "result" => result}} when is_binary(result) ->
+            String.trim(result)
 
-    session_id = Enum.find_value(lines, fn line ->
-      case Jason.decode(line) do
-        {:ok, %{"type" => "result", "session_id" => sid}} when is_binary(sid) -> sid
-        _ -> nil
-      end
-    end)
+          _ ->
+            nil
+        end
+      end)
 
-    text = case result_text do
-      nil -> raw |> String.trim() |> String.slice(0, 2000)
-      "" -> raw |> String.trim() |> String.slice(0, 2000)
-      t -> t
-    end
+    session_id =
+      Enum.find_value(lines, fn line ->
+        case Jason.decode(line) do
+          {:ok, %{"type" => "result", "session_id" => sid}} when is_binary(sid) -> sid
+          _ -> nil
+        end
+      end)
+
+    text =
+      case result_text do
+        nil -> raw |> String.trim() |> String.slice(0, 2000)
+        "" -> raw |> String.trim() |> String.slice(0, 2000)
+        t -> t
+      end
 
     # Check if the response contains a structured questions block
     content = parse_questions(text)
@@ -680,9 +828,13 @@ defmodule GiTF.TUI.App do
         case Jason.decode(json) do
           {:ok, %{"preamble" => preamble, "questions" => questions}} when is_list(questions) ->
             {:questions, preamble, questions}
-          _ -> text
+
+          _ ->
+            text
         end
-      _ -> text
+
+      _ ->
+        text
     end
   end
 
@@ -693,52 +845,86 @@ defmodule GiTF.TUI.App do
           {:ok, plan_data} when is_map(plan_data) ->
             remaining = String.replace(content, full, "") |> String.trim()
             {:plan, plan_data, remaining}
-          _ -> :no_plan
+
+          _ ->
+            :no_plan
         end
-      _ -> :no_plan
+
+      _ ->
+        :no_plan
     end
   end
 
   defp parse_plan_block(_), do: :no_plan
 
   defp refresh_activity(model) do
-    ghosts = try do GiTF.Archive.all(:ghosts) rescue _ -> [] end
-    missions = try do GiTF.Archive.all(:missions) rescue _ -> [] end
-    ops = try do GiTF.Archive.all(:ops) rescue _ -> [] end
+    ghosts =
+      try do
+        GiTF.Archive.all(:ghosts)
+      rescue
+        _ -> []
+      end
+
+    missions =
+      try do
+        GiTF.Archive.all(:missions)
+      rescue
+        _ -> []
+      end
+
+    ops =
+      try do
+        GiTF.Archive.all(:ops)
+      rescue
+        _ -> []
+      end
 
     # Reap dead ghosts — detect ghosts marked "working" but actually finished/dead
     # Returns list of {ghost_id, :done | :failed, summary} events
     reap_events = reap_dead_bees(ghosts, ops)
 
     # Add reap events to chat
-    model = Enum.reduce(reap_events, model, fn
-      {ghost_id, :done, summary}, m ->
-        job_title = Enum.find_value(ops, "unknown", fn j -> if j[:ghost_id] == ghost_id, do: j[:title] end)
-        msg = "#{ghost_id} finished: #{job_title}\n#{summary}"
-        %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
+    model =
+      Enum.reduce(reap_events, model, fn
+        {ghost_id, :done, summary}, m ->
+          job_title =
+            Enum.find_value(ops, "unknown", fn j -> if j[:ghost_id] == ghost_id, do: j[:title] end)
 
-      {ghost_id, :failed, reason}, m ->
-        msg = "#{ghost_id} failed: #{reason}"
-        %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
-    end)
+          msg = "#{ghost_id} finished: #{job_title}\n#{summary}"
+          %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
+
+        {ghost_id, :failed, reason}, m ->
+          msg = "#{ghost_id} failed: #{reason}"
+          %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
+      end)
 
     # Re-read after reaping
-    ghosts = try do GiTF.Archive.all(:ghosts) rescue _ -> [] end
+    ghosts =
+      try do
+        GiTF.Archive.all(:ghosts)
+      rescue
+        _ -> []
+      end
 
     # Build op_id -> mission_id lookup
     job_quest_map = Map.new(ops, fn j -> {j[:id], j[:mission_id]} end)
 
     # Filter to active ghosts and attach mission_id
-    active_ghosts = ghosts
-    |> Enum.filter(fn b -> (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()] end)
-    |> Enum.map(fn b -> Map.put(b, :mission_id, job_quest_map[b[:op_id]]) end)
+    active_ghosts =
+      ghosts
+      |> Enum.filter(fn b ->
+        (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()]
+      end)
+      |> Enum.map(fn b -> Map.put(b, :mission_id, job_quest_map[b[:op_id]]) end)
 
     bee_logs = read_bee_logs(active_ghosts)
 
-    activity = model.activity
-    |> Activity.update_bees(active_ghosts)
-    |> Activity.update_quests(missions)
-    |> Activity.update_bee_logs(bee_logs)
+    activity =
+      model.activity
+      |> Activity.update_bees(active_ghosts)
+      |> Activity.update_quests(missions)
+      |> Activity.update_bee_logs(bee_logs)
+
     %{model | activity: activity, ops: ops}
   end
 
@@ -767,6 +953,7 @@ defmodule GiTF.TUI.App do
                 [{ghost[:id], :failed, "Process died"}]
               else
                 log_age = log_file_age_seconds(log_path)
+
                 if log_age > 120 do
                   debug("reaper: ghost #{ghost[:id]} stale (log #{log_age}s old, no process)")
                   mark_bee_failed(ghost, "Process disappeared")
@@ -800,7 +987,9 @@ defmodule GiTF.TUI.App do
         case Jason.decode(line) do
           {:ok, %{"type" => "result", "result" => result}} when is_binary(result) ->
             String.trim(result) |> String.slice(0, 200)
-          _ -> nil
+
+          _ ->
+            nil
         end
       end)
     else
@@ -872,7 +1061,9 @@ defmodule GiTF.TUI.App do
       # Tell Major to advance the mission
       if ghost[:op_id] do
         case Process.whereis(GiTF.Major) do
-          nil -> :ok
+          nil ->
+            :ok
+
           _pid ->
             try do
               {:ok, op} = GiTF.Ops.get(ghost[:op_id])
@@ -901,7 +1092,9 @@ defmodule GiTF.TUI.App do
         run_dir = Path.join([root, ".gitf", "run"])
 
         ghosts
-        |> Enum.filter(fn b -> (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()] end)
+        |> Enum.filter(fn b ->
+          (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()]
+        end)
         |> Map.new(fn ghost ->
           log_path = Path.join(run_dir, "#{ghost[:id]}.log")
           lines = tail_file(log_path, 3)
@@ -965,6 +1158,7 @@ defmodule GiTF.TUI.App do
         column size: 8 do
           Views.Chat.render(model)
         end
+
         column size: 4 do
           render_right_panel(model)
         end
@@ -998,28 +1192,37 @@ defmodule GiTF.TUI.App do
     pending_count = length(mq[:pending] || [])
     mq_color = if pending_count > 0, do: :yellow, else: :white
 
-    active_text = case mq[:active] do
-      nil -> ""
-      active -> " >>" <> ((active[:op_id] || active.op_id) |> to_string() |> String.slice(0, 8))
-    end
+    active_text =
+      case mq[:active] do
+        nil ->
+          ""
+
+        active ->
+          id = Map.get(active, :op_id) || Map.get(active, "op_id")
+          " >>" <> (id |> to_string() |> String.slice(0, 8))
+      end
 
     {_kpi_text, kpi_parts} = build_kpi_parts(stats)
 
     bar do
       label do
         text(content: "Health:", color: :white)
+
         for {name, status} <- health[:checks] || %{} do
           text(content: " #{health_char(status)}", color: health_color(status))
           text(content: "#{short_check_name(name)}", color: :white)
         end
+
         text(content: " | ", color: :white)
         text(content: "Alerts:#{alert_count}", color: alert_color)
         text(content: " | ", color: :white)
         text(content: "MQ:#{pending_count}", color: mq_color)
         text(content: active_text, color: :blue)
+
         for {content, color} <- kpi_parts do
           text(content: content, color: color)
         end
+
         text(content: " | ", color: :white)
         text(content: "F1-F5:panels", color: :white)
       end
@@ -1066,7 +1269,8 @@ defmodule GiTF.TUI.App do
   defp short_check_name(name), do: name |> to_string() |> String.first() |> String.upcase()
 
   defp input_bar(%{input: input, busy: busy}) do
-    {before_cursor, at_cursor, after_cursor} = Views.Input.split_at_cursor(input.text, input.cursor)
+    {before_cursor, at_cursor, after_cursor} =
+      Views.Input.split_at_cursor(input.text, input.cursor)
 
     prompt = if busy, do: "... ", else: Constants.prompt_symbol()
     prompt_color = if busy, do: :yellow, else: Constants.color_prompt()

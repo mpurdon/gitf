@@ -63,8 +63,11 @@ defmodule GiTF.CLI.Chat do
     # Planning chat always uses the API (needs tool calling for ask_choice/submit_plan).
     # In CLI mode, warn and use API anyway; in ollama mode, use local models via API.
     if ModelResolver.execution_mode() == :cli do
-      IO.puts(IO.ANSI.yellow() <> "[WARN] Planning chat requires API access (tool calling). " <>
-        "Ghosts will use Claude CLI, but planning uses API." <> IO.ANSI.reset())
+      IO.puts(
+        IO.ANSI.yellow() <>
+          "[WARN] Planning chat requires API access (tool calling). " <>
+          "Ghosts will use Claude CLI, but planning uses API." <> IO.ANSI.reset()
+      )
     end
 
     model = opts[:model] || ModelResolver.resolve("opus")
@@ -75,7 +78,9 @@ defmodule GiTF.CLI.Chat do
     context =
       ReqLLM.Context.new([
         ReqLLM.Context.system(system_prompt),
-        ReqLLM.Context.user("I want to: #{mission.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need.")
+        ReqLLM.Context.user(
+          "I want to: #{mission.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need."
+        )
       ])
 
     state = %__MODULE__{
@@ -121,7 +126,9 @@ defmodule GiTF.CLI.Chat do
 
       "/done" ->
         state
-        |> append_user("I'm satisfied. Please submit the implementation plan now using the submit_plan tool.")
+        |> append_user(
+          "I'm satisfied. Please submit the implementation plan now using the submit_plan tool."
+        )
         |> call_and_handle()
         |> chat_loop()
 
@@ -222,11 +229,18 @@ defmodule GiTF.CLI.Chat do
       case find_fallback_model(state.model, state.failed_providers) do
         {:ok, fallback} ->
           new_provider = ModelResolver.provider(fallback)
-          Format.info("Skipping #{provider} (tripped). Using #{new_provider}:#{ModelResolver.model_id(fallback)}")
+
+          Format.info(
+            "Skipping #{provider} (tripped). Using #{new_provider}:#{ModelResolver.model_id(fallback)}"
+          )
+
           call_and_handle(%{state | model: fallback}, 0)
 
         :none ->
-          Format.error("All configured providers have failed. Add more API keys in .gitf/config.toml under [llm.keys]")
+          Format.error(
+            "All configured providers have failed. Add more API keys in .gitf/config.toml under [llm.keys]"
+          )
+
           state
       end
     else
@@ -253,7 +267,10 @@ defmodule GiTF.CLI.Chat do
   defp handle_api_error(state, error, retries) do
     case classify_error(error) do
       {:rate_limited, delay} when retries < @max_retries ->
-        IO.puts(dim("  Rate limited. Retrying in #{delay}s... (attempt #{retries + 1}/#{@max_retries})"))
+        IO.puts(
+          dim("  Rate limited. Retrying in #{delay}s... (attempt #{retries + 1}/#{@max_retries})")
+        )
+
         Process.sleep(delay * 1000)
         call_and_handle(state, retries + 1)
 
@@ -267,7 +284,10 @@ defmodule GiTF.CLI.Chat do
         trip_and_fallback(state, provider)
 
       {:auth_error, provider} ->
-        Format.error("Authentication failed for #{provider}. Check your API key in .gitf/config.toml")
+        Format.error(
+          "Authentication failed for #{provider}. Check your API key in .gitf/config.toml"
+        )
+
         trip_and_fallback(state, provider)
 
       {:api_error, message} ->
@@ -288,7 +308,10 @@ defmodule GiTF.CLI.Chat do
         call_and_handle(%{state | model: fallback}, 0)
 
       :none ->
-        Format.error("All configured providers have failed. Add more API keys in .gitf/config.toml under [llm.keys]")
+        Format.error(
+          "All configured providers have failed. Add more API keys in .gitf/config.toml under [llm.keys]"
+        )
+
         state
     end
   end
@@ -322,7 +345,7 @@ defmodule GiTF.CLI.Chat do
         {:rate_limited, delay}
 
       String.contains?(reason, "401") or String.contains?(reason, "403") or
-          String.contains?(reason, "authentication") or String.contains?(reason, "API key") ->
+        String.contains?(reason, "authentication") or String.contains?(reason, "API key") ->
         {:auth_error, extract_provider_from_reason(reason)}
 
       true ->
@@ -588,13 +611,21 @@ defmodule GiTF.CLI.Chat do
 
   defp normalize_options(options) do
     Enum.map(options, fn
-      opt when is_binary(opt) -> opt
-      %{"label" => _} = opt -> opt
+      opt when is_binary(opt) ->
+        opt
+
+      %{"label" => _} = opt ->
+        opt
+
       %{label: l} = opt ->
         %{"label" => l}
-        |> then(fn m -> if opt[:description], do: Map.put(m, "description", opt[:description]), else: m end)
+        |> then(fn m ->
+          if opt[:description], do: Map.put(m, "description", opt[:description]), else: m
+        end)
         |> then(fn m -> if opt[:recommended], do: Map.put(m, "recommended", true), else: m end)
-      other -> inspect(other)
+
+      other ->
+        inspect(other)
     end)
   end
 
@@ -617,11 +648,13 @@ defmodule GiTF.CLI.Chat do
       desc = op["description"] || op[:description]
       deps = op["depends_on"] || op[:depends_on]
 
-      type_color = case type do
-        "research" -> :cyan
-        "verification" -> :magenta
-        _ -> :yellow
-      end
+      type_color =
+        case type do
+          "research" -> :cyan
+          "verification" -> :magenta
+          _ -> :yellow
+        end
+
       badge = color(type_color) <> "[#{type}]" <> reset()
       IO.puts("  #{idx}. #{badge} #{title}")
 
@@ -644,14 +677,15 @@ defmodule GiTF.CLI.Chat do
 
     if answer in ["y", "yes", ""] do
       # Normalize op keys to strings for plan_handler
-      normalized_jobs = Enum.map(ops, fn op ->
-        %{
-          "title" => op["title"] || op[:title] || "Untitled",
-          "description" => op["description"] || op[:description] || "",
-          "op_type" => op["op_type"] || op[:op_type] || "implementation",
-          "depends_on" => op["depends_on"] || op[:depends_on] || []
-        }
-      end)
+      normalized_jobs =
+        Enum.map(ops, fn op ->
+          %{
+            "title" => op["title"] || op[:title] || "Untitled",
+            "description" => op["description"] || op[:description] || "",
+            "op_type" => op["op_type"] || op[:op_type] || "implementation",
+            "depends_on" => op["depends_on"] || op[:depends_on] || []
+          }
+        end)
 
       plan = %{name: name, summary: summary, ops: normalized_jobs}
       Format.success("Plan accepted with #{length(ops)} op(s).")

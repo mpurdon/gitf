@@ -61,7 +61,13 @@ defmodule GiTF.DebriefTest do
     end
 
     test "returns true when debrief is true" do
-      Archive.insert(:sectors, %{id: "cmb_with_review", path: "/tmp", name: "with-review", debrief: true})
+      Archive.insert(:sectors, %{
+        id: "cmb_with_review",
+        path: "/tmp",
+        name: "with-review",
+        debrief: true
+      })
+
       assert Debrief.enabled?("cmb_with_review")
     end
   end
@@ -134,11 +140,12 @@ defmodule GiTF.DebriefTest do
     test "marks ops with regression_detected" do
       mission = create_quest()
 
-      {:ok, op} = GiTF.Ops.create(%{
-        title: "Test op",
-        mission_id: mission.id,
-        sector_id: mission.sector_id
-      })
+      {:ok, op} =
+        GiTF.Ops.create(%{
+          title: "Test op",
+          mission_id: mission.id,
+          sector_id: mission.sector_id
+        })
 
       # Initially no regression flag
       {:ok, fresh_job} = GiTF.Ops.get(op.id)

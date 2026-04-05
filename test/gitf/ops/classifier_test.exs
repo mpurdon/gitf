@@ -54,7 +54,10 @@ defmodule GiTF.Ops.ClassifierTest do
       assert Classifier.classify_complexity("complex system integration", :implementation) ==
                :complex
 
-      assert Classifier.classify_complexity("large refactor across multiple modules", :refactoring) ==
+      assert Classifier.classify_complexity(
+               "large refactor across multiple modules",
+               :refactoring
+             ) ==
                :complex
     end
 
@@ -72,25 +75,25 @@ defmodule GiTF.Ops.ClassifierTest do
     test "recommends opus for planning" do
       result = Classifier.classify_and_recommend("Plan the authentication system")
       assert result.op_type == :planning
-      assert result.recommended_model == "opus"
+      assert result.recommended_model == "thinking"
       assert result.complexity == :complex
     end
 
     test "recommends haiku for research" do
       result = Classifier.classify_and_recommend("Research caching strategies")
       assert result.op_type == :research
-      assert result.recommended_model == "haiku"
+      assert result.recommended_model == "fast"
     end
 
     test "recommends based on implementation complexity" do
       simple = Classifier.classify_and_recommend("Fix simple typo in config")
-      assert simple.recommended_model == "haiku"
+      assert simple.recommended_model == "fast"
 
       complex = Classifier.classify_and_recommend("Implement complex payment integration")
-      assert complex.recommended_model == "opus"
+      assert complex.recommended_model == "thinking"
 
       moderate = Classifier.classify_and_recommend("Add new API endpoint")
-      assert moderate.recommended_model == "sonnet"
+      assert moderate.recommended_model == "general"
     end
 
     test "includes reasoning" do

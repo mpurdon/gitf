@@ -202,7 +202,7 @@ defmodule GiTF.Ops do
   Transitions: failed -> pending. Also stops the assigned ghost,
   cleans up its shell/worktree, and clears the ghost_id assignment
   so the op can be assigned to a fresh ghost.
-  
+
   Optionally appends feedback to the op description.
   """
   @spec reset(String.t(), String.t() | nil) :: {:ok, map()} | {:error, atom()}
@@ -210,8 +210,8 @@ defmodule GiTF.Ops do
     with {:ok, op} <- get(op_id),
          {:ok, next_status} <- validate_transition(op.status, :reset) do
       cleanup_bee_and_cell(op.ghost_id)
-      
-      new_description = 
+
+      new_description =
         if feedback do
           (op.description || "") <> "\n\n## Feedback from previous attempt:\n\n" <> feedback
         else
@@ -219,7 +219,15 @@ defmodule GiTF.Ops do
         end
 
       retry_count = Map.get(op, :retry_count, 0) + 1
-      updated = %{op | status: next_status, ghost_id: nil, retry_count: retry_count, description: new_description}
+
+      updated = %{
+        op
+        | status: next_status,
+          ghost_id: nil,
+          retry_count: retry_count,
+          description: new_description
+      }
+
       result = Archive.put(:ops, updated)
 
       # Nudge Major's spawner so the reset op gets picked up immediately
@@ -412,7 +420,9 @@ defmodule GiTF.Ops do
               {:ok, %{status: "pending"}} -> block(op_id)
               _ -> :ok
             end
-          _ -> :ok
+
+          _ ->
+            :ok
         end
 
         result
@@ -478,12 +488,18 @@ defmodule GiTF.Ops do
 
     Enum.all?(deps, fn dep ->
       case Archive.get(:ops, dep.depends_on_id) do
-        nil -> true
-        %{status: "done"} -> true
+        nil ->
+          true
+
+        %{status: "done"} ->
+          true
+
         %{status: s} when s in ["failed", "rejected"] ->
           # Dependency failed — check if a successful retry exists
           retry_completed?(dep.depends_on_id)
-        _ -> false
+
+        _ ->
+          false
       end
     end)
   end
@@ -520,8 +536,10 @@ defmodule GiTF.Ops do
           {:ok, %{status: "blocked"} = dep_job} ->
             # Inject failure context if a dependency failed
             if dep_failed? do
-              warning = "\n\n## Warning: Dependency failed\n\nDependency op #{op_id} failed. " <>
-                "Proceed with available context; the prerequisite work was not completed."
+              warning =
+                "\n\n## Warning: Dependency failed\n\nDependency op #{op_id} failed. " <>
+                  "Proceed with available context; the prerequisite work was not completed."
+
               updated = %{dep_job | description: (dep_job.description || "") <> warning}
               Archive.put(:ops, updated)
             end

@@ -8,8 +8,8 @@ defmodule GiTF.Dashboard.DesignLive do
   @default_strategy "normal"
   @strategy_colors %{"minimal" => "#58a6ff", "normal" => "#3fb950", "complex" => "#a78bfa"}
   @strategy_instructions Map.new(@strategies, fn s ->
-    {s, GiTF.Major.Planner.strategy_instruction(s, nil)}
-  end)
+                           {s, GiTF.Major.Planner.strategy_instruction(s, nil)}
+                         end)
   @refresh_ms 5_000
 
   @impl true
@@ -54,7 +54,9 @@ defmodule GiTF.Dashboard.DesignLive do
 
   def handle_event("select_override", %{"strategy" => strategy}, socket) do
     current = socket.assigns.override_selection
-    {:noreply, assign(socket, :override_selection, if(current == strategy, do: nil, else: strategy))}
+
+    {:noreply,
+     assign(socket, :override_selection, if(current == strategy, do: nil, else: strategy))}
   end
 
   def handle_event("approve_design", _params, socket) do
@@ -63,7 +65,11 @@ defmodule GiTF.Dashboard.DesignLive do
     case GiTF.Major.Orchestrator.approve_design(mission.id, socket.assigns.override_selection) do
       {:ok, _} ->
         {:ok, mission} = GiTF.Missions.get(mission.id)
-        {:noreply, socket |> put_flash(:info, "Design approved — advancing to planning.") |> refresh_data(mission)}
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Design approved — advancing to planning.")
+         |> refresh_data(mission)}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Approval failed: #{inspect(reason)}")}
@@ -76,7 +82,11 @@ defmodule GiTF.Dashboard.DesignLive do
     case GiTF.Major.Orchestrator.reject_design(mission.id, "Human rejected via dashboard") do
       {:ok, _} ->
         {:ok, mission} = GiTF.Missions.get(mission.id)
-        {:noreply, socket |> put_flash(:info, "Design rejected — redesign triggered.") |> refresh_data(mission)}
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Design rejected — redesign triggered.")
+         |> refresh_data(mission)}
 
       {:error, :max_redesigns} ->
         {:noreply, put_flash(socket, :error, "Maximum redesign iterations reached.")}
@@ -89,6 +99,7 @@ defmodule GiTF.Dashboard.DesignLive do
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
+
     case GiTF.Missions.get(socket.assigns.mission.id) do
       {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
       _ -> {:noreply, socket}
@@ -223,7 +234,13 @@ defmodule GiTF.Dashboard.DesignLive do
   defp render_strategy_detail(assigns) do
     strategy = assigns.active_tab
     design = assigns.designs[strategy]
-    assigns = assign(assigns, strategy: strategy, design: design, is_winner: winner?(strategy, assigns.review))
+
+    assigns =
+      assign(assigns,
+        strategy: strategy,
+        design: design,
+        is_winner: winner?(strategy, assigns.review)
+      )
 
     ~H"""
     <div class="design-layout">
@@ -301,7 +318,14 @@ defmodule GiTF.Dashboard.DesignLive do
 
   defp render_collapsible(assigns, section_id, title, render_fn) do
     open = not MapSet.member?(assigns.collapsed, section_id)
-    assigns = assign(assigns, section_id: section_id, section_title: title, section_open: open, section_render_fn: render_fn)
+
+    assigns =
+      assign(assigns,
+        section_id: section_id,
+        section_title: title,
+        section_open: open,
+        section_render_fn: render_fn
+      )
 
     ~H"""
     <div class="section-header" phx-click="toggle_section" phx-value-section={@section_id}>
@@ -385,7 +409,7 @@ defmodule GiTF.Dashboard.DesignLive do
 
     mode =
       if mission[:current_phase] in ["design", "review"] and
-         (is_nil(review) or review["approved"] != true) do
+           (is_nil(review) or review["approved"] != true) do
         :approval
       else
         :view_only
@@ -408,7 +432,9 @@ defmodule GiTF.Dashboard.DesignLive do
     review && selected_strategy(review) == strategy
   end
 
-  defp selected_strategy(review) when is_map(review), do: review["selected_design"] || @default_strategy
+  defp selected_strategy(review) when is_map(review),
+    do: review["selected_design"] || @default_strategy
+
   defp selected_strategy(_), do: @default_strategy
 
   defp strategy_color(strategy), do: Map.get(@strategy_colors, strategy, "#8b949e")

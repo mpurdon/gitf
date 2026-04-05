@@ -14,6 +14,19 @@ defmodule GiTF.Dashboard.ProvidersLive do
 
     {configured, unconfigured} = ProviderManager.list_providers()
 
+    # Ollama status
+    ollama_running = GiTF.Runtime.Ollama.running?()
+
+    ollama_models =
+      if ollama_running do
+        case GiTF.Runtime.Ollama.list_models() do
+          {:ok, models} -> models
+          _ -> []
+        end
+      else
+        []
+      end
+
     {:ok,
      socket
      |> assign(:page_title, "Providers")
@@ -28,7 +41,10 @@ defmodule GiTF.Dashboard.ProvidersLive do
      |> assign(:circuit_states, load_circuit_states())
      |> assign(:stats, load_stats())
      |> assign(:dirty, false)
-     |> assign(:saving, false)}
+     |> assign(:saving, false)
+     |> assign(:ollama_running, ollama_running)
+     |> assign(:ollama_models, ollama_models)
+     |> assign(:starting_ollama, false)}
   end
 
   # -- Events ----------------------------------------------------------------
@@ -40,7 +56,9 @@ defmodule GiTF.Dashboard.ProvidersLive do
 
     if idx && idx > 0 do
       new_priority = swap(priority, idx, idx - 1)
-      {:noreply, socket |> assign(:priority, new_priority) |> assign(:dirty, true) |> reload_providers()}
+
+      {:noreply,
+       socket |> assign(:priority, new_priority) |> assign(:dirty, true) |> reload_providers()}
     else
       {:noreply, socket}
     end
@@ -52,7 +70,9 @@ defmodule GiTF.Dashboard.ProvidersLive do
 
     if idx && idx < length(priority) - 1 do
       new_priority = swap(priority, idx, idx + 1)
-      {:noreply, socket |> assign(:priority, new_priority) |> assign(:dirty, true) |> reload_providers()}
+
+      {:noreply,
+       socket |> assign(:priority, new_priority) |> assign(:dirty, true) |> reload_providers()}
     else
       {:noreply, socket}
     end
@@ -76,8 +96,14 @@ defmodule GiTF.Dashboard.ProvidersLive do
     {:noreply, socket |> assign(:fallback_strategy, strategy) |> assign(:dirty, true)}
   end
 
-  def handle_event("update_field", %{"provider" => name, "field" => field, "value" => value}, socket) do
-    editing = put_in(socket.assigns.editing, [Access.key(name, %{}), field], value)
+  def handle_event(
+        "update_provider_config",
+        %{"provider" => name, "config" => config},
+        socket
+      ) do
+    current_edits = Map.get(socket.assigns.editing, name, %{})
+    new_edits = Map.merge(current_edits, config)
+    editing = put_in(socket.assigns.editing, [Access.key(name, %{})], new_edits)
     {:noreply, socket |> assign(:editing, editing) |> assign(:dirty, true)}
   end
 
@@ -104,7 +130,21 @@ defmodule GiTF.Dashboard.ProvidersLive do
 
   def handle_event("add_provider", %{"provider" => name}, socket) do
     priority = socket.assigns.priority ++ [name]
-    {:noreply, socket |> assign(:priority, priority) |> assign(:dirty, true) |> reload_providers()}
+
+    {:noreply,
+     socket |> assign(:priority, priority) |> assign(:dirty, true) |> reload_providers()}
+  end
+
+  def handle_event("start_ollama", _, socket) do
+    # Spawn a task to start Ollama and notify us when done
+    Task.async(fn ->
+      case GiTF.Runtime.Ollama.start_server() do
+        {:ok, _} -> {:ollama_started, :ok}
+        {:error, reason} -> {:ollama_started, {:error, reason}}
+      end
+    end)
+
+    {:noreply, assign(socket, :starting_ollama, true)}
   end
 
   def handle_event("save", _params, socket) do
@@ -114,31 +154,46 @@ defmodule GiTF.Dashboard.ProvidersLive do
         provider = Enum.find(socket.assigns.configured, &(&1.name == name))
 
         config = %{
-          "enabled" => Map.get(edits, "enabled", provider && provider.enabled || true),
-          "thinking" => Map.get(edits, "thinking", provider && to_string(provider.models.thinking) || ""),
-          "general" => Map.get(edits, "general", provider && to_string(provider.models.general) || ""),
-          "fast" => Map.get(edits, "fast", provider && to_string(provider.models.fast) || "")
+          "enabled" => Map.get(edits, "enabled", (provider && provider.enabled) || true),
+          "thinking" =>
+            Map.get(edits, "thinking", (provider && to_string(provider.models.thinking)) || ""),
+          "general" =>
+            Map.get(edits, "general", (provider && to_string(provider.models.general)) || ""),
+          "fast" => Map.get(edits, "fast", (provider && to_string(provider.models.fast)) || "")
         }
 
-        config = case Map.get(edits, "api_key") do
-          key when is_binary(key) and key != "" -> Map.put(config, "api_key", key)
-          _ -> config
-        end
+        config =
+          case Map.get(edits, "api_key") do
+            key when is_binary(key) and key != "" -> Map.put(config, "api_key", key)
+            _ -> config
+          end
 
-        config = case Map.get(edits, "aws_profile") do
-          profile when is_binary(profile) and profile != "" -> Map.put(config, "aws_profile", profile)
-          _ -> config
-        end
+        config =
+          case Map.get(edits, "aws_profile") do
+            profile when is_binary(profile) and profile != "" ->
+              Map.put(config, "aws_profile", profile)
 
-        config = case Map.get(edits, "aws_region") do
-          region when is_binary(region) and region != "" -> Map.put(config, "aws_region", region)
-          _ -> config
-        end
+            _ ->
+              config
+          end
+
+        config =
+          case Map.get(edits, "aws_region") do
+            region when is_binary(region) and region != "" ->
+              Map.put(config, "aws_region", region)
+
+            _ ->
+              config
+          end
 
         Map.put(acc, name, config)
       end)
 
-    case ProviderManager.save!(socket.assigns.priority, socket.assigns.fallback_strategy, provider_configs) do
+    case ProviderManager.save!(
+           socket.assigns.priority,
+           socket.assigns.fallback_strategy,
+           provider_configs
+         ) do
       :ok ->
         {configured, unconfigured} = ProviderManager.list_providers()
 
@@ -161,6 +216,37 @@ defmodule GiTF.Dashboard.ProvidersLive do
     Process.demonitor(ref, [:flush])
     test_results = Map.put(socket.assigns.test_results, name, result)
     {:noreply, assign(socket, :test_results, test_results)}
+  end
+
+  def handle_info({ref, {:ollama_started, result}}, socket) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+
+    socket =
+      case result do
+        :ok ->
+          socket
+          |> assign(:ollama_running, true)
+          |> assign(:starting_ollama, false)
+          |> put_flash(:info, "Ollama server started successfully.")
+
+        {:error, reason} ->
+          socket
+          |> assign(:starting_ollama, false)
+          |> put_flash(:error, "Failed to start Ollama: #{inspect(reason)}")
+      end
+
+    # Also try to fetch models if it started
+    socket =
+      if socket.assigns.ollama_running do
+        case GiTF.Runtime.Ollama.list_models() do
+          {:ok, models} -> assign(socket, :ollama_models, models)
+          _ -> socket
+        end
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   def handle_info({:circuit_reset, _provider, _latency}, socket) do
@@ -211,11 +297,25 @@ defmodule GiTF.Dashboard.ProvidersLive do
       </div>
     </div>
 
+    <%!-- Unconfigured providers --%>
+    <div :if={unconfigured_available(@unconfigured, @priority) != []} class="panel" style="margin-bottom:1rem">
+      <div class="panel-title">Available Providers</div>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem">
+        <div :for={provider <- unconfigured_available(@unconfigured, @priority)} style="display:flex; align-items:center; gap:0.4rem">
+          <span class="provider-glyph" style={"width:28px; height:28px; font-size:0.85rem; color:#{provider.color}; border-color:#{provider.color}55; background:#{provider.color}11"}>
+            {provider.glyph}
+          </span>
+          <span style="font-size:0.85rem; color:#8b949e">{String.capitalize(provider.name)}</span>
+          <button class="btn btn-grey" style="font-size:0.7rem; padding:0.15rem 0.4rem" phx-click="add_provider" phx-value-provider={provider.name}>Add</button>
+        </div>
+      </div>
+    </div>
+
     <%!-- Provider Priority --%>
     <div class="panel" style="margin-bottom:1rem">
       <div class="panel-title">Provider Priority</div>
 
-      <div :for={{name, idx} <- Enum.with_index(@priority)} style="margin-top:0.5rem">
+      <div :for={{name, idx} <- Enum.with_index(@priority)} id={"provider-card-#{name}"} style="margin-top:0.5rem">
         <% provider = Enum.find(@configured, &(&1.name == name)) || ProviderManager.provider_info(name)
            edits = Map.get(@editing, name, %{})
            enabled = Map.get(edits, "enabled", provider.enabled)
@@ -278,129 +378,132 @@ defmodule GiTF.Dashboard.ProvidersLive do
         </div>
 
         <%!-- Expanded config --%>
-        <div :if={expanded} style="background:#0d1117; border:1px solid #21262d; border-top:none; border-radius:0 0 8px 8px; padding:1rem; margin-top:-0.5rem; margin-bottom:0.5rem">
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
-            <div>
-              <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">🧠 Thinking Model</label>
-              <input
-                class="form-input"
-                style="font-size:0.8rem; font-family:monospace"
-                value={Map.get(edits, "thinking", to_string(provider.models.thinking))}
-                phx-blur="update_field"
-                phx-value-provider={name}
-                phx-value-field="thinking"
+        <div :if={expanded} id={"provider-config-#{name}"} style="background:#0d1117; border:1px solid #21262d; border-top:none; border-radius:0 0 8px 8px; padding:1rem; margin-top:-0.5rem; margin-bottom:0.5rem">
+          <form id={"provider-form-#{name}"} phx-change="update_provider_config" phx-submit="update_provider_config">
+            <input type="hidden" name="provider" value={name} />
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
+              <.model_input
+                label="🧠 Thinking Model"
+                provider_name={name}
+                field="thinking"
+                current_val={Map.get(edits, "thinking", to_string(provider.models.thinking)) |> rewrite_legacy_prefix(name)}
+                ollama_running={@ollama_running}
+                ollama_models={@ollama_models}
               />
-            </div>
-            <div>
-              <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">◈ General Model</label>
-              <input
-                class="form-input"
-                style="font-size:0.8rem; font-family:monospace"
-                value={Map.get(edits, "general", to_string(provider.models.general))}
-                phx-blur="update_field"
-                phx-value-provider={name}
-                phx-value-field="general"
+              <.model_input
+                label="◈ General Model"
+                provider_name={name}
+                field="general"
+                current_val={Map.get(edits, "general", to_string(provider.models.general)) |> rewrite_legacy_prefix(name)}
+                ollama_running={@ollama_running}
+                ollama_models={@ollama_models}
               />
-            </div>
-            <div>
-              <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">⚡ Fast Model</label>
-              <input
-                class="form-input"
-                style="font-size:0.8rem; font-family:monospace"
-                value={Map.get(edits, "fast", to_string(provider.models.fast))}
-                phx-blur="update_field"
-                phx-value-provider={name}
-                phx-value-field="fast"
+              <.model_input
+                label="⚡ Fast Model"
+                provider_name={name}
+                field="fast"
+                current_val={Map.get(edits, "fast", to_string(provider.models.fast)) |> rewrite_legacy_prefix(name)}
+                ollama_running={@ollama_running}
+                ollama_models={@ollama_models}
               />
-            </div>
-          </div>
-
-          <%!-- Auth section --%>
-          <div style="display:flex; gap:1rem; align-items:flex-end; margin-bottom:0.75rem">
-            <div :if={provider.auth == :api_key} style="flex:1">
-              <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">API Key</label>
-              <input
-                class="form-input"
-                style="font-size:0.8rem; font-family:monospace"
-                type="password"
-                placeholder={if provider.api_key_set, do: "••••••••••••••••", else: "Enter API key..."}
-                value={Map.get(edits, "api_key", "")}
-                phx-blur="update_field"
-                phx-value-provider={name}
-                phx-value-field="api_key"
-              />
-            </div>
-            <div :if={provider.auth == :aws_profile} style="flex:1">
-              <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">AWS Profile Name</label>
-              <input
-                class="form-input"
-                style="font-size:0.8rem; font-family:monospace"
-                placeholder="e.g. nieto"
-                value={Map.get(edits, "aws_profile", provider.aws_profile || "")}
-                phx-blur="update_field"
-                phx-value-provider={name}
-                phx-value-field="aws_profile"
-              />
-            </div>
-            <div :if={provider.auth == :aws_profile} style="width:150px">
-              <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">AWS Region</label>
-              <select
-                class="form-select"
-                style="font-size:0.8rem; font-family:monospace"
-                phx-change="update_field"
-                phx-value-provider={name}
-                phx-value-field="aws_region"
-                name="value"
-              >
-                <option :for={region <- aws_regions()} value={region} selected={region == (Map.get(edits, "aws_region", provider.aws_region) || "us-east-1")}>
-                  {region}
-                </option>
-              </select>
             </div>
 
-            <div>
+            <%!-- Auth section --%>
+            <div style="display:flex; gap:1rem; align-items:flex-end; margin-bottom:0.75rem">
+              <div :if={provider.auth == :api_key} style="flex:1">
+                <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">API Key</label>
+                <input
+                  class="form-input"
+                  style="font-size:0.8rem; font-family:monospace"
+                  type="password"
+                  placeholder={if provider.api_key_set, do: "••••••••••••••••", else: "Enter API key..."}
+                  value={Map.get(edits, "api_key", "")}
+                  name="config[api_key]"
+                  phx-debounce="500"
+                />
+              </div>
+              <div :if={provider.auth == :aws_profile} style="flex:1">
+                <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">AWS Profile Name</label>
+                <input
+                  class="form-input"
+                  style="font-size:0.8rem; font-family:monospace"
+                  placeholder="e.g. nieto"
+                  value={Map.get(edits, "aws_profile", provider.aws_profile || "")}
+                  name="config[aws_profile]"
+                  phx-debounce="500"
+                />
+              </div>
+              <div :if={provider.auth == :aws_profile} style="width:150px">
+                <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">AWS Region</label>
+                <select
+                  class="form-select"
+                  style="font-size:0.8rem; font-family:monospace"
+                  name="config[aws_region]"
+                >
+                  <option :for={region <- aws_regions()} value={region} selected={region == (Map.get(edits, "aws_region", provider.aws_region) || "us-east-1")}>
+                    {region}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  class={"btn #{case test_result do; {:ok, _} -> "btn-green"; :testing -> "btn-grey"; _ -> "btn-blue" end}"}
+                  phx-click="test_connection"
+                  phx-value-provider={name}
+                  disabled={test_result == :testing}
+                  style="font-size:0.8rem; white-space:nowrap"
+                >
+                  {case test_result do
+                    :testing -> "Testing..."
+                    {:ok, ms} -> "✓ #{ms}ms"
+                    _ -> "Test Connection"
+                  end}
+                </button>
+              </div>
+            </div>
+
+            <div :if={match?({:error, _}, test_result)} style="background:#f8514911; border:1px solid #f8514933; border-radius:6px; padding:0.5rem 0.75rem; margin-top:0.5rem; display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem">
+              <div style="font-size:0.8rem; color:#f85149; flex:1; word-break:break-word; white-space:pre-wrap">
+                {format_test_error(test_result)}
+              </div>
               <button
-                class={"btn #{case test_result do; {:ok, _} -> "btn-green"; :testing -> "btn-grey"; _ -> "btn-blue" end}"}
-                phx-click="test_connection"
+                type="button"
+                class="btn btn-grey"
+                style="font-size:0.7rem; padding:0.15rem 0.4rem; flex-shrink:0"
+                phx-click="dismiss_test"
                 phx-value-provider={name}
-                disabled={test_result == :testing}
-                style="font-size:0.8rem; white-space:nowrap"
-              >
-                {case test_result do
-                  :testing -> "Testing..."
-                  {:ok, ms} -> "✓ #{ms}ms"
-                  _ -> "Test Connection"
-                end}
-              </button>
+              >✕</button>
             </div>
-          </div>
-
-          <div :if={match?({:error, _}, test_result)} style="background:#f8514911; border:1px solid #f8514933; border-radius:6px; padding:0.5rem 0.75rem; margin-top:0.5rem; display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem">
-            <div style="font-size:0.8rem; color:#f85149; flex:1; word-break:break-word; white-space:pre-wrap">
-              {format_test_error(test_result)}
-            </div>
-            <button
-              class="btn btn-grey"
-              style="font-size:0.7rem; padding:0.15rem 0.4rem; flex-shrink:0"
-              phx-click="dismiss_test"
-              phx-value-provider={name}
-            >✕</button>
-          </div>
+          </form>
         </div>
       </div>
     </div>
 
-    <%!-- Unconfigured providers --%>
-    <div :if={unconfigured_available(@unconfigured, @priority) != []} class="panel" style="margin-bottom:1rem">
-      <div class="panel-title">Available Providers</div>
-      <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem">
-        <div :for={provider <- unconfigured_available(@unconfigured, @priority)} style="display:flex; align-items:center; gap:0.4rem">
-          <span class="provider-glyph" style={"width:28px; height:28px; font-size:0.85rem; color:#{provider.color}; border-color:#{provider.color}55; background:#{provider.color}11"}>
-            {provider.glyph}
-          </span>
-          <span style="font-size:0.85rem; color:#8b949e">{String.capitalize(provider.name)}</span>
-          <button class="btn btn-grey" style="font-size:0.7rem; padding:0.15rem 0.4rem" phx-click="add_provider" phx-value-provider={provider.name}>Add</button>
+    <%!-- Ollama Local Server --%>
+    <div class="panel" style="margin-bottom:1rem" :if={Enum.any?(@priority, &(&1 == "ollama")) or @ollama_running}>
+      <div class="panel-title">Ollama Local Server</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.5rem">
+        <div style="display:flex; align-items:center; gap:0.5rem">
+           <span class={"badge #{if @ollama_running, do: "badge-green", else: "badge-grey"}"}>
+             {if @ollama_running, do: "Running", else: "Stopped"}
+           </span>
+           <span :if={@ollama_running} style="font-size:0.8rem; color:#8b949e">
+             {@ollama_models |> length()} models available
+           </span>
         </div>
+        <div>
+          <button :if={not @ollama_running} class="btn btn-blue" phx-click="start_ollama" disabled={@starting_ollama}>
+            {if @starting_ollama, do: "Starting...", else: "Start Server"}
+          </button>
+        </div>
+      </div>
+      <div :if={@ollama_running and @ollama_models != []} style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.5rem">
+         <span :for={model <- @ollama_models} class="badge badge-grey" style="font-family:monospace; font-size:0.75rem">{model}</span>
+      </div>
+      <div :if={@ollama_running and @ollama_models == []} style="margin-top:1rem; font-size:0.8rem; color:#8b949e">
+        No models found. Run <code style="color:#d2a8ff; background:#1c2128; padding:0.1rem 0.3rem; border-radius:3px">ollama pull &lt;model&gt;</code> in your terminal.
       </div>
     </div>
 
@@ -475,10 +578,17 @@ defmodule GiTF.Dashboard.ProvidersLive do
 
   defp aws_regions do
     [
-      "us-east-1", "us-east-2", "us-west-2",
-      "eu-west-1", "eu-west-3", "eu-central-1",
-      "ap-southeast-1", "ap-southeast-2", "ap-northeast-1",
-      "ca-central-1", "sa-east-1"
+      "us-east-1",
+      "us-east-2",
+      "us-west-2",
+      "eu-west-1",
+      "eu-west-3",
+      "eu-central-1",
+      "ap-southeast-1",
+      "ap-southeast-2",
+      "ap-northeast-1",
+      "ca-central-1",
+      "sa-east-1"
     ]
   end
 
@@ -487,11 +597,12 @@ defmodule GiTF.Dashboard.ProvidersLive do
     |> Enum.map(fn name ->
       state = ProviderCircuit.provider_state(name)
 
-      {name, %{
-        state: state,
-        failure_mode: if(state == :open, do: ProviderCircuit.failure_mode(name)),
-        next_probe_in: if(state == :open, do: ProviderCircuit.seconds_until_probe(name))
-      }}
+      {name,
+       %{
+         state: state,
+         failure_mode: if(state == :open, do: ProviderCircuit.failure_mode(name)),
+         next_probe_in: if(state == :open, do: ProviderCircuit.seconds_until_probe(name))
+       }}
     end)
     |> Map.new()
   rescue
@@ -529,5 +640,45 @@ defmodule GiTF.Dashboard.ProvidersLive do
     |> String.replace(~r/-\d{8}.*$/, "")
     |> String.replace(~r/-v\d+:\d+$/, "")
     |> String.slice(0, 25)
+  end
+
+  defp rewrite_legacy_prefix(model, "ollama") do
+    if String.starts_with?(model, "openai:") do
+      String.replace(model, ~r/^openai:/, "ollama:")
+    else
+      model
+    end
+  end
+
+  defp rewrite_legacy_prefix(model, _), do: model
+
+  defp model_input(assigns) do
+    ~H"""
+    <div>
+      <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">{@label}</label>
+      <%= if @provider_name == "ollama" and @ollama_running and @ollama_models != [] do %>
+        <select
+          class="form-select"
+          style="font-size:0.8rem; font-family:monospace; width:100%"
+          name={"config[#{@field}]"}
+        >
+          <option :for={model <- @ollama_models} value={"ollama:#{model}"} selected={"ollama:#{model}" == @current_val}>
+            {model}
+          </option>
+          <option :if={@current_val not in Enum.map(@ollama_models, &("ollama:" <> &1))} value={@current_val} selected>
+            {String.replace(@current_val, "ollama:", "")} (not downloaded)
+          </option>
+        </select>
+      <% else %>
+        <input
+          class="form-input"
+          style="font-size:0.8rem; font-family:monospace; width:100%"
+          value={@current_val}
+          name={"config[#{@field}]"}
+          phx-debounce="blur"
+        />
+      <% end %>
+    </div>
+    """
   end
 end

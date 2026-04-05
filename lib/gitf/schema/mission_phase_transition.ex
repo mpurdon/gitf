@@ -1,7 +1,7 @@
 defmodule GiTF.Schema.MissionPhaseTransition do
   @moduledoc """
   Schema for mission phase transitions.
-  
+
   Tracks when a mission moves between phases (pending → research → planning → implementation).
   """
 

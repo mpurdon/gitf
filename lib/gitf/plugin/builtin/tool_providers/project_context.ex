@@ -29,7 +29,8 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
   defp project_info_tool do
     ReqLLM.Tool.new!(
       name: "project_info",
-      description: "Detect project language, build tool, test framework, and git info from the filesystem.",
+      description:
+        "Detect project language, build tool, test framework, and git info from the filesystem.",
       parameter_schema: [
         path: [type: :string, doc: "Project root path (default: current sector)"]
       ],
@@ -55,19 +56,34 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
 
   defp detect_language(path) do
     cond do
-      File.exists?(Path.join(path, "mix.exs")) -> "elixir"
-      File.exists?(Path.join(path, "package.json")) -> "javascript/typescript"
-      File.exists?(Path.join(path, "Cargo.toml")) -> "rust"
-      File.exists?(Path.join(path, "go.mod")) -> "go"
-      File.exists?(Path.join(path, "pyproject.toml")) or File.exists?(Path.join(path, "setup.py")) -> "python"
-      File.exists?(Path.join(path, "Gemfile")) -> "ruby"
-      true -> "unknown"
+      File.exists?(Path.join(path, "mix.exs")) ->
+        "elixir"
+
+      File.exists?(Path.join(path, "package.json")) ->
+        "javascript/typescript"
+
+      File.exists?(Path.join(path, "Cargo.toml")) ->
+        "rust"
+
+      File.exists?(Path.join(path, "go.mod")) ->
+        "go"
+
+      File.exists?(Path.join(path, "pyproject.toml")) or File.exists?(Path.join(path, "setup.py")) ->
+        "python"
+
+      File.exists?(Path.join(path, "Gemfile")) ->
+        "ruby"
+
+      true ->
+        "unknown"
     end
   end
 
   defp detect_build_tool(path) do
     cond do
-      File.exists?(Path.join(path, "mix.exs")) -> "mix"
+      File.exists?(Path.join(path, "mix.exs")) ->
+        "mix"
+
       File.exists?(Path.join(path, "package.json")) ->
         cond do
           File.exists?(Path.join(path, "bun.lockb")) -> "bun"
@@ -75,10 +91,18 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
           File.exists?(Path.join(path, "yarn.lock")) -> "yarn"
           true -> "npm"
         end
-      File.exists?(Path.join(path, "Cargo.toml")) -> "cargo"
-      File.exists?(Path.join(path, "go.mod")) -> "go"
-      File.exists?(Path.join(path, "Makefile")) -> "make"
-      true -> "unknown"
+
+      File.exists?(Path.join(path, "Cargo.toml")) ->
+        "cargo"
+
+      File.exists?(Path.join(path, "go.mod")) ->
+        "go"
+
+      File.exists?(Path.join(path, "Makefile")) ->
+        "make"
+
+      true ->
+        "unknown"
     end
   end
 
@@ -95,7 +119,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
   defp detect_git_info(path) do
     if File.dir?(Path.join(path, ".git")) do
       branch =
-        case GiTF.Git.safe_cmd( ["branch", "--show-current"], cd: path, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd(["branch", "--show-current"], cd: path, stderr_to_stdout: true) do
           {output, 0} -> String.trim(output)
           _ -> "unknown"
         end
@@ -113,7 +137,8 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
   defp codebase_map_tool do
     ReqLLM.Tool.new!(
       name: "codebase_map",
-      description: "Generate a directory tree of the project, excluding build artifacts and dependencies.",
+      description:
+        "Generate a directory tree of the project, excluding build artifacts and dependencies.",
       parameter_schema: [
         path: [type: :string, doc: "Root path (default: current sector)"],
         depth: [type: :integer, doc: "Max depth (default: 3)"]
@@ -165,7 +190,8 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
   defp dependency_info_tool do
     ReqLLM.Tool.new!(
       name: "dependency_info",
-      description: "Parse project dependency files (mix.lock, package.json, Cargo.toml) and list dependencies.",
+      description:
+        "Parse project dependency files (mix.lock, package.json, Cargo.toml) and list dependencies.",
       parameter_schema: [
         path: [type: :string, doc: "Project root path (default: current sector)"]
       ],
@@ -250,12 +276,18 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
           |> String.split("\n")
           |> Enum.reduce({false, []}, fn line, {in_deps, acc} ->
             cond do
-              String.starts_with?(line, "[dependencies]") -> {true, acc}
-              String.starts_with?(line, "[") -> {false, acc}
+              String.starts_with?(line, "[dependencies]") ->
+                {true, acc}
+
+              String.starts_with?(line, "[") ->
+                {false, acc}
+
               in_deps and String.contains?(line, "=") ->
                 [name | _] = String.split(line, "=", parts: 2)
                 {true, [String.trim(name) | acc]}
-              true -> {in_deps, acc}
+
+              true ->
+                {in_deps, acc}
             end
           end)
           |> elem(1)

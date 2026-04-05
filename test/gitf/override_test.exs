@@ -20,11 +20,12 @@ defmodule GiTF.OverrideTest do
   defp add_job(mission, opts \\ %{}) do
     risk = Map.get(opts, :risk_level, :low)
 
-    {:ok, op} = GiTF.Ops.create(%{
-      title: "Test op",
-      mission_id: mission.id,
-      sector_id: mission.sector_id
-    })
+    {:ok, op} =
+      GiTF.Ops.create(%{
+        title: "Test op",
+        mission_id: mission.id,
+        sector_id: mission.sector_id
+      })
 
     # Set risk_level directly (classifier may override attrs)
     updated = %{op | risk_level: risk}

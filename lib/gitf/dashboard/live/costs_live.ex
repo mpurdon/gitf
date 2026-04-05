@@ -48,7 +48,7 @@ defmodule GiTF.Dashboard.CostsLive do
         c[:recorded_at] && DateTime.compare(c.recorded_at, one_hour_ago) != :lt
       end)
 
-    burn_rate = Enum.sum(Enum.map(recent_costs, & &1[:cost_usd] || 0.0))
+    burn_rate = Enum.sum(Enum.map(recent_costs, &(&1[:cost_usd] || 0.0)))
 
     # Per-mission cost breakdown
     mission_costs =
@@ -102,8 +102,11 @@ defmodule GiTF.Dashboard.CostsLive do
             DateTime.compare(c.recorded_at, hour_end) == :lt
         end)
 
-      cost = Enum.sum(Enum.map(hour_costs, & &1[:cost_usd] || 0.0))
-      tokens = Enum.sum(Enum.map(hour_costs, &((&1[:input_tokens] || 0) + (&1[:output_tokens] || 0))))
+      cost = Enum.sum(Enum.map(hour_costs, &(&1[:cost_usd] || 0.0)))
+
+      tokens =
+        Enum.sum(Enum.map(hour_costs, &((&1[:input_tokens] || 0) + (&1[:output_tokens] || 0))))
+
       label = if offset == 0, do: "now", else: "#{offset}h ago"
 
       %{label: label, cost: cost, tokens: tokens}

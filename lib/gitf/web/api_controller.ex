@@ -129,16 +129,17 @@ defmodule GiTF.Web.ApiController do
             goal: plan[:goal],
             selected_strategy: plan[:strategy],
             candidates_count: length(candidates),
-            tasks: Enum.map(tasks, fn t ->
-              %{
-                title: t["title"] || t[:title],
-                description: t["description"] || t[:description],
-                target_files: t["target_files"] || t[:target_files] || [],
-                acceptance_criteria: t["acceptance_criteria"] || t[:acceptance_criteria] || [],
-                depends_on_indices: t["depends_on_indices"] || t[:depends_on_indices] || [],
-                model_recommendation: t["model_recommendation"] || t[:model_recommendation]
-              }
-            end),
+            tasks:
+              Enum.map(tasks, fn t ->
+                %{
+                  title: t["title"] || t[:title],
+                  description: t["description"] || t[:description],
+                  target_files: t["target_files"] || t[:target_files] || [],
+                  acceptance_criteria: t["acceptance_criteria"] || t[:acceptance_criteria] || [],
+                  depends_on_indices: t["depends_on_indices"] || t[:depends_on_indices] || [],
+                  model_recommendation: t["model_recommendation"] || t[:model_recommendation]
+                }
+              end),
             estimated_duration: plan[:estimated_duration]
           }
         })
@@ -201,16 +202,18 @@ defmodule GiTF.Web.ApiController do
                 mission_id: id,
                 strategy: strategy,
                 score: candidate[:score] || candidate.score,
-                tasks: Enum.map(tasks, fn t ->
-                  %{
-                    title: t["title"] || t[:title],
-                    description: t["description"] || t[:description],
-                    target_files: t["target_files"] || t[:target_files] || [],
-                    acceptance_criteria: t["acceptance_criteria"] || t[:acceptance_criteria] || [],
-                    depends_on_indices: t["depends_on_indices"] || t[:depends_on_indices] || [],
-                    model_recommendation: t["model_recommendation"] || t[:model_recommendation]
-                  }
-                end),
+                tasks:
+                  Enum.map(tasks, fn t ->
+                    %{
+                      title: t["title"] || t[:title],
+                      description: t["description"] || t[:description],
+                      target_files: t["target_files"] || t[:target_files] || [],
+                      acceptance_criteria:
+                        t["acceptance_criteria"] || t[:acceptance_criteria] || [],
+                      depends_on_indices: t["depends_on_indices"] || t[:depends_on_indices] || [],
+                      model_recommendation: t["model_recommendation"] || t[:model_recommendation]
+                    }
+                  end),
                 estimated_duration: candidate[:estimated_duration]
               }
             })
@@ -419,8 +422,11 @@ defmodule GiTF.Web.ApiController do
   def complete_bee(conn, %{"id" => ghost_id}) do
     # Phase ops: extract artifact before completing
     case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} when not is_nil(ghost.op_id) -> maybe_collect_phase_artifact(ghost_id, ghost.op_id)
-      _ -> :ok
+      {:ok, ghost} when not is_nil(ghost.op_id) ->
+        maybe_collect_phase_artifact(ghost_id, ghost.op_id)
+
+      _ ->
+        :ok
     end
 
     case GiTF.Ghosts.complete(ghost_id) do

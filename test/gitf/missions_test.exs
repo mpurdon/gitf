@@ -6,7 +6,9 @@ defmodule GiTF.MissionsTest do
 
   setup do
     {:ok, sector} =
-      Archive.insert(:sectors, %{name: "missions-test-sector-#{:erlang.unique_integer([:positive])}"})
+      Archive.insert(:sectors, %{
+        name: "missions-test-sector-#{:erlang.unique_integer([:positive])}"
+      })
 
     %{sector: sector}
   end
@@ -78,16 +80,16 @@ defmodule GiTF.MissionsTest do
       assert Missions.compute_status([]) == "pending"
     end
 
-    test "returns pending when all ops are pending" do
-      assert Missions.compute_status(["pending", "pending"]) == "pending"
+    test "returns active when all ops are pending" do
+      assert Missions.compute_status(["pending", "pending"]) == "active"
     end
 
     test "returns completed when all ops are done" do
       assert Missions.compute_status(["done", "done", "done"]) == "completed"
     end
 
-    test "returns failed when any op has failed" do
-      assert Missions.compute_status(["done", "failed", "pending"]) == "failed"
+    test "returns active when any op has failed but others are pending" do
+      assert Missions.compute_status(["done", "failed", "pending"]) == "active"
     end
 
     test "returns active when any op is running" do
@@ -98,12 +100,16 @@ defmodule GiTF.MissionsTest do
       assert Missions.compute_status(["pending", "assigned"]) == "active"
     end
 
-    test "returns pending for mixed pending and blocked" do
-      assert Missions.compute_status(["pending", "blocked"]) == "pending"
+    test "returns active for mixed pending and blocked" do
+      assert Missions.compute_status(["pending", "blocked"]) == "active"
     end
 
-    test "failed takes precedence over active" do
-      assert Missions.compute_status(["running", "failed"]) == "failed"
+    test "returns failed when ops are only done or failed (no pending/running)" do
+      assert Missions.compute_status(["done", "failed"]) == "failed"
+    end
+
+    test "returns active when running despite failed op" do
+      assert Missions.compute_status(["running", "failed"]) == "active"
     end
   end
 
@@ -188,7 +194,9 @@ defmodule GiTF.MissionsTest do
           status: "done"
         })
 
-      {:ok, ghost} = Archive.insert(:ghosts, %{name: "test-ghost", op_id: op.id, status: "stopped"})
+      {:ok, ghost} =
+        Archive.insert(:ghosts, %{name: "test-ghost", op_id: op.id, status: "stopped"})
+
       GiTF.Ops.assign(op.id, ghost.id)
 
       {:ok, _cell} =

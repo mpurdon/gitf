@@ -2,7 +2,7 @@ defmodule GiTF.Web.UserSocket do
   use Phoenix.Socket
 
   ## Channels
-  channel "game:control", GiTF.Web.GameChannel
+  channel("game:control", GiTF.Web.GameChannel)
 
   # Socket params are passed from the client and can
   # be used to verify and authenticate a user. After

@@ -31,9 +31,19 @@ defmodule GiTF.Web.Live.Dashboard do
       |> assign(:active_tab, :detail)
       |> assign(:refresh_count, 0)
       |> assign(:events, [])
-      |> assign(:health, safe_call(fn -> GiTF.Observability.Health.check() end, %{status: :unknown, checks: %{}, timestamp: DateTime.utc_now()}))
+      |> assign(
+        :health,
+        safe_call(fn -> GiTF.Observability.Health.check() end, %{
+          status: :unknown,
+          checks: %{},
+          timestamp: DateTime.utc_now()
+        })
+      )
       |> assign(:alerts, safe_call(fn -> GiTF.Observability.Alerts.check_alerts() end, []))
-      |> assign(:sync_queue, safe_call(fn -> GiTF.Sync.Queue.status() end, %{pending: [], active: nil, completed: []}))
+      |> assign(
+        :sync_queue,
+        safe_call(fn -> GiTF.Sync.Queue.status() end, %{pending: [], active: nil, completed: []})
+      )
       |> assign(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, []))
       |> assign(:event_store_events, [])
       |> assign(:event_types, safe_call(fn -> GiTF.EventStore.event_types() end, []))
@@ -96,13 +106,20 @@ defmodule GiTF.Web.Live.Dashboard do
 
   def handle_event("kill_quest", %{"id" => mission_id}, socket) do
     GiTF.Missions.kill(mission_id)
-    {:noreply, socket |> assign(:selected_op_id, nil) |> assign(:selected_mission_id, nil) |> assign_stats()}
+
+    {:noreply,
+     socket |> assign(:selected_op_id, nil) |> assign(:selected_mission_id, nil) |> assign_stats()}
   end
 
   def handle_event("select_quest", %{"id" => mission_id}, socket) do
     current = socket.assigns.selected_mission_id
     new_id = if current == mission_id, do: nil, else: mission_id
-    {:noreply, socket |> assign(:selected_mission_id, new_id) |> assign(:selected_op_id, nil) |> assign(:active_tab, :detail)}
+
+    {:noreply,
+     socket
+     |> assign(:selected_mission_id, new_id)
+     |> assign(:selected_op_id, nil)
+     |> assign(:active_tab, :detail)}
   end
 
   def handle_event("toggle_done_jobs", _params, socket) do
@@ -146,7 +163,10 @@ defmodule GiTF.Web.Live.Dashboard do
     socket =
       socket
       |> assign(:event_type_filter, type_atom)
-      |> assign(:event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 50, type: type_atom) end, []))
+      |> assign(
+        :event_store_events,
+        safe_call(fn -> GiTF.EventStore.list(limit: 50, type: type_atom) end, [])
+      )
 
     {:noreply, socket}
   end
@@ -201,12 +221,25 @@ defmodule GiTF.Web.Live.Dashboard do
   defp refresh_core(socket) do
     socket
     |> assign_stats()
-    |> assign(:sync_queue, safe_call(fn -> GiTF.Sync.Queue.status() end, socket.assigns.sync_queue))
+    |> assign(
+      :sync_queue,
+      safe_call(fn -> GiTF.Sync.Queue.status() end, socket.assigns.sync_queue)
+    )
     |> assign(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, socket.assigns.runs))
     |> then(fn s ->
-      assign(s, :alerts, safe_call(fn ->
-        GiTF.Observability.Alerts.check_alerts(ops: s.assigns.ops, missions: s.assigns.missions)
-      end, s.assigns.alerts))
+      assign(
+        s,
+        :alerts,
+        safe_call(
+          fn ->
+            GiTF.Observability.Alerts.check_alerts(
+              ops: s.assigns.ops,
+              missions: s.assigns.missions
+            )
+          end,
+          s.assigns.alerts
+        )
+      )
     end)
   end
 
@@ -224,8 +257,14 @@ defmodule GiTF.Web.Live.Dashboard do
       end)
 
     socket
-    |> assign(:health, safe_call(fn -> GiTF.Observability.Health.check() end, socket.assigns.health))
-    |> assign(:agent_identities, safe_call(fn -> GiTF.GhostID.list() end, socket.assigns.agent_identities))
+    |> assign(
+      :health,
+      safe_call(fn -> GiTF.Observability.Health.check() end, socket.assigns.health)
+    )
+    |> assign(
+      :agent_identities,
+      safe_call(fn -> GiTF.GhostID.list() end, socket.assigns.agent_identities)
+    )
     |> assign(:budget_status, load_budget_status(socket.assigns.missions))
     |> assign(:backups, backups)
   end
@@ -234,8 +273,17 @@ defmodule GiTF.Web.Live.Dashboard do
 
   defp maybe_refresh_tab(%{assigns: %{active_tab: :events}} = socket) do
     opts = [limit: 50]
-    opts = if socket.assigns.event_type_filter, do: Keyword.put(opts, :type, socket.assigns.event_type_filter), else: opts
-    assign(socket, :event_store_events, safe_call(fn -> GiTF.EventStore.list(opts) end, socket.assigns.event_store_events))
+
+    opts =
+      if socket.assigns.event_type_filter,
+        do: Keyword.put(opts, :type, socket.assigns.event_type_filter),
+        else: opts
+
+    assign(
+      socket,
+      :event_store_events,
+      safe_call(fn -> GiTF.EventStore.list(opts) end, socket.assigns.event_store_events)
+    )
   end
 
   defp maybe_refresh_tab(socket), do: socket
@@ -244,7 +292,9 @@ defmodule GiTF.Web.Live.Dashboard do
     missions = Archive.all(:missions)
     ops = Archive.all(:ops)
     ghosts = Archive.all(:ghosts)
-    stats = GiTF.Observability.Metrics.collect_metrics(missions: missions, ops: ops, ghosts: ghosts)
+
+    stats =
+      GiTF.Observability.Metrics.collect_metrics(missions: missions, ops: ops, ghosts: ghosts)
 
     selected_job =
       case socket.assigns[:selected_op_id] do
@@ -1202,17 +1252,27 @@ defmodule GiTF.Web.Live.Dashboard do
         true -> :skip
       end
 
-    [{"Recon", recon}, {"Triage", triage}, {"Ghost", ghost}, {"Tachikoma", tachikoma}, {"Sync", sync}]
+    [
+      {"Recon", recon},
+      {"Triage", triage},
+      {"Ghost", ghost},
+      {"Tachikoma", tachikoma},
+      {"Sync", sync}
+    ]
   end
 
   defp merge_active?(%{active: nil}, _op_id), do: false
   defp merge_active?(%{active: active}, op_id), do: (active[:op_id] || active.op_id) == op_id
   defp merge_active?(_, _), do: false
 
-  defp merge_pending?(%{pending: pending}, op_id), do: Enum.any?(pending, fn {jid, _} -> jid == op_id end)
+  defp merge_pending?(%{pending: pending}, op_id),
+    do: Enum.any?(pending, fn {jid, _} -> jid == op_id end)
+
   defp merge_pending?(_, _), do: false
 
-  defp merge_completed?(%{completed: completed}, op_id), do: Enum.any?(completed, fn {jid, _, _} -> jid == op_id end)
+  defp merge_completed?(%{completed: completed}, op_id),
+    do: Enum.any?(completed, fn {jid, _, _} -> jid == op_id end)
+
   defp merge_completed?(_, _), do: false
 
   defp stage_badge(:done), do: "bg-green-900 text-green-300"
@@ -1230,11 +1290,13 @@ defmodule GiTF.Web.Live.Dashboard do
   defp complexity_badge(:complex), do: "bg-red-900 text-red-300"
   defp complexity_badge(_), do: "bg-gray-700 text-gray-400"
 
-  defp event_type_badge(type) when type in [:bee_spawned, :bee_completed, :bee_failed, :bee_stopped],
-    do: "bg-blue-900 text-blue-300"
+  defp event_type_badge(type)
+       when type in [:bee_spawned, :bee_completed, :bee_failed, :bee_stopped],
+       do: "bg-blue-900 text-blue-300"
 
-  defp event_type_badge(type) when type in [:job_created, :job_transition, :job_verified, :job_rejected],
-    do: "bg-yellow-900 text-yellow-300"
+  defp event_type_badge(type)
+       when type in [:job_created, :job_transition, :job_verified, :job_rejected],
+       do: "bg-yellow-900 text-yellow-300"
 
   defp event_type_badge(type) when type in [:quest_created, :quest_completed, :quest_failed],
     do: "bg-green-900 text-green-300"

@@ -7,7 +7,7 @@ defmodule GiTF.AutonomyTest do
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    store_dir = Path.join(System.tmp_dir!(), "section-autonomy-test-#{:rand.uniform(100000)}")
+    store_dir = Path.join(System.tmp_dir!(), "section-autonomy-test-#{:rand.uniform(100_000)}")
     File.mkdir_p!(store_dir)
     GiTF.Test.StoreHelper.stop_store()
     {:ok, _} = Archive.start_link(data_dir: store_dir)
@@ -20,7 +20,7 @@ defmodule GiTF.AutonomyTest do
   describe "self_heal/0" do
     test "returns empty list when system is healthy" do
       results = Autonomy.self_heal()
-      
+
       assert is_list(results)
     end
 
@@ -32,10 +32,11 @@ defmodule GiTF.AutonomyTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ghosts, ghost)
-      
+
       results = Autonomy.self_heal()
-      
+
       # Should detect and clean up orphaned ghost
       assert is_list(results)
     end
@@ -44,7 +45,7 @@ defmodule GiTF.AutonomyTest do
   describe "optimize_resources/0" do
     test "provides optimization recommendations" do
       recommendations = Autonomy.optimize_resources()
-      
+
       assert is_list(recommendations)
     end
   end
@@ -52,7 +53,7 @@ defmodule GiTF.AutonomyTest do
   describe "predict_issues/1" do
     test "predicts issues based on failure patterns" do
       sector_id = "sector-predict"
-      
+
       # Create some failed ops
       for i <- 1..3 do
         op = %{
@@ -63,11 +64,12 @@ defmodule GiTF.AutonomyTest do
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
+
         Archive.insert(:ops, op)
       end
-      
+
       predictions = Autonomy.predict_issues(sector_id)
-      
+
       assert is_list(predictions)
     end
   end
@@ -81,8 +83,9 @@ defmodule GiTF.AutonomyTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ops, op)
-      
+
       assert Autonomy.auto_approve?(op.id) == true
     end
 
@@ -94,8 +97,9 @@ defmodule GiTF.AutonomyTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
+
       Archive.insert(:ops, op)
-      
+
       assert Autonomy.auto_approve?(op.id) == false
     end
   end
@@ -103,7 +107,7 @@ defmodule GiTF.AutonomyTest do
   describe "audit/2" do
     test "creates audit log entry" do
       {:ok, entry} = Autonomy.audit(:job_approved, %{op_id: "op-123"})
-      
+
       assert entry.action == :job_approved
       assert entry.details.op_id == "op-123"
     end

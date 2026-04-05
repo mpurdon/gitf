@@ -32,17 +32,19 @@ defmodule GiTF.TUI.Views.Chat do
   end
 
   defp render_message(%{role: role, content: content}) when is_binary(content) do
-    color = case role do
-      :user -> Constants.color_user()
-      :assistant -> Constants.color_assistant()
-      :system -> Constants.color_system()
-    end
+    color =
+      case role do
+        :user -> Constants.color_user()
+        :assistant -> Constants.color_assistant()
+        :system -> Constants.color_system()
+      end
 
-    prefix = case role do
-      :user -> "User: "
-      :assistant -> "Assistant: "
-      :system -> "[System] "
-    end
+    prefix =
+      case role do
+        :user -> "User: "
+        :assistant -> "Assistant: "
+        :system -> "[System] "
+      end
 
     label(content: prefix <> content, color: color, wrap: true)
   end

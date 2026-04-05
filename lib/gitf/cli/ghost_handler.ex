@@ -11,8 +11,12 @@ defmodule GiTF.CLI.GhostHandler do
     ghosts =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_bees() do
-          {:ok, b} -> b
-          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+          {:ok, b} ->
+            b
+
+          {:error, reason} ->
+            Format.error("Remote error: #{inspect(reason)}")
+            []
         end
       else
         GiTF.Ghosts.list()

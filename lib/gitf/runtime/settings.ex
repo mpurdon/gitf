@@ -59,7 +59,10 @@ defmodule GiTF.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} brief --ghost #{ghost_id}"}
+              %{
+                "type" => "command",
+                "command" => "#{env_prefix}#{gitf_bin} brief --ghost #{ghost_id}"
+              }
             ]
           }
         ],
@@ -67,7 +70,10 @@ defmodule GiTF.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{env_prefix}#{gitf_bin} costs record --ghost #{ghost_id}"}
+              %{
+                "type" => "command",
+                "command" => "#{env_prefix}#{gitf_bin} costs record --ghost #{ghost_id}"
+              }
             ]
           }
         ]

@@ -63,10 +63,12 @@ defmodule GiTF.MCPServer do
       data ->
         buffer = buffer <> data
         {messages, remaining} = parse_messages(buffer)
+
         Enum.each(messages, fn msg ->
           response = handle_rpc(msg)
           if response, do: write_stdout(Jason.encode!(response) <> "\n")
         end)
+
         loop(remaining)
     end
   end
@@ -91,11 +93,12 @@ defmodule GiTF.MCPServer do
   # -- Internals --------------------------------------------------------------
 
   defp handle_initialize do
-    {:ok, %{
-      protocolVersion: @protocol_version,
-      capabilities: %{tools: %{}},
-      serverInfo: %{name: "gitf", version: GiTF.version()}
-    }}
+    {:ok,
+     %{
+       protocolVersion: @protocol_version,
+       capabilities: %{tools: %{}},
+       serverInfo: %{name: "gitf", version: GiTF.version()}
+     }}
   end
 
   defp handle_tools_list do
@@ -112,10 +115,11 @@ defmodule GiTF.MCPServer do
     end
   rescue
     e ->
-      {:ok, %{
-        content: [%{type: "text", text: "Internal error: #{Exception.message(e)}"}],
-        isError: true
-      }}
+      {:ok,
+       %{
+         content: [%{type: "text", text: "Internal error: #{Exception.message(e)}"}],
+         isError: true
+       }}
   end
 
   defp handle_tools_call(_) do

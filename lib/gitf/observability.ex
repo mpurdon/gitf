@@ -64,7 +64,12 @@ defmodule GiTF.Observability do
         alerts
       else
         GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{type: :zombie_detected})
-        [{:zombie_detected, "GiTF appears unproductive: active missions but no op activity for 30+ minutes"} | alerts]
+
+        [
+          {:zombie_detected,
+           "GiTF appears unproductive: active missions but no op activity for 30+ minutes"}
+          | alerts
+        ]
       end
 
     if alerts != [] do
@@ -73,10 +78,12 @@ defmodule GiTF.Observability do
 
     # Run Medic checks and emit health status (with auto-fix enabled)
     health_results = GiTF.Medic.run_all(fix: true)
-    overall_status = 
-      if Enum.any?(health_results, &(&1.status == :error)), do: :error, 
-      else: (if Enum.any?(health_results, &(&1.status == :warn)), do: :warn, else: :ok)
-      
+
+    overall_status =
+      if Enum.any?(health_results, &(&1.status == :error)),
+        do: :error,
+        else: if(Enum.any?(health_results, &(&1.status == :warn)), do: :warn, else: :ok)
+
     GiTF.Telemetry.emit([:gitf, :health, :checked], %{check_count: length(health_results)}, %{
       status: overall_status,
       details: health_results

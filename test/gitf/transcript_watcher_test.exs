@@ -25,7 +25,9 @@ defmodule GiTF.TranscriptWatcherTest do
         catch
           :exit, _ -> :ok
         end
-      :error -> :ok
+
+      :error ->
+        :ok
     end
 
     # Start watcher with a fast poll interval for testing

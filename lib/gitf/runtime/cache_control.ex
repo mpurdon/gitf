@@ -18,7 +18,7 @@ defmodule GiTF.Runtime.CacheControl do
             content: content,
             cache_control: %{"type" => "ephemeral"}
           }
-        
+
         # Google/Gemini uses a different mechanism (Context Caching resources)
         # created via API, not inline headers. We handle this elsewhere or skip.
         _ ->
@@ -41,7 +41,7 @@ defmodule GiTF.Runtime.CacheControl do
             content: content,
             cache_control: %{"type" => "ephemeral"}
           }
-        
+
         _ ->
           %{role: :user, content: content}
       end

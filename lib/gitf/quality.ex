@@ -73,16 +73,17 @@ defmodule GiTF.Quality do
       {:ok, %{metrics: metrics, score: score, tool: tool} = result} ->
         # Check for baseline and compare
         baseline = get_performance_baseline(sector.id)
-        
-        final_score = if baseline do
-          case Performance.compare_baseline(result, baseline) do
-            {:ok, comparison} -> comparison.score
-            _ -> score
+
+        final_score =
+          if baseline do
+            case Performance.compare_baseline(result, baseline) do
+              {:ok, comparison} -> comparison.score
+              _ -> score
+            end
+          else
+            score
           end
-        else
-          score
-        end
-        
+
         report = %{
           id: generate_id("qr"),
           op_id: op_id,
@@ -115,7 +116,7 @@ defmodule GiTF.Quality do
       score: 100,
       created_at: DateTime.utc_now()
     }
-    
+
     Archive.insert(:performance_baselines, baseline)
   end
 
@@ -164,25 +165,25 @@ defmodule GiTF.Quality do
       cond do
         static && security && performance ->
           round(static.score * 0.5 + security.score * 0.3 + performance.score * 0.2)
-        
+
         static && security ->
           round(static.score * 0.6 + security.score * 0.4)
-        
+
         static && performance ->
           round(static.score * 0.7 + performance.score * 0.3)
-        
+
         security && performance ->
           round(security.score * 0.6 + performance.score * 0.4)
-        
+
         static ->
           static.score
-        
+
         security ->
           security.score
-        
+
         performance ->
           performance.score
-        
+
         true ->
           nil
       end
@@ -214,7 +215,7 @@ defmodule GiTF.Quality do
     case Archive.get(:sectors, sector_id) do
       nil ->
         default_thresholds()
-      
+
       sector ->
         Map.get(sector, :quality_thresholds, default_thresholds())
     end
@@ -227,7 +228,7 @@ defmodule GiTF.Quality do
     case Archive.get(:sectors, sector_id) do
       nil ->
         {:error, :comb_not_found}
-      
+
       sector ->
         updated = Map.put(sector, :quality_thresholds, thresholds)
         Archive.put(:sectors, updated)
@@ -242,11 +243,12 @@ defmodule GiTF.Quality do
   def get_quality_trends(sector_id, limit \\ 10) do
     # Get all ops for this sector
     ops = Archive.filter(:ops, &(&1.sector_id == sector_id and &1.status == "done"))
-    
+
     # Calculate scores and sort by completion time
     ops
     |> Enum.map(fn op ->
       score = calculate_composite_score(op.id)
+
       %{
         op_id: op.id,
         score: score,
@@ -263,7 +265,7 @@ defmodule GiTF.Quality do
   """
   def get_quality_stats(sector_id) do
     trends = get_quality_trends(sector_id, 100)
-    
+
     if Enum.empty?(trends) do
       %{
         average: nil,
@@ -274,7 +276,7 @@ defmodule GiTF.Quality do
       }
     else
       scores = Enum.map(trends, & &1.score)
-      
+
       %{
         average: Float.round(Enum.sum(scores) / length(scores), 1),
         min: Enum.min(scores),
@@ -295,17 +297,17 @@ defmodule GiTF.Quality do
   end
 
   defp calculate_trend(trends) when length(trends) < 3, do: :insufficient_data
-  
+
   defp calculate_trend(trends) do
     # Compare recent vs older scores
     recent_scores = trends |> Enum.take(3) |> Enum.map(& &1.score)
     recent = Enum.sum(recent_scores) / 3
-    
+
     older_scores = trends |> Enum.drop(3) |> Enum.take(3) |> Enum.map(& &1.score)
     older = Enum.sum(older_scores) / 3
-    
+
     diff = recent - older
-    
+
     cond do
       diff > 5 -> :improving
       diff < -5 -> :declining

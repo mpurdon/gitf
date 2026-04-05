@@ -100,6 +100,7 @@ defmodule GiTF.Sync.Strategy do
         Map.delete(in_degree, best)
         |> then(fn deg ->
           neighbors = Map.get(adj, best, [])
+
           Enum.reduce(neighbors, deg, fn n, d ->
             Map.update(d, n, 0, &max(&1 - 1, 0))
           end)
@@ -118,6 +119,7 @@ defmodule GiTF.Sync.Strategy do
   defp sort_by_heuristics(op_ids, ops, conflict_prone) do
     Enum.sort_by(op_ids, fn jid ->
       op = Map.get(ops, jid, %{})
+
       {
         file_overlap_score(op, conflict_prone),
         diff_size(op),

@@ -56,7 +56,11 @@ defmodule GiTF.Ghosts do
       {step, {:error, reason}} ->
         Logger.error("Ghost spawn failed at step #{step} for op #{op_id}: #{inspect(reason)}")
 
-        ghost_id = if match?({:ok, ghost} when is_map(ghost), {:ok, nil}), do: nil, else: get_ghost_id_from_op(op_id)
+        ghost_id =
+          if match?({:ok, ghost} when is_map(ghost), {:ok, nil}),
+            do: nil,
+            else: get_ghost_id_from_op(op_id)
+
         cleanup_orphaned_ghost(ghost_id, op_id)
 
         GiTF.Telemetry.emit([:gitf, :ghost, :spawn_failed], %{}, %{
@@ -124,9 +128,7 @@ defmodule GiTF.Ghosts do
       {:ok, ghost}
     else
       {step, {:error, reason}} ->
-        Logger.error(
-          "Ghost CLI spawn failed at step #{step} for op #{op_id}: #{inspect(reason)}"
-        )
+        Logger.error("Ghost CLI spawn failed at step #{step} for op #{op_id}: #{inspect(reason)}")
 
         ghost_id = get_ghost_id_from_op(op_id)
         cleanup_orphaned_ghost(ghost_id, op_id)
@@ -231,7 +233,9 @@ defmodule GiTF.Ghosts do
           GiTF.Ops.unblock_dependents(ghost[:op_id])
 
           GiTF.Link.send(
-            ghost_id, "major", "job_complete",
+            ghost_id,
+            "major",
+            "job_complete",
             "Job #{ghost[:op_id]} completed successfully"
           )
         end
@@ -257,7 +261,9 @@ defmodule GiTF.Ghosts do
           GiTF.Ops.fail(ghost[:op_id])
 
           GiTF.Link.send(
-            ghost_id, "major", "job_failed",
+            ghost_id,
+            "major",
+            "job_failed",
             "Job #{ghost[:op_id]} failed: #{reason}"
           )
         end
@@ -353,7 +359,13 @@ defmodule GiTF.Ghosts do
         {:error, :bee_not_found}
 
       ghost ->
-        updated = Map.merge(ghost, %{status: GhostStatus.working(), shell_path: shell.worktree_path, pid: nil})
+        updated =
+          Map.merge(ghost, %{
+            status: GhostStatus.working(),
+            shell_path: shell.worktree_path,
+            pid: nil
+          })
+
         Archive.put(:ghosts, updated)
         :ok
     end
@@ -430,7 +442,9 @@ defmodule GiTF.Ghosts do
         if GiTF.Sandbox.available?() and GiTF.Sandbox.name() != "local" do
           {sandbox_cmd, sandbox_args, _opts} =
             GiTF.Sandbox.wrap_command("sh", ["-c", cmd_line],
-              cd: shell.worktree_path, risk_level: risk_level)
+              cd: shell.worktree_path,
+              risk_level: risk_level
+            )
 
           GiTF.Sandbox.to_shell_string(sandbox_cmd, sandbox_args)
         else

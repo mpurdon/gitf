@@ -20,7 +20,9 @@ defmodule GiTF.TachikomaTest do
         catch
           :exit, _ -> :ok
         end
-      :error -> :ok
+
+      :error ->
+        :ok
     end
 
     :ok

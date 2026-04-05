@@ -62,8 +62,12 @@ defmodule GiTF.CLI.MissionHandler do
     missions =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_quests() do
-          {:ok, q} -> q
-          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+          {:ok, q} ->
+            q
+
+          {:error, reason} ->
+            Format.error("Remote error: #{inspect(reason)}")
+            []
         end
       else
         GiTF.Missions.list()
@@ -219,6 +223,7 @@ defmodule GiTF.CLI.MissionHandler do
           case phase do
             "research" ->
               key_files = Map.get(artifact, "key_files", [])
+
               "#{length(key_files)} key files, stack: #{inspect(Map.get(artifact, "tech_stack", []))}"
 
             "requirements" ->

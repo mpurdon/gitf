@@ -6,7 +6,7 @@ defmodule GiTF.Quality.SecurityTest do
   describe "scan/2" do
     test "returns security score and findings" do
       {:ok, result} = Security.scan("/tmp", :unknown)
-      
+
       assert is_integer(result.score)
       assert result.score >= 0 and result.score <= 100
       assert is_list(result.findings)
@@ -18,6 +18,7 @@ defmodule GiTF.Quality.SecurityTest do
       dir = Path.join(System.tmp_dir!(), "gitf_sec_test_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(dir)
       file = Path.join(dir, "test_secret.ex")
+
       File.write!(file, """
       defmodule Test do
         api_key = "sk_live_EXAMPLE_KEY_12345"
@@ -36,7 +37,7 @@ defmodule GiTF.Quality.SecurityTest do
 
     test "handles missing audit tools gracefully" do
       {:ok, result} = Security.scan("/nonexistent", :elixir)
-      
+
       # Should not crash, just return empty findings
       assert is_list(result.findings)
       assert result.score >= 0

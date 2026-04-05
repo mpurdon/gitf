@@ -130,14 +130,15 @@ defmodule GiTF.GitHub do
       body = issue["body"] || ""
       labels = Enum.map(issue["labels"] || [], & &1["name"]) |> Enum.join(", ")
 
-      goal = """
-      #{title}
+      goal =
+        """
+        #{title}
 
-      #{body}
-      #{if labels != "", do: "\nLabels: #{labels}", else: ""}
-      GitHub Issue: #{issue["html_url"]}
-      """
-      |> String.trim()
+        #{body}
+        #{if labels != "", do: "\nLabels: #{labels}", else: ""}
+        GitHub Issue: #{issue["html_url"]}
+        """
+        |> String.trim()
 
       attrs = %{
         goal: goal,
@@ -167,10 +168,17 @@ defmodule GiTF.GitHub do
     case Req.get(client,
            url: "/repos/#{sector.github_owner}/#{sector.github_repo}/issues/#{issue_number}"
          ) do
-      {:ok, %{status: 200, body: issue}} -> {:ok, issue}
-      {:ok, %{status: 404}} -> {:error, :issue_not_found}
-      {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
-      {:error, reason} -> {:error, reason}
+      {:ok, %{status: 200, body: issue}} ->
+        {:ok, issue}
+
+      {:ok, %{status: 404}} ->
+        {:error, :issue_not_found}
+
+      {:ok, %{status: status, body: resp}} ->
+        {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -296,7 +304,7 @@ defmodule GiTF.GitHub do
     path = Map.get(sector, :path)
 
     if path && File.dir?(path) do
-      case GiTF.Git.safe_cmd( ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+      case GiTF.Git.safe_cmd(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
              cd: path,
              stderr_to_stdout: true
            ) do

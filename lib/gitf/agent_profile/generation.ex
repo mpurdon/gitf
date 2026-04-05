@@ -21,7 +21,11 @@ defmodule GiTF.AgentProfile.Generation do
     else
       case GiTF.Runtime.Models.find_executable(opts) do
         {:ok, _} ->
-          case GiTF.Runtime.Models.spawn_headless(prompt, cwd, Keyword.merge(opts, output_format: :text)) do
+          case GiTF.Runtime.Models.spawn_headless(
+                 prompt,
+                 cwd,
+                 Keyword.merge(opts, output_format: :text)
+               ) do
             {:ok, port} ->
               collect_port_output(port)
 

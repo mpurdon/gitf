@@ -186,7 +186,7 @@ defmodule GiTF.Recon do
     files =
       findings
       |> Map.get(:relevant_files, [])
-      |> Enum.map_join("\n", &("- `#{&1}`"))
+      |> Enum.map_join("\n", &"- `#{&1}`")
 
     """
     ## Recon Report

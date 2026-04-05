@@ -40,7 +40,12 @@ defmodule GiTF.ClearanceTest do
     end
 
     test "auto_approve returns all zeros" do
-      result = Clearance.adjusted_thresholds(%{security: 70, performance: 60, composite: 65}, :auto_approve)
+      result =
+        Clearance.adjusted_thresholds(
+          %{security: 70, performance: 60, composite: 65},
+          :auto_approve
+        )
+
       assert result == %{security: 0, performance: 0, composite: 0}
     end
 

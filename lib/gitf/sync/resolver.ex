@@ -44,13 +44,19 @@ defmodule GiTF.Sync.Resolver do
 
         "pr_branch" ->
           Logger.info("Sync strategy pr_branch for op #{op_id}, creating PR")
+
           case GiTF.Sync.create_local_pr(shell, sector, op_id) do
-            {:ok, _url} -> {:ok, :pr_created, 0}
+            {:ok, _url} ->
+              {:ok, :pr_created, 0}
+
             {:error, reason} ->
               # PR creation may fail (no remote, no gh CLI, etc.) but the branch
               # still exists — advance the pipeline so work isn't stuck.
-              Logger.warning("PR creation failed for op #{op_id}: #{inspect(reason)}, " <>
-                "branch #{shell.branch} still available for manual PR")
+              Logger.warning(
+                "PR creation failed for op #{op_id}: #{inspect(reason)}, " <>
+                  "branch #{shell.branch} still available for manual PR"
+              )
+
               {:ok, :pr_created, 0}
           end
 
@@ -154,8 +160,10 @@ defmodule GiTF.Sync.Resolver do
 
       with :ok <- GiTF.Git.checkout(repo, target) do
         # Attempt sync, expecting conflicts
-        case GiTF.Git.safe_cmd( ["sync", "--no-commit", "--no-ff", shell.branch],
-               cd: repo, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd(["sync", "--no-commit", "--no-ff", shell.branch],
+               cd: repo,
+               stderr_to_stdout: true
+             ) do
           {_output, 0} ->
             # No conflicts — just commit
             commit_merge(repo, shell.branch, target)
@@ -201,8 +209,10 @@ defmodule GiTF.Sync.Resolver do
       original_head = get_head(repo)
 
       with :ok <- GiTF.Git.checkout(repo, target) do
-        case GiTF.Git.safe_cmd( ["sync", "--no-commit", "--no-ff", shell.branch],
-               cd: repo, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd(["sync", "--no-commit", "--no-ff", shell.branch],
+               cd: repo,
+               stderr_to_stdout: true
+             ) do
           {_output, 0} ->
             commit_merge(repo, shell.branch, target)
             {:ok, :merged}
@@ -294,8 +304,12 @@ defmodule GiTF.Sync.Resolver do
         {:ok, reimagine_job} ->
           Logger.info("Created re-imagine op #{reimagine_job.id} for #{op_id}")
 
-          GiTF.Link.send("merge_resolver", "major", "reimagine_job_created",
-            "Created conflict resolution op #{reimagine_job.id} for #{op_id}")
+          GiTF.Link.send(
+            "merge_resolver",
+            "major",
+            "reimagine_job_created",
+            "Created conflict resolution op #{reimagine_job.id} for #{op_id}"
+          )
 
           # The re-imagine op will go through the full ghost → tachikoma → sync pipeline
           {:error, {:reimagined, reimagine_job.id}}
@@ -313,10 +327,12 @@ defmodule GiTF.Sync.Resolver do
       cond do
         additive_file?(file) ->
           # Union sync for additive files
-          case GiTF.Git.safe_cmd( ["checkout", "--union", "--", file],
-                 cd: repo, stderr_to_stdout: true) do
+          case GiTF.Git.safe_cmd(["checkout", "--union", "--", file],
+                 cd: repo,
+                 stderr_to_stdout: true
+               ) do
             {_, 0} ->
-              GiTF.Git.safe_cmd( ["add", file], cd: repo, stderr_to_stdout: true)
+              GiTF.Git.safe_cmd(["add", file], cd: repo, stderr_to_stdout: true)
               true
 
             _ ->
@@ -325,10 +341,12 @@ defmodule GiTF.Sync.Resolver do
 
         file_only_touched_by_branch?(repo, file, shell.branch, target) ->
           # Accept incoming (the ghost's version) for files only this branch touched
-          case GiTF.Git.safe_cmd( ["checkout", "--theirs", "--", file],
-                 cd: repo, stderr_to_stdout: true) do
+          case GiTF.Git.safe_cmd(["checkout", "--theirs", "--", file],
+                 cd: repo,
+                 stderr_to_stdout: true
+               ) do
             {_, 0} ->
-              GiTF.Git.safe_cmd( ["add", file], cd: repo, stderr_to_stdout: true)
+              GiTF.Git.safe_cmd(["add", file], cd: repo, stderr_to_stdout: true)
               true
 
             _ ->
@@ -348,13 +366,14 @@ defmodule GiTF.Sync.Resolver do
 
   defp file_only_touched_by_branch?(repo, file, branch, target) do
     # Check if the file was modified on the target branch since the sync base
-    case GiTF.Git.safe_cmd( ["sync-base", branch, target],
-           cd: repo, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["sync-base", branch, target], cd: repo, stderr_to_stdout: true) do
       {base, 0} ->
         base = String.trim(base)
 
-        case GiTF.Git.safe_cmd( ["diff", "--name-only", "#{base}..#{target}", "--", file],
-               cd: repo, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd(["diff", "--name-only", "#{base}..#{target}", "--", file],
+               cd: repo,
+               stderr_to_stdout: true
+             ) do
           {output, 0} -> String.trim(output) == ""
           _ -> false
         end
@@ -388,7 +407,7 @@ defmodule GiTF.Sync.Resolver do
               # Validate it's not prose
               if looks_like_code?(resolved, file) do
                 File.write!(file_path, resolved)
-                GiTF.Git.safe_cmd( ["add", file], cd: repo, stderr_to_stdout: true)
+                GiTF.Git.safe_cmd(["add", file], cd: repo, stderr_to_stdout: true)
                 :ok
               else
                 Logger.warning("AI-resolve produced prose for #{file}, skipping")
@@ -400,7 +419,7 @@ defmodule GiTF.Sync.Resolver do
           end
         else
           # No conflict markers — already resolved or not actually conflicted
-          GiTF.Git.safe_cmd( ["add", file], cd: repo, stderr_to_stdout: true)
+          GiTF.Git.safe_cmd(["add", file], cd: repo, stderr_to_stdout: true)
           :ok
         end
 
@@ -446,10 +465,10 @@ defmodule GiTF.Sync.Resolver do
       ~r/^\#{3,}\s/
     ]
 
+    # Should have reasonable line count relative to file extension
+    # Shouldn't be mostly empty
     not Enum.any?(prose_starters, &Regex.match?(&1, trimmed)) and
-      # Should have reasonable line count relative to file extension
       String.contains?(trimmed, "\n") and
-      # Shouldn't be mostly empty
       String.length(trimmed) > 10
   end
 
@@ -476,41 +495,49 @@ defmodule GiTF.Sync.Resolver do
   # -- Private: git helpers ----------------------------------------------------
 
   defp get_head(repo) do
-    case GiTF.Git.safe_cmd( ["rev-parse", "HEAD"], cd: repo, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["rev-parse", "HEAD"], cd: repo, stderr_to_stdout: true) do
       {output, 0} -> String.trim(output)
       _ -> nil
     end
   end
 
   defp rollback(repo, nil), do: abort_merge(repo)
+
   defp rollback(repo, head) do
     abort_merge(repo)
-    GiTF.Git.safe_cmd( ["reset", "--hard", head], cd: repo, stderr_to_stdout: true)
+    GiTF.Git.safe_cmd(["reset", "--hard", head], cd: repo, stderr_to_stdout: true)
     :ok
   end
 
   defp abort_merge(repo) do
-    GiTF.Git.safe_cmd( ["sync", "--abort"], cd: repo, stderr_to_stdout: true)
+    GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo, stderr_to_stdout: true)
     :ok
   end
 
   defp commit_merge(repo, branch, target) do
-    GiTF.Git.safe_cmd( ["commit", "--no-edit", "-m", "Sync #{branch} into #{target}"],
-      cd: repo, stderr_to_stdout: true)
+    GiTF.Git.safe_cmd(["commit", "--no-edit", "-m", "Sync #{branch} into #{target}"],
+      cd: repo,
+      stderr_to_stdout: true
+    )
+
     :ok
   end
 
   defp get_conflicted_files(repo) do
-    case GiTF.Git.safe_cmd( ["diff", "--name-only", "--diff-filter=U"],
-           cd: repo, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["diff", "--name-only", "--diff-filter=U"],
+           cd: repo,
+           stderr_to_stdout: true
+         ) do
       {output, 0} -> String.split(output, "\n", trim: true)
       _ -> []
     end
   end
 
   defp get_changed_files(repo, branch, target) do
-    case GiTF.Git.safe_cmd( ["diff", "--name-only", "#{target}...#{branch}"],
-           cd: repo, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["diff", "--name-only", "#{target}...#{branch}"],
+           cd: repo,
+           stderr_to_stdout: true
+         ) do
       {output, 0} -> String.split(output, "\n", trim: true)
       _ -> []
     end
@@ -520,15 +547,19 @@ defmodule GiTF.Sync.Resolver do
 
   defp get_branch_diff(repo, branch, target) do
     conflicted =
-      case GiTF.Git.safe_cmd( ["diff", "--name-only", "#{target}...#{branch}"],
-             cd: repo, stderr_to_stdout: true) do
+      case GiTF.Git.safe_cmd(["diff", "--name-only", "#{target}...#{branch}"],
+             cd: repo,
+             stderr_to_stdout: true
+           ) do
         {output, 0} -> String.split(output, "\n", trim: true)
         _ -> []
       end
 
     summary =
-      case GiTF.Git.safe_cmd( ["diff", "--stat", "#{target}...#{branch}"],
-             cd: repo, stderr_to_stdout: true) do
+      case GiTF.Git.safe_cmd(["diff", "--stat", "#{target}...#{branch}"],
+             cd: repo,
+             stderr_to_stdout: true
+           ) do
         {output, 0} -> String.slice(output, 0, 2000)
         _ -> "Could not generate diff summary"
       end
@@ -567,10 +598,10 @@ defmodule GiTF.Sync.Resolver do
 
       command when is_binary(command) ->
         if command_safe?(command) do
-          task = Task.async(fn ->
-            System.cmd("sh", ["-c", command],
-              cd: sector.path, stderr_to_stdout: true, env: [])
-          end)
+          task =
+            Task.async(fn ->
+              System.cmd("sh", ["-c", command], cd: sector.path, stderr_to_stdout: true, env: [])
+            end)
 
           case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
             {:ok, {_, 0}} -> :ok
@@ -591,6 +622,7 @@ defmodule GiTF.Sync.Resolver do
 
   defp command_safe?(command) do
     lower = String.downcase(command)
+
     not Enum.any?(@validation_blocklist, fn blocked ->
       String.contains?(lower, blocked)
     end)

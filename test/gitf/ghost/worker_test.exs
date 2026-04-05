@@ -12,7 +12,9 @@ defmodule GiTF.Ghost.WorkerTest do
     gitf_root = create_gitf_workspace()
 
     {:ok, sector} =
-      GiTF.Sector.add(repo_path, name: "worker-test-sector-#{:erlang.unique_integer([:positive])}")
+      GiTF.Sector.add(repo_path,
+        name: "worker-test-sector-#{:erlang.unique_integer([:positive])}"
+      )
 
     {:ok, mission} =
       Archive.insert(:missions, %{
@@ -76,7 +78,10 @@ defmodule GiTF.Ghost.WorkerTest do
       links = GiTF.Link.list(from: ctx.ghost.id)
 
       if length(links) >= 1 do
-        assert Enum.any?(links, &(&1.subject in ["job_complete", "validation_failed", "job_failed"]))
+        assert Enum.any?(
+                 links,
+                 &(&1.subject in ["job_complete", "validation_failed", "job_failed"])
+               )
       else
         # No link_msg — expected when Tachikoma isn't running in the test env
         assert ghost.status in ["stopped", "crashed"]
@@ -212,7 +217,7 @@ defmodule GiTF.Ghost.WorkerTest do
           gitf_root: "/tmp"
         )
 
-      assert spec.restart == :temporary
+      assert spec.restart == :transient
       assert spec.id == {Worker, "ghost-test"}
     end
   end

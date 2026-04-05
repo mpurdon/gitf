@@ -175,7 +175,7 @@ defmodule GiTF.Dashboard.GhostsLive do
   defp status_dot_color(GhostStatus.stopped()), do: "#484f58"
   defp status_dot_color(GhostStatus.crashed()), do: "#f85149"
   defp status_dot_color(_), do: "#484f58"
-  
+
   defp context_badge(percentage) when percentage >= 45, do: "badge-red"
   defp context_badge(percentage) when percentage >= 40, do: "badge-yellow"
   defp context_badge(_), do: "badge-green"

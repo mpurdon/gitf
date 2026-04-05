@@ -103,11 +103,12 @@ defmodule GiTF.TUI.Views.Activity do
     files = length(cp[:files_modified] || [])
     errors = cp[:error_count] || 0
 
-    ctx_color = cond do
-      ctx_pct > 80 -> :red
-      ctx_pct > 60 -> :yellow
-      true -> :green
-    end
+    ctx_color =
+      cond do
+        ctx_pct > 80 -> :red
+        ctx_pct > 60 -> :yellow
+        true -> :green
+      end
 
     error_part = if errors > 0, do: " err:#{errors}", else: ""
 
@@ -156,7 +157,11 @@ defmodule GiTF.TUI.Views.Activity do
       label(content: "Active Runs", color: :white, attributes: [:bold])
     ] ++
       Enum.flat_map(runs, fn run ->
-        pct = if run.total_jobs > 0, do: Float.round(run.completed_jobs / run.total_jobs * 100, 0), else: 0
+        pct =
+          if run.total_jobs > 0,
+            do: Float.round(run.completed_jobs / run.total_jobs * 100, 0),
+            else: 0
+
         bar_len = 15
         filled = trunc(pct / 100 * bar_len)
         bar_str = String.duplicate("#", filled) <> String.duplicate(".", bar_len - filled)

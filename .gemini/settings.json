@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gitf": {
+      "command": "./bin/gitf-mcp",
+      "args": []
+    }
+  }
+}

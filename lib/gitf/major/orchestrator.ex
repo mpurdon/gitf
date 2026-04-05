@@ -50,7 +50,8 @@ defmodule GiTF.Major.Orchestrator do
         planning_artifact = GiTF.Missions.get_artifact(mission_id, "planning")
 
         # Check for existing active ops (restart scenario — don't create duplicates)
-        active_ops = Enum.filter(mission.ops, & &1.status in ["pending", "running", "assigned", "blocked"])
+        active_ops =
+          Enum.filter(mission.ops, &(&1.status in ["pending", "running", "assigned", "blocked"]))
 
         existing_impl_ops =
           active_ops
@@ -62,13 +63,19 @@ defmodule GiTF.Major.Orchestrator do
 
         cond do
           existing_phase_ops != [] ->
-            Logger.info("Quest #{mission_id} has #{length(existing_phase_ops)} active phase ops, triggering spawner")
+            Logger.info(
+              "Quest #{mission_id} has #{length(existing_phase_ops)} active phase ops, triggering spawner"
+            )
+
             GiTF.Missions.update(mission_id, %{pipeline_mode: "full", status: "active"})
             send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
             {:ok, mission[:current_phase] || "research"}
 
           existing_impl_ops != [] ->
-            Logger.info("Quest #{mission_id} has #{length(existing_impl_ops)} existing impl ops, triggering spawner")
+            Logger.info(
+              "Quest #{mission_id} has #{length(existing_impl_ops)} existing impl ops, triggering spawner"
+            )
+
             GiTF.Missions.update(mission_id, %{pipeline_mode: "full", status: "active"})
             send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
             {:ok, "implementation"}
@@ -156,9 +163,12 @@ defmodule GiTF.Major.Orchestrator do
 
       if redesign_count < @max_redesign_iterations do
         quest_record = Archive.get(:missions, mission_id)
-        updated = quest_record
+
+        updated =
+          quest_record
           |> Map.put(:redesign_count, redesign_count + 1)
           |> Map.put(:redesign_reason, reason)
+
         Archive.put(:missions, updated)
 
         {:ok, mission} = GiTF.Missions.get(mission_id)
@@ -182,6 +192,7 @@ defmodule GiTF.Major.Orchestrator do
       if quest_timed_out?(mission) do
         timeout_h = max_quest_age_hours()
         Logger.warning("Quest #{mission_id} exceeded #{timeout_h}h max age, force-completing")
+
         GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
           type: :quest_timeout,
           message: "Quest #{mission_id} force-completed after #{timeout_h}h timeout"
@@ -209,53 +220,53 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp advance_mission_phase(mission) do
-      phase = Map.get(mission, :current_phase, "pending")
+    phase = Map.get(mission, :current_phase, "pending")
 
-      case phase do
-        "pending" ->
-          # Only start research if mission has a sector_id (new-style missions)
-          if Map.get(mission, :sector_id) do
-            start_research(mission)
-          else
-            {:ok, phase}
-          end
+    case phase do
+      "pending" ->
+        # Only start research if mission has a sector_id (new-style missions)
+        if Map.get(mission, :sector_id) do
+          start_research(mission)
+        else
+          {:ok, phase}
+        end
 
-        "research" ->
-          check_and_advance(mission, "research", &start_requirements/1)
+      "research" ->
+        check_and_advance(mission, "research", &start_requirements/1)
 
-        "requirements" ->
-          check_and_advance(mission, "requirements", &start_design/1)
+      "requirements" ->
+        check_and_advance(mission, "requirements", &start_design/1)
 
-        "design" ->
-          check_design_complete(mission)
+      "design" ->
+        check_design_complete(mission)
 
-        "review" ->
-          handle_review_result(mission)
+      "review" ->
+        handle_review_result(mission)
 
-        "planning" ->
-          check_and_advance(mission, "planning", &start_implementation/1)
+      "planning" ->
+        check_and_advance(mission, "planning", &start_implementation/1)
 
-        "implementation" ->
-          check_implementation_complete(mission)
+      "implementation" ->
+        check_implementation_complete(mission)
 
-        "validation" ->
-          handle_validation_result(mission)
+      "validation" ->
+        handle_validation_result(mission)
 
-        "awaiting_approval" ->
-          handle_approval_result(mission)
+      "awaiting_approval" ->
+        handle_approval_result(mission)
 
-        "sync" ->
-          check_and_advance(mission, "sync", &start_simplify/1)
+      "sync" ->
+        check_and_advance(mission, "sync", &start_simplify/1)
 
-        "simplify" ->
-          check_simplify_complete(mission)
+      "simplify" ->
+        check_simplify_complete(mission)
 
-        "scoring" ->
-          check_and_advance(mission, "scoring", &finish_scored/1)
+      "scoring" ->
+        check_and_advance(mission, "scoring", &finish_scored/1)
 
-        other ->
-          {:ok, other}
-      end
+      other ->
+        {:ok, other}
+    end
   end
 
   @doc """
@@ -284,7 +295,8 @@ defmodule GiTF.Major.Orchestrator do
   defp start_requirements(mission) do
     research = GiTF.Missions.get_artifact(mission.id, "research")
 
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "requirements", "Research complete") do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission.id, "requirements", "Research complete") do
       prompt = PhasePrompts.requirements_prompt(mission, research)
       spawn_phase_ghost(mission, "requirements", prompt, model: "general")
       {:ok, "requirements"}
@@ -313,8 +325,12 @@ defmodule GiTF.Major.Orchestrator do
 
       # Store strategy count so advance logic knows how many to wait for
       quest_record = Archive.get(:missions, mission.id)
+
       if quest_record do
-        Archive.put(:missions, Map.put(quest_record, :design_strategy_count, length(@design_strategies)))
+        Archive.put(
+          :missions,
+          Map.put(quest_record, :design_strategy_count, length(@design_strategies))
+        )
       end
 
       # Spawn 3 parallel design ghosts with different complexity strategies
@@ -323,7 +339,13 @@ defmodule GiTF.Major.Orchestrator do
 
         base_prompt =
           if review && review["approved"] == false do
-            PhasePrompts.design_prompt_with_feedback(mission, requirements, research, review, extra_instructions)
+            PhasePrompts.design_prompt_with_feedback(
+              mission,
+              requirements,
+              research,
+              review,
+              extra_instructions
+            )
           else
             PhasePrompts.design_prompt(mission, requirements, research, extra_instructions)
           end
@@ -364,7 +386,9 @@ defmodule GiTF.Major.Orchestrator do
     |> Enum.reject(&is_nil/1)
     |> Map.new()
     |> case do
-      designs when map_size(designs) > 0 -> designs
+      designs when map_size(designs) > 0 ->
+        designs
+
       _ ->
         # Fallback: check for a single "design" artifact (backward compat)
         case GiTF.Missions.get_artifact(mission_id, "design") do
@@ -389,7 +413,8 @@ defmodule GiTF.Major.Orchestrator do
   defp start_implementation(mission) do
     planning_artifact = GiTF.Missions.get_artifact(mission.id, "planning")
 
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "implementation", "Planning complete") do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission.id, "implementation", "Planning complete") do
       # Planning phase already scored and selected the best plan.
       # Just create ops from whatever planning artifact exists.
       case planning_artifact do
@@ -413,7 +438,8 @@ defmodule GiTF.Major.Orchestrator do
   defp start_validation(mission) do
     all_artifacts = Map.get(mission, :artifacts, %{})
 
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
       prompt = PhasePrompts.validation_prompt(mission, all_artifacts)
       spawn_phase_ghost(mission, "validation", prompt, model: "general")
       {:ok, "validation"}
@@ -421,9 +447,12 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp start_merge(mission) do
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "sync", "Validation passed, merging") do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission.id, "sync", "Validation passed, merging") do
       sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
-      strategy = if sector, do: Map.get(sector, :sync_strategy) || "auto_merge", else: "auto_merge"
+
+      strategy =
+        if sector, do: Map.get(sector, :sync_strategy) || "auto_merge", else: "auto_merge"
 
       case strategy do
         "manual" ->
@@ -431,6 +460,7 @@ defmodule GiTF.Major.Orchestrator do
             "status" => "manual",
             "note" => "Branches left for manual merge"
           })
+
           # Sync artifact stored — advance_mission_phase will pick up simplify
           {:ok, "sync"}
 
@@ -458,17 +488,22 @@ defmodule GiTF.Major.Orchestrator do
             "branch" => quest_branch,
             "merged_at" => DateTime.utc_now()
           })
+
           # Sync done — advance will pick up simplify
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_simplify(mission)
         else
           {:error, reason} ->
-            Logger.warning("Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}")
+            Logger.warning(
+              "Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}"
+            )
+
             GiTF.Missions.store_artifact(mission.id, "sync", %{
               "status" => "failed",
               "branch" => quest_branch,
               "error" => inspect(reason)
             })
+
             fail_quest(mission.id, "Sync failed: #{inspect(reason)}")
         end
 
@@ -477,7 +512,11 @@ defmodule GiTF.Major.Orchestrator do
           "status" => "failed",
           "error" => inspect(reason)
         })
-        Logger.warning("Quest #{mission.id} sync failed: #{inspect(reason)}, completing as failed")
+
+        Logger.warning(
+          "Quest #{mission.id} sync failed: #{inspect(reason)}, completing as failed"
+        )
+
         GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
         GiTF.Missions.update_status!(mission.id)
         {:ok, "completed"}
@@ -495,16 +534,25 @@ defmodule GiTF.Major.Orchestrator do
 
         # Push mission branch and create PR
         GiTF.Git.safe_cmd(["push", "-u", "origin", quest_branch],
-          cd: repo_path, stderr_to_stdout: true)
+          cd: repo_path,
+          stderr_to_stdout: true
+        )
 
         pr_result =
-          case System.cmd("gh", [
-                 "pr", "create",
-                 "--head", quest_branch,
-                 "--base", main_branch,
-                 "--title", String.slice(title, 0, 200),
-                 "--body", String.slice(body, 0, 4000)
-               ], cd: repo_path, stderr_to_stdout: true) do
+          case System.cmd(
+                 "gh",
+                 [
+                   "pr",
+                   "create",
+                   "--head",
+                   quest_branch,
+                   "--base",
+                   main_branch,
+                   "--title",
+                   String.slice(title, 0, 200),
+                   "--body",
+                   String.slice(body, 0, 4000)
+                 ], cd: repo_path, stderr_to_stdout: true) do
             {output, 0} -> {:ok, String.trim(output)}
             {output, _} -> {:error, String.slice(output, 0, 200)}
           end
@@ -519,6 +567,7 @@ defmodule GiTF.Major.Orchestrator do
 
           {:error, reason} ->
             Logger.warning("Quest #{mission.id} PR creation failed: #{inspect(reason)}")
+
             GiTF.Missions.store_artifact(mission.id, "sync", %{
               "status" => "pr_failed",
               "branch" => quest_branch,
@@ -534,6 +583,7 @@ defmodule GiTF.Major.Orchestrator do
           "status" => "failed",
           "error" => inspect(reason)
         })
+
         Logger.warning("Quest #{mission.id} merge_quest failed: #{inspect(reason)}")
         GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
         GiTF.Missions.update_status!(mission.id)
@@ -542,28 +592,40 @@ defmodule GiTF.Major.Orchestrator do
   rescue
     e ->
       Logger.warning("Quest #{mission.id} PR finalization failed: #{Exception.message(e)}")
+
       GiTF.Missions.store_artifact(mission.id, "sync", %{
         "status" => "failed",
         "error" => Exception.message(e)
       })
+
       fail_quest(mission.id, "PR finalization failed")
   end
 
   defp start_awaiting_approval(mission) do
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "awaiting_approval", "Validation passed, awaiting human approval") do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(
+             mission.id,
+             "awaiting_approval",
+             "Validation passed, awaiting human approval"
+           ) do
       GiTF.Override.request_approval(mission.id)
-      GiTF.Observability.Alerts.dispatch_webhook(:approval_requested,
-        "Quest #{mission.id} awaiting human approval: #{String.slice(mission.goal, 0, 80)}")
+
+      GiTF.Observability.Alerts.dispatch_webhook(
+        :approval_requested,
+        "Quest #{mission.id} awaiting human approval: #{String.slice(mission.goal, 0, 80)}"
+      )
+
       {:ok, "awaiting_approval"}
     end
   end
 
   defp check_design_complete(mission) do
-    design_ops = Archive.filter(:ops, fn j ->
-      j.mission_id == mission.id and
-        j[:phase_job] == true and
-        j[:phase] == "design"
-    end)
+    design_ops =
+      Archive.filter(:ops, fn j ->
+        j.mission_id == mission.id and
+          j[:phase_job] == true and
+          j[:phase] == "design"
+      end)
 
     if design_ops == [] do
       {:ok, "design"}
@@ -612,17 +674,30 @@ defmodule GiTF.Major.Orchestrator do
 
           # Critical-risk missions never auto-approve — alert instead
           if mission_max_risk(mission.id) == :critical do
-            Logger.warning("Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve")
-            GiTF.Observability.Alerts.dispatch_webhook(:approval_timeout_critical,
-              "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval")
+            Logger.warning(
+              "Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve"
+            )
+
+            GiTF.Observability.Alerts.dispatch_webhook(
+              :approval_timeout_critical,
+              "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval"
+            )
+
             {:ok, "awaiting_approval"}
           else
             # Re-validate before auto-approving to catch regressions
             validation_fresh? = revalidate_quest(mission)
 
             if validation_fresh? do
-              Logger.info("Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)")
-              GiTF.Override.approve(mission.id, %{approved_by: "auto_timeout", notes: "Auto-approved after #{timeout_h}h (re-validated)"})
+              Logger.info(
+                "Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)"
+              )
+
+              GiTF.Override.approve(mission.id, %{
+                approved_by: "auto_timeout",
+                notes: "Auto-approved after #{timeout_h}h (re-validated)"
+              })
+
               {:ok, mission} = GiTF.Missions.get(mission.id)
               start_merge(mission)
             else
@@ -667,13 +742,20 @@ defmodule GiTF.Major.Orchestrator do
     end
   rescue
     e ->
-      Logger.warning("Re-validation failed for mission #{mission.id}: #{Exception.message(e)}, allowing")
+      Logger.warning(
+        "Re-validation failed for mission #{mission.id}: #{Exception.message(e)}, allowing"
+      )
+
       true
   end
 
   defp approval_timed_out?(mission_id) do
-    case Archive.find_one(:approval_requests, fn r -> r.mission_id == mission_id and r.status == "pending" end) do
-      nil -> false
+    case Archive.find_one(:approval_requests, fn r ->
+           r.mission_id == mission_id and r.status == "pending"
+         end) do
+      nil ->
+        false
+
       request ->
         hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
         hours_elapsed > approval_timeout_hours()
@@ -706,30 +788,39 @@ defmodule GiTF.Major.Orchestrator do
 
         if age > @phase_timeout_seconds do
           # Check if there's already a running phase ghost to avoid duplicate spawning
-          running_phase_job = Archive.find_one(:ops, fn j ->
-            j.mission_id == mission.id and
-              j[:op_type] == "phase" and
-              j[:phase] == phase and
-              j.status in ["running", "assigned"]
-          end)
+          running_phase_job =
+            Archive.find_one(:ops, fn j ->
+              j.mission_id == mission.id and
+                j[:op_type] == "phase" and
+                j[:phase] == phase and
+                j.status in ["running", "assigned"]
+            end)
 
-          running_worker = if running_phase_job do
-            case running_phase_job[:ghost_id] do
-              nil -> false
-              ghost_id ->
-                case GiTF.Ghost.Worker.lookup(ghost_id) do
-                  {:ok, pid} -> Process.alive?(pid)
-                  :error -> false
-                end
+          running_worker =
+            if running_phase_job do
+              case running_phase_job[:ghost_id] do
+                nil ->
+                  false
+
+                ghost_id ->
+                  case GiTF.Ghost.Worker.lookup(ghost_id) do
+                    {:ok, pid} -> Process.alive?(pid)
+                    :error -> false
+                  end
+              end
+            else
+              false
             end
-          else
-            false
-          end
 
           if running_worker do
-            Logger.debug("Quest #{mission.id} phase #{phase} has running worker, skipping re-spawn")
+            Logger.debug(
+              "Quest #{mission.id} phase #{phase} has running worker, skipping re-spawn"
+            )
           else
-            Logger.warning("Quest #{mission.id} stuck in #{phase} for #{age}s, re-spawning phase ghost")
+            Logger.warning(
+              "Quest #{mission.id} stuck in #{phase} for #{age}s, re-spawning phase ghost"
+            )
+
             # Fail any stale phase ops first
             if running_phase_job do
               GiTF.Ops.fail(running_phase_job.id)
@@ -824,7 +915,10 @@ defmodule GiTF.Major.Orchestrator do
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_design(mission)
         else
-          Logger.warning("Quest #{mission.id} exceeded max redesign iterations, proceeding with current design")
+          Logger.warning(
+            "Quest #{mission.id} exceeded max redesign iterations, proceeding with current design"
+          )
+
           promote_selected_design(mission.id, review)
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_planning(mission)
@@ -839,9 +933,11 @@ defmodule GiTF.Major.Orchestrator do
     case GiTF.Missions.get_artifact(mission_id, key) do
       nil ->
         # Fallback: try other variants or existing "design" artifact
-        fallback = Enum.find_value(@design_strategies, fn %{name: name} ->
-          GiTF.Missions.get_artifact(mission_id, "design_#{name}")
-        end)
+        fallback =
+          Enum.find_value(@design_strategies, fn %{name: name} ->
+            GiTF.Missions.get_artifact(mission_id, "design_#{name}")
+          end)
+
         if fallback, do: GiTF.Missions.store_artifact(mission_id, "design", fallback)
 
       design ->
@@ -856,6 +952,7 @@ defmodule GiTF.Major.Orchestrator do
     cond do
       impl_jobs == [] ->
         Logger.warning("Quest #{mission.id} has no implementation ops, advancing to validation")
+
         if Map.get(mission, :sector_id) do
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_validation(mission)
@@ -932,7 +1029,9 @@ defmodule GiTF.Major.Orchestrator do
         replan_count = Map.get(mission, :replan_count, 0)
 
         if replan_count < 2 do
-          Logger.info("Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)")
+          Logger.info(
+            "Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)"
+          )
 
           # Increment replan count
           quest_record = Archive.get(:missions, mission.id)
@@ -963,14 +1062,19 @@ defmodule GiTF.Major.Orchestrator do
               fail_exhausted_quest(mission)
           end
         else
-          Logger.warning("Quest #{mission.id}: all recovery strategies exhausted (fallback + #{replan_count} replans)")
+          Logger.warning(
+            "Quest #{mission.id}: all recovery strategies exhausted (fallback + #{replan_count} replans)"
+          )
+
           fail_exhausted_quest(mission)
         end
     end
   end
 
   defp fail_exhausted_quest(mission) do
-    Logger.warning("Quest #{mission.id} implementation exhausted — all plans, fallbacks, and replans failed")
+    Logger.warning(
+      "Quest #{mission.id} implementation exhausted — all plans, fallbacks, and replans failed"
+    )
 
     # Collect what DID succeed for partial credit
     impl_jobs = Enum.reject(mission.ops, & &1[:phase_job])
@@ -986,7 +1090,10 @@ defmodule GiTF.Major.Orchestrator do
 
     if done_count > 0 do
       # Some ops succeeded — attempt validation of partial work
-      Logger.info("Quest #{mission.id}: #{done_count}/#{total_count} ops completed, attempting partial validation")
+      Logger.info(
+        "Quest #{mission.id}: #{done_count}/#{total_count} ops completed, attempting partial validation"
+      )
+
       {:ok, mission} = GiTF.Missions.get(mission.id)
       start_validation(mission)
     else
@@ -1024,10 +1131,16 @@ defmodule GiTF.Major.Orchestrator do
         fix_attempt = Map.get(mission, :validation_fix_count, 0)
 
         if fix_attempt < @max_validation_fix_attempts do
-          Logger.info("Quest #{mission.id} validation failed (attempt #{fix_attempt + 1}/#{@max_validation_fix_attempts}), creating fix ops")
+          Logger.info(
+            "Quest #{mission.id} validation failed (attempt #{fix_attempt + 1}/#{@max_validation_fix_attempts}), creating fix ops"
+          )
+
           attempt_validation_fixes(mission, validation, fix_attempt)
         else
-          Logger.warning("Quest #{mission.id} validation failed after #{fix_attempt} fix attempts: #{validation["summary"]}")
+          Logger.warning(
+            "Quest #{mission.id} validation failed after #{fix_attempt} fix attempts: #{validation["summary"]}"
+          )
+
           fail_quest(mission.id, "Validation failed after #{fix_attempt} fix attempts")
         end
     end
@@ -1044,8 +1157,10 @@ defmodule GiTF.Major.Orchestrator do
 
     # Extract specific gaps from validation artifact
     gaps = Map.get(validation, "gaps", [])
-    unmet = (Map.get(validation, "requirements_met", []) || [])
-            |> Enum.filter(fn r -> Map.get(r, "met") == false end)
+
+    unmet =
+      (Map.get(validation, "requirements_met", []) || [])
+      |> Enum.filter(fn r -> Map.get(r, "met") == false end)
 
     fix_specs =
       cond do
@@ -1053,7 +1168,8 @@ defmodule GiTF.Major.Orchestrator do
         unmet != [] ->
           Enum.map(unmet, fn req ->
             %{
-              "title" => "Fix: #{Map.get(req, "req_id", "unknown")} — #{Map.get(req, "evidence", "validation failed")}",
+              "title" =>
+                "Fix: #{Map.get(req, "req_id", "unknown")} — #{Map.get(req, "evidence", "validation failed")}",
               "description" => """
               The validation phase found this requirement was NOT met.
 
@@ -1085,18 +1201,26 @@ defmodule GiTF.Major.Orchestrator do
         # Fallback: single fix op from summary
         true ->
           summary = Map.get(validation, "summary", "Validation failed")
-          [%{
-            "title" => "Fix validation issues: #{String.slice(summary, 0, 60)}",
-            "description" => "Validation failed: #{summary}\n\nFix all identified issues.",
-            "op_type" => "fix"
-          }]
+
+          [
+            %{
+              "title" => "Fix validation issues: #{String.slice(summary, 0, 60)}",
+              "description" => "Validation failed: #{summary}\n\nFix all identified issues.",
+              "op_type" => "fix"
+            }
+          ]
       end
 
     if fix_specs != [] do
       Planner.create_jobs_from_specs(mission.id, fix_specs)
 
       # Transition back to implementation to run the fix ops
-      GiTF.Missions.transition_phase(mission.id, "implementation", "Validation fix attempt #{fix_attempt + 1}")
+      GiTF.Missions.transition_phase(
+        mission.id,
+        "implementation",
+        "Validation fix attempt #{fix_attempt + 1}"
+      )
+
       {:ok, mission} = GiTF.Missions.get(mission.id)
       spawn_implementation_jobs(mission)
       {:ok, "implementation"}
@@ -1106,7 +1230,10 @@ defmodule GiTF.Major.Orchestrator do
     end
   rescue
     e ->
-      Logger.warning("Validation fix attempt failed for mission #{mission.id}: #{Exception.message(e)}")
+      Logger.warning(
+        "Validation fix attempt failed for mission #{mission.id}: #{Exception.message(e)}"
+      )
+
       fail_quest(mission.id, "Validation fix attempt crashed")
   end
 
@@ -1117,7 +1244,8 @@ defmodule GiTF.Major.Orchestrator do
     if Map.get(mission, :pipeline_mode) == "fast" do
       start_scoring(mission)
     else
-      with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "simplify", "Sync complete, simplifying") do
+      with {:ok, _} <-
+             GiTF.Missions.transition_phase(mission.id, "simplify", "Sync complete, simplifying") do
         sector = Archive.get(:sectors, mission.sector_id)
         repo_path = if sector, do: sector.path, else: nil
 
@@ -1135,9 +1263,10 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp check_simplify_complete(mission) do
-    simplify_ops = Enum.filter(mission.ops, fn op ->
-      Map.get(op, :phase) == "simplify"
-    end)
+    simplify_ops =
+      Enum.filter(mission.ops, fn op ->
+        Map.get(op, :phase) == "simplify"
+      end)
 
     if simplify_ops == [] do
       # No simplify ops yet — still spawning
@@ -1185,7 +1314,8 @@ defmodule GiTF.Major.Orchestrator do
   # -- Scoring Phase: final quality assessment --------------------------------
 
   defp start_scoring(mission) do
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "scoring", "Simplify complete, scoring") do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission.id, "scoring", "Simplify complete, scoring") do
       all_artifacts = Map.get(mission, :artifacts, %{})
       prompt = PhasePrompts.scoring_prompt(mission, all_artifacts)
       spawn_phase_ghost(mission, "scoring", prompt, model: "general")
@@ -1207,16 +1337,24 @@ defmodule GiTF.Major.Orchestrator do
   defp fail_quest(mission_id, reason) do
     GiTF.Missions.transition_phase(mission_id, "completed", reason)
     GiTF.Missions.update_status!(mission_id)
-    GiTF.Observability.Alerts.dispatch_webhook(:quest_failed,
-      "Quest #{mission_id} failed: #{reason}")
+
+    GiTF.Observability.Alerts.dispatch_webhook(
+      :quest_failed,
+      "Quest #{mission_id} failed: #{reason}"
+    )
+
     {:ok, "completed"}
   end
 
   defp complete_quest(mission_id) do
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission_id, "completed", "All phases complete") do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission_id, "completed", "All phases complete") do
       GiTF.Missions.update_status!(mission_id)
-      GiTF.Observability.Alerts.dispatch_webhook(:quest_completed,
-        "Quest #{mission_id} completed successfully")
+
+      GiTF.Observability.Alerts.dispatch_webhook(
+        :quest_completed,
+        "Quest #{mission_id} completed successfully"
+      )
 
       # Start post-review if enabled for this sector
       with {:ok, mission} <- GiTF.Missions.get(mission_id),
@@ -1235,14 +1373,18 @@ defmodule GiTF.Major.Orchestrator do
     strategy = Keyword.get(opts, :strategy)
 
     # Guard: don't create duplicate phase ops (prevents retry loops from spawning 100+ ops)
-    existing = Enum.find(mission.ops, fn op ->
-      op[:phase_job] && op[:phase] == phase &&
-        op.status in ["pending", "running", "assigned"] &&
-        (is_nil(strategy) || String.contains?(op.title || "", "[#{strategy}]"))
-    end)
+    existing =
+      Enum.find(mission.ops, fn op ->
+        op[:phase_job] && op[:phase] == phase &&
+          op.status in ["pending", "running", "assigned"] &&
+          (is_nil(strategy) || String.contains?(op.title || "", "[#{strategy}]"))
+      end)
 
     if existing do
-      Logger.debug("Phase op already exists for #{phase}#{if strategy, do: " [#{strategy}]"}, skipping duplicate")
+      Logger.debug(
+        "Phase op already exists for #{phase}#{if strategy, do: " [#{strategy}]"}, skipping duplicate"
+      )
+
       {:ok, nil}
     else
       spawn_phase_ghost_inner(mission, phase, prompt, opts)
@@ -1282,7 +1424,10 @@ defmodule GiTF.Major.Orchestrator do
           {:ok, gitf_root} ->
             case GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root, prompt: prompt) do
               {:ok, ghost} ->
-                Logger.info("Phase ghost #{ghost.id} spawned for #{phase} phase of mission #{mission.id}")
+                Logger.info(
+                  "Phase ghost #{ghost.id} spawned for #{phase} phase of mission #{mission.id}"
+                )
+
                 {:ok, ghost}
 
               {:error, reason} ->
@@ -1366,7 +1511,8 @@ defmodule GiTF.Major.Orchestrator do
           |> Enum.with_index(1)
           |> Enum.map(fn {req, idx} ->
             %{
-              "title" => "Implement requirement #{idx}: #{String.slice(to_string(req["name"] || req), 0, 60)}",
+              "title" =>
+                "Implement requirement #{idx}: #{String.slice(to_string(req["name"] || req), 0, 60)}",
               "description" => to_string(req["description"] || req),
               "op_type" => "implementation"
             }
@@ -1376,7 +1522,8 @@ defmodule GiTF.Major.Orchestrator do
           design["components"]
           |> Enum.map(fn comp ->
             %{
-              "title" => "Implement component: #{String.slice(to_string(comp["name"] || comp), 0, 60)}",
+              "title" =>
+                "Implement component: #{String.slice(to_string(comp["name"] || comp), 0, 60)}",
               "description" => to_string(comp["description"] || Jason.encode!(comp)),
               "op_type" => "implementation"
             }
@@ -1384,11 +1531,13 @@ defmodule GiTF.Major.Orchestrator do
 
         true ->
           # Last resort: single op from mission goal
-          [%{
-            "title" => "Implement: #{String.slice(mission.goal, 0, 80)}",
-            "description" => mission.goal,
-            "op_type" => "implementation"
-          }]
+          [
+            %{
+              "title" => "Implement: #{String.slice(mission.goal, 0, 80)}",
+              "description" => mission.goal,
+              "op_type" => "implementation"
+            }
+          ]
       end
 
     if specs != [] do
@@ -1399,7 +1548,10 @@ defmodule GiTF.Major.Orchestrator do
     {:ok, specs}
   rescue
     e ->
-      Logger.warning("Synthetic op generation failed for mission #{mission.id}: #{Exception.message(e)}")
+      Logger.warning(
+        "Synthetic op generation failed for mission #{mission.id}: #{Exception.message(e)}"
+      )
+
       {:ok, []}
   end
 
@@ -1420,20 +1572,35 @@ defmodule GiTF.Major.Orchestrator do
         :ok
 
       {:warn, estimated, remaining} ->
-        Logger.warning("Quest #{mission_id} budget tight: estimated $#{Float.round(estimated, 2)} vs $#{Float.round(remaining, 2)} remaining")
-        GiTF.Observability.Alerts.dispatch_webhook(:budget_warning,
-          "Quest #{mission_id} budget tight: ~$#{Float.round(estimated, 2)} needed, $#{Float.round(remaining, 2)} remaining")
+        Logger.warning(
+          "Quest #{mission_id} budget tight: estimated $#{Float.round(estimated, 2)} vs $#{Float.round(remaining, 2)} remaining"
+        )
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :budget_warning,
+          "Quest #{mission_id} budget tight: ~$#{Float.round(estimated, 2)} needed, $#{Float.round(remaining, 2)} remaining"
+        )
+
         :ok
 
       {:error, :would_exceed, estimated, remaining} ->
-        Logger.warning("Quest #{mission_id} would exceed budget: estimated $#{Float.round(estimated, 2)} vs $#{Float.round(remaining, 2)} remaining")
-        GiTF.Observability.Alerts.dispatch_webhook(:budget_blocked,
-          "Quest #{mission_id} blocked: ~$#{Float.round(estimated, 2)} needed but only $#{Float.round(remaining, 2)} remaining")
+        Logger.warning(
+          "Quest #{mission_id} would exceed budget: estimated $#{Float.round(estimated, 2)} vs $#{Float.round(remaining, 2)} remaining"
+        )
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :budget_blocked,
+          "Quest #{mission_id} blocked: ~$#{Float.round(estimated, 2)} needed but only $#{Float.round(remaining, 2)} remaining"
+        )
+
         {:error, :budget_would_exceed}
     end
   rescue
     e ->
-      Logger.warning("Budget preflight check failed for #{mission_id}: #{Exception.message(e)}, allowing")
+      Logger.warning(
+        "Budget preflight check failed for #{mission_id}: #{Exception.message(e)}, allowing"
+      )
+
       :ok
   end
 
@@ -1472,7 +1639,9 @@ defmodule GiTF.Major.Orchestrator do
       [single] ->
         # Only one sector — auto-assign it
         case GiTF.Archive.get(:missions, mission.id) do
-          nil -> {:error, :no_sector_assigned}
+          nil ->
+            {:error, :no_sector_assigned}
+
           record ->
             GiTF.Archive.put(:missions, Map.put(record, :sector_id, single.id))
             Logger.info("Auto-assigned sector #{single.name} to mission #{mission.id}")
@@ -1484,10 +1653,16 @@ defmodule GiTF.Major.Orchestrator do
         case GiTF.Sector.current() do
           {:ok, current} ->
             case GiTF.Archive.get(:missions, mission.id) do
-              nil -> {:error, :no_sector_assigned}
+              nil ->
+                {:error, :no_sector_assigned}
+
               record ->
                 GiTF.Archive.put(:missions, Map.put(record, :sector_id, current.id))
-                Logger.info("Auto-assigned current sector #{current.name} to mission #{mission.id}")
+
+                Logger.info(
+                  "Auto-assigned current sector #{current.name} to mission #{mission.id}"
+                )
+
                 :ok
             end
 
@@ -1503,9 +1678,12 @@ defmodule GiTF.Major.Orchestrator do
   # Determine the highest-risk op type in a mission (for auto-approve gating)
   defp mission_max_risk(mission_id) do
     case GiTF.Archive.get(:missions, mission_id) do
-      nil -> :normal
+      nil ->
+        :normal
+
       mission ->
         ops = Map.get(mission, :ops, [])
+
         cond do
           Enum.any?(ops, fn op -> Map.get(op, :risk_level) == "critical" end) -> :critical
           Enum.any?(ops, fn op -> Map.get(op, :risk_level) == "high" end) -> :high

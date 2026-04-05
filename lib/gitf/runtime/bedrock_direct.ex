@@ -65,7 +65,10 @@ defmodule GiTF.Runtime.BedrockDirect do
         text = ReqLLM.Response.text(response) || ""
 
         if output_tokens == 0 and text == "" do
-          Logger.warning("BedrockDirect: got 200 but empty response body: #{inspect(resp, limit: 500)}")
+          Logger.warning(
+            "BedrockDirect: got 200 but empty response body: #{inspect(resp, limit: 500)}"
+          )
+
           {:error, "Bedrock returned empty response"}
         else
           {:ok, response}
@@ -103,8 +106,17 @@ defmodule GiTF.Runtime.BedrockDirect do
 
     # Inference config
     inference = %{}
-    inference = if opts[:max_tokens], do: Map.put(inference, "maxTokens", opts[:max_tokens]), else: inference
-    inference = if opts[:temperature], do: Map.put(inference, "temperature", opts[:temperature]), else: inference
+
+    inference =
+      if opts[:max_tokens],
+        do: Map.put(inference, "maxTokens", opts[:max_tokens]),
+        else: inference
+
+    inference =
+      if opts[:temperature],
+        do: Map.put(inference, "temperature", opts[:temperature]),
+        else: inference
+
     body = if inference != %{}, do: Map.put(body, "inferenceConfig", inference), else: body
 
     # Tools
@@ -141,29 +153,33 @@ defmodule GiTF.Runtime.BedrockDirect do
         tool_calls = get_field(msg, :tool_calls) || []
         tool_call_id = get_field(msg, :tool_call_id)
 
-        bedrock_role = case role do
-          r when r in [:assistant, "assistant"] -> "assistant"
-          _ -> "user"
-        end
+        bedrock_role =
+          case role do
+            r when r in [:assistant, "assistant"] -> "assistant"
+            _ -> "user"
+          end
 
-        parts = cond do
-          role in [:tool, "tool"] and tool_call_id ->
-            [%{
-              "toolResult" => %{
-                "toolUseId" => tool_call_id,
-                "content" => [%{"text" => content_to_string(msg)}]
-              }
-            }]
+        parts =
+          cond do
+            role in [:tool, "tool"] and tool_call_id ->
+              [
+                %{
+                  "toolResult" => %{
+                    "toolUseId" => tool_call_id,
+                    "content" => [%{"text" => content_to_string(msg)}]
+                  }
+                }
+              ]
 
-          tool_calls != [] and tool_calls != nil ->
-            text = content_to_string(msg)
-            text_parts = if text != "", do: [%{"text" => text}], else: []
-            tool_parts = Enum.map(tool_calls, &format_tool_call/1)
-            text_parts ++ tool_parts
+            tool_calls != [] and tool_calls != nil ->
+              text = content_to_string(msg)
+              text_parts = if text != "", do: [%{"text" => text}], else: []
+              tool_parts = Enum.map(tool_calls, &format_tool_call/1)
+              text_parts ++ tool_parts
 
-          true ->
-            [%{"text" => content_to_string(msg)}]
-        end
+            true ->
+              [%{"text" => content_to_string(msg)}]
+          end
 
         {bedrock_role, parts}
       end)
@@ -177,8 +193,10 @@ defmodule GiTF.Runtime.BedrockDirect do
         fn
           {role, parts}, nil ->
             {:cont, {role, parts}}
+
           {role, parts}, {role, acc_parts} ->
             {:cont, {role, acc_parts ++ parts}}
+
           {role, parts}, acc ->
             {:cont, %{"role" => elem(acc, 0), "content" => elem(acc, 1)}, {role, parts}}
         end,
@@ -210,6 +228,7 @@ defmodule GiTF.Runtime.BedrockDirect do
   defp content_to_string(other), do: to_string(other)
 
   defp normalize_content(content) when is_binary(content), do: content
+
   defp normalize_content(content) when is_list(content) do
     content
     |> Enum.map(fn
@@ -221,6 +240,7 @@ defmodule GiTF.Runtime.BedrockDirect do
     end)
     |> Enum.join("\n")
   end
+
   defp normalize_content(nil), do: ""
   defp normalize_content(other), do: to_string(other)
 
@@ -233,7 +253,14 @@ defmodule GiTF.Runtime.BedrockDirect do
     name = get_field(tc, :name) || get_in(tc, [:function, :name]) || ""
     args = get_field(tc, :arguments) || get_in(tc, [:function, :arguments]) || %{}
     input = if is_binary(args), do: Jason.decode!(args), else: args
-    %{"toolUse" => %{"toolUseId" => get_field(tc, :id) || random_id(), "name" => to_string(name), "input" => input}}
+
+    %{
+      "toolUse" => %{
+        "toolUseId" => get_field(tc, :id) || random_id(),
+        "name" => to_string(name),
+        "input" => input
+      }
+    }
   end
 
   defp format_tools(tools) do

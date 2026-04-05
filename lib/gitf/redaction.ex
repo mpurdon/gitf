@@ -23,8 +23,7 @@ defmodule GiTF.Redaction do
     # Bearer tokens
     {~r/Bearer\s+[A-Za-z0-9._-]+/, "Bearer [REDACTED]"},
     # Environment variable exports with secret-indicating names
-    {~r/export\s+(\w*(?:KEY|SECRET|TOKEN|PASSWORD)\w*)=(\S+)/,
-     "export \\1=[REDACTED]"},
+    {~r/export\s+(\w*(?:KEY|SECRET|TOKEN|PASSWORD)\w*)=(\S+)/, "export \\1=[REDACTED]"},
     # Generic long tokens preceded by secret-indicating words
     {~r/(?:token|key|secret|password|authorization|bearer)[\s:=]+\K[A-Za-z0-9+\/=_-]{40,}/i,
      "[REDACTED]"}

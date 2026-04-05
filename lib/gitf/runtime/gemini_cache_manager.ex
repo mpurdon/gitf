@@ -52,7 +52,7 @@ defmodule GiTF.Runtime.GeminiCacheManager do
           # Cache expired or expiring soon, create new one
           create_and_store(hash, content, model, opts, state)
         end
-        
+
       nil ->
         # No cache, create one
         create_and_store(hash, content, model, opts, state)
@@ -61,7 +61,7 @@ defmodule GiTF.Runtime.GeminiCacheManager do
 
   defp create_and_store(hash, content, model, opts, state) do
     ttl_seconds = Keyword.get(opts, :ttl_seconds, 3600)
-    
+
     # Map friendly model name to API model name if needed
     # e.g. "google:gemini-1.5-pro" -> "models/gemini-1.5-pro-001"
     # For now, assume model is passed correctly or perform basic mapping
@@ -70,13 +70,14 @@ defmodule GiTF.Runtime.GeminiCacheManager do
     case create_cache_resource(content, api_model, ttl_seconds) do
       {:ok, %{"name" => name, "expireTime" => expire_time}} ->
         {:ok, expires_at, _} = DateTime.from_iso8601(expire_time)
-        
-        new_caches = Map.put(state.caches, hash, %{
-          name: name,
-          expires_at: expires_at,
-          model: model
-        })
-        
+
+        new_caches =
+          Map.put(state.caches, hash, %{
+            name: name,
+            expires_at: expires_at,
+            model: model
+          })
+
         Logger.info("Created Gemini Context Cache: #{name} (expires #{expire_time})")
         {:reply, {:ok, name}, %{state | caches: new_caches}}
 
@@ -89,7 +90,7 @@ defmodule GiTF.Runtime.GeminiCacheManager do
   defp create_cache_resource(system_instruction, model, ttl_seconds) do
     key = get_api_key()
     url = "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{key}"
-    
+
     body = %{
       "model" => model,
       "systemInstruction" => %{
@@ -114,9 +115,9 @@ defmodule GiTF.Runtime.GeminiCacheManager do
     # Handle "google:gemini-1.5-pro" -> "models/gemini-1.5-pro-001"
     # Basic heuristic: if it contains "gemini", ensure it starts with "models/"
     # and strip "google:" prefix
-    
+
     clean = String.replace(model, "google:", "")
-    
+
     if String.starts_with?(clean, "models/") do
       clean
     else

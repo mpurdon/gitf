@@ -48,7 +48,9 @@ defmodule GiTF.Dashboard.ProgressLive do
 
         op =
           case ghost[:op_id] do
-            nil -> nil
+            nil ->
+              nil
+
             op_id ->
               case GiTF.Ops.get(op_id) do
                 {:ok, j} -> j
@@ -243,8 +245,9 @@ defmodule GiTF.Dashboard.ProgressLive do
   end
 
   defp event_summary(%{type: :error, data: data}) do
-    Map.get(data, :message) || Map.get(data, "message") || inspect(data)
-    |> truncate(80)
+    Map.get(data, :message) || Map.get(data, "message") ||
+      inspect(data)
+      |> truncate(80)
   end
 
   defp event_summary(%{data: data}) when map_size(data) > 0 do

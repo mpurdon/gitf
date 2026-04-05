@@ -50,7 +50,6 @@ defmodule GiTF.Runtime.CrossModelAudit do
     with {:ok, op} <- GiTF.Ops.get(op_id),
          {:ok, shell} <- find_cell(op),
          {:ok, diff} <- get_diff(shell) do
-
       if String.trim(diff) == "" do
         {:ok, %{score: 100, issues: [], severity: :none, model: "none", skipped: true}}
       else
@@ -85,19 +84,21 @@ defmodule GiTF.Runtime.CrossModelAudit do
 
   defp find_cell(op) do
     case GiTF.Archive.find_one(:shells, fn c ->
-      c.ghost_id == op.ghost_id and c.status == "active"
-    end) do
+           c.ghost_id == op.ghost_id and c.status == "active"
+         end) do
       nil -> {:error, :no_cell}
       shell -> {:ok, shell}
     end
   end
 
   defp get_diff(shell) do
-    case GiTF.Git.safe_cmd( ["diff", "HEAD~1"], cd: shell.worktree_path, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output}
+    case GiTF.Git.safe_cmd(["diff", "HEAD~1"], cd: shell.worktree_path, stderr_to_stdout: true) do
+      {output, 0} ->
+        {:ok, output}
+
       {_, _} ->
         # Fallback: diff against main
-        case GiTF.Git.safe_cmd( ["diff", "main"], cd: shell.worktree_path, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd(["diff", "main"], cd: shell.worktree_path, stderr_to_stdout: true) do
           {output, 0} -> {:ok, output}
           {output, _} -> {:error, {:diff_failed, output}}
         end

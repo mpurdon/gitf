@@ -19,7 +19,7 @@ defmodule GiTF.Git do
   """
   @spec clone(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def clone(repo_url, destination) do
-    case safe_cmd( ["clone", repo_url, destination], stderr_to_stdout: true) do
+    case safe_cmd(["clone", repo_url, destination], stderr_to_stdout: true) do
       {_output, 0} -> {:ok, destination}
       {output, _code} -> {:error, String.trim(output)}
     end
@@ -32,7 +32,7 @@ defmodule GiTF.Git do
   """
   @spec git_version() :: {:ok, String.t()} | {:error, :git_not_found}
   def git_version do
-    case safe_cmd( ["--version"], stderr_to_stdout: true) do
+    case safe_cmd(["--version"], stderr_to_stdout: true) do
       {output, 0} ->
         version =
           output
@@ -55,7 +55,7 @@ defmodule GiTF.Git do
   """
   @spec repo?(String.t()) :: boolean()
   def repo?(path) do
-    case safe_cmd( ["rev-parse", "--is-inside-work-tree"],
+    case safe_cmd(["rev-parse", "--is-inside-work-tree"],
            cd: path,
            stderr_to_stdout: true
          ) do
@@ -110,7 +110,7 @@ defmodule GiTF.Git do
   @spec worktree_add(String.t(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
   def worktree_add(repo_path, worktree_path, branch) do
-    case safe_cmd( ["worktree", "add", worktree_path, "-b", branch],
+    case safe_cmd(["worktree", "add", worktree_path, "-b", branch],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -134,7 +134,7 @@ defmodule GiTF.Git do
         do: ["worktree", "remove", "--force", worktree_path],
         else: ["worktree", "remove", worktree_path]
 
-    case safe_cmd( args, cd: repo_path, stderr_to_stdout: true) do
+    case safe_cmd(args, cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> :ok
       {output, _code} -> {:error, String.trim(output)}
     end
@@ -149,7 +149,7 @@ defmodule GiTF.Git do
   """
   @spec worktree_list(String.t()) :: {:ok, [map()]} | {:error, String.t()}
   def worktree_list(repo_path) do
-    case safe_cmd( ["worktree", "list", "--porcelain"],
+    case safe_cmd(["worktree", "list", "--porcelain"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -170,7 +170,7 @@ defmodule GiTF.Git do
   """
   @spec branch_delete(String.t(), String.t()) :: :ok | {:error, String.t()}
   def branch_delete(repo_path, branch_name) do
-    case safe_cmd( ["branch", "-D", branch_name],
+    case safe_cmd(["branch", "-D", branch_name],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -182,7 +182,7 @@ defmodule GiTF.Git do
   @doc "Returns the current branch name."
   @spec current_branch(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def current_branch(repo_path) do
-    case safe_cmd( ["rev-parse", "--abbrev-ref", "HEAD"],
+    case safe_cmd(["rev-parse", "--abbrev-ref", "HEAD"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -194,7 +194,7 @@ defmodule GiTF.Git do
   @doc "Checks out a branch."
   @spec checkout(String.t(), String.t()) :: :ok | {:error, String.t()}
   def checkout(repo_path, branch) do
-    case safe_cmd( ["checkout", branch], cd: repo_path, stderr_to_stdout: true) do
+    case safe_cmd(["checkout", branch], cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> :ok
       {output, _code} -> {:error, String.trim(output)}
     end
@@ -208,7 +208,7 @@ defmodule GiTF.Git do
         do: ["sync", "--no-ff", branch],
         else: ["sync", branch]
 
-    case safe_cmd( args, cd: repo_path, stderr_to_stdout: true) do
+    case safe_cmd(args, cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> :ok
       {output, _code} -> {:error, String.trim(output)}
     end
@@ -217,7 +217,7 @@ defmodule GiTF.Git do
   @doc "Checks whether a local branch exists."
   @spec branch_exists?(String.t(), String.t()) :: boolean()
   def branch_exists?(repo_path, branch) do
-    case safe_cmd( ["rev-parse", "--verify", "refs/heads/#{branch}"],
+    case safe_cmd(["rev-parse", "--verify", "refs/heads/#{branch}"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -229,7 +229,7 @@ defmodule GiTF.Git do
   @doc "Creates a new branch from a base ref."
   @spec branch_create(String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
   def branch_create(repo_path, branch, base) do
-    case safe_cmd( ["checkout", "-b", branch, base],
+    case safe_cmd(["checkout", "-b", branch, base],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -247,7 +247,7 @@ defmodule GiTF.Git do
   """
   @spec worktree_prune(String.t()) :: :ok | {:error, String.t()}
   def worktree_prune(repo_path) do
-    case safe_cmd( ["worktree", "prune"],
+    case safe_cmd(["worktree", "prune"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -266,7 +266,7 @@ defmodule GiTF.Git do
   """
   @spec sparse_checkout_init(String.t()) :: :ok | {:error, String.t()}
   def sparse_checkout_init(repo_path) do
-    case safe_cmd( ["sparse-checkout", "init", "--cone"],
+    case safe_cmd(["sparse-checkout", "init", "--cone"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -284,7 +284,7 @@ defmodule GiTF.Git do
   """
   @spec sparse_checkout_set(String.t(), [String.t()]) :: :ok | {:error, String.t()}
   def sparse_checkout_set(repo_path, patterns) do
-    case safe_cmd( ["sparse-checkout", "set" | patterns],
+    case safe_cmd(["sparse-checkout", "set" | patterns],
            cd: repo_path,
            stderr_to_stdout: true
          ) do

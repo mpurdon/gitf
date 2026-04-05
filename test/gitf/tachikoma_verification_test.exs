@@ -18,12 +18,16 @@ defmodule GiTF.TachikomaAuditTest do
         catch
           :exit, _ -> :ok
         end
-      [] -> :ok
+
+      [] ->
+        :ok
     end
 
     on_exit(fn ->
       case Process.whereis(GiTF.Registry) do
-        nil -> :ok
+        nil ->
+          :ok
+
         _ ->
           case Registry.lookup(GiTF.Registry, :tachikoma) do
             [{pid, _}] ->
@@ -32,7 +36,9 @@ defmodule GiTF.TachikomaAuditTest do
               catch
                 :exit, _ -> :ok
               end
-            [] -> :ok
+
+            [] ->
+              :ok
           end
       end
     end)
@@ -74,11 +80,12 @@ defmodule GiTF.TachikomaAuditTest do
     test "tachikoma patrol handles verification gracefully" do
       Process.flag(:trap_exit, true)
       # Create a op that needs verification
-      {:ok, _job} = Archive.insert(:ops, %{
-        title: "Test op",
-        status: "done",
-        verification_status: "pending"
-      })
+      {:ok, _job} =
+        Archive.insert(:ops, %{
+          title: "Test op",
+          status: "done",
+          verification_status: "pending"
+        })
 
       # Start tachikoma
       {:ok, pid} = Tachikoma.start_link(poll_interval: 1000)

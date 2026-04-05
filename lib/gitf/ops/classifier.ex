@@ -1,11 +1,11 @@
 defmodule GiTF.Ops.Classifier do
   @moduledoc """
   Classifies ops by type and complexity to enable intelligent model selection.
-  
+
   Uses heuristics and keyword matching to determine:
   - Job type (planning, implementation, research, etc.)
   - Complexity level (simple, moderate, complex)
-  
+
   This enables the system to assign the optimal model for each op.
   """
 
@@ -13,7 +13,7 @@ defmodule GiTF.Ops.Classifier do
 
   @doc """
   Classify a op and recommend a model.
-  
+
   Returns a map with:
   - `:op_type` - The classified op type
   - `:complexity` - The complexity level
@@ -98,8 +98,15 @@ defmodule GiTF.Ops.Classifier do
   end
 
   @high_risk_keywords ~w(migration security auth deploy credential database secret password token)
-  @high_risk_files ["**/config/**", "**/migrations/**", "**/auth/**", "Dockerfile", ".env",
-                     "**/secrets/**", "**/credentials/**"]
+  @high_risk_files [
+    "**/config/**",
+    "**/migrations/**",
+    "**/auth/**",
+    "Dockerfile",
+    ".env",
+    "**/secrets/**",
+    "**/credentials/**"
+  ]
 
   @doc """
   Classify risk level based on title, description, and target files.
@@ -142,7 +149,8 @@ defmodule GiTF.Ops.Classifier do
 
           true ->
             # Exact filename match
-            Path.basename(file_lower) == String.downcase(pattern) or file_lower == String.downcase(pattern)
+            Path.basename(file_lower) == String.downcase(pattern) or
+              file_lower == String.downcase(pattern)
         end
       end)
     end)

@@ -17,11 +17,12 @@ defmodule GiTF.MajorTest do
     # Start a fresh Major for each test. Must terminate from supervisor first
     # to prevent auto-restart conflicts.
     try do
-      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Major)
-      Supervisor.delete_child(GiTF.Supervisor, GiTF.Major)
+      Supervisor.terminate_child(GiTF.Core.Supervisor, GiTF.Major)
+      Supervisor.delete_child(GiTF.Core.Supervisor, GiTF.Major)
     catch
       :exit, _ -> :ok
     end
+
     GiTF.Test.StoreHelper.safe_stop(GiTF.Major)
     Process.sleep(10)
     {:ok, pid} = Major.start_link(gitf_root: gitf_root)
@@ -160,7 +161,9 @@ defmodule GiTF.MajorTest do
     test "retry logic increments retry count for failed op" do
       # Create the necessary DB records for retry
       {:ok, sector} =
-        Archive.insert(:sectors, %{name: "retry-test-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{
+          name: "retry-test-sector-#{:erlang.unique_integer([:positive])}"
+        })
 
       {:ok, mission} =
         Archive.insert(:missions, %{
@@ -206,7 +209,9 @@ defmodule GiTF.MajorTest do
     test "updates mission status to completed on job_complete" do
       # Create records: sector, mission, op (done), ghost
       {:ok, sector} =
-        Archive.insert(:sectors, %{name: "mission-adv-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{
+          name: "mission-adv-sector-#{:erlang.unique_integer([:positive])}"
+        })
 
       {:ok, mission} =
         Archive.insert(:missions, %{
@@ -301,7 +306,6 @@ defmodule GiTF.MajorTest do
       receive do
         {:waggle_received, %{subject: "quest_completed"}} ->
           assert true
-
       after
         2_000 ->
           # Audit failed -> retry path. Major should still be alive.

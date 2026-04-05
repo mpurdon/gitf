@@ -63,13 +63,15 @@ defmodule GiTF.Runtime.Keys do
   def status do
     providers = ~w(anthropic openai google groq mistral cohere together fireworks)
 
-    api_keys = Enum.map(providers, fn provider ->
-      {provider, GiTF.Runtime.ProviderManager.api_key_for(provider) != nil}
-    end)
+    api_keys =
+      Enum.map(providers, fn provider ->
+        {provider, GiTF.Runtime.ProviderManager.api_key_for(provider) != nil}
+      end)
 
-    aws_status = {"aws_bedrock",
-      System.get_env("AWS_ACCESS_KEY_ID") != nil or
-      System.get_env("AWS_BEARER_TOKEN_BEDROCK") != nil}
+    aws_status =
+      {"aws_bedrock",
+       System.get_env("AWS_ACCESS_KEY_ID") != nil or
+         System.get_env("AWS_BEARER_TOKEN_BEDROCK") != nil}
 
     api_keys ++ [aws_status]
   end
@@ -82,7 +84,9 @@ defmodule GiTF.Runtime.Keys do
       keys when is_map(keys) ->
         Map.new(keys, fn {k, v} -> {to_string(k), v} end)
         |> Map.filter(fn {_k, v} -> is_binary(v) and v != "" end)
-      _ -> %{}
+
+      _ ->
+        %{}
     end
   rescue
     _ -> %{}
@@ -93,7 +97,7 @@ defmodule GiTF.Runtime.Keys do
   defp load_aws_credentials(toml_keys) do
     # Skip if AWS creds are already in the environment
     if System.get_env("AWS_ACCESS_KEY_ID") != nil or
-       System.get_env("AWS_BEARER_TOKEN_BEDROCK") != nil do
+         System.get_env("AWS_BEARER_TOKEN_BEDROCK") != nil do
       0
     else
       profile = resolve_aws_profile(toml_keys)
@@ -123,7 +127,9 @@ defmodule GiTF.Runtime.Keys do
             nil -> 0
             creds -> set_aws_env_vars(creds)
           end
-        {:error, _} -> 0
+
+        {:error, _} ->
+          0
       end
 
     # If no static creds found, try SSO via `aws configure export-credentials`
@@ -147,8 +153,11 @@ defmodule GiTF.Runtime.Keys do
   end
 
   defp load_aws_sso_credentials(profile) do
-    case System.cmd("aws", ["configure", "export-credentials", "--profile", profile, "--format", "env"],
-           stderr_to_stdout: true) do
+    case System.cmd(
+           "aws",
+           ["configure", "export-credentials", "--profile", profile, "--format", "env"],
+           stderr_to_stdout: true
+         ) do
       {output, 0} ->
         output
         |> String.split("\n", trim: true)
@@ -157,18 +166,24 @@ defmodule GiTF.Runtime.Keys do
             ["export " <> var, value] ->
               var = String.trim(var)
               value = String.trim(value)
+
               if var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"] do
                 System.put_env(var, value)
                 true
               else
                 false
               end
-            _ -> false
+
+            _ ->
+              false
           end
         end)
 
       {error, _} ->
-        Logger.debug("SSO credential export failed for profile '#{profile}': #{String.slice(error, 0, 200)}")
+        Logger.debug(
+          "SSO credential export failed for profile '#{profile}': #{String.slice(error, 0, 200)}"
+        )
+
         0
     end
   rescue

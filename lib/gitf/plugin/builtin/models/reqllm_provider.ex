@@ -87,47 +87,82 @@ defmodule GiTF.Plugin.Builtin.Models.ReqLLMProvider do
     %{
       # Google models (defaults)
       "google:gemini-2.5-pro" => %{
-        input: 1.25, output: 10.0, cache_read: 0.315, cache_write: 0.0
+        input: 1.25,
+        output: 10.0,
+        cache_read: 0.315,
+        cache_write: 0.0
       },
       "google:gemini-2.5-flash" => %{
-        input: 0.15, output: 0.60, cache_read: 0.0375, cache_write: 0.0
+        input: 0.15,
+        output: 0.60,
+        cache_read: 0.0375,
+        cache_write: 0.0
       },
       "google:gemini-2.0-flash" => %{
-        input: 0.10, output: 0.40, cache_read: 0.025, cache_write: 0.0
+        input: 0.10,
+        output: 0.40,
+        cache_read: 0.025,
+        cache_write: 0.0
       },
       # Anthropic models (direct API)
       "anthropic:claude-opus-4-6" => %{
-        input: 15.0, output: 75.0, cache_read: 1.50, cache_write: 18.75
+        input: 15.0,
+        output: 75.0,
+        cache_read: 1.50,
+        cache_write: 18.75
       },
       "anthropic:claude-sonnet-4-6" => %{
-        input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75
+        input: 3.0,
+        output: 15.0,
+        cache_read: 0.30,
+        cache_write: 3.75
       },
       "anthropic:claude-haiku-4-5" => %{
-        input: 0.80, output: 4.0, cache_read: 0.08, cache_write: 1.0
+        input: 0.80,
+        output: 4.0,
+        cache_read: 0.08,
+        cache_write: 1.0
       },
       # Bedrock models (AWS)
       "bedrock:anthropic.claude-sonnet-4-6" => %{
-        input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75
+        input: 3.0,
+        output: 15.0,
+        cache_read: 0.30,
+        cache_write: 3.75
       },
       "bedrock:anthropic.claude-haiku-4-5" => %{
-        input: 0.80, output: 4.0, cache_read: 0.08, cache_write: 1.0
+        input: 0.80,
+        output: 4.0,
+        cache_read: 0.08,
+        cache_write: 1.0
       },
       "bedrock:amazon.nova-pro" => %{
-        input: 0.80, output: 3.20, cache_read: 0.0, cache_write: 0.0
+        input: 0.80,
+        output: 3.20,
+        cache_read: 0.0,
+        cache_write: 0.0
       },
       "bedrock:amazon.nova-lite" => %{
-        input: 0.06, output: 0.24, cache_read: 0.0, cache_write: 0.0
+        input: 0.06,
+        output: 0.24,
+        cache_read: 0.0,
+        cache_write: 0.0
       },
       # OpenAI models
       "openai:gpt-4o" => %{
-        input: 2.50, output: 10.0, cache_read: 1.25, cache_write: 0.0
+        input: 2.50,
+        output: 10.0,
+        cache_read: 1.25,
+        cache_write: 0.0
       },
       "openai:gpt-4o-mini" => %{
-        input: 0.15, output: 0.60, cache_read: 0.075, cache_write: 0.0
+        input: 0.15,
+        output: 0.60,
+        cache_read: 0.075,
+        cache_write: 0.0
       }
-      # Ollama models (via OpenAI-compatible API) are free/local.
-      # Use "openai:llama3.3", "openai:qwen2.5-coder", etc.
-      # Configure with OPENAI_API_BASE=http://localhost:11434/v1
+      # Ollama models
+      # Use "ollama:llama3.3", "ollama:qwen2.5-coder", etc.
     }
   end
 
@@ -150,7 +185,7 @@ defmodule GiTF.Plugin.Builtin.Models.ReqLLMProvider do
       # OpenAI
       "openai:gpt-4o",
       "openai:gpt-4o-mini"
-      # Ollama: use "openai:<model>" with OPENAI_API_BASE=http://localhost:11434/v1
+      # Ollama: use "ollama:<model>"
     ]
   end
 
@@ -238,11 +273,16 @@ defmodule GiTF.Plugin.Builtin.Models.ReqLLMProvider do
 
   defp infer_cost_tier(model) do
     cond do
-      String.contains?(model, "opus") or String.contains?(model, "gemini-2.5-pro") -> :high
+      String.contains?(model, "opus") or String.contains?(model, "gemini-2.5-pro") ->
+        :high
+
       String.contains?(model, "haiku") or String.contains?(model, "flash") or
         String.contains?(model, "mini") or String.contains?(model, "nova-lite") or
-        String.contains?(model, "llama") or String.contains?(model, "qwen") -> :low
-      true -> :medium
+        String.contains?(model, "llama") or String.contains?(model, "qwen") ->
+        :low
+
+      true ->
+        :medium
     end
   end
 end

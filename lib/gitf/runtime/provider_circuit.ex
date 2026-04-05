@@ -54,24 +54,35 @@ defmodule GiTF.Runtime.ProviderCircuit do
   # Determines how long Tachikoma waits between recovery probes based on
   # WHY the circuit opened — not just which provider it was.
   @failure_mode_intervals %{
-    quota_exhausted: 1800,   # 30 min — spending caps / billing limits, may take hours
-    billing_error: 1800,     # 30 min — payment issues, needs manual intervention
-    rate_limited: 120,       # 2 min  — transient throttle, clears quickly
-    auth_error: 900,         # 15 min — bad key / expired creds, needs manual fix
-    server_error: 180,       # 3 min  — 500/502/503, usually brief
-    connection_error: 60,    # 1 min  — network blip, often instant recovery
-    model_not_found: 3600,   # 60 min — misconfigured model, needs manual fix
-    unknown: 300             # 5 min  — safe default
+    # 30 min — spending caps / billing limits, may take hours
+    quota_exhausted: 1800,
+    # 30 min — payment issues, needs manual intervention
+    billing_error: 1800,
+    # 2 min  — transient throttle, clears quickly
+    rate_limited: 120,
+    # 15 min — bad key / expired creds, needs manual fix
+    auth_error: 900,
+    # 3 min  — 500/502/503, usually brief
+    server_error: 180,
+    # 1 min  — network blip, often instant recovery
+    connection_error: 60,
+    # 60 min — misconfigured model, needs manual fix
+    model_not_found: 3600,
+    # 5 min  — safe default
+    unknown: 300
   }
 
   # Provider-specific base intervals (seconds) used as a floor.
   # The actual interval is max(failure_mode_interval, provider_base).
   @provider_base_intervals %{
-    "ollama" => 30,       # local, zero cost
-    "bedrock" => 60,      # AWS is reliable
+    # local, zero cost
+    "ollama" => 30,
+    # AWS is reliable
+    "bedrock" => 60,
     "anthropic" => 60,
     "openai" => 60,
-    "google" => 120,      # Google quotas are sticky
+    # Google quotas are sticky
+    "google" => 120,
     "groq" => 60,
     "mistral" => 60,
     "together" => 60,
@@ -109,9 +120,11 @@ defmodule GiTF.Runtime.ProviderCircuit do
 
             fallback_key = @circuit_prefix <> fallback_provider
 
-            CircuitBreaker.call_with_retry(fallback_key, fn ->
-              call_fn.(fallback_model)
-            end, max_retries: 2)
+            CircuitBreaker.call_with_retry(
+              fallback_key,
+              fn ->
+                call_fn.(fallback_model)
+              end, max_retries: 2)
 
           :none ->
             Logger.warning("All provider circuits unavailable, attempting probe on #{provider}")
@@ -183,7 +196,10 @@ defmodule GiTF.Runtime.ProviderCircuit do
 
       _ ->
         failure_mode = classify_failure(provider)
-        mode_interval = Map.get(@failure_mode_intervals, failure_mode, @failure_mode_intervals.unknown)
+
+        mode_interval =
+          Map.get(@failure_mode_intervals, failure_mode, @failure_mode_intervals.unknown)
+
         provider_base = Map.get(@provider_base_intervals, provider, @default_provider_base)
         max(mode_interval, provider_base)
     end
@@ -218,7 +234,11 @@ defmodule GiTF.Runtime.ProviderCircuit do
   """
   @spec record_probe(String.t()) :: :ok
   def record_probe(provider) do
-    CircuitBreaker.put_metadata(@circuit_prefix <> provider, :last_probe, System.monotonic_time(:millisecond))
+    CircuitBreaker.put_metadata(
+      @circuit_prefix <> provider,
+      :last_probe,
+      System.monotonic_time(:millisecond)
+    )
   end
 
   @doc """
@@ -235,7 +255,9 @@ defmodule GiTF.Runtime.ProviderCircuit do
     interval_s = probe_interval(provider)
 
     case get_last_probe(provider) do
-      nil -> 0
+      nil ->
+        0
+
       last_ms ->
         elapsed_ms = System.monotonic_time(:millisecond) - last_ms
         max(0, interval_s - div(elapsed_ms, 1000))
@@ -285,13 +307,16 @@ defmodule GiTF.Runtime.ProviderCircuit do
 
   defp extract_provider(model) when is_binary(model) do
     cond do
-      String.starts_with?(model, "arn:aws:bedrock:") -> "bedrock"
+      String.starts_with?(model, "arn:aws:bedrock:") ->
+        "bedrock"
+
       String.contains?(model, ":") ->
         case String.split(model, ":", parts: 2) do
           ["amazon_bedrock", _] -> "bedrock"
           [provider, _] -> provider
           _ -> ModelResolver.configured_provider()
         end
+
       true ->
         ModelResolver.configured_provider()
     end
@@ -354,14 +379,12 @@ defmodule GiTF.Runtime.ProviderCircuit do
       String.contains?(lower, "resource_exhausted") -> :quota_exhausted
       String.contains?(lower, "billing") -> :billing_error
       String.contains?(lower, "payment") -> :billing_error
-
       # Rate limiting — transient, clears in seconds/minutes
       String.contains?(lower, "rate limit") -> :rate_limited
       String.contains?(lower, "too many requests") -> :rate_limited
       String.contains?(lower, "throttl") -> :rate_limited
       # Bare 429 without spending/quota keywords = rate limit
       String.contains?(lower, "429") -> :rate_limited
-
       # Auth errors — needs manual credential fix
       String.contains?(lower, "401") -> :auth_error
       String.contains?(lower, "403") -> :auth_error
@@ -369,13 +392,11 @@ defmodule GiTF.Runtime.ProviderCircuit do
       String.contains?(lower, "forbidden") -> :auth_error
       String.contains?(lower, "invalid") and String.contains?(lower, "key") -> :auth_error
       String.contains?(lower, "expired") -> :auth_error
-
       # Model / config errors — needs manual fix
       String.contains?(lower, "not_found") -> :model_not_found
       String.contains?(lower, "unknown provider") -> :model_not_found
       String.contains?(lower, "unsupported model") -> :model_not_found
       String.contains?(lower, "404") -> :model_not_found
-
       # Server errors — usually brief
       String.contains?(lower, "500") -> :server_error
       String.contains?(lower, "502") -> :server_error
@@ -383,24 +404,25 @@ defmodule GiTF.Runtime.ProviderCircuit do
       String.contains?(lower, "529") -> :server_error
       String.contains?(lower, "overloaded") -> :server_error
       String.contains?(lower, "internal server") -> :server_error
-
       # Connection errors — often instant recovery
       String.contains?(lower, "timeout") -> :connection_error
       String.contains?(lower, "econnrefused") -> :connection_error
       String.contains?(lower, "connection") -> :connection_error
       String.contains?(lower, "closed") -> :connection_error
-
       true -> :unknown
     end
   end
 
   def classify_reason(%{status: status}) when status in [401, 403], do: :auth_error
+
   def classify_reason(%{status: 429, body: body}) when is_map(body) do
     text = inspect(body) |> String.downcase()
+
     if String.contains?(text, "spending") or String.contains?(text, "quota"),
       do: :quota_exhausted,
       else: :rate_limited
   end
+
   def classify_reason(%{status: 429}), do: :rate_limited
   def classify_reason(%{status: s}) when s in [500, 502, 503, 529], do: :server_error
   def classify_reason(%{status: 404}), do: :model_not_found

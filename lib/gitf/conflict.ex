@@ -62,10 +62,10 @@ defmodule GiTF.Conflict do
       worktree_path = shell.worktree_path
 
       # Fetch latest from origin (best-effort, may not have remote)
-      GiTF.Git.safe_cmd( ["fetch", "origin"], cd: worktree_path, stderr_to_stdout: true)
+      GiTF.Git.safe_cmd(["fetch", "origin"], cd: worktree_path, stderr_to_stdout: true)
 
       # Attempt rebase onto main
-      case GiTF.Git.safe_cmd( ["rebase", main_branch],
+      case GiTF.Git.safe_cmd(["rebase", main_branch],
              cd: worktree_path,
              stderr_to_stdout: true
            ) do
@@ -77,7 +77,10 @@ defmodule GiTF.Conflict do
               {:ok, :resolved}
 
             {:error, :conflicts, files} ->
-              Logger.warning("Rebase did not resolve all conflicts for shell #{shell_id}: #{inspect(files)}")
+              Logger.warning(
+                "Rebase did not resolve all conflicts for shell #{shell_id}: #{inspect(files)}"
+              )
+
               {:error, {:rebase_incomplete, files}}
 
             _ ->
@@ -86,7 +89,7 @@ defmodule GiTF.Conflict do
 
         {output, _code} ->
           # Rebase failed — abort to restore clean state
-          GiTF.Git.safe_cmd( ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
+          GiTF.Git.safe_cmd(["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
           Logger.warning("Rebase failed for shell #{shell_id}: #{String.slice(output, 0, 200)}")
           {:error, :rebase_failed}
       end
@@ -141,7 +144,7 @@ defmodule GiTF.Conflict do
   # -- Private -----------------------------------------------------------------
 
   defp changed_files(repo_path, branch, main_branch) do
-    case GiTF.Git.safe_cmd( ["diff", "--name-only", "#{main_branch}...#{branch}"],
+    case GiTF.Git.safe_cmd(["diff", "--name-only", "#{main_branch}...#{branch}"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -154,7 +157,7 @@ defmodule GiTF.Conflict do
 
   defp check_conflicts(repo_path, branch, main_branch) do
     # Use git diff to find files that differ and may conflict
-    case GiTF.Git.safe_cmd( ["diff", "--name-only", "#{main_branch}...#{branch}"],
+    case GiTF.Git.safe_cmd(["diff", "--name-only", "#{main_branch}...#{branch}"],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
@@ -182,7 +185,7 @@ defmodule GiTF.Conflict do
 
     case merge_base do
       {:ok, base} ->
-        case GiTF.Git.safe_cmd( ["diff", "--name-only", "#{base}..#{main_branch}"],
+        case GiTF.Git.safe_cmd(["diff", "--name-only", "#{base}..#{main_branch}"],
                cd: repo_path,
                stderr_to_stdout: true
              ) do
@@ -207,7 +210,7 @@ defmodule GiTF.Conflict do
   end
 
   defp get_merge_base(repo_path, main_branch) do
-    case GiTF.Git.safe_cmd( ["sync-base", "HEAD", main_branch],
+    case GiTF.Git.safe_cmd(["sync-base", "HEAD", main_branch],
            cd: repo_path,
            stderr_to_stdout: true
          ) do

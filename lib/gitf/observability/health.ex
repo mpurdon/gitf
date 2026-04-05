@@ -44,19 +44,22 @@ defmodule GiTF.Observability.Health do
       false
     else
       # Check for zombie: active missions exist but no op activity for 30+ minutes
-      active_quests = Archive.filter(:missions, fn q ->
-        q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
-      end)
+      active_quests =
+        Archive.filter(:missions, fn q ->
+          q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
+        end)
 
       if active_quests == [] do
         true
       else
         # Any op activity in last 30 minutes?
         thirty_min_ago = DateTime.add(DateTime.utc_now(), -1800, :second)
-        recent_activity = Archive.filter(:ops, fn j ->
-          updated = j[:updated_at] || j[:created_at]
-          updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
-        end)
+
+        recent_activity =
+          Archive.filter(:ops, fn j ->
+            updated = j[:updated_at] || j[:created_at]
+            updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
+          end)
 
         recent_activity != []
       end
@@ -81,10 +84,11 @@ defmodule GiTF.Observability.Health do
 
     task = Task.async(fn -> System.cmd("df", ["-k", gitf_dir], stderr_to_stdout: true) end)
 
-    df_result = case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
-      {:ok, result} -> result
-      nil -> {"", 1}
-    end
+    df_result =
+      case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
+        {:ok, result} -> result
+        nil -> {"", 1}
+      end
 
     case df_result do
       {output, 0} ->
@@ -93,6 +97,7 @@ defmodule GiTF.Observability.Health do
         case lines do
           [_header, data_line | _] ->
             fields = String.split(data_line, ~r/\s+/, trim: true)
+
             case Enum.at(fields, 3) do
               nil ->
                 :ok
@@ -155,7 +160,9 @@ defmodule GiTF.Observability.Health do
 
   defp check_major do
     case Process.whereis(GiTF.Major) do
-      nil -> :warning
+      nil ->
+        :warning
+
       pid ->
         if Process.alive?(pid) do
           try do
@@ -176,6 +183,7 @@ defmodule GiTF.Observability.Health do
     case GiTF.Sync.Queue.lookup() do
       {:ok, pid} ->
         if Process.alive?(pid), do: :ok, else: :error
+
       :error ->
         :warning
     end

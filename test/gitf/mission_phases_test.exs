@@ -6,7 +6,7 @@ defmodule GiTF.MissionPhasesTest do
 
   setup do
     # Start store for each test with unique directory
-    tmp_dir = System.tmp_dir!() |> Path.join("mission_phases_test_#{:rand.uniform(1000000)}")
+    tmp_dir = System.tmp_dir!() |> Path.join("mission_phases_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
     GiTF.Test.StoreHelper.stop_store()
     start_supervised!({Archive, data_dir: tmp_dir})
@@ -17,7 +17,7 @@ defmodule GiTF.MissionPhasesTest do
   describe "mission phase transitions" do
     test "new missions start in pending phase" do
       {:ok, mission} = Missions.create(%{goal: "Test mission"})
-      
+
       assert mission.current_phase == "pending"
       assert mission.research_summary == nil
       assert mission.implementation_plan == nil
@@ -25,15 +25,15 @@ defmodule GiTF.MissionPhasesTest do
 
     test "can transition mission phases" do
       {:ok, mission} = Missions.create(%{goal: "Test mission"})
-      
+
       {:ok, updated} = Missions.transition_phase(mission.id, "research", "Starting research")
-      
+
       assert updated.current_phase == "research"
-      
+
       # Check transition was recorded
       transitions = Missions.get_phase_transitions(mission.id)
       assert length(transitions) == 1
-      
+
       transition = List.first(transitions)
       assert transition.mission_id == mission.id
       assert transition.from_phase == "pending"
@@ -43,14 +43,14 @@ defmodule GiTF.MissionPhasesTest do
 
     test "can track multiple phase transitions" do
       {:ok, mission} = Missions.create(%{goal: "Test mission"})
-      
+
       {:ok, _} = Missions.transition_phase(mission.id, "research")
       {:ok, _} = Missions.transition_phase(mission.id, "planning")
       {:ok, _} = Missions.transition_phase(mission.id, "implementation")
-      
+
       transitions = Missions.get_phase_transitions(mission.id)
       assert length(transitions) == 3
-      
+
       # Check that all expected phases are present
       phases = Enum.map(transitions, & &1.to_phase)
       assert "research" in phases
@@ -64,7 +64,7 @@ defmodule GiTF.MissionPhasesTest do
 
     test "get_phase_transitions returns empty list for mission with no transitions" do
       {:ok, mission} = Missions.create(%{goal: "Test mission"})
-      
+
       transitions = Missions.get_phase_transitions(mission.id)
       assert transitions == []
     end
@@ -78,18 +78,18 @@ defmodule GiTF.MissionPhasesTest do
         goal: "Legacy mission goal",
         status: "pending"
       }
-      
+
       {:ok, mission} = Archive.insert(:missions, quest_record)
-      
+
       # Manually run migration 3 on this mission
       updated =
         mission
         |> Map.put_new(:current_phase, "pending")
         |> Map.put_new(:research_summary, nil)
         |> Map.put_new(:implementation_plan, nil)
-      
+
       Archive.put(:missions, updated)
-      
+
       # Verify mission now has phase fields
       updated_quest = Archive.get(:missions, mission.id)
       assert updated_quest.current_phase == "pending"

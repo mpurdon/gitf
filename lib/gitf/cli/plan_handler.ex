@@ -72,7 +72,10 @@ defmodule GiTF.CLI.PlanHandler do
     rescue
       # Catch the MatchError thrown by Ratatouille when ExTermbox NIF fails to load in an escript
       _e in MatchError ->
-        GiTF.CLI.Format.warn("TUI failed to initialize (this is normal when running as a global escript).")
+        GiTF.CLI.Format.warn(
+          "TUI failed to initialize (this is normal when running as a global escript)."
+        )
+
         GiTF.CLI.Format.info("Falling back to CLI mode...")
         run_cli_planning(mission)
     after
@@ -98,10 +101,11 @@ defmodule GiTF.CLI.PlanHandler do
     # Remove stale plan file from previous attempts
     File.rm(plan_file)
 
-    workspace = case mission.sector_id && GiTF.Archive.get(:sectors, mission.sector_id) do
-      nil -> root
-      sector -> sector.path
-    end
+    workspace =
+      case mission.sector_id && GiTF.Archive.get(:sectors, mission.sector_id) do
+        nil -> root
+        sector -> sector.path
+      end
 
     system_prompt = build_cli_system_prompt(mission, plan_file)
     initial_prompt = build_cli_initial_prompt(mission)
@@ -111,7 +115,8 @@ defmodule GiTF.CLI.PlanHandler do
 
     case GiTF.Runtime.Claude.spawn_interactive(workspace,
            system_prompt: system_prompt,
-           prompt: initial_prompt) do
+           prompt: initial_prompt
+         ) do
       {:ok, port} ->
         # Block until Claude exits
         receive do
@@ -137,11 +142,13 @@ defmodule GiTF.CLI.PlanHandler do
         case Jason.decode(content) do
           {:ok, plan_data} ->
             Format.success("Plan received from Claude Code session.")
+
             plan = %{
               name: plan_data["name"] || "",
               summary: plan_data["summary"] || "",
               ops: plan_data["ops"] || []
             }
+
             {:ok, plan}
 
           {:error, _} ->
@@ -152,7 +159,11 @@ defmodule GiTF.CLI.PlanHandler do
 
       {:error, :enoent} ->
         Format.warn("No plan file was written by Claude.")
-        Format.info("Tip: ask Claude to finalize the plan before exiting, or create ops manually.")
+
+        Format.info(
+          "Tip: ask Claude to finalize the plan before exiting, or create ops manually."
+        )
+
         :no_plan
 
       {:error, reason} ->
@@ -162,10 +173,11 @@ defmodule GiTF.CLI.PlanHandler do
   end
 
   defp build_cli_initial_prompt(mission) do
-    codebase_hint = case mission.sector_id && GiTF.Archive.get(:sectors, mission.sector_id) do
-      nil -> ""
-      sector -> " The codebase is at #{sector.path}."
-    end
+    codebase_hint =
+      case mission.sector_id && GiTF.Archive.get(:sectors, mission.sector_id) do
+        nil -> ""
+        sector -> " The codebase is at #{sector.path}."
+      end
 
     "I want to plan: \"#{mission.goal}\"#{codebase_hint} " <>
       "Start by exploring the codebase to understand the current state, " <>

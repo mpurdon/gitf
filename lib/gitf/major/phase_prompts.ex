@@ -65,13 +65,17 @@ defmodule GiTF.Major.PhasePrompts do
 
     instructions = []
 
-    instructions = instructions ++ Enum.map(github_issues, fn [_url, repo, number] ->
-      "   - Run `gh issue view #{number} --repo #{repo}` to fetch the issue description"
-    end)
+    instructions =
+      instructions ++
+        Enum.map(github_issues, fn [_url, repo, number] ->
+          "   - Run `gh issue view #{number} --repo #{repo}` to fetch the issue description"
+        end)
 
-    instructions = instructions ++ Enum.map(github_prs, fn [_url, repo, number] ->
-      "   - Run `gh pr view #{number} --repo #{repo}` to fetch the PR description"
-    end)
+    instructions =
+      instructions ++
+        Enum.map(github_prs, fn [_url, repo, number] ->
+          "   - Run `gh pr view #{number} --repo #{repo}` to fetch the PR description"
+        end)
 
     if instructions == [] do
       ""
@@ -161,7 +165,9 @@ defmodule GiTF.Major.PhasePrompts do
     """
 
     final_instructions =
-      if extra_instructions != "", do: instructions <> "#{extra_instructions}\n", else: instructions
+      if extra_instructions != "",
+        do: instructions <> "#{extra_instructions}\n",
+        else: instructions
 
     """
     # Technical Design Phase
@@ -223,7 +229,13 @@ defmodule GiTF.Major.PhasePrompts do
   Builds the design prompt with review feedback for redesign iterations.
   """
   @spec design_prompt_with_feedback(map(), map(), map(), map(), String.t()) :: String.t()
-  def design_prompt_with_feedback(mission, requirements, research, review, extra_instructions \\ "") do
+  def design_prompt_with_feedback(
+        mission,
+        requirements,
+        research,
+        review,
+        extra_instructions \\ ""
+      ) do
     base = design_prompt(mission, requirements, research, extra_instructions)
     review_json = Jason.encode!(review, pretty: true)
 
@@ -260,6 +272,7 @@ defmodule GiTF.Major.PhasePrompts do
         |> Enum.sort_by(fn {name, _} -> name end)
         |> Enum.map(fn {name, design} ->
           design_json = Jason.encode!(design, pretty: true)
+
           """
           ### Design: #{String.upcase(name)}
 
@@ -273,6 +286,7 @@ defmodule GiTF.Major.PhasePrompts do
         # Single design (backward compat or only one succeeded)
         {_name, design} = designs |> Enum.at(0) || {"normal", designs}
         design_json = Jason.encode!(design, pretty: true)
+
         """
         ### Technical Design
 
@@ -376,18 +390,20 @@ defmodule GiTF.Major.PhasePrompts do
     requirements_json = Jason.encode!(requirements, pretty: true)
     review_json = Jason.encode!(review, pretty: true)
 
-    research_section = if research do
-      research_json = Jason.encode!(research, pretty: true)
-      """
-      ## Codebase Research
+    research_section =
+      if research do
+        research_json = Jason.encode!(research, pretty: true)
 
-      ```json
-      #{research_json}
-      ```
-      """
-    else
-      ""
-    end
+        """
+        ## Codebase Research
+
+        ```json
+        #{research_json}
+        ```
+        """
+      else
+        ""
+      end
 
     """
     # Planning Phase
@@ -508,135 +524,138 @@ defmodule GiTF.Major.PhasePrompts do
   Each agent reviews changed files with a different lens.
   """
   def simplify_prompts(mission, repo_path, changed_files) do
-    files_list = if changed_files != [], do: Enum.join(changed_files, "\n"), else: "(no files tracked)"
+    files_list =
+      if changed_files != [], do: Enum.join(changed_files, "\n"), else: "(no files tracked)"
+
     location = repo_path || "(unknown)"
 
     [
-      {"reuse", """
-      # Code Reuse Review
+      {"reuse",
+       """
+       # Code Reuse Review
 
-      You are a code reuse specialist. Review the changed files for duplicated logic,
-      repeated patterns, and missed abstractions.
+       You are a code reuse specialist. Review the changed files for duplicated logic,
+       repeated patterns, and missed abstractions.
 
-      **Goal**: #{mission.goal}
-      **Codebase**: #{location}
+       **Goal**: #{mission.goal}
+       **Codebase**: #{location}
 
-      ## Changed Files
-      #{files_list}
+       ## Changed Files
+       #{files_list}
 
-      ## Instructions
+       ## Instructions
 
-      1. Read each changed file
-      2. Search the codebase for similar patterns that could be consolidated
-      3. Identify duplicated logic across files
-      4. Suggest extractions into shared helpers/modules where beneficial
-      5. **Apply fixes directly** — don't just report, fix the code
+       1. Read each changed file
+       2. Search the codebase for similar patterns that could be consolidated
+       3. Identify duplicated logic across files
+       4. Suggest extractions into shared helpers/modules where beneficial
+       5. **Apply fixes directly** — don't just report, fix the code
 
-      ## Output Format
+       ## Output Format
 
-      Output ONLY a JSON object in a ```json fence:
+       Output ONLY a JSON object in a ```json fence:
 
-      ```json
-      {
-        "issues_found": 0,
-        "issues_fixed": 0,
-        "changes": [
-          {
-            "file": "path/to/file",
-            "type": "extracted_helper",
-            "description": "What was changed and why"
-          }
-        ],
-        "summary": "Brief summary of reuse improvements"
-      }
-      ```
-      """},
+       ```json
+       {
+         "issues_found": 0,
+         "issues_fixed": 0,
+         "changes": [
+           {
+             "file": "path/to/file",
+             "type": "extracted_helper",
+             "description": "What was changed and why"
+           }
+         ],
+         "summary": "Brief summary of reuse improvements"
+       }
+       ```
+       """},
+      {"quality",
+       """
+       # Code Quality Review
 
-      {"quality", """
-      # Code Quality Review
+       You are a code quality specialist. Review the changed files for readability,
+       structural problems, and patterns that a senior developer would flag in code review.
 
-      You are a code quality specialist. Review the changed files for readability,
-      structural problems, and patterns that a senior developer would flag in code review.
+       **Goal**: #{mission.goal}
+       **Codebase**: #{location}
 
-      **Goal**: #{mission.goal}
-      **Codebase**: #{location}
+       ## Changed Files
+       #{files_list}
 
-      ## Changed Files
-      #{files_list}
+       ## Instructions
 
-      ## Instructions
+       1. Read each changed file
+       2. Check naming conventions, function length, clarity
+       3. Look for overly complex conditionals, deep nesting, unclear intent
+       4. Identify missing error handling at system boundaries
+       5. **Apply fixes directly** — don't just report, fix the code
 
-      1. Read each changed file
-      2. Check naming conventions, function length, clarity
-      3. Look for overly complex conditionals, deep nesting, unclear intent
-      4. Identify missing error handling at system boundaries
-      5. **Apply fixes directly** — don't just report, fix the code
+       Do NOT add unnecessary comments, docstrings, or type annotations to code
+       that is already clear. Only fix genuine quality issues.
 
-      Do NOT add unnecessary comments, docstrings, or type annotations to code
-      that is already clear. Only fix genuine quality issues.
+       ## Output Format
 
-      ## Output Format
+       Output ONLY a JSON object in a ```json fence:
 
-      Output ONLY a JSON object in a ```json fence:
+       ```json
+       {
+         "issues_found": 0,
+         "issues_fixed": 0,
+         "changes": [
+           {
+             "file": "path/to/file",
+             "type": "simplified_logic",
+             "description": "What was changed and why"
+           }
+         ],
+         "summary": "Brief summary of quality improvements"
+       }
+       ```
+       """},
+      {"efficiency",
+       """
+       # Efficiency Review
 
-      ```json
-      {
-        "issues_found": 0,
-        "issues_fixed": 0,
-        "changes": [
-          {
-            "file": "path/to/file",
-            "type": "simplified_logic",
-            "description": "What was changed and why"
-          }
-        ],
-        "summary": "Brief summary of quality improvements"
-      }
-      ```
-      """},
+       You are a performance and efficiency specialist. Review the changed files for
+       unnecessary iterations, resource waste, and missed optimizations.
 
-      {"efficiency", """
-      # Efficiency Review
+       **Goal**: #{mission.goal}
+       **Codebase**: #{location}
 
-      You are a performance and efficiency specialist. Review the changed files for
-      unnecessary iterations, resource waste, and missed optimizations.
+       ## Changed Files
+       #{files_list}
 
-      **Goal**: #{mission.goal}
-      **Codebase**: #{location}
+       ## Instructions
 
-      ## Changed Files
-      #{files_list}
+       1. Read each changed file
+       2. Look for unnecessary iterations, N+1 patterns, redundant computations
+       3. Check for resource leaks (unclosed files, connections, etc.)
+       4. Identify missed concurrency/batching opportunities
+       5. **Apply fixes directly** — don't just report, fix the code
 
-      ## Instructions
+       Do NOT prematurely optimize. Only fix genuine efficiency issues that would
+       matter at normal scale.
 
-      1. Read each changed file
-      2. Look for unnecessary iterations, N+1 patterns, redundant computations
-      3. Check for resource leaks (unclosed files, connections, etc.)
-      4. Identify missed concurrency/batching opportunities
-      5. **Apply fixes directly** — don't just report, fix the code
+       ## Output Format
 
-      Do NOT prematurely optimize. Only fix genuine efficiency issues that would
-      matter at normal scale.
+       Output ONLY a JSON object in a ```json fence:
 
-      ## Output Format
-
-      Output ONLY a JSON object in a ```json fence:
-
-      ```json
-      {
-        "issues_found": 0,
-        "issues_fixed": 0,
-        "changes": [
-          {
-            "file": "path/to/file",
-            "type": "removed_n_plus_1",
-            "description": "What was changed and why"
-          }
-        ],
-        "summary": "Brief summary of efficiency improvements"
-      }
-      ```
-      """}
+       ```json
+       {
+         "issues_found": 0,
+         "issues_fixed": 0,
+         "changes": [
+           {
+             "file": "path/to/file",
+             "type": "removed_n_plus_1",
+             "description": "What was changed and why"
+           }
+         ],
+         "summary": "Brief summary of efficiency improvements"
+       }
+       ```
+       """}
     ]
   end
 

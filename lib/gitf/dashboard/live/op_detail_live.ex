@@ -42,8 +42,11 @@ defmodule GiTF.Dashboard.OpDetailLive do
   @impl true
   def handle_event("reset", _params, socket) do
     case GiTF.Ops.reset(socket.assigns.op.id, nil) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "Op reset.") |> reload()}
-      {:error, reason} -> {:noreply, put_flash(socket, :error, "Reset failed: #{inspect(reason)}")}
+      {:ok, _} ->
+        {:noreply, socket |> put_flash(:info, "Op reset.") |> reload()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Reset failed: #{inspect(reason)}")}
     end
   end
 

@@ -21,7 +21,9 @@ defmodule GiTF.Progress do
   @doc "Updates progress data for a ghost."
   @spec update(String.t(), map()) :: :ok
   def update(ghost_id, data) when is_binary(ghost_id) and is_map(data) do
-    entry = Map.merge(data, %{ghost_id: ghost_id, updated_at: System.monotonic_time(:millisecond)})
+    entry =
+      Map.merge(data, %{ghost_id: ghost_id, updated_at: System.monotonic_time(:millisecond)})
+
     :ets.insert(@table, {ghost_id, entry})
 
     Phoenix.PubSub.broadcast(GiTF.PubSub, @pubsub_topic, {:bee_progress, ghost_id, entry})

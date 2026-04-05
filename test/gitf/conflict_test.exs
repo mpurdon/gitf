@@ -42,7 +42,11 @@ defmodule GiTF.ConflictTest do
   end
 
   describe "check/1" do
-    test "returns clean when no conflicts exist", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
+    test "returns clean when no conflicts exist", %{
+      sector: sector,
+      ghost: ghost,
+      tmp_dir: tmp_dir
+    } do
       # Create a branch with non-conflicting changes
       System.cmd("git", ["checkout", "-b", "test-branch"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "new_file.txt"), "new content")
@@ -78,7 +82,11 @@ defmodule GiTF.ConflictTest do
       assert {:error, :cell_not_found} = Conflict.resolve("cel-nonexistent", :rebase)
     end
 
-    test "defer strategy marks shell for manual sync", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
+    test "defer strategy marks shell for manual sync", %{
+      sector: sector,
+      ghost: ghost,
+      tmp_dir: tmp_dir
+    } do
       {:ok, shell} =
         Archive.insert(:shells, %{
           sector_id: sector.id,
@@ -95,7 +103,11 @@ defmodule GiTF.ConflictTest do
       assert updated_cell.needs_manual_merge == true
     end
 
-    test "rebase strategy on clean branch succeeds", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
+    test "rebase strategy on clean branch succeeds", %{
+      sector: sector,
+      ghost: ghost,
+      tmp_dir: tmp_dir
+    } do
       # Create a feature branch
       System.cmd("git", ["checkout", "-b", "feature-branch"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "feature.txt"), "feature content")
@@ -194,7 +206,8 @@ defmodule GiTF.ConflictTest do
     end
 
     test "returns error for non-existent shell" do
-      assert {:error, :cell_not_found} = Conflict.check_between_cells("cel-nonexistent", "cel-other")
+      assert {:error, :cell_not_found} =
+               Conflict.check_between_cells("cel-nonexistent", "cel-other")
     end
   end
 end
