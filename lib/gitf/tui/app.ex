@@ -31,6 +31,8 @@ defmodule GiTF.TUI.App do
   @arrow_up key(:arrow_up)
   @arrow_down key(:arrow_down)
   @tab key(:tab)
+  @pgup key(:page_up)
+  @pgdown key(:page_down)
   @f1 key(:f1)
   @f2 key(:f2)
   @f3 key(:f3)
@@ -264,20 +266,38 @@ defmodule GiTF.TUI.App do
         %{model | input: input}
 
       @arrow_up ->
-        if plan_reviewing? and input_empty? do
-          %{model | plan: Plan.select_prev(model.plan)}
-        else
-          input = Input.prev_history(model.input)
-          %{model | input: input}
+        cond do
+          plan_reviewing? and input_empty? ->
+            %{model | plan: Plan.select_prev(model.plan)}
+
+          input_empty? ->
+            # Scroll up
+            %{model | chat_scroll: max(model.chat_scroll - 1, 0)}
+
+          true ->
+            input = Input.prev_history(model.input)
+            %{model | input: input}
         end
 
       @arrow_down ->
-        if plan_reviewing? and input_empty? do
-          %{model | plan: Plan.select_next(model.plan)}
-        else
-          input = Input.next_history(model.input)
-          %{model | input: input}
+        cond do
+          plan_reviewing? and input_empty? ->
+            %{model | plan: Plan.select_next(model.plan)}
+
+          input_empty? ->
+            # Scroll down
+            %{model | chat_scroll: model.chat_scroll + 1}
+
+          true ->
+            input = Input.next_history(model.input)
+            %{model | input: input}
         end
+
+      @pgup ->
+        %{model | chat_scroll: max(model.chat_scroll - 10, 0)}
+
+      @pgdown ->
+        %{model | chat_scroll: model.chat_scroll + 10}
 
       @tab ->
         if plan_reviewing? and input_empty? and Plan.candidate_count(model.plan) > 1 do
@@ -504,7 +524,9 @@ defmodule GiTF.TUI.App do
   # Estimate scroll offset to keep latest messages visible.
   # Each message is ~2 lines on average (prefix + wrapped content).
   defp chat_bottom(chat) do
-    max(length(chat.history) * 3 - 5, 0)
+    # Heuristic: count messages and assume avg 4 lines each
+    # This ensures we scroll far enough to see the latest message even if it wraps
+    max(length(chat.history) * 4 - 5, 0)
   end
 
   defp debug(msg) do

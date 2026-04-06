@@ -41,7 +41,7 @@ defmodule GiTF.TUI.Views.Activity do
 
       [
         label do
-          text(content: short_name, color: :yellow)
+          text(content: short_name, color: :yellow, attributes: [:bold])
           text(content: budget_text, color: budget_color)
         end
       ] ++
@@ -162,15 +162,15 @@ defmodule GiTF.TUI.Views.Activity do
             do: Float.round(run.completed_jobs / run.total_jobs * 100, 0),
             else: 0
 
-        bar_len = 15
+        bar_len = 12
         filled = trunc(pct / 100 * bar_len)
-        bar_str = String.duplicate("#", filled) <> String.duplicate(".", bar_len - filled)
+        bar_str = String.duplicate("█", filled) <> String.duplicate("░", bar_len - filled)
 
         [
           label do
-            text(content: " #{String.slice(run.mission_id, 0, 12)} ", color: :white)
-            text(content: "[#{bar_str}] ", color: :blue)
-            text(content: "#{run.completed_jobs}/#{run.total_jobs}", color: :cyan)
+            text(content: " #{String.slice(run.mission_id, 0, 10)} ", color: :white)
+            text(content: bar_str, color: :blue)
+            text(content: " #{trunc(pct)}%", color: :cyan)
           end
         ]
       end)
