@@ -288,15 +288,44 @@ defmodule GiTF.Tachikoma do
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
       if age > @verification_max_age_seconds do
-        # Job stuck in verification queue too long — skip verification, let it sync
-        Logger.warning("Tachikoma: op #{op.id} stuck in verification for #{age}s, auto-passing")
+        # Job stuck in verification queue too long — retry once with timeout, fail if still stuck
+        Logger.warning("Tachikoma: op #{op.id} stuck in verification for #{age}s, retrying")
 
-        case GiTF.Ops.get(op.id) do
-          {:ok, j} -> GiTF.Archive.put(:ops, Map.put(j, :verification_status, "passed"))
-          _ -> :ok
+        task = Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+          GiTF.Audit.verify_job(op.id)
+        end)
+
+        case Task.yield(task, 60_000) || Task.shutdown(task) do
+          {:ok, {:ok, :pass, _result}} ->
+            []
+
+          {:ok, {:ok, :fail, result}} ->
+            [
+              %{
+                name: "verification_timeout_failed",
+                status: :error,
+                message:
+                  "Job #{op.id} failed verification after timeout retry: #{format_audit_result(result)}"
+              }
+            ]
+
+          _timeout_or_error ->
+            case GiTF.Ops.get(op.id) do
+              {:ok, j} ->
+                GiTF.Archive.put(:ops, Map.put(j, :verification_status, "failed"))
+
+              _ ->
+                :ok
+            end
+
+            [
+              %{
+                name: "verification_timeout",
+                status: :error,
+                message: "Job #{op.id} stuck in verification for #{age}s, marked as failed"
+              }
+            ]
         end
-
-        []
       else
         case GiTF.Audit.verify_job(op.id) do
           {:ok, :pass, _result} ->

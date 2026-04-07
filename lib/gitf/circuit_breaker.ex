@@ -67,6 +67,12 @@ defmodule GiTF.CircuitBreaker do
   with exponential backoff. Falls back to `fallback_fn` if provided and
   all retries are exhausted.
 
+  **Note:** Uses `Process.sleep/1` for backoff delays, blocking the calling
+  process. This is acceptable because callers are ghost worker processes
+  (via `ProviderCircuit`) and Task-supervised probes, both of which are
+  expected to block while waiting for LLM responses. Do not call this from
+  the Major or Tachikoma GenServer process directly.
+
   ## Options
 
     * `:max_retries` - max retry attempts (default: 4)

@@ -37,7 +37,8 @@ defmodule GiTF.Major.Orchestrator do
   def start_quest(mission_id, opts \\ []) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          :ok <- validate_quest_ready(mission),
-         :ok <- budget_preflight(mission_id) do
+         :ok <- budget_preflight(mission_id),
+         :ok <- provider_preflight() do
       force = Keyword.get(opts, :force_fast_path, false)
       force_full = Keyword.get(opts, :force_full_pipeline, false)
 
@@ -95,6 +96,17 @@ defmodule GiTF.Major.Orchestrator do
         # Fail the mission so it doesn't stall forever in "pending"
         Logger.warning("Quest #{mission_id} has no sector and auto-assign failed")
         fail_quest(mission_id, "No sector assigned and auto-assign failed")
+
+      {:error, :all_providers_down} ->
+        # Don't fail the mission — leave it pending so it can be retried when providers recover
+        Logger.warning("Quest #{mission_id} paused: all LLM providers have open circuit breakers")
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :factory_paused,
+          "All LLM providers down — mission #{mission_id} queued for retry"
+        )
+
+        {:error, :all_providers_down}
 
       error ->
         error
@@ -309,6 +321,20 @@ defmodule GiTF.Major.Orchestrator do
     %{name: "complex", hint: "Comprehensive implementation with edge cases and extensibility"}
   ]
 
+  defp strategies_for_complexity(research) do
+    complexity = if research, do: Map.get(research, "complexity"), else: nil
+
+    case complexity do
+      "moderate" ->
+        # Single strategy for moderate complexity to save cost
+        [Enum.find(@design_strategies, &(&1.name == "normal"))]
+
+      _ ->
+        # Full 3-strategy exploration for complex (or unknown) missions
+        @design_strategies
+    end
+  end
+
   defp start_design(mission) do
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     research = GiTF.Missions.get_artifact(mission.id, "research")
@@ -323,18 +349,20 @@ defmodule GiTF.Major.Orchestrator do
           ""
         end
 
+      strategies = strategies_for_complexity(research)
+
       # Store strategy count so advance logic knows how many to wait for
       quest_record = Archive.get(:missions, mission.id)
 
       if quest_record do
         Archive.put(
           :missions,
-          Map.put(quest_record, :design_strategy_count, length(@design_strategies))
+          Map.put(quest_record, :design_strategy_count, length(strategies))
         )
       end
 
-      # Spawn 3 parallel design ghosts with different complexity strategies
-      Enum.each(@design_strategies, fn %{name: strategy_name} ->
+      # Spawn parallel design ghosts — count scales with complexity
+      Enum.each(strategies, fn %{name: strategy_name} ->
         strategy_section = Planner.strategy_instruction(strategy_name, nil)
 
         base_prompt =
@@ -743,10 +771,10 @@ defmodule GiTF.Major.Orchestrator do
   rescue
     e ->
       Logger.warning(
-        "Re-validation failed for mission #{mission.id}: #{Exception.message(e)}, allowing"
+        "Re-validation crashed for mission #{mission.id}: #{Exception.message(e)}, rejecting"
       )
 
-      true
+      false
   end
 
   defp approval_timed_out?(mission_id) do
@@ -1346,9 +1374,30 @@ defmodule GiTF.Major.Orchestrator do
     if scoring do
       score = Map.get(scoring, "overall_score", 0)
       Logger.info("Quest #{mission.id} scored #{score}/100")
+      record_triage_feedback(mission, score)
     end
 
     complete_quest(mission.id)
+  end
+
+  # Store triage-vs-outcome data for future accuracy analysis.
+  # Links the original triage complexity to the final quality score so
+  # patterns like "ops triaged as simple but scored < 70" can be detected.
+  defp record_triage_feedback(mission, score) do
+    research = GiTF.Missions.get_artifact(mission.id, "research")
+    triage_complexity = if research, do: Map.get(research, "complexity"), else: nil
+    pipeline_mode = Map.get(mission, :pipeline_mode)
+
+    Archive.insert(:triage_feedback, %{
+      mission_id: mission.id,
+      sector_id: mission.sector_id,
+      triage_complexity: triage_complexity,
+      pipeline_mode: pipeline_mode,
+      quality_score: score,
+      completed_at: DateTime.utc_now()
+    })
+  rescue
+    e -> Logger.debug("Triage feedback recording failed: #{Exception.message(e)}")
   end
 
   defp fail_quest(mission_id, reason) do
@@ -1680,6 +1729,21 @@ defmodule GiTF.Major.Orchestrator do
       :ok
   end
 
+  defp provider_preflight do
+    priority = GiTF.Runtime.ProviderManager.provider_priority()
+    open = GiTF.Runtime.ProviderCircuit.open_providers()
+
+    if length(open) >= length(priority) and length(priority) > 0 do
+      {:error, :all_providers_down}
+    else
+      :ok
+    end
+  rescue
+    e ->
+      Logger.warning("Provider preflight check failed: #{Exception.message(e)}, allowing")
+      :ok
+  end
+
   defp validate_design_phase(mission) do
     if Map.get(mission, :current_phase) in ["design", "review"] do
       :ok
@@ -1761,8 +1825,8 @@ defmodule GiTF.Major.Orchestrator do
         ops = Map.get(mission, :ops, [])
 
         cond do
-          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == "critical" end) -> :critical
-          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == "high" end) -> :high
+          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == :critical end) -> :critical
+          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == :high end) -> :high
           true -> :normal
         end
     end

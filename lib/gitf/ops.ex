@@ -89,8 +89,8 @@ defmodule GiTF.Ops do
         verification_status: "pending",
         audit_result: nil,
         verified_at: nil,
-        # Risk level for adaptive permissions
-        risk_level: classification[:risk_level] || attrs[:risk_level] || :low,
+        # Risk level for adaptive permissions (always normalized to atom)
+        risk_level: normalize_risk(classification[:risk_level] || attrs[:risk_level] || :low),
         # Retry tracking (persisted, survives Major restarts)
         retry_count: attrs[:retry_count] || 0,
         # Per-op verification contract
@@ -381,6 +381,13 @@ defmodule GiTF.Ops do
       next -> {:ok, next}
     end
   end
+
+  defp normalize_risk(level) when is_atom(level), do: level
+  defp normalize_risk("low"), do: :low
+  defp normalize_risk("medium"), do: :medium
+  defp normalize_risk("high"), do: :high
+  defp normalize_risk("critical"), do: :critical
+  defp normalize_risk(_), do: :low
 
   defp validate_required(attrs, keys) do
     missing =

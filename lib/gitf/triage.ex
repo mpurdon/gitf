@@ -22,6 +22,14 @@ defmodule GiTF.Triage do
   @complex_keywords ~w(refactor redesign migration overhaul architecture)
   @simple_keywords ["fix typo", "update config", "bump version", "rename", "add comment"]
 
+  @complex_regexes Enum.map(@complex_keywords, fn kw ->
+                     Regex.compile!("\\b#{Regex.escape(kw)}\\b")
+                   end)
+
+  @simple_regexes Enum.map(@simple_keywords, fn kw ->
+                    Regex.compile!("\\b#{Regex.escape(kw)}\\b")
+                  end)
+
   # -- Public API --------------------------------------------------------------
 
   @doc """
@@ -38,7 +46,20 @@ defmodule GiTF.Triage do
   @spec triage(map()) :: {complexity(), pipeline()}
   def triage(op) do
     complexity = determine_complexity(op)
-    {complexity, pipeline_for(complexity)}
+    pipeline = pipeline_for(complexity)
+
+    GiTF.Telemetry.emit(
+      [:gitf, :triage, :classified],
+      %{},
+      %{
+        op_id: Map.get(op, :id),
+        complexity: complexity,
+        recommended_model: pipeline.recommended_model,
+        title: Map.get(op, :title, "")
+      }
+    )
+
+    {complexity, pipeline}
   end
 
   @doc """
@@ -55,6 +76,29 @@ defmodule GiTF.Triage do
 
   def pipeline_for(:complex) do
     %{skip_drone: false, skip_scout: false, recommended_model: "opus"}
+  end
+
+  @doc """
+  Returns triage accuracy stats for a sector based on historical feedback.
+
+  Compares triage complexity classification against final quality scores.
+  A "miss" is when a mission triaged as simple scored below 70, or when
+  a mission triaged as complex scored above 90 (over-estimated).
+  """
+  @spec accuracy_stats(String.t()) :: %{total: non_neg_integer(), misses: non_neg_integer()}
+  def accuracy_stats(sector_id) do
+    feedback = GiTF.Archive.filter(:triage_feedback, &(&1.sector_id == sector_id))
+
+    misses =
+      Enum.count(feedback, fn f ->
+        score = f.quality_score || 0
+
+        # Vocabulary aligns with from_classifier/1: trivial/low -> simple, high/critical -> complex
+        (f.triage_complexity in ["trivial", "low"] and score < 70) or
+          (f.triage_complexity in ["high", "critical"] and score > 90)
+      end)
+
+    %{total: length(feedback), misses: misses}
   end
 
   # -- Private: complexity determination ---------------------------------------
@@ -90,12 +134,12 @@ defmodule GiTF.Triage do
 
   defp has_architectural_keywords?(op) do
     text = job_text(op)
-    Enum.any?(@complex_keywords, &String.contains?(text, &1))
+    Enum.any?(@complex_regexes, &Regex.match?(&1, text))
   end
 
   defp has_simple_keywords?(op) do
     text = job_text(op)
-    Enum.any?(@simple_keywords, &String.contains?(text, &1))
+    Enum.any?(@simple_regexes, &Regex.match?(&1, text))
   end
 
   defp from_classifier(op) do

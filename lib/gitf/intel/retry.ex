@@ -134,7 +134,7 @@ defmodule GiTF.Intel.Retry do
       retry_metadata: metadata,
       assigned_model: new_model || Map.get(op, :assigned_model),
       recommended_model: Map.get(op, :recommended_model),
-      risk_level: Map.get(op, :risk_level, "low"),
+      risk_level: Map.get(op, :risk_level, :low),
       verification_status: "pending",
       acceptance_criteria: Map.get(op, :acceptance_criteria, []),
       phase_job: Map.get(op, :phase_job, false),

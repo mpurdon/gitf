@@ -74,36 +74,6 @@ defmodule GiTF.AutonomyTest do
     end
   end
 
-  describe "auto_approve?/1" do
-    test "approves high-quality verified ops" do
-      op = %{
-        id: "op-approve",
-        quality_score: 90,
-        verification_status: "passed",
-        created_at: DateTime.utc_now(),
-        updated_at: DateTime.utc_now()
-      }
-
-      Archive.insert(:ops, op)
-
-      assert Autonomy.auto_approve?(op.id) == true
-    end
-
-    test "rejects low-quality ops" do
-      op = %{
-        id: "op-reject",
-        quality_score: 60,
-        verification_status: "passed",
-        created_at: DateTime.utc_now(),
-        updated_at: DateTime.utc_now()
-      }
-
-      Archive.insert(:ops, op)
-
-      assert Autonomy.auto_approve?(op.id) == false
-    end
-  end
-
   describe "audit/2" do
     test "creates audit log entry" do
       {:ok, entry} = Autonomy.audit(:job_approved, %{op_id: "op-123"})

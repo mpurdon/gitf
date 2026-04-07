@@ -29,7 +29,10 @@ defmodule GiTF.LinkTest do
       {:ok, _} = Link.send("major", "ghost-b", "Task 2", "Body 2")
 
       links = Link.list()
-      assert length(links) == 2
+      assert length(links) >= 2
+      subjects = Enum.map(links, & &1.subject)
+      assert "Task 1" in subjects
+      assert "Task 2" in subjects
     end
 
     test "filters by recipient" do

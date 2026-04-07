@@ -10,17 +10,26 @@ defmodule GiTF.Autonomy do
   Perform self-healing checks and repairs.
   """
   def self_heal do
+    # Batch-load all data once to avoid repeated full-scans of the archive
+    ghosts = Archive.all(:ghosts)
+    ops = Archive.all(:ops)
+    shells = Archive.all(:shells)
+
     [
-      cleanup_orphaned_processes(),
-      reconcile_state(),
-      cleanup_stale_worktrees(),
-      recover_stuck_jobs()
+      cleanup_orphaned_processes(ghosts, ops),
+      reconcile_state(ops, ghosts),
+      cleanup_stale_worktrees(shells),
+      recover_stuck_jobs(ops)
     ]
     |> Enum.reject(&is_nil/1)
   end
 
   @doc """
-  Optimize resource allocation based on current load.
+  Analyze resource utilization and provide optimization recommendations.
+
+  Returns a list of advisory recommendations displayed in the CLI
+  (`gitf autonomy`) and dashboard. No automated action is taken on
+  these recommendations.
   """
   def optimize_resources do
     metrics = collect_metrics()
@@ -29,8 +38,8 @@ defmodule GiTF.Autonomy do
 
     # Check ghost utilization
     recommendations =
-      if metrics.bee_utilization < 0.5 do
-        [{:reduce_bees, "Low utilization, consider reducing active ghosts"} | recommendations]
+      if metrics.ghost_utilization < 0.5 do
+        [{:reduce_ghosts, "Low utilization, consider reducing active ghosts"} | recommendations]
       else
         recommendations
       end
@@ -38,7 +47,7 @@ defmodule GiTF.Autonomy do
     # Check queue depth
     recommendations =
       if metrics.pending_jobs > 10 do
-        [{:increase_bees, "High queue depth, consider spawning more ghosts"} | recommendations]
+        [{:increase_ghosts, "High queue depth, consider spawning more ghosts"} | recommendations]
       else
         recommendations
       end
@@ -56,6 +65,9 @@ defmodule GiTF.Autonomy do
 
   @doc """
   Predict likely issues before they occur.
+
+  Combines per-op failure patterns with cross-mission sector trends
+  to surface both granular and systemic risks.
   """
   def predict_issues(sector_id) do
     patterns = GiTF.Intel.FailureAnalysis.get_failure_patterns(sector_id)
@@ -71,39 +83,19 @@ defmodule GiTF.Autonomy do
         predictions
       end
 
-    # Predict based on patterns
-    predictions =
-      if length(patterns) > 0 do
-        top_pattern = hd(patterns)
+    # Predict based on all significant failure patterns
+    pattern_predictions =
+      patterns
+      |> Enum.filter(&(&1.frequency > 0.3))
+      |> Enum.map(fn pattern ->
+        {:recurring_failure,
+         "#{pattern.type} failures are common (#{Float.round(pattern.frequency * 100, 1)}%)"}
+      end)
 
-        if top_pattern.frequency > 0.3 do
-          [
-            {:recurring_failure,
-             "#{top_pattern.type} failures are common (#{Float.round(top_pattern.frequency * 100, 1)}%)"}
-            | predictions
-          ]
-        else
-          predictions
-        end
-      else
-        predictions
-      end
+    # Cross-mission sector trends from recent completed missions
+    sector_predictions = cross_mission_predictions(sector_id)
 
-    predictions
-  end
-
-  @doc """
-  Automatically approve low-risk changes.
-  """
-  def auto_approve?(op_id) do
-    with {:ok, op} <- GiTF.Ops.get(op_id),
-         quality_score when not is_nil(quality_score) <- Map.get(op, :quality_score),
-         verification when verification == "passed" <- Map.get(op, :verification_status) do
-      # Auto-approve if high quality and verified
-      quality_score >= 85 and verification == "passed"
-    else
-      _ -> false
-    end
+    predictions ++ pattern_predictions ++ sector_predictions
   end
 
   @doc """
@@ -122,14 +114,12 @@ defmodule GiTF.Autonomy do
 
   # Private functions
 
-  defp cleanup_orphaned_processes do
+  defp cleanup_orphaned_processes(ghosts, ops) do
     # Check for ghosts without active ops
-    ghosts = Archive.all(:ghosts)
-
     orphaned =
       Enum.filter(ghosts, fn ghost ->
         ghost.status == "active" and
-          not has_active_job?(ghost.id)
+          not has_active_job?(ghost.id, ops)
       end)
 
     if length(orphaned) > 0 do
@@ -138,20 +128,24 @@ defmodule GiTF.Autonomy do
         GiTF.Ghosts.stop(ghost.id)
       end)
 
-      {:cleaned_orphaned_bees, length(orphaned)}
+      {:cleaned_orphaned_ghosts, length(orphaned)}
     else
       nil
     end
   end
 
-  defp reconcile_state do
-    # Check for inconsistent state
-    ops = Archive.all(:ops)
+  defp reconcile_state(ops, ghosts) do
+    # Check for inconsistent state — build a set for O(1) ghost lookup
+    active_ghost_ids =
+      ghosts
+      |> Enum.filter(&(&1.status == "active"))
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
 
     inconsistent =
       Enum.filter(ops, fn op ->
         op.status == "running" and
-          not has_active_bee?(op.ghost_id)
+          not MapSet.member?(active_ghost_ids, op.ghost_id)
       end)
 
     if length(inconsistent) > 0 do
@@ -171,31 +165,42 @@ defmodule GiTF.Autonomy do
     end
   end
 
-  defp cleanup_stale_worktrees do
-    # Check for worktrees older than 7 days
-    shells = Archive.all(:shells)
+  defp cleanup_stale_worktrees(shells) do
+    # Check for active worktrees older than 7 days
     cutoff = DateTime.add(DateTime.utc_now(), -7, :day)
 
     stale =
       Enum.filter(shells, fn shell ->
-        DateTime.compare(shell.created_at, cutoff) == :lt
+        shell.status != "removed" and
+          DateTime.compare(shell.created_at, cutoff) == :lt
       end)
 
     if length(stale) > 0 do
-      Enum.each(stale, fn shell ->
-        Logger.info("Cleaning up stale worktree: #{shell.id}")
-        # Would actually clean up the worktree here
-      end)
+      cleaned =
+        Enum.count(stale, fn shell ->
+          Logger.info("Cleaning up stale worktree: #{shell.id}")
 
-      {:cleaned_stale_worktrees, length(stale)}
+          case GiTF.Shell.remove(shell.id, force: true) do
+            {:ok, _} ->
+              true
+
+            {:error, reason} ->
+              Logger.warning(
+                "Failed to clean up stale worktree #{shell.id}: #{inspect(reason)}"
+              )
+
+              false
+          end
+        end)
+
+      {:cleaned_stale_worktrees, cleaned}
     else
       nil
     end
   end
 
-  defp recover_stuck_jobs do
+  defp recover_stuck_jobs(ops) do
     # Check for ops stuck in running state for > 1 hour
-    ops = Archive.all(:ops)
     cutoff = DateTime.add(DateTime.utc_now(), -1, :hour)
 
     stuck =
@@ -217,18 +222,62 @@ defmodule GiTF.Autonomy do
     end
   end
 
-  defp has_active_job?(ghost_id) do
-    Archive.all(:ops)
-    |> Enum.any?(fn op ->
+  defp has_active_job?(ghost_id, ops) do
+    Enum.any?(ops, fn op ->
       op.ghost_id == ghost_id and op.status in ["pending", "running"]
     end)
   end
 
-  defp has_active_bee?(ghost_id) do
-    case Archive.get(:ghosts, ghost_id) do
-      nil -> false
-      ghost -> ghost.status == "active"
+  defp cross_mission_predictions(sector_id) do
+    # Look at the last 20 completed missions for this sector
+    recent =
+      Archive.filter(:missions, fn m ->
+        m.sector_id == sector_id and m.status in ["completed", "failed"]
+      end)
+      |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
+      |> Enum.take(20)
+
+    if length(recent) < 3 do
+      []
+    else
+      failed = Enum.count(recent, &(&1.status == "failed"))
+      total = length(recent)
+      failure_rate = failed / total
+
+      predictions = []
+
+      predictions =
+        if failure_rate > 0.5 do
+          [
+            {:sector_degradation,
+             "Sector has #{Float.round(failure_rate * 100, 0)}% mission failure rate over last #{total} missions"}
+            | predictions
+          ]
+        else
+          predictions
+        end
+
+      # Check for budget escalation trend
+      triage_feedback = Archive.filter(:triage_feedback, &(&1.sector_id == sector_id))
+
+      low_scores =
+        triage_feedback
+        |> Enum.filter(&((&1.quality_score || 100) < 70))
+        |> length()
+
+      predictions =
+        if length(triage_feedback) > 5 and low_scores / length(triage_feedback) > 0.3 do
+          [{:quality_trend, "Over 30% of missions in this sector score below 70"} | predictions]
+        else
+          predictions
+        end
+
+      predictions
     end
+  rescue
+    e ->
+      Logger.debug("Cross-mission prediction failed for sector #{sector_id}: #{Exception.message(e)}")
+      []
   end
 
   defp collect_metrics do
@@ -239,7 +288,7 @@ defmodule GiTF.Autonomy do
     pending_jobs = Enum.count(ops, &(&1.status == "pending"))
 
     # Simple utilization calculation
-    bee_utilization =
+    ghost_utilization =
       if active_ghosts > 0 do
         running_jobs = Enum.count(ops, &(&1.status == "running"))
         running_jobs / active_ghosts
@@ -248,7 +297,7 @@ defmodule GiTF.Autonomy do
       end
 
     %{
-      bee_utilization: bee_utilization,
+      ghost_utilization: ghost_utilization,
       pending_jobs: pending_jobs,
       active_ghosts: active_ghosts,
       cost_trend: GiTF.Observability.Metrics.trend(:cost_usd)

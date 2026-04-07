@@ -33,8 +33,7 @@ defmodule GiTF.Override do
     ops
     |> Enum.reject(& &1[:phase_job])
     |> Enum.any?(fn op ->
-      risk = Map.get(op, :risk_level)
-      risk in [:critical] or risk in ["critical"]
+      Map.get(op, :risk_level) == :critical
     end)
   end
 
