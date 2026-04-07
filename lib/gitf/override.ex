@@ -19,6 +19,26 @@ defmodule GiTF.Override do
   """
   @spec requires_approval?(map()) :: boolean()
   def requires_approval?(mission) do
+    # In Dark Factory mode, we auto-approve unless it's critical risk
+    if GiTF.Config.dark_factory?() do
+      is_critical?(mission)
+    else
+      requires_approval_standard?(mission)
+    end
+  end
+
+  defp is_critical?(mission) do
+    ops = Map.get(mission, :ops, [])
+
+    ops
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.any?(fn op ->
+      risk = Map.get(op, :risk_level)
+      risk in [:critical] or risk in ["critical"]
+    end)
+  end
+
+  defp requires_approval_standard?(mission) do
     sector_requires? =
       case Map.get(mission, :sector_id) do
         nil ->
@@ -31,17 +51,7 @@ defmodule GiTF.Override do
           end
       end
 
-    ops = Map.get(mission, :ops, [])
-
-    critical_risk_jobs? =
-      ops
-      |> Enum.reject(& &1[:phase_job])
-      |> Enum.any?(fn op ->
-        risk = Map.get(op, :risk_level)
-        risk in [:critical] or risk in ["critical"]
-      end)
-
-    sector_requires? or critical_risk_jobs?
+    sector_requires? or is_critical?(mission)
   end
 
   @doc """

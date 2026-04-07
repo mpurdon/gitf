@@ -11,7 +11,10 @@ defmodule GiTF.Config do
   """
 
   @global_default_config %{
-    "major" => %{"max_ghosts" => 5},
+    "major" => %{
+      "max_ghosts" => 5,
+      "dark_factory" => false
+    },
     "ghost" => %{"spawn_timeout_ms" => 30_000},
     "tachikoma" => %{
       "patrol_interval_ms" => 30_000,
@@ -73,6 +76,20 @@ defmodule GiTF.Config do
          {:ok, parsed} <- Toml.decode(content) do
       {:ok, parsed}
     end
+  end
+
+  @doc """
+  Returns true if the system is in dark factory mode (autonomous approval).
+  """
+  @spec dark_factory?() :: boolean()
+  def dark_factory? do
+    case GiTF.Config.Provider.get([:major, :dark_factory]) do
+      val when is_boolean(val) -> val
+      "true" -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 
   @doc """

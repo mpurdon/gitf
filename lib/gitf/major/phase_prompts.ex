@@ -35,7 +35,9 @@ defmodule GiTF.Major.PhasePrompts do
     3. Identify coding patterns, conventions, and style
     4. Understand the tech stack and dependencies
     5. Identify test setup and testing conventions
-    6. Note any risks or constraints relevant to the goal
+    7. **Assess complexity**: Based on your research, determine if this goal can be
+       completed by a single ghost agent in a single session (low) or if it requires
+       coordinated steps across multiple components (high).
 
     ## Output Format
 
@@ -50,7 +52,9 @@ defmodule GiTF.Major.PhasePrompts do
       "test_setup": "Description of test framework and conventions",
       "dependencies": ["key dependencies relevant to the goal"],
       "risks": ["potential risks or challenges for this goal"],
-      "external_context": "Summary of any external resources (issues, PRs, docs) referenced in the goal"
+      "external_context": "Summary of any external resources (issues, PRs, docs) referenced in the goal",
+      "complexity": "low" | "high",
+      "triage_reasoning": "Brief explanation of why you chose this complexity level"
     }
     ```
 

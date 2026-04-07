@@ -232,7 +232,7 @@ defmodule GiTF.Major.Orchestrator do
         end
 
       "research" ->
-        check_and_advance(mission, "research", &start_requirements/1)
+        check_research_and_advance(mission)
 
       "requirements" ->
         check_and_advance(mission, "requirements", &start_design/1)
@@ -844,6 +844,28 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  defp check_research_and_advance(mission) do
+    artifact = GiTF.Missions.get_artifact(mission.id, "research")
+
+    if artifact && !artifact_failed?(artifact) do
+      complexity = Map.get(artifact, "complexity") || "high"
+
+      if complexity == "low" do
+        Logger.info(
+          "Quest #{mission.id}: Research identified low complexity, switching to fast path"
+        )
+
+        GiTF.Missions.update(mission.id, %{pipeline_mode: "fast"})
+        FastPath.execute(mission.id)
+      else
+        Logger.info("Quest #{mission.id}: Research identified high complexity, continuing deep plan")
+        start_requirements(mission)
+      end
+    else
+      check_and_advance(mission, "research", &start_requirements/1)
+    end
+  end
+
   # Rebuild the real prompt for a phase re-spawn using available artifacts
   defp rebuild_phase_prompt(mission, phase) do
     sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
@@ -1240,25 +1262,20 @@ defmodule GiTF.Major.Orchestrator do
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
 
   defp start_simplify(mission) do
-    # Skip simplify for fast-path missions
-    if Map.get(mission, :pipeline_mode) == "fast" do
-      start_scoring(mission)
-    else
-      with {:ok, _} <-
-             GiTF.Missions.transition_phase(mission.id, "simplify", "Sync complete, simplifying") do
-        sector = Archive.get(:sectors, mission.sector_id)
-        repo_path = if sector, do: sector.path, else: nil
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission.id, "simplify", "Sync complete, simplifying") do
+      sector = Archive.get(:sectors, mission.sector_id)
+      repo_path = if sector, do: sector.path, else: nil
 
-        # Get changed files from all implementation ops
-        changed_files = get_mission_changed_files(mission)
+      # Get changed files from all implementation ops
+      changed_files = get_mission_changed_files(mission)
 
-        # Spawn 3 parallel review ghosts
-        for {focus, prompt} <- PhasePrompts.simplify_prompts(mission, repo_path, changed_files) do
-          spawn_phase_ghost(mission, "simplify", prompt, model: "general", strategy: focus)
-        end
-
-        {:ok, "simplify"}
+      # Spawn 3 parallel review ghosts
+      for {focus, prompt} <- PhasePrompts.simplify_prompts(mission, repo_path, changed_files) do
+        spawn_phase_ghost(mission, "simplify", prompt, model: "general", strategy: focus)
       end
+
+      {:ok, "simplify"}
     end
   end
 

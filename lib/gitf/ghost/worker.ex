@@ -1037,6 +1037,7 @@ defmodule GiTF.Ghost.Worker do
     record_costs_from_events(state)
 
     is_scout = op && Map.get(op, :recon, false)
+    is_simplify = op && Map.get(op, :phase) == "simplify"
     skip_verification = op && Map.get(op, :skip_verification, false)
 
     cond do
@@ -1054,7 +1055,7 @@ defmodule GiTF.Ghost.Worker do
 
         GiTF.Link.send(state.ghost_id, "major", "scout_complete", body)
 
-      is_phase_job ->
+      is_phase_job and not is_simplify ->
         # Phase ops link_msg Major directly — no verification/sync needed
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
         body = "Job #{state.op_id} completed successfully (phase: #{op.phase})"
@@ -1081,7 +1082,7 @@ defmodule GiTF.Ghost.Worker do
         )
 
       true ->
-        # Standard ops: broadcast to Tachikoma for independent verification.
+        # Standard ops (and Simplify phase ops): broadcast to Tachikoma for independent verification.
         # The Tachikoma verifies, then forwards to SyncQueue on pass.
         # Do NOT link_msg Major here — the SyncQueue will link_msg "job_merged" after sync.
         Phoenix.PubSub.broadcast(
