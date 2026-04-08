@@ -32,17 +32,21 @@ defmodule GiTF.Costs do
       |> maybe_set_recorded_at()
       |> maybe_calculate_cost()
 
-    category = attrs[:category] || derive_category(attrs[:ghost_id])
+    phase_info = derive_phase_info(attrs[:ghost_id])
 
     record = %{
       ghost_id: attrs[:ghost_id],
+      op_id: phase_info.op_id,
+      mission_id: phase_info.mission_id,
+      phase: phase_info.phase,
+      phase_type: phase_info.phase_type,
       input_tokens: attrs[:input_tokens] || 0,
       output_tokens: attrs[:output_tokens] || 0,
       cache_read_tokens: attrs[:cache_read_tokens] || 0,
       cache_write_tokens: attrs[:cache_write_tokens] || 0,
       cost_usd: attrs[:cost_usd],
       model: attrs[:model] || attrs["model"],
-      category: category,
+      category: attrs[:category] || phase_info.category,
       recorded_at: attrs[:recorded_at]
     }
 
@@ -58,7 +62,11 @@ defmodule GiTF.Costs do
       },
       %{
         model: cost.model,
-        ghost_id: cost.ghost_id
+        ghost_id: cost.ghost_id,
+        phase: cost.phase,
+        phase_type: cost.phase_type,
+        mission_id: cost.mission_id,
+        op_id: cost.op_id
       }
     )
 
@@ -93,6 +101,22 @@ defmodule GiTF.Costs do
     end
   end
 
+  @doc """
+  Returns a per-phase cost breakdown for a mission.
+
+  Groups costs by phase and phase_type (productive vs overhead).
+  """
+  @spec quest_phase_summary(String.t()) :: map()
+  def quest_phase_summary(mission_id) do
+    costs = for_quest(mission_id)
+
+    %{
+      by_phase: group_costs_by(costs, &Map.get(&1, :phase, "unknown")),
+      by_phase_type: group_costs_by(costs, &Map.get(&1, :phase_type, "unknown")),
+      total: total(costs)
+    }
+  end
+
   @doc "Sums the `cost_usd` field across a list of cost records."
   @spec total([map()]) :: float()
   def total(costs) do
@@ -124,7 +148,9 @@ defmodule GiTF.Costs do
       total_output_tokens: costs |> Enum.map(&Map.get(&1, :output_tokens, 0)) |> Enum.sum(),
       by_model: group_costs_by(costs, fn c -> Map.get(c, :model) end),
       by_bee: group_costs_by(costs, &Map.get(&1, :ghost_id)),
-      by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown"))
+      by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown")),
+      by_phase: group_costs_by(costs, &Map.get(&1, :phase, "unknown")),
+      by_phase_type: group_costs_by(costs, &Map.get(&1, :phase_type, "unknown"))
     }
   end
 
@@ -152,33 +178,48 @@ defmodule GiTF.Costs do
 
   # -- Private helpers ---------------------------------------------------------
 
-  @planning_phases ~w(research requirements design planning)
-  @verification_phases ~w(review validation)
+  @productive_phases ~w(research requirements design planning implementation)
+  @overhead_phases ~w(review validation simplify scoring)
 
-  defp derive_category("major"), do: "orchestration"
+  @planning_category_phases ~w(research requirements design planning)
+  @verification_category_phases ~w(review validation simplify scoring)
 
-  defp derive_category(ghost_id) when is_binary(ghost_id) do
+  @default_phase_info %{category: "unknown", phase: "unknown", phase_type: "unknown", op_id: nil, mission_id: nil}
+
+  defp derive_phase_info("major") do
+    %{@default_phase_info | category: "orchestration", phase: "orchestration", phase_type: "overhead"}
+  end
+
+  defp derive_phase_info(ghost_id) when is_binary(ghost_id) do
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
          op_id when is_binary(op_id) <- Map.get(ghost, :op_id),
          {:ok, op} <- GiTF.Ops.get(op_id) do
-      cond do
-        Map.get(op, :phase_job, false) and op[:phase] in @planning_phases ->
-          "planning"
+      phase = if Map.get(op, :phase_job, false), do: op[:phase], else: "implementation"
+      mission_id = Map.get(op, :mission_id)
 
-        Map.get(op, :phase_job, false) and op[:phase] in @verification_phases ->
-          "verification"
+      category =
+        cond do
+          phase in @planning_category_phases -> "planning"
+          phase in @verification_category_phases -> "verification"
+          true -> "implementation"
+        end
 
-        true ->
-          "implementation"
-      end
+      phase_type =
+        cond do
+          phase in @productive_phases -> "productive"
+          phase in @overhead_phases -> "overhead"
+          true -> "productive"
+        end
+
+      %{category: category, phase: phase, phase_type: phase_type, op_id: op_id, mission_id: mission_id}
     else
-      _ -> "unknown"
+      _ -> @default_phase_info
     end
   rescue
-    _ -> "unknown"
+    _ -> @default_phase_info
   end
 
-  defp derive_category(_), do: "unknown"
+  defp derive_phase_info(_), do: @default_phase_info
 
   # Normalize complex model ARNs to base names for pricing/display
   defp normalize_model(nil), do: nil

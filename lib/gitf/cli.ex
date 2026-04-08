@@ -2238,6 +2238,51 @@ defmodule GiTF.CLI do
       IO.puts("")
     end
 
+    by_phase_type = summary[:by_phase_type] || %{}
+
+    if map_size(by_phase_type) > 0 do
+      IO.puts("Productive vs overhead:")
+
+      for type <- ["productive", "overhead"] do
+        case Map.get(by_phase_type, type) do
+          nil ->
+            :ok
+
+          data ->
+            cost = (data[:cost] || 0.0) / 1
+            total_c = (summary[:total_cost] || 1.0) / 1
+            pct = if total_c > 0, do: Float.round(cost / total_c * 100, 1), else: 0.0
+            IO.puts("  #{String.pad_trailing(type, 12)} $#{:erlang.float_to_binary(cost, decimals: 4)}  (#{pct}%)")
+        end
+      end
+
+      IO.puts("")
+    end
+
+    by_phase = summary[:by_phase] || %{}
+
+    if map_size(by_phase) > 0 do
+      IO.puts("By phase:")
+      headers = ["Phase", "Cost", "Input Tokens", "Output Tokens"]
+
+      rows =
+        by_phase
+        |> Enum.sort_by(fn {_, data} -> data[:cost] || 0 end, :desc)
+        |> Enum.map(fn {phase, data} ->
+          cost = (data[:cost] || 0.0) / 1
+
+          [
+            phase,
+            "$#{:erlang.float_to_binary(cost, decimals: 4)}",
+            "#{data[:input_tokens] || 0}",
+            "#{data[:output_tokens] || 0}"
+          ]
+        end)
+
+      Format.table(headers, rows)
+      IO.puts("")
+    end
+
     by_bee = summary[:by_bee] || %{}
 
     if map_size(by_bee) > 0 do

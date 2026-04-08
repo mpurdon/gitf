@@ -237,8 +237,81 @@ defmodule GiTF.Dashboard.CostsLive do
         <% end %>
       </div>
 
+      <!-- Productive vs Overhead -->
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="panel-title">Productive vs Overhead</div>
+        <%= if @summary.by_phase_type == %{} do %>
+          <div class="empty">No cost data recorded yet.</div>
+        <% else %>
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th style="text-align:right">Cost</th>
+                <th style="text-align:right">Tokens</th>
+                <th style="width:160px">Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for type <- ["productive", "overhead", "unknown"] do %>
+                <%= if data = @summary.by_phase_type[type] do %>
+                  <tr>
+                    <td style={"color:#{phase_type_color(type)}; font-weight:600"}>{type}</td>
+                    <td style="text-align:right; font-family:monospace">{format_cost(data.cost)}</td>
+                    <td style="text-align:right; font-family:monospace; font-size:0.8rem">{format_tokens(data.input_tokens + data.output_tokens)}</td>
+                    <td>
+                      <div class="cost-bar">
+                        <div class="cost-bar-fill" style={"width:#{cost_pct(@summary.total_cost, data.cost)}%; background:#{phase_type_color(type)}"}></div>
+                      </div>
+                      <div style="font-size:0.65rem; color:#8b949e; text-align:center">{cost_pct(@summary.total_cost, data.cost)}%</div>
+                    </td>
+                  </tr>
+                <% end %>
+              <% end %>
+            </tbody>
+          </table>
+        <% end %>
+      </div>
+
+      <!-- By phase -->
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="panel-title">By Phase</div>
+        <%= if @summary.by_phase == %{} do %>
+          <div class="empty">No cost data recorded yet.</div>
+        <% else %>
+          <table>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th style="text-align:right">Cost</th>
+                <th style="text-align:right">Input</th>
+                <th style="text-align:right">Output</th>
+                <th style="width:120px">Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for {phase, data} <- Enum.sort_by(@summary.by_phase, fn {_, d} -> d.cost end, :desc) do %>
+                <tr>
+                  <td>
+                    <span style={"color:#{phase_type_color(phase_to_type(phase))}"}>{phase}</span>
+                  </td>
+                  <td style="text-align:right; font-family:monospace">{format_cost(data.cost)}</td>
+                  <td style="text-align:right; font-family:monospace; font-size:0.8rem">{format_tokens(data.input_tokens)}</td>
+                  <td style="text-align:right; font-family:monospace; font-size:0.8rem">{format_tokens(data.output_tokens)}</td>
+                  <td>
+                    <div class="cost-bar">
+                      <div class="cost-bar-fill" style={"width:#{cost_pct(@summary.total_cost, data.cost)}%"}></div>
+                    </div>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        <% end %>
+      </div>
+
       <!-- By category -->
-      <div class="panel">
+      <div class="panel" style="margin-bottom:1.5rem">
         <div class="panel-title">By Category</div>
         <%= if @summary.by_category == %{} do %>
           <div class="empty">No cost data recorded yet.</div>
@@ -286,4 +359,12 @@ defmodule GiTF.Dashboard.CostsLive do
   defp budget_color(pct) when pct > 90, do: "#f85149"
   defp budget_color(pct) when pct > 70, do: "#d29922"
   defp budget_color(_), do: "#1f6feb"
+
+  defp phase_type_color("productive"), do: "#3fb950"
+  defp phase_type_color("overhead"), do: "#d29922"
+  defp phase_type_color(_), do: "#8b949e"
+
+  @overhead_phases ~w(review validation simplify scoring orchestration)
+  defp phase_to_type(phase) when phase in @overhead_phases, do: "overhead"
+  defp phase_to_type(_), do: "productive"
 end
