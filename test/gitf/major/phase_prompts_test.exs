@@ -87,18 +87,17 @@ defmodule GiTF.Major.PhasePromptsTest do
     end
   end
 
-  describe "validation_prompt/2" do
-    test "includes all artifacts" do
-      artifacts = %{
-        "research" => %{"key_files" => []},
-        "requirements" => %{"functional_requirements" => []},
-        "design" => %{"components" => []}
-      }
+  describe "validation_prompt/3" do
+    test "includes requirements and planning" do
+      requirements = %{"functional_requirements" => [%{"id" => "FR-1"}]}
+      planning = [%{"title" => "Implement feature", "target_files" => ["lib/foo.ex"]}]
 
-      prompt = PhasePrompts.validation_prompt(@mission, artifacts)
+      prompt = PhasePrompts.validation_prompt(@mission, requirements, planning)
       assert prompt =~ "Validation Phase"
       assert prompt =~ "requirements_met"
       assert prompt =~ "overall_verdict"
+      assert prompt =~ "FR-1"
+      assert prompt =~ "Implement feature"
     end
   end
 end

@@ -96,7 +96,7 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec requirements_prompt(map(), map()) :: String.t()
   def requirements_prompt(mission, research_artifact) do
-    research_json = Jason.encode!(research_artifact, pretty: true)
+    research_json = Jason.encode!(research_artifact)
 
     """
     # Requirements Phase
@@ -157,8 +157,8 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec design_prompt(map(), map(), map(), String.t()) :: String.t()
   def design_prompt(mission, requirements, research, extra_instructions \\ "") do
-    requirements_json = Jason.encode!(requirements, pretty: true)
-    research_json = Jason.encode!(research, pretty: true)
+    requirements_json = Jason.encode!(requirements)
+    research_json = Jason.encode!(research)
 
     instructions = """
     1. Map each requirement to a specific implementation approach
@@ -241,7 +241,7 @@ defmodule GiTF.Major.PhasePrompts do
         extra_instructions \\ ""
       ) do
     base = design_prompt(mission, requirements, research, extra_instructions)
-    review_json = Jason.encode!(review, pretty: true)
+    review_json = Jason.encode!(review)
 
     base <>
       """
@@ -266,16 +266,17 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec review_prompt(map(), map(), map(), map()) :: String.t()
   def review_prompt(mission, designs, requirements, research) do
-    requirements_json = Jason.encode!(requirements, pretty: true)
-    research_json = Jason.encode!(research, pretty: true)
+    requirements_json = Jason.encode!(requirements)
+    research_json = Jason.encode!(research)
 
     designs_section =
       if is_map(designs) and map_size(designs) > 1 do
-        # Multiple design variants to compare
+        # Multiple design variants — pass only structural keys to reduce token load
         designs
         |> Enum.sort_by(fn {name, _} -> name end)
         |> Enum.map(fn {name, design} ->
-          design_json = Jason.encode!(design, pretty: true)
+          condensed = condense_design(design)
+          design_json = Jason.encode!(condensed)
 
           """
           ### Design: #{String.upcase(name)}
@@ -287,9 +288,9 @@ defmodule GiTF.Major.PhasePrompts do
         end)
         |> Enum.join("\n")
       else
-        # Single design (backward compat or only one succeeded)
+        # Single design — pass in full since there's no comparison overhead
         {_name, design} = designs |> Enum.at(0) || {"normal", designs}
-        design_json = Jason.encode!(design, pretty: true)
+        design_json = Jason.encode!(design)
 
         """
         ### Technical Design
@@ -389,20 +390,26 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec planning_prompt(map(), map(), map(), map()) :: String.t()
   def planning_prompt(mission, design, requirements, review) do
-    research = GiTF.Missions.get_artifact(mission.id, "research")
-    design_json = Jason.encode!(design, pretty: true)
-    requirements_json = Jason.encode!(requirements, pretty: true)
-    review_json = Jason.encode!(review, pretty: true)
+    design_json = Jason.encode!(design)
+    requirements_json = Jason.encode!(requirements)
 
-    research_section =
-      if research do
-        research_json = Jason.encode!(research, pretty: true)
+    # Extract only actionable review feedback, not the full artifact
+    review_section =
+      if is_map(review) do
+        issues = Map.get(review, "issues", [])
+        selected = Map.get(review, "selected_design")
+
+        condensed =
+          %{"selected_design" => selected, "issues" => issues}
+          |> Map.reject(fn {_, v} -> is_nil(v) end)
+
+        review_json = Jason.encode!(condensed)
 
         """
-        ## Codebase Research
+        ## Review Feedback
 
         ```json
-        #{research_json}
+        #{review_json}
         ```
         """
       else
@@ -412,15 +419,14 @@ defmodule GiTF.Major.PhasePrompts do
     """
     # Planning Phase
 
-    You are a project planner. Using ALL prior phase artifacts below, produce an
-    ordered list of implementation ops with dependencies. Stay grounded in the
-    actual codebase — only reference files, patterns, and technologies identified
-    in the research and design phases. Do NOT introduce new technologies or
-    frameworks that aren't already in the project.
+    You are a project planner. Using the validated design and requirements below,
+    produce an ordered list of implementation ops with dependencies. Stay grounded
+    in the actual codebase — only reference files, patterns, and technologies
+    identified in the design. Do NOT introduce new technologies or frameworks
+    that aren't already in the project.
 
     **Goal**: #{mission.goal}
 
-    #{research_section}
     ## Requirements
 
     ```json
@@ -433,11 +439,7 @@ defmodule GiTF.Major.PhasePrompts do
     #{design_json}
     ```
 
-    ## Review Feedback
-
-    ```json
-    #{review_json}
-    ```
+    #{review_section}
 
     ## Instructions
 
@@ -474,22 +476,29 @@ defmodule GiTF.Major.PhasePrompts do
 
   Reviews all implementation against original requirements.
   """
-  @spec validation_prompt(map(), map()) :: String.t()
-  def validation_prompt(mission, all_artifacts) do
-    artifacts_json = Jason.encode!(all_artifacts, pretty: true)
+  @spec validation_prompt(map(), map() | nil, map() | nil) :: String.t()
+  def validation_prompt(mission, requirements, planning) do
+    requirements_json = encode_or(requirements, "{}")
+    planning_json = encode_or(planning, "[]")
 
     """
     # Validation Phase
 
     You are a QA validator. Review all implementation work against the
-    original requirements and design.
+    original requirements and planned ops.
 
     **Goal**: #{mission.goal}
 
-    ## All Phase Artifacts
+    ## Requirements
 
     ```json
-    #{artifacts_json}
+    #{requirements_json}
+    ```
+
+    ## Planned Ops
+
+    ```json
+    #{planning_json}
     ```
 
     ## Instructions
@@ -664,13 +673,18 @@ defmodule GiTF.Major.PhasePrompts do
   end
 
   @doc "Scoring prompt: assess final result across 4 eval dimensions."
-  def scoring_prompt(mission, all_artifacts) do
-    artifacts_json =
+  def scoring_prompt(mission, requirements, validation) do
+    requirements_json = encode_or(requirements, "{}")
+
+    validation_json =
       try do
-        Jason.encode!(all_artifacts, pretty: true)
+        encode_or(validation, "{}")
       rescue
         _ -> "{}"
       end
+
+    op_count = length(Map.get(mission, :ops, []))
+    pipeline_mode = Map.get(mission, :pipeline_mode, "full")
 
     """
     # Final Scoring
@@ -679,11 +693,18 @@ defmodule GiTF.Major.PhasePrompts do
     four standardized evaluation dimensions.
 
     **Goal**: #{mission.goal}
+    **Pipeline**: #{pipeline_mode} | **Ops**: #{op_count}
 
-    ## All Phase Artifacts
+    ## Requirements
 
     ```json
-    #{artifacts_json}
+    #{requirements_json}
+    ```
+
+    ## Validation Result
+
+    ```json
+    #{validation_json}
     ```
 
     ## Evaluation Dimensions
@@ -748,4 +769,20 @@ defmodule GiTF.Major.PhasePrompts do
     Grade: A (90+), B (80+), C (70+), D (60+), F (<60).
     """
   end
+
+  # Keep only the structural keys that matter for design comparison.
+  # Drops verbose descriptions and detailed approaches to reduce token count.
+  defp condense_design(design) when is_map(design) do
+    Map.take(design, [
+      "components",
+      "requirement_mapping",
+      "dependencies",
+      "risks"
+    ])
+  end
+
+  defp condense_design(other), do: other
+
+  defp encode_or(nil, fallback), do: fallback
+  defp encode_or(data, _fallback), do: Jason.encode!(data)
 end

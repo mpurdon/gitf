@@ -464,11 +464,12 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp start_validation(mission) do
-    all_artifacts = Map.get(mission, :artifacts, %{})
+    requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
+    planning = GiTF.Missions.get_artifact(mission.id, "planning")
 
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
-      prompt = PhasePrompts.validation_prompt(mission, all_artifacts)
+      prompt = PhasePrompts.validation_prompt(mission, requirements, planning)
       spawn_phase_ghost(mission, "validation", prompt, model: "general")
       {:ok, "validation"}
     end
@@ -924,8 +925,9 @@ defmodule GiTF.Major.Orchestrator do
         {PhasePrompts.planning_prompt(mission, design, requirements, review), "thinking"}
 
       "validation" ->
-        all_artifacts = Map.get(mission, :artifacts, %{})
-        {PhasePrompts.validation_prompt(mission, all_artifacts), "general"}
+        requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
+        planning = GiTF.Missions.get_artifact(mission.id, "planning") || %{}
+        {PhasePrompts.validation_prompt(mission, requirements, planning), "general"}
 
       phase when phase in ["implementation", "sync", "awaiting_approval"] ->
         # These phases don't use phase ghosts — handled by op spawning,
@@ -1361,8 +1363,9 @@ defmodule GiTF.Major.Orchestrator do
   defp start_scoring(mission) do
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "scoring", "Simplify complete, scoring") do
-      all_artifacts = Map.get(mission, :artifacts, %{})
-      prompt = PhasePrompts.scoring_prompt(mission, all_artifacts)
+      requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
+      validation = GiTF.Missions.get_artifact(mission.id, "validation")
+      prompt = PhasePrompts.scoring_prompt(mission, requirements, validation)
       spawn_phase_ghost(mission, "scoring", prompt, model: "general")
       {:ok, "scoring"}
     end
@@ -1518,6 +1521,13 @@ defmodule GiTF.Major.Orchestrator do
 
   defp spawn_phase_ghost_inner(mission, phase, prompt, opts) do
     model = Keyword.get(opts, :model, "general")
+
+    GiTF.Telemetry.emit(
+      [:gitf, :phase, :prompt_built],
+      %{prompt_bytes: byte_size(prompt)},
+      %{phase: phase, mission_id: mission.id, model: model}
+    )
+
     strategy = Keyword.get(opts, :strategy)
 
     # Build title with strategy label for parallel planning ghosts

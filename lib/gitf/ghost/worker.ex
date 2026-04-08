@@ -625,7 +625,18 @@ defmodule GiTF.Ghost.Worker do
 
           prompt =
             if resume_context do
-              resume_context <> "\n\n---\n\nContinue the following task:\n\n" <> original_prompt
+              # Truncate original prompt to avoid 2x token load on resume.
+              # The transfer context already has the task state; the original
+              # prompt's artifact dumps are redundant for continuation.
+              truncated =
+                if byte_size(original_prompt) > 4000 do
+                  String.slice(original_prompt, 0, 4000) <>
+                    "\n\n[... prompt truncated for context efficiency — refer to transfer context above for full state ...]"
+                else
+                  original_prompt
+                end
+
+              resume_context <> "\n\n---\n\nContinue the following task:\n\n" <> truncated
             else
               original_prompt
             end

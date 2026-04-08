@@ -49,25 +49,26 @@ defmodule GiTF.Major.Janitor do
   defp budget_healthy?(missions) do
     active = Enum.filter(missions, &(&1.status == "active"))
 
-    no_overages =
-      Enum.all?(active, fn mission ->
-        case GiTF.Budget.check(mission.id) do
-          {:ok, _remaining} -> true
-          {:error, :budget_exceeded, _} -> false
-        end
+    # Budget.check/1 already computes remaining = budget - spent, so use it
+    # for both the overage check and headroom calculation in a single pass
+    results =
+      Enum.map(active, fn mission ->
+        GiTF.Budget.check(mission.id)
       end)
 
-    config_budget = GiTF.Budget.config_budget()
+    no_overages = Enum.all?(results, &match?({:ok, _}, &1))
 
-    total_spent =
-      Enum.reduce(active, 0.0, fn m, acc ->
-        acc + GiTF.Budget.spent_for(m.id)
+    total_remaining =
+      Enum.reduce(results, 0.0, fn
+        {:ok, remaining}, acc -> acc + remaining
+        _, acc -> acc
       end)
 
-    headroom = config_budget - total_spent
-    no_overages and headroom > 0.50
+    no_overages and total_remaining > 0.50
   rescue
-    _ -> true
+    e ->
+      Logger.warning("Janitor budget check failed: #{Exception.message(e)}, allowing")
+      true
   end
 
   defp spawn_janitor_mission do
