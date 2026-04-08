@@ -202,4 +202,103 @@ defmodule GiTF.Telemetry do
 
   # Non-persisted events (high-frequency or informational-only)
   defp map_event(_, _, _), do: nil
+
+  # -- OpenTelemetry span helpers --------------------------------------------
+  #
+  # Gracefully degrade to no-ops if OpenTelemetry is not loaded.
+  # This allows the codebase to compile and run without OTel deps
+  # in environments that don't need tracing (e.g., escript builds).
+
+  @otel_tracer_name :gitf
+
+  defp get_tracer, do: :opentelemetry.get_tracer(@otel_tracer_name)
+
+  @doc "Start a root span for a mission pipeline execution."
+  def start_mission_span(mission_id, goal) do
+    if otel_available?() do
+      :otel_tracer.start_span(get_tracer(), "gitf.mission", %{
+        attributes: [{"mission.id", mission_id}, {"mission.goal", String.slice(goal || "", 0, 200)}]
+      })
+      |> :otel_tracer.set_current_span()
+    end
+
+    :ok
+  end
+
+  @doc "Start a child span for a pipeline phase."
+  def start_phase_span(phase, mission_id) do
+    if otel_available?() do
+      :otel_tracer.start_span(get_tracer(), "gitf.phase.#{phase}", %{
+        attributes: [{"phase.name", phase}, {"mission.id", mission_id}]
+      })
+      |> :otel_tracer.set_current_span()
+    end
+
+    :ok
+  end
+
+  @doc "Start a child span for a ghost worker execution."
+  def start_ghost_span(ghost_id, op_id, mission_id) do
+    if otel_available?() do
+      :otel_tracer.start_span(get_tracer(), "gitf.ghost", %{
+        attributes: [
+          {"ghost.id", ghost_id},
+          {"op.id", op_id || ""},
+          {"mission.id", mission_id || ""}
+        ]
+      })
+      |> :otel_tracer.set_current_span()
+    end
+
+    :ok
+  end
+
+  @doc "End the current active span."
+  def end_current_span do
+    if otel_available?() do
+      :otel_span.end_span(:otel_tracer.current_span_ctx())
+    end
+
+    :ok
+  end
+
+  @doc "Mark the current span as errored with a reason."
+  def set_span_error(reason) do
+    if otel_available?() do
+      ctx = :otel_tracer.current_span_ctx()
+      :otel_span.set_status(ctx, :error, to_string(reason))
+    end
+
+    :ok
+  end
+
+  @doc "Extract current trace context for embedding in EventStore records."
+  @spec current_trace_context() :: %{trace_id: String.t() | nil, span_id: String.t() | nil}
+  def current_trace_context do
+    if otel_available?() do
+      ctx = :otel_tracer.current_span_ctx()
+
+      case ctx do
+        :undefined ->
+          %{trace_id: nil, span_id: nil}
+
+        _ ->
+          trace_id = :otel_span.trace_id(ctx)
+          span_id = :otel_span.span_id(ctx)
+
+          %{
+            trace_id: if(trace_id != 0, do: Integer.to_string(trace_id, 16), else: nil),
+            span_id: if(span_id != 0, do: Integer.to_string(span_id, 16), else: nil)
+          }
+      end
+    else
+      %{trace_id: nil, span_id: nil}
+    end
+  rescue
+    _ -> %{trace_id: nil, span_id: nil}
+  end
+
+  defp otel_available? do
+    Code.ensure_loaded?(:opentelemetry)
+  end
 end

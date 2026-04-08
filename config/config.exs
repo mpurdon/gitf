@@ -35,4 +35,10 @@ config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:remission_id]
 
+# OpenTelemetry — default to OTLP export if OTEL_EXPORTER_OTLP_ENDPOINT is set
+config :opentelemetry,
+  resource: %{service: %{name: "gitf"}},
+  sampler: {:parent_based, %{root: :always_on}},
+  traces_exporter: {:otel_exporter_otlp, %{protocol: :http_protobuf}}
+
 import_config "#{config_env()}.exs"

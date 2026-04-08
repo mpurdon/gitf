@@ -74,11 +74,15 @@ defmodule GiTF.EventStore do
   end
 
   def record(event_type, entity_id, data, metadata) do
+    trace_ctx = GiTF.Telemetry.current_trace_context()
+
     event = %{
       type: event_type,
       entity_id: entity_id,
       data: GiTF.Redaction.redact_map(data),
       metadata: GiTF.Redaction.redact_map(metadata),
+      trace_id: trace_ctx.trace_id,
+      span_id: trace_ctx.span_id,
       timestamp: DateTime.utc_now()
     }
 
@@ -144,6 +148,39 @@ defmodule GiTF.EventStore do
         event.entity_id == mission_id
     end)
     |> Enum.sort_by(& &1.timestamp, {:asc, DateTime})
+  end
+
+  @doc """
+  Returns an enriched timeline for a mission with phase durations and cost data.
+
+  Builds on `timeline/1` by computing how long each phase took and merging
+  per-phase cost attribution from `GiTF.Costs.quest_phase_summary/1`.
+  """
+  @spec enriched_timeline(String.t()) :: map()
+  def enriched_timeline(mission_id) do
+    events = timeline(mission_id)
+    transitions = GiTF.Missions.get_phase_transitions(mission_id)
+    phase_costs = GiTF.Costs.quest_phase_summary(mission_id)
+
+    phases = build_phase_durations(transitions)
+
+    phases =
+      Enum.map(phases, fn p ->
+        cost_data = Map.get(phase_costs.by_phase, p.phase, %{cost: 0, input_tokens: 0, output_tokens: 0})
+
+        Map.merge(p, %{
+          cost_usd: cost_data.cost,
+          tokens: Map.get(cost_data, :input_tokens, 0) + Map.get(cost_data, :output_tokens, 0)
+        })
+      end)
+
+    %{
+      events: events,
+      phases: phases,
+      phase_costs: phase_costs,
+      total_cost: phase_costs.total,
+      total_duration_s: total_duration(phases)
+    }
   end
 
   @doc """
@@ -216,5 +253,47 @@ defmodule GiTF.EventStore do
     Enum.filter(events, fn event ->
       get_in(event, [:metadata, key]) == value
     end)
+  end
+
+  # Compute duration per phase from consecutive transition timestamps
+  defp build_phase_durations(transitions) do
+    # Sort by inserted_at (always a DateTime from Archive) to avoid mixed-type comparison
+    sorted =
+      transitions
+      |> Enum.sort_by(& &1[:inserted_at], {:asc, DateTime})
+
+    sorted
+    |> Enum.chunk_every(2, 1)
+    |> Enum.map(fn
+      [current, next] ->
+        started = current[:inserted_at]
+        ended = next[:inserted_at]
+
+        duration_s =
+          if started && ended, do: DateTime.diff(ended, started, :second), else: nil
+
+        %{
+          phase: current[:to_phase] || current[:phase],
+          started_at: started,
+          ended_at: ended,
+          duration_s: duration_s,
+          reason: current[:reason]
+        }
+
+      [current] ->
+        %{
+          phase: current[:to_phase] || current[:phase],
+          started_at: current[:inserted_at],
+          ended_at: nil,
+          duration_s: nil,
+          reason: current[:reason]
+        }
+    end)
+  end
+
+  defp total_duration(phases) do
+    phases
+    |> Enum.map(&(&1[:duration_s] || 0))
+    |> Enum.sum()
   end
 end

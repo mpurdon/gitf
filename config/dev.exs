@@ -8,3 +8,7 @@ config :gitf, GiTF.Repo, database: ".gitf/gitf.db"
 config :gitf, GiTF.Web.Endpoint, code_reloader: true
 
 config :logger, level: :debug
+
+# OpenTelemetry — stdout exporter for dev visibility
+config :opentelemetry,
+  traces_exporter: {:otel_exporter_stdout, []}

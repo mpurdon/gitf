@@ -14,3 +14,7 @@ config :gitf, GiTF.Dashboard.Endpoint,
   live_view: [signing_salt: "gitf_dashboard_test_salt"]
 
 config :logger, level: :warning
+
+# Disable OTel tracing in tests
+config :opentelemetry,
+  traces_exporter: :none

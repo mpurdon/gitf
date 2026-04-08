@@ -39,6 +39,7 @@ defmodule GiTF.Major.Orchestrator do
          :ok <- validate_quest_ready(mission),
          :ok <- budget_preflight(mission_id),
          :ok <- provider_preflight() do
+      GiTF.Telemetry.start_mission_span(mission_id, mission.goal)
       force = Keyword.get(opts, :force_fast_path, false)
       force_full = Keyword.get(opts, :force_full_pipeline, false)
 
@@ -1404,6 +1405,13 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp fail_quest(mission_id, reason) do
+    GiTF.Telemetry.set_span_error(reason)
+    GiTF.Telemetry.end_current_span()
+
+    # Classify failure and store structured info on mission record
+    failure_info = classify_mission_failure(mission_id, reason)
+    GiTF.Missions.update(mission_id, %{failure_info: failure_info})
+
     # Generate post-mortem before rolling back
     case GiTF.Missions.get(mission_id) do
       {:ok, mission} -> generate_post_mortem(mission, reason)
@@ -1436,6 +1444,55 @@ defmodule GiTF.Major.Orchestrator do
 
     {:ok, "completed"}
   end
+
+  defp classify_mission_failure(mission_id, reason) do
+    {current_phase, failed_ops} =
+      case GiTF.Missions.get(mission_id) do
+        {:ok, m} ->
+          failed_ids =
+            m.ops
+            |> Enum.filter(&(&1.status == "failed"))
+            |> Enum.map(& &1.id)
+
+          {Map.get(m, :current_phase, "unknown"), failed_ids}
+
+        _ ->
+          {"unknown", []}
+      end
+
+    %{
+      failure_type: classify_reason(reason),
+      failure_phase: current_phase,
+      failure_reason: reason,
+      failed_op_ids: failed_ops,
+      classified_at: DateTime.utc_now()
+    }
+  rescue
+    _ -> %{failure_type: :unknown, failure_phase: "unknown", failure_reason: reason, failed_op_ids: [], classified_at: DateTime.utc_now()}
+  end
+
+  @failure_patterns [
+    {~r/timed?\s*out|timeout|exceeded.*h\b/i, :timeout},
+    {~r/budget|cost|spend/i, :budget_exceeded},
+    {~r/compil|syntax|undefined function/i, :compilation_error},
+    {~r/test.*fail|assertion|assert/i, :test_failure},
+    {~r/context.*overflow|context.*handoff|context.*limit/i, :context_overflow},
+    {~r/validation.*fail|validator|verdict.*fail/i, :validation_failure},
+    {~r/quality.*gate|quality.*below|score.*below/i, :quality_gate_failure},
+    {~r/security|vulnerab|secret/i, :security_gate_failure},
+    {~r/merge.*conflict|conflict.*in/i, :merge_conflict},
+    {~r/provider.*unavail|all.*providers.*down|circuit.*open/i, :provider_unavailable},
+    {~r/rejected|human.*review.*rejected/i, :review_rejected},
+    {~r/no sector|auto.assign.*fail/i, :configuration_error}
+  ]
+
+  defp classify_reason(reason) when is_binary(reason) do
+    Enum.find_value(@failure_patterns, :unknown, fn {pattern, type} ->
+      if Regex.match?(pattern, reason), do: type
+    end)
+  end
+
+  defp classify_reason(_), do: :unknown
 
   defp generate_post_mortem(mission, reason) do
     case Archive.get(:sectors, mission.sector_id) do
@@ -1475,6 +1532,8 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp complete_quest(mission_id) do
+    GiTF.Telemetry.end_current_span()
+
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission_id, "completed", "All phases complete") do
       GiTF.Missions.update_status!(mission_id)
@@ -1521,6 +1580,8 @@ defmodule GiTF.Major.Orchestrator do
 
   defp spawn_phase_ghost_inner(mission, phase, prompt, opts) do
     model = Keyword.get(opts, :model, "general")
+
+    GiTF.Telemetry.start_phase_span(phase, mission.id)
 
     GiTF.Telemetry.emit(
       [:gitf, :phase, :prompt_built],

@@ -36,7 +36,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
     end
   end
 
-  defp load_diagnostics(socket, id, _mission) do
+  defp load_diagnostics(socket, id, mission) do
     ops = GiTF.Ops.list(mission_id: id)
     failed_ops = Enum.filter(ops, &(Map.get(&1, :status) == "failed"))
     transitions = GiTF.Missions.get_phase_transitions(id)
@@ -46,6 +46,8 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
     analyses = load_existing_analyses(failed_ops)
     ghost_info = load_ghost_info(failed_ops)
     audit_data = load_audit_data(failed_ops)
+    enriched = GiTF.EventStore.enriched_timeline(id)
+    failure_info = Map.get(mission, :failure_info)
 
     first_failed = List.first(failed_ops)
 
@@ -59,6 +61,9 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
     |> assign(:analyses, analyses)
     |> assign(:ghost_info, ghost_info)
     |> assign(:audit_data, audit_data)
+    |> assign(:enriched_phases, enriched.phases)
+    |> assign(:phase_costs, enriched.phase_costs)
+    |> assign(:failure_info, failure_info)
     |> assign(:selected_op, first_failed && Map.get(first_failed, :id))
   end
 
@@ -348,7 +353,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
                       {Map.get(t, :to_phase, "?")}
                     </span>
                     <span style="font-size:0.75rem; color:#484f58">
-                      {format_timestamp(Map.get(t, :timestamp))}
+                      {format_timestamp(Map.get(t, :inserted_at))}
                     </span>
                   </div>
                   <%= if Map.get(t, :reason) do %>
@@ -362,6 +367,67 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
           </div>
         <% end %>
       </div>
+
+      <%!-- Failure Classification --%>
+      <%= if @failure_info do %>
+        <div class="panel" style="margin-bottom:1rem; border-left:3px solid #f85149">
+          <div class="panel-title">Failure Classification</div>
+          <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center">
+            <span class="badge badge-red" style="font-size:0.9rem">{@failure_info[:failure_type] || "unknown"}</span>
+            <span style="color:#8b949e">during <strong>{@failure_info[:failure_phase] || "?"}</strong> phase</span>
+            <%= if length(@failure_info[:failed_op_ids] || []) > 0 do %>
+              <span style="color:#8b949e">{length(@failure_info[:failed_op_ids])} failed ops</span>
+            <% end %>
+          </div>
+          <div style="margin-top:0.5rem; font-size:0.85rem; color:#c9d1d9">{@failure_info[:failure_reason]}</div>
+        </div>
+      <% end %>
+
+      <%!-- Phase Durations & Costs --%>
+      <%= if @enriched_phases != [] do %>
+        <div class="panel" style="margin-bottom:1rem">
+          <div class="panel-title">Phase Durations & Costs</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th style="text-align:right">Duration</th>
+                <th style="text-align:right">Cost</th>
+                <th style="text-align:right">Tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for p <- @enriched_phases do %>
+                <tr>
+                  <td>
+                    <span class={"badge #{phase_badge(p.phase)}"}>{p.phase}</span>
+                  </td>
+                  <td style="text-align:right; font-family:monospace; font-size:0.85rem">
+                    {format_duration(p[:duration_s])}
+                  </td>
+                  <td style="text-align:right; font-family:monospace; font-size:0.85rem">
+                    {format_cost(p[:cost_usd] || 0)}
+                  </td>
+                  <td style="text-align:right; font-family:monospace; font-size:0.85rem">
+                    {format_tokens(p[:tokens] || 0)}
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+          <%!-- Productive vs Overhead --%>
+          <%= if @phase_costs.by_phase_type != %{} do %>
+            <div style="margin-top:0.75rem; display:flex; gap:1.5rem; font-size:0.85rem">
+              <%= if prod = @phase_costs.by_phase_type["productive"] do %>
+                <span style="color:#3fb950">Productive: {format_cost(prod.cost)}</span>
+              <% end %>
+              <%= if ovhd = @phase_costs.by_phase_type["overhead"] do %>
+                <span style="color:#d29922">Overhead: {format_cost(ovhd.cost)}</span>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
 
       <%!-- Failed Ops Diagnostics --%>
       <%= if @failed_ops != [] do %>
@@ -614,6 +680,11 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
   end
 
   # -- Helpers ---------------------------------------------------------------
+
+  defp format_duration(nil), do: "-"
+  defp format_duration(seconds) when seconds < 60, do: "#{seconds}s"
+  defp format_duration(seconds) when seconds < 3600, do: "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
+  defp format_duration(seconds), do: "#{div(seconds, 3600)}h #{div(rem(seconds, 3600), 60)}m"
 
   defp recovery_cycles(mission) do
     (Map.get(mission, :redesign_count, 0) || 0) +

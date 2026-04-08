@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.40.25"
+  @version "0.40.26"
 
   def project do
     [
@@ -61,6 +61,9 @@ defmodule GiTF.MixProject do
       {:req, "~> 0.5"},
       {:ratatouille, "~> 0.5"},
       {:telemetry, "~> 1.2"},
+      {:opentelemetry_api, "~> 1.4"},
+      {:opentelemetry, "~> 1.6"},
+      {:opentelemetry_exporter, "~> 1.9"},
       {:req_llm, "~> 1.6"},
       {:mox, "~> 1.1", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test}

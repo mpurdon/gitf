@@ -428,6 +428,8 @@ defmodule GiTF.Ghost.Worker do
       :shutdown ->
         # Application shutting down — no restart coming, fail the op
         if state.status in [:provisioning, :running] do
+          GiTF.Telemetry.set_span_error("shutdown")
+          GiTF.Telemetry.end_current_span()
           save_crash_context(state)
           update_ghost_status(state.ghost_id, GhostStatus.crashed())
           GiTF.Ops.fail(state.op_id)
@@ -549,15 +551,17 @@ defmodule GiTF.Ghost.Worker do
 
   defp provision_fresh(state) do
     # Enrich logging metadata with mission_id
-    is_phase_job =
+    {is_phase_job, mission_id} =
       case GiTF.Ops.get(state.op_id) do
         {:ok, op} ->
           GiTF.Logger.set_bee_context(state.ghost_id, state.op_id, op.mission_id)
-          Map.get(op, :phase_job, false)
+          {Map.get(op, :phase_job, false), op.mission_id}
 
         _ ->
-          false
+          {false, nil}
       end
+
+    GiTF.Telemetry.start_ghost_span(state.ghost_id, state.op_id, mission_id)
 
     with {:shell, {:ok, shell}} <- {:shell, create_shell(state)},
          {:update, :ok} <- {:update, update_bee_working(state, shell)},
@@ -1012,6 +1016,7 @@ defmodule GiTF.Ghost.Worker do
   # -- Private: completion handling --------------------------------------------
 
   defp mark_success(state) do
+    GiTF.Telemetry.end_current_span()
     update_ghost_status(state.ghost_id, GhostStatus.stopped())
 
     # Collect phase output or auto-commit BEFORE marking op as done,
