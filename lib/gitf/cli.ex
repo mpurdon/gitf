@@ -2713,6 +2713,28 @@ defmodule GiTF.CLI do
     end
   end
 
+  # -- Drift detection --------------------------------------------------------
+
+  defp dispatch([:drift], result) do
+    ghost_filter = result_get(result, :options, :ghost)
+    force_check = result_get(result, :flags, :check) || false
+
+    if force_check do
+      Format.info("Running fresh drift check (fetching origin per sector)...")
+      GiTF.Drift.check_all_active()
+    end
+
+    shells =
+      GiTF.Archive.filter(:shells, &(&1.status == "active"))
+      |> filter_drift_shells(ghost_filter)
+
+    if shells == [] do
+      Format.info("No active shells.")
+    else
+      render_drift_table(shells)
+    end
+  end
+
   # -- Phase 5: Validate ------------------------------------------------------
 
   defp dispatch([:validate], result) do
@@ -4296,6 +4318,25 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
+        drift: [
+          name: "drift",
+          about: "Show drift state for active ghost shells (base commit vs origin/main)",
+          options: [
+            ghost: [
+              short: "-b",
+              long: "--ghost",
+              help: "Ghost ID to filter (optional)",
+              parser: :string,
+              required: false
+            ]
+          ],
+          flags: [
+            check: [
+              long: "--check",
+              help: "Force a fresh drift check (runs git fetch per sector)"
+            ]
+          ]
+        ],
         validate: [
           name: "validate",
           about: "Run validation on a ghost's completed work",
@@ -4409,4 +4450,89 @@ defmodule GiTF.CLI do
       ]
     )
   end
+
+  # -- Drift display helpers ---------------------------------------------------
+
+  defp filter_drift_shells(shells, nil), do: shells
+
+  defp filter_drift_shells(shells, ghost_id) do
+    Enum.filter(shells, &(&1.ghost_id == ghost_id))
+  end
+
+  defp render_drift_table(shells) do
+    IO.puts("")
+
+    IO.puts(
+      String.pad_trailing("SHELL", 20) <>
+        String.pad_trailing("GHOST", 16) <>
+        String.pad_trailing("STATE", 14) <>
+        String.pad_trailing("BEHIND", 8) <> "CHECKED"
+    )
+
+    IO.puts(String.duplicate("-", 72))
+
+    Enum.each(shells, fn shell ->
+      level = shell[:drift_state] || :unknown
+      meta = shell[:drift_meta] || %{}
+      behind = Map.get(meta, :commits_behind, "-")
+      checked = format_drift_time(shell[:drift_checked_at])
+
+      IO.puts(
+        String.pad_trailing(short_drift_id(shell.id), 20) <>
+          String.pad_trailing(short_drift_id(shell.ghost_id || "-"), 16) <>
+          String.pad_trailing(to_string(level), 14) <>
+          String.pad_trailing(to_string(behind), 8) <>
+          checked
+      )
+    end)
+
+    IO.puts("")
+
+    Enum.each(shells, &render_drift_detail/1)
+  end
+
+  defp render_drift_detail(shell) do
+    meta = shell[:drift_meta] || %{}
+
+    case shell[:drift_state] do
+      :risky ->
+        files = Map.get(meta, :overlapping_files, [])
+
+        if files != [] do
+          Format.warn("#{short_drift_id(shell.id)} risky — target files touched on main:")
+          Enum.each(files, fn f -> IO.puts("  #{f}") end)
+        end
+
+      :conflicted ->
+        files = Map.get(meta, :ghost_modified_overlap, [])
+
+        if files != [] do
+          Format.error(
+            "#{short_drift_id(shell.id)} conflicted — ghost-modified files changed on main:"
+          )
+
+          Enum.each(files, fn f -> IO.puts("  #{f}") end)
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp format_drift_time(nil), do: "never"
+
+  defp format_drift_time(%DateTime{} = dt) do
+    secs = DateTime.diff(DateTime.utc_now(), dt, :second)
+
+    cond do
+      secs < 60 -> "#{secs}s ago"
+      secs < 3600 -> "#{div(secs, 60)}m ago"
+      true -> "#{div(secs, 3600)}h ago"
+    end
+  end
+
+  defp format_drift_time(_), do: "-"
+
+  defp short_drift_id(id) when is_binary(id), do: String.slice(id, 0, 14)
+  defp short_drift_id(_), do: "-"
 end

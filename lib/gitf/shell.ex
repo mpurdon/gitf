@@ -27,8 +27,43 @@ defmodule GiTF.Shell do
          worktree_path = build_worktree_path(sector.path, ghost_id),
          {:ok, _path} <- Git.worktree_add(sector.path, worktree_path, branch),
          :ok <- maybe_generate_settings(ghost_id, gitf_root, worktree_path),
-         {:ok, shell} <- insert_cell(sector_id, ghost_id, worktree_path, branch) do
+         base_commit_sha = capture_base_sha(worktree_path),
+         base_ref = detect_base_ref(sector.path),
+         {:ok, shell} <-
+           insert_cell(sector_id, ghost_id, worktree_path, branch, base_commit_sha, base_ref) do
+      GiTF.Telemetry.emit([:gitf, :drift, :base_captured], %{}, %{
+        shell_id: shell.id,
+        sector_id: sector_id,
+        ghost_id: ghost_id,
+        base_commit_sha: base_commit_sha,
+        base_ref: base_ref
+      })
+
       {:ok, shell}
+    end
+  end
+
+  # Captures the base SHA from the worktree itself (race-free — the worktree
+  # is pinned to its own HEAD regardless of what the parent repo is doing).
+  defp capture_base_sha(worktree_path) do
+    case Git.head_sha(worktree_path) do
+      {:ok, sha} ->
+        sha
+
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Shell.create: failed to capture base SHA for #{worktree_path}: #{reason}")
+        nil
+    end
+  end
+
+  # Detects the appropriate base ref in priority order: origin/main, main, master.
+  defp detect_base_ref(sector_path) do
+    cond do
+      match?({:ok, _}, Git.rev_parse(sector_path, "origin/main")) -> "origin/main"
+      Git.branch_exists?(sector_path, "main") -> "main"
+      Git.branch_exists?(sector_path, "master") -> "master"
+      true -> "main"
     end
   end
 
@@ -154,14 +189,19 @@ defmodule GiTF.Shell do
     Path.join([sector_path, "ghosts", ghost_id])
   end
 
-  defp insert_cell(sector_id, ghost_id, worktree_path, branch) do
+  defp insert_cell(sector_id, ghost_id, worktree_path, branch, base_commit_sha, base_ref) do
     record = %{
       sector_id: sector_id,
       ghost_id: ghost_id,
       worktree_path: worktree_path,
       branch: branch,
       status: "active",
-      removed_at: nil
+      removed_at: nil,
+      base_commit_sha: base_commit_sha,
+      base_ref: base_ref,
+      drift_state: :unknown,
+      drift_checked_at: nil,
+      drift_meta: nil
     }
 
     Archive.insert(:shells, record)

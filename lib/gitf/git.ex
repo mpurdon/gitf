@@ -312,6 +312,93 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  Returns the full SHA of HEAD in a repo or worktree.
+  """
+  @spec head_sha(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def head_sha(repo_path), do: rev_parse(repo_path, "HEAD")
+
+  @doc """
+  Resolves a ref to its full SHA via `git rev-parse --verify`.
+  """
+  @spec rev_parse(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def rev_parse(repo_path, ref) do
+    case safe_cmd(["rev-parse", "--verify", ref], cd: repo_path, stderr_to_stdout: true) do
+      {output, 0} -> {:ok, String.trim(output)}
+      {output, _} -> {:error, String.trim(output)}
+    end
+  end
+
+  @doc """
+  Returns the merge-base of two refs.
+  """
+  @spec merge_base(String.t(), String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def merge_base(repo_path, ref_a, ref_b) do
+    case safe_cmd(["merge-base", ref_a, ref_b], cd: repo_path, stderr_to_stdout: true) do
+      {output, 0} -> {:ok, String.trim(output)}
+      {output, _} -> {:error, String.trim(output)}
+    end
+  end
+
+  @doc """
+  Returns true if `ancestor` is an ancestor commit of `descendant`.
+  Returns false on any non-zero exit (including "not an ancestor" and errors).
+  """
+  @spec ancestor?(String.t(), String.t(), String.t()) :: boolean()
+  def ancestor?(repo_path, ancestor, descendant) do
+    case safe_cmd(["merge-base", "--is-ancestor", ancestor, descendant],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {_, 0} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  Fetches updates from a remote. Returns `:ok` or `{:error, reason}`.
+  Intended to be called best-effort; callers should not fail on `:error`.
+  """
+  @spec fetch(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def fetch(repo_path, remote \\ "origin") do
+    case safe_cmd(["fetch", "--quiet", remote], cd: repo_path, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, String.trim(output)}
+    end
+  end
+
+  @doc """
+  Lists files changed between two refs (`git diff --name-only <from>..<to>`).
+  """
+  @spec changed_files_between(String.t(), String.t(), String.t()) ::
+          {:ok, [String.t()]} | {:error, String.t()}
+  def changed_files_between(repo_path, from_ref, to_ref) do
+    case safe_cmd(["diff", "--name-only", "#{from_ref}..#{to_ref}"],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} -> {:ok, String.split(output, "\n", trim: true)}
+      {output, _} -> {:error, String.trim(output)}
+    end
+  end
+
+  @doc """
+  Counts commits in a range (`git rev-list --count <range>`).
+  """
+  @spec count_commits(String.t(), String.t()) :: {:ok, non_neg_integer()} | {:error, String.t()}
+  def count_commits(repo_path, range) do
+    case safe_cmd(["rev-list", "--count", range], cd: repo_path, stderr_to_stdout: true) do
+      {output, 0} ->
+        case Integer.parse(String.trim(output)) do
+          {n, _} -> {:ok, n}
+          _ -> {:error, "unparseable count"}
+        end
+
+      {output, _} ->
+        {:error, String.trim(output)}
+    end
+  end
+
+  @doc """
   Runs a git command with a timeout to prevent hangs.
 
   Wraps `System.cmd/3` in a Task that is killed after `@git_timeout_ms`.

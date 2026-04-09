@@ -51,7 +51,13 @@ defmodule GiTF.Telemetry do
     [:gitf, :store, :data_loss],
     [:gitf, :store, :write_error],
     [:gitf, :model, :downgraded],
-    [:gitf, :conflict, :prevented]
+    [:gitf, :conflict, :prevented],
+    [:gitf, :drift, :base_captured],
+    [:gitf, :drift, :detected],
+    [:gitf, :drift, :state_changed],
+    [:gitf, :drift, :auto_rebased],
+    [:gitf, :drift, :auto_rebase_skipped],
+    [:gitf, :drift, :auto_rebase_failed]
   ]
 
   @doc "Returns all defined telemetry event names."

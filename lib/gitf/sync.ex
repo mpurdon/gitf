@@ -198,6 +198,13 @@ defmodule GiTF.Sync do
     # Clean up any stale sync state from interrupted previous sync
     cleanup_stale_merge_state(repo_path)
 
+    # Fetch remote before merging to catch commits pushed since shell creation.
+    # Non-fatal: local repos without remotes still work.
+    _ = GiTF.Git.fetch(repo_path, "origin")
+
+    # Refresh drift state so post-sync telemetry reflects reality at sync time.
+    _ = GiTF.Drift.check_shell(shell.id)
+
     # Save HEAD before any checkout/sync so we can always roll back
     original_head =
       case get_head(repo_path) do

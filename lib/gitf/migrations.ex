@@ -8,7 +8,7 @@ defmodule GiTF.Migrations do
 
   alias GiTF.Archive
 
-  @current_version 6
+  @current_version 7
 
   @doc """
   Run all pending migrations.
@@ -146,6 +146,25 @@ defmodule GiTF.Migrations do
     Enum.each(ops, fn op ->
       updated = Map.put_new(op, :priority, :normal)
       Archive.put(:ops, updated)
+    end)
+
+    :ok
+  end
+
+  defp run_migration(7) do
+    # Migration 7: Add drift detection fields to shells
+    shells = Archive.all(:shells)
+
+    Enum.each(shells, fn shell ->
+      updated =
+        shell
+        |> Map.put_new(:base_commit_sha, nil)
+        |> Map.put_new(:base_ref, nil)
+        |> Map.put_new(:drift_state, :unknown)
+        |> Map.put_new(:drift_checked_at, nil)
+        |> Map.put_new(:drift_meta, nil)
+
+      Archive.put(:shells, updated)
     end)
 
     :ok

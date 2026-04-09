@@ -137,6 +137,7 @@ defmodule GiTF.Tachikoma do
       prune_worktrees()
       cleanup_orphan_cells()
       cleanup_if_low_disk()
+      check_drift()
     end
 
     # Recompute sector intelligence profiles every 20 patrols (~10 min)
@@ -726,6 +727,41 @@ defmodule GiTF.Tachikoma do
   rescue
     e ->
       Logger.warning("Tachikoma: cleanup_orphan_cells failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp check_drift do
+    results = GiTF.Drift.check_all_active()
+
+    # Auto-rebase :behind shells asynchronously so the patrol isn't blocked
+    Enum.each(results, fn
+      {shell_id, :behind} ->
+        Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+          try do
+            GiTF.Drift.maybe_auto_rebase(shell_id)
+          rescue
+            e ->
+              Logger.debug("Auto-rebase task failed for #{shell_id}: #{Exception.message(e)}")
+          end
+        end)
+
+      _ ->
+        :ok
+    end)
+
+    risky_count = Enum.count(results, fn {_, level} -> level == :risky end)
+    conflicted_count = Enum.count(results, fn {_, level} -> level == :conflicted end)
+
+    if risky_count > 0 or conflicted_count > 0 do
+      Logger.warning(
+        "Drift detected: #{risky_count} risky, #{conflicted_count} conflicted shells"
+      )
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("Tachikoma: check_drift failed: #{Exception.message(e)}")
       :ok
   end
 
