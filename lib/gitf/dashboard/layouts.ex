@@ -603,7 +603,60 @@ defmodule GiTF.Dashboard.Layouts do
             params: { _csrf_token: csrfToken }
           });
           liveSocket.connect();
+
+          // Keyboard shortcuts — press ? to show help
+          const shortcuts = {
+            'g o': '/dashboard/',
+            'g m': '/dashboard/missions',
+            'g g': '/dashboard/ghosts',
+            'g c': '/dashboard/costs',
+            'g t': '/dashboard/timeline',
+            'g h': '/dashboard/health',
+            'g s': '/dashboard/shells',
+            'g a': '/dashboard/approvals',
+            'g p': '/dashboard/progress',
+            'g r': '/dashboard/rollback',
+            'g q': '/dashboard/merges',
+          };
+          let keyBuffer = '';
+          let keyTimer = null;
+          document.addEventListener('keydown', function(e) {
+            // Skip if user is typing in an input
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+            clearTimeout(keyTimer);
+            keyBuffer += e.key;
+            keyTimer = setTimeout(() => { keyBuffer = ''; }, 500);
+            const path = shortcuts[keyBuffer];
+            if (path) {
+              keyBuffer = '';
+              window.location.href = path;
+            }
+            // ? shows shortcuts help
+            if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+              const help = document.getElementById('shortcuts-help');
+              if (help) help.style.display = help.style.display === 'none' ? 'block' : 'none';
+            }
+          });
         </script>
+        <div id="shortcuts-help" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#161b22; border:1px solid #30363d; border-radius:8px; padding:1.5rem; z-index:10000; max-width:400px; box-shadow:0 8px 24px rgba(0,0,0,0.5)">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
+            <span style="color:#f0f6fc; font-weight:600; font-size:1rem">Keyboard Shortcuts</span>
+            <span style="color:#6b7280; font-size:0.8rem">Press ? to toggle</span>
+          </div>
+          <div style="display:grid; grid-template-columns:auto 1fr; gap:0.35rem 1rem; font-size:0.85rem">
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g o</kbd><span style="color:#8b949e">Overview</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g m</kbd><span style="color:#8b949e">Missions</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g g</kbd><span style="color:#8b949e">Ghosts</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g c</kbd><span style="color:#8b949e">Costs</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g t</kbd><span style="color:#8b949e">Timeline</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g h</kbd><span style="color:#8b949e">Health</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g s</kbd><span style="color:#8b949e">Shells</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g a</kbd><span style="color:#8b949e">Approvals</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g p</kbd><span style="color:#8b949e">Activity</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g r</kbd><span style="color:#8b949e">Rollback</span>
+            <kbd style="background:#0d1117; border:1px solid #30363d; border-radius:3px; padding:0.1rem 0.4rem; font-family:monospace; color:#c9d1d9">g q</kbd><span style="color:#8b949e">Merge Queue</span>
+          </div>
+        </div>
       </body>
     </html>
     """

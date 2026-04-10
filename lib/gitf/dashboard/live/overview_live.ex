@@ -250,6 +250,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     socket
     |> assign(:page_title, "Overview")
     |> assign(:current_path, "/")
+    |> assign(:last_updated, DateTime.utc_now())
     |> assign(:dark_factory, dark_factory)
     |> assign(:ghost_count, length(ghosts))
     |> assign(:active_ghosts, active_ghosts)
@@ -385,7 +386,12 @@ defmodule GiTF.Dashboard.OverviewLive do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
-        <h1 class="page-title" style="margin-bottom:0">Dashboard Overview</h1>
+        <div style="display:flex; align-items:baseline; gap:0.75rem">
+          <h1 class="page-title" style="margin-bottom:0">Dashboard Overview</h1>
+          <span style="font-size:0.7rem; color:#484f58" title="Auto-refreshes every 5s">
+            updated {format_timestamp(@last_updated)}
+          </span>
+        </div>
         
         <div style="display:flex; align-items:center; gap:0.75rem; background:#1c2128; border:1px solid #30363d; padding:0.5rem 0.75rem; border-radius:6px">
           <div style="display:flex; flex-direction:column">
