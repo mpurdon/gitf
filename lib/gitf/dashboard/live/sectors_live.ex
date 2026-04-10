@@ -404,6 +404,7 @@ defmodule GiTF.Dashboard.SectorsLive do
               <tr>
                 <th>Name</th>
                 <th>Path</th>
+                <th>Missions</th>
                 <th>Strategy</th>
                 <th>GitHub</th>
                 <th></th>
@@ -418,8 +419,16 @@ defmodule GiTF.Dashboard.SectorsLive do
                       <span class="badge badge-green" style="margin-left:0.5rem">current</span>
                     <% end %>
                   </td>
-                  <td style="font-family:monospace; font-size:0.8rem; color:#8b949e">
+                  <td style="font-family:monospace; font-size:0.8rem; color:#8b949e; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title={Map.get(sector, :path, "-")}>
                     {Map.get(sector, :path, "-")}
+                  </td>
+                  <td style="text-align:center">
+                    <% count = sector_mission_count(sector.id) %>
+                    <%= if count > 0 do %>
+                      <span style="color:#58a6ff; font-size:0.85rem">{count}</span>
+                    <% else %>
+                      <span style="color:#6b7280">0</span>
+                    <% end %>
                   </td>
                   <td>{Map.get(sector, :sync_strategy, "-")}</td>
                   <td>
@@ -449,5 +458,12 @@ defmodule GiTF.Dashboard.SectorsLive do
       </div>
     </.live_component>
     """
+  end
+
+  defp sector_mission_count(sector_id) do
+    GiTF.Archive.filter(:missions, fn m -> m[:sector_id] == sector_id end)
+    |> length()
+  rescue
+    _ -> 0
   end
 end

@@ -247,6 +247,13 @@ defmodule GiTF.Dashboard.OverviewLive do
     # Dark Factory status
     dark_factory = GiTF.Config.dark_factory?()
 
+    health_status =
+      try do
+        GiTF.Observability.Health.check().status
+      rescue
+        _ -> :unknown
+      end
+
     socket
     |> assign(:page_title, "Overview")
     |> assign(:current_path, "/")
@@ -278,6 +285,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:recent_sectors, recent_sectors)
     |> assign(:current_sector_id, current_sector_id)
     |> assign(:recent_missions, recent_missions)
+    |> assign(:health_status, health_status)
   end
 
   @mini_phases (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++ ["completed"]
@@ -388,8 +396,12 @@ defmodule GiTF.Dashboard.OverviewLive do
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
         <div style="display:flex; align-items:baseline; gap:0.75rem">
           <h1 class="page-title" style="margin-bottom:0">Dashboard Overview</h1>
+          <a href="/dashboard/health" style={"display:inline-flex; align-items:center; gap:0.3rem; font-size:0.7rem; color:#{if @health_status == :healthy, do: "#3fb950", else: "#f85149"}; text-decoration:none"} title="System health">
+            <span style={"width:6px; height:6px; border-radius:50%; background:#{if @health_status == :healthy, do: "#3fb950", else: "#f85149"}"}></span>
+            {if @health_status == :healthy, do: "healthy", else: "degraded"}
+          </a>
           <span style="font-size:0.7rem; color:#484f58" title="Auto-refreshes every 5s">
-            updated {format_timestamp(@last_updated)}
+            &middot; updated {format_timestamp(@last_updated)}
           </span>
         </div>
         

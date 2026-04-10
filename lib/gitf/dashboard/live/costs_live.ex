@@ -17,12 +17,19 @@ defmodule GiTF.Dashboard.CostsLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    {:ok, assign_data(socket)}
+    {:ok,
+     socket
+     |> assign(:cost_sort, :spent)
+     |> assign_data()}
   end
 
   @impl true
   def handle_event("refresh", _params, socket) do
     {:noreply, assign_data(socket)}
+  end
+
+  def handle_event("sort_costs", %{"col" => col}, socket) do
+    {:noreply, socket |> assign(:cost_sort, String.to_existing_atom(col)) |> assign_data()}
   end
 
   @impl true
@@ -72,7 +79,7 @@ defmodule GiTF.Dashboard.CostsLive do
           op_count: length(m[:ops] || [])
         }
       end)
-      |> Enum.sort_by(& &1.spent, :desc)
+      |> Enum.sort_by(&Map.get(&1, socket.assigns[:cost_sort] || :spent, 0), :desc)
 
     # Hourly cost trend (last 12 hours)
     hourly_trend = build_hourly_trend(all_costs, 12)
@@ -171,10 +178,11 @@ defmodule GiTF.Dashboard.CostsLive do
             <thead>
               <tr>
                 <th>Mission</th>
-                <th style="text-align:right">Spent</th>
-                <th style="text-align:right">Budget</th>
-                <th style="text-align:right">Remaining</th>
-                <th style="width:120px">Usage</th>
+                <th class="sortable" phx-click="sort_costs" phx-value-col="spent" style="text-align:right">Spent {if @cost_sort == :spent, do: "▼"}</th>
+                <th class="sortable" phx-click="sort_costs" phx-value-col="budget" style="text-align:right">Budget {if @cost_sort == :budget, do: "▼"}</th>
+                <th class="sortable" phx-click="sort_costs" phx-value-col="remaining" style="text-align:right">Remaining {if @cost_sort == :remaining, do: "▼"}</th>
+                <th class="sortable" phx-click="sort_costs" phx-value-col="pct" style="text-align:right">Usage {if @cost_sort == :pct, do: "▼"}</th>
+                <th>Ops</th>
               </tr>
             </thead>
             <tbody>
@@ -190,11 +198,14 @@ defmodule GiTF.Dashboard.CostsLive do
                     {format_cost(m.remaining)}
                   </td>
                   <td>
-                    <div class="cost-bar">
-                      <div class={"cost-bar-fill"} style={"width:#{min(m.pct, 100)}%; background:#{budget_color(m.pct)}"}></div>
+                    <div style="display:flex; align-items:center; gap:0.3rem">
+                      <div class="cost-bar" style="flex:1">
+                        <div class={"cost-bar-fill"} style={"width:#{min(m.pct, 100)}%; background:#{budget_color(m.pct)}"}></div>
+                      </div>
+                      <span style="font-size:0.65rem; color:#8b949e; min-width:32px; text-align:right">{m.pct}%</span>
                     </div>
-                    <div style="font-size:0.65rem; color:#8b949e; text-align:center">{m.pct}%</div>
                   </td>
+                  <td style="text-align:center; font-size:0.8rem; color:#8b949e">{m.op_count}</td>
                 </tr>
               <% end %>
             </tbody>
