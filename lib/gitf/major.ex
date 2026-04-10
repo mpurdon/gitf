@@ -1378,28 +1378,37 @@ defmodule GiTF.Major do
   end
 
   defp check_debriefs do
-    reviews = GiTF.Debrief.active_reviews()
-
-    Enum.each(reviews, fn review ->
-      if GiTF.Debrief.expired?(review) do
-        Logger.info("Post-review expired for mission #{review.mission_id}, closing")
-        GiTF.Debrief.close_review(review.mission_id)
-      else
-        case GiTF.Debrief.check_regressions(review.mission_id) do
-          {:ok, :clean} ->
-            :ok
-
-          {:ok, :regression, findings} ->
-            GiTF.Debrief.handle_regression(review.mission_id, findings)
-
-          {:error, _reason} ->
-            :ok
-        end
-      end
+    # Each review check runs async so validation commands (up to 120s) and
+    # auto-revert (which acquires the sector lock) don't block Major's mailbox.
+    GiTF.Debrief.active_reviews()
+    |> Enum.each(fn review ->
+      Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+        process_debrief_review(review)
+      end)
     end)
   rescue
     e ->
       Logger.warning("Post-review check failed: #{Exception.message(e)}")
+  end
+
+  defp process_debrief_review(review) do
+    if GiTF.Debrief.expired?(review) do
+      Logger.info("Post-review expired for mission #{review.mission_id}, closing")
+      GiTF.Debrief.close_review(review.mission_id)
+    else
+      case GiTF.Debrief.check_regressions(review.mission_id) do
+        {:ok, :regression, findings} ->
+          GiTF.Debrief.handle_regression(review.mission_id, findings)
+
+        _ ->
+          :ok
+      end
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Debrief review for mission #{review.mission_id} failed: #{Exception.message(e)}"
+      )
   end
 
   # -- Private: stall detection ------------------------------------------------

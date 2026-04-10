@@ -528,20 +528,30 @@ defmodule GiTF.Major.Orchestrator do
   defp finalize_merge_to_main(mission) do
     case GiTF.Sync.merge_quest(mission.id) do
       {:ok, quest_branch} ->
-        # merge_quest creates a mission branch — now merge it into main
         sector = Archive.get(:sectors, mission.sector_id)
         repo_path = sector.path
 
+        # Capture pre-merge HEAD so we can audit and (later) revert if needed
+        main_before_sha =
+          case GiTF.Git.head_sha(repo_path) do
+            {:ok, sha} -> sha
+            _ -> nil
+          end
+
         with {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path),
              :ok <- GiTF.Git.checkout(repo_path, main_branch),
-             :ok <- GiTF.Git.sync(repo_path, quest_branch, no_ff: true) do
+             :ok <- GiTF.Git.sync(repo_path, quest_branch, no_ff: true),
+             {:ok, merge_commit_sha} <- GiTF.Git.head_sha(repo_path) do
           GiTF.Missions.store_artifact(mission.id, "sync", %{
             "status" => "success",
             "branch" => quest_branch,
-            "merged_at" => DateTime.utc_now()
+            "merged_at" => DateTime.utc_now(),
+            "merge_commit_sha" => merge_commit_sha,
+            "main_before_sha" => main_before_sha,
+            "main_branch" => main_branch,
+            "revertible" => true
           })
 
-          # Sync done — advance will pick up simplify
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_simplify(mission)
         else

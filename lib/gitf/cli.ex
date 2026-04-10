@@ -2735,6 +2735,25 @@ defmodule GiTF.CLI do
     end
   end
 
+  # -- Rollback ---------------------------------------------------------------
+
+  defp dispatch([:rollback], result) do
+    mission_id = result_get(result, :args, :mission_id)
+    force = result_get(result, :flags, :force) || false
+
+    case GiTF.Rollback.can_revert?(mission_id) do
+      {:ok, info} ->
+        execute_rollback(mission_id, info, false)
+
+      {:error, :stale_window} when force ->
+        Format.warn("Mission is past the revert window, but --force given. Proceeding.")
+        execute_rollback(mission_id, nil, true)
+
+      {:error, reason} ->
+        Format.error("Cannot revert mission #{mission_id}: #{reason}")
+    end
+  end
+
   # -- Phase 5: Validate ------------------------------------------------------
 
   defp dispatch([:validate], result) do
@@ -4337,6 +4356,24 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
+        rollback: [
+          name: "rollback",
+          about: "Revert a mission's merge commit (creates a git revert, never resets)",
+          args: [
+            mission_id: [
+              value_name: "MISSION_ID",
+              help: "Mission ID whose merge to revert",
+              required: true,
+              parser: :string
+            ]
+          ],
+          flags: [
+            force: [
+              long: "--force",
+              help: "Bypass the revert window check (still requires merge_commit_sha)"
+            ]
+          ]
+        ],
         validate: [
           name: "validate",
           about: "Run validation on a ghost's completed work",
@@ -4535,4 +4572,27 @@ defmodule GiTF.CLI do
 
   defp short_drift_id(id) when is_binary(id), do: String.slice(id, 0, 14)
   defp short_drift_id(_), do: "-"
+
+  # -- Rollback helpers --------------------------------------------------------
+
+  defp execute_rollback(mission_id, info, force) do
+    if info do
+      Format.info(
+        "Reverting merge #{String.slice(info.merge_commit_sha, 0, 12)} for mission #{mission_id}"
+      )
+    else
+      Format.info("Reverting mission #{mission_id} (force mode)")
+    end
+
+    case GiTF.Rollback.revert_merge(mission_id, force: force) do
+      {:ok, %{revert_sha: sha, pushed: true}} ->
+        Format.success("Reverted: #{String.slice(sha, 0, 12)} (pushed to origin)")
+
+      {:ok, %{revert_sha: sha, pushed: false}} ->
+        Format.success("Reverted: #{String.slice(sha, 0, 12)} (local only — push manually)")
+
+      {:error, reason} ->
+        Format.error("Revert failed: #{reason}")
+    end
+  end
 end

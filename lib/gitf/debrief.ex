@@ -97,18 +97,12 @@ defmodule GiTF.Debrief do
   @spec handle_regression(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def handle_regression(mission_id, findings) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
-      # Create follow-up mission
-      {:ok, followup} =
-        GiTF.Missions.create(%{
-          goal: "Fix regression from mission \"#{mission.name}\"",
-          sector_id: mission.sector_id
-        })
-
-      # Apply trust penalty and invalidate sector intelligence profile
       GiTF.Trust.apply_regression_penalty(mission_id)
       GiTF.Intel.SectorProfile.invalidate(mission.sector_id)
 
-      # Update review record
+      revert_result = maybe_auto_revert(mission_id)
+      {:ok, followup} = create_followup_mission(mission, findings, revert_result)
+
       update_review(mission_id, %{
         status: "regression_detected",
         outcome: %{
@@ -118,23 +112,77 @@ defmodule GiTF.Debrief do
         }
       })
 
-      # Broadcast alert (best-effort)
       try do
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "section:alerts",
-          {:regression_detected, mission_id, followup.id}
+          {:regression_detected, mission_id, followup.id, revert_result}
         )
       rescue
         _ -> :ok
       end
 
       Logger.warning(
-        "Regression detected for mission #{mission_id}, follow-up mission #{followup.id} created"
+        "Regression detected for mission #{mission_id} (revert: #{format_revert_result(revert_result)}), follow-up #{followup.id} created"
       )
 
       {:ok, followup}
     end
+  end
+
+  defp maybe_auto_revert(mission_id) do
+    if auto_revert_enabled?() do
+      case GiTF.Rollback.revert_merge(mission_id) do
+        {:ok, info} -> {:reverted, info}
+        {:error, reason} -> {:not_reverted, reason}
+      end
+    else
+      {:not_reverted, :disabled}
+    end
+  rescue
+    e ->
+      Logger.warning("Auto-revert crashed: #{Exception.message(e)}")
+      {:not_reverted, :crashed}
+  end
+
+  defp auto_revert_enabled? do
+    GiTF.Config.Provider.get([:debrief, :auto_revert]) != false
+  end
+
+  defp create_followup_mission(mission, findings, revert_result) do
+    description =
+      """
+      ## Regression Context
+
+      The previous mission's merge was found to introduce a regression.
+
+      **Mission:** #{mission.name || mission.id}
+
+      **Validation findings:**
+      ```
+      #{String.slice(findings || "", 0, 2000)}
+      ```
+
+      **Revert status:** #{format_revert_result(revert_result)}
+      """
+      |> String.trim()
+
+    GiTF.Missions.create(%{
+      goal: "Fix regression from mission \"#{mission.name || mission.id}\"",
+      description: description,
+      sector_id: mission.sector_id,
+      priority: :high
+    })
+  end
+
+  defp format_revert_result({:reverted, info}) do
+    sha = String.slice(info[:revert_sha] || "", 0, 12)
+    suffix = if info[:pushed], do: " (pushed)", else: " (local only)"
+    "REVERTED — created revert commit #{sha}#{suffix}"
+  end
+
+  defp format_revert_result({:not_reverted, reason}) do
+    "NOT REVERTED (#{reason})"
   end
 
   @doc """
