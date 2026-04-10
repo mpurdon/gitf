@@ -197,16 +197,32 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     case GiTF.Missions.get(id) do
       {:ok, mission} ->
-        # Budget utilization
+        # Budget utilization + forecast
         budget_info =
           try do
             budget = GiTF.Budget.budget_for(id)
             spent = GiTF.Budget.spent_for(id)
             remaining = GiTF.Budget.remaining(id)
             pct = if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
-            %{budget: budget, spent: spent, remaining: remaining, pct: pct}
+
+            # Estimate: cost per completed op * remaining ops
+            ops = GiTF.Ops.list(mission_id: id)
+            done = Enum.count(ops, &(&1.status in ["done", "failed"]))
+            pending = Enum.count(ops, &(&1.status in ["pending", "running", "assigned", "blocked"]))
+            cost_per_op = if done > 0, do: Float.round(spent / done, 4), else: 0.0
+            estimated_remaining = Float.round(cost_per_op * pending, 4)
+
+            %{
+              budget: budget,
+              spent: spent,
+              remaining: remaining,
+              pct: pct,
+              estimated_remaining: estimated_remaining,
+              pending_ops: pending,
+              done_ops: done
+            }
           rescue
-            _ -> %{budget: 0, spent: 0, remaining: 0, pct: 0.0}
+            _ -> %{budget: 0, spent: 0, remaining: 0, pct: 0.0, estimated_remaining: 0, pending_ops: 0, done_ops: 0}
           end
 
         # Rollback status
@@ -577,6 +593,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <span>{@budget_info.pct}% used</span>
             <span>{format_cost(@budget_info.remaining)} remaining</span>
           </div>
+          <%= if @budget_info.estimated_remaining > 0 do %>
+            <div style="margin-top:0.4rem; font-size:0.7rem; color:#8b949e; border-top:1px solid #21262d; padding-top:0.3rem">
+              Est. {format_cost(@budget_info.estimated_remaining)} more
+              <span style="color:#484f58">({@budget_info.pending_ops} ops @ {format_cost(if @budget_info.done_ops > 0, do: @budget_info.spent / @budget_info.done_ops, else: 0)}/op)</span>
+            </div>
+          <% end %>
           <div style="display:flex; gap:0.4rem; margin-top:0.5rem; align-items:center">
             <span class={"badge #{case @priority do
               :critical -> "badge-red"

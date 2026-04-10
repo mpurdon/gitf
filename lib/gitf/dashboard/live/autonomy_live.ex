@@ -12,6 +12,26 @@ defmodule GiTF.Dashboard.AutonomyLive do
         _ -> []
       end
 
+    scaling =
+      try do
+        status = GiTF.Major.status()
+
+        %{
+          max_ghosts: Map.get(status, :max_ghosts, "?"),
+          effective_max: Map.get(status, :effective_max_ghosts, "?"),
+          active_ghosts: map_size(Map.get(status, :active_ghosts, %{}))
+        }
+      rescue
+        _ -> %{max_ghosts: "?", effective_max: "?", active_ghosts: 0}
+      end
+
+    budget_util =
+      try do
+        Float.round(GiTF.Autonomy.max_budget_utilization() * 100, 1)
+      rescue
+        _ -> 0.0
+      end
+
     {:ok,
      socket
      |> assign(:page_title, "Autonomy")
@@ -21,7 +41,9 @@ defmodule GiTF.Dashboard.AutonomyLive do
      |> assign(:heal_result, nil)
      |> assign(:optimize_result, nil)
      |> assign(:predict_result, nil)
-     |> assign(:loading, nil)}
+     |> assign(:loading, nil)
+     |> assign(:scaling, scaling)
+     |> assign(:budget_util, budget_util)}
   end
 
   @impl true
@@ -73,6 +95,35 @@ defmodule GiTF.Dashboard.AutonomyLive do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
       <h1 class="page-title">Autonomy</h1>
+
+      <%!-- Scaling status --%>
+      <div class="panel" style="margin-bottom:1rem">
+        <div class="panel-title">Auto-Scaling Status</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:0.75rem; margin-top:0.5rem">
+          <div>
+            <div style="font-size:0.7rem; color:#6b7280">Effective Ghost Cap</div>
+            <div style="font-size:1.2rem; font-weight:600; color:#58a6ff">{@scaling.effective_max} <span style="font-size:0.8rem; color:#6b7280">/ {@scaling.max_ghosts}</span></div>
+          </div>
+          <div>
+            <div style="font-size:0.7rem; color:#6b7280">Active Ghosts</div>
+            <div style="font-size:1.2rem; font-weight:600; color:#3fb950">{@scaling.active_ghosts}</div>
+          </div>
+          <div>
+            <div style="font-size:0.7rem; color:#6b7280">Budget Pressure</div>
+            <div style={"font-size:1.2rem; font-weight:600; color:#{cond do
+              @budget_util >= 85 -> "#f85149"
+              @budget_util >= 70 -> "#d29922"
+              true -> "#3fb950"
+            end}"}>{@budget_util}%</div>
+          </div>
+          <div>
+            <div style="font-size:0.7rem; color:#6b7280">Scaling Curve</div>
+            <div style="font-size:0.8rem; color:#8b949e; margin-top:0.2rem">
+              &lt;70%: full &middot; 70%: 0.75x &middot; 85%: 0.5x &middot; 95%: crawl
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:1rem">
         <%!-- Self-Heal --%>
