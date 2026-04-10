@@ -136,6 +136,9 @@ defmodule GiTF.Dashboard.ProgressLive do
                     <%= if activity.op_title do %>
                       <div style="color:#c9d1d9; font-size:0.85rem; margin-bottom:0.35rem">
                         <a href={"/dashboard/ops/#{activity.op_id}"} style="color:#58a6ff">{truncate(activity.op_title, 80)}</a>
+                        <%= if activity.mission_id do %>
+                          <a href={"/dashboard/missions/#{activity.mission_id}"} style="color:#6b7280; font-size:0.75rem; margin-left:0.5rem">mission &rarr;</a>
+                        <% end %>
                       </div>
                     <% end %>
 

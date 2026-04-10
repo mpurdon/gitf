@@ -70,7 +70,7 @@ defmodule GiTF.Dashboard.Layouts do
           }
 
           /* -- Main content -------------------------------------------------- */
-          .main { padding: 1.5rem 2rem; max-width: 100%; }
+          .main { padding: 1.5rem 2rem; max-width: 100%; position: relative; }
           .page-title {
             font-size: 1.5rem;
             font-weight: 600;
