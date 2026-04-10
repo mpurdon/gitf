@@ -16,6 +16,27 @@ defmodule GiTF.Dashboard.AppLayout do
   @prefix "/dashboard"
 
   @impl true
+  def update(assigns, socket) do
+    # Subscribe on first mount
+    if not Map.get(socket.assigns, :subscribed, false) do
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "section:alerts")
+    end
+
+    {:ok,
+     socket
+     |> assign(assigns)
+     |> assign_new(:subscribed, fn -> true end)
+     |> assign_new(:toasts, fn -> Map.get(assigns, :toasts, []) end)}
+  end
+
+  @impl true
+  def handle_event("dismiss_toast", %{"id" => id}, socket) do
+    toasts = Enum.reject(socket.assigns.toasts, &(&1.id == id))
+    {:noreply, assign(socket, :toasts, toasts)}
+  end
+
+  @impl true
   def render(assigns) do
     pending_count =
       try do
@@ -94,6 +115,23 @@ defmodule GiTF.Dashboard.AppLayout do
         </div>
         {render_slot(@inner_block)}
       </main>
+
+      <%!-- Toast notifications --%>
+      <%= if @toasts != [] do %>
+        <div class="toast-container">
+          <%= for toast <- Enum.take(@toasts, 5) do %>
+            <div class={"toast toast-#{toast.level}"}>
+              <span style="flex:1">{toast.message}</span>
+              <button
+                phx-click="dismiss_toast"
+                phx-value-id={toast.id}
+                phx-target={@myself}
+                style="background:none; border:none; color:#6b7280; cursor:pointer; font-size:1rem; padding:0; line-height:1"
+              >&times;</button>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
     </div>
     """
   end

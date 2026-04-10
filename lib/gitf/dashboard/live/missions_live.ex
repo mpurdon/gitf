@@ -31,6 +31,8 @@ defmodule GiTF.Dashboard.MissionsLive do
      |> assign(:missions, missions)
      |> assign(:search, "")
      |> assign(:status_filter, "all")
+     |> assign(:sort_by, :priority)
+     |> assign(:sort_dir, :asc)
      |> assign(:expanded, MapSet.new())}
   end
 
@@ -71,6 +73,19 @@ defmodule GiTF.Dashboard.MissionsLive do
     {:noreply, socket |> assign(:status_filter, status) |> apply_filters()}
   end
 
+  def handle_event("sort", %{"col" => col}, socket) do
+    col = String.to_existing_atom(col)
+
+    dir =
+      if socket.assigns.sort_by == col do
+        if socket.assigns.sort_dir == :asc, do: :desc, else: :asc
+      else
+        :asc
+      end
+
+    {:noreply, socket |> assign(:sort_by, col) |> assign(:sort_dir, dir) |> apply_filters()}
+  end
+
   def handle_event("start", %{"id" => id}, socket) do
     case GiTF.Major.Orchestrator.start_quest(id) do
       {:ok, _} ->
@@ -91,11 +106,12 @@ defmodule GiTF.Dashboard.MissionsLive do
   defp apply_filters(socket) do
     search = String.downcase(socket.assigns.search || "")
     status_filter = socket.assigns.status_filter
+    sort_by = socket.assigns.sort_by
+    sort_dir = socket.assigns.sort_dir
 
     filtered =
       socket.assigns.all_missions
       |> Enum.filter(fn m ->
-        # Status filter
         status_match =
           case status_filter do
             "all" -> true
@@ -105,7 +121,6 @@ defmodule GiTF.Dashboard.MissionsLive do
             _ -> true
           end
 
-        # Search filter
         search_match =
           if search == "" do
             true
@@ -117,8 +132,24 @@ defmodule GiTF.Dashboard.MissionsLive do
 
         status_match and search_match
       end)
+      |> sort_missions(sort_by, sort_dir)
 
     assign(socket, :missions, filtered)
+  end
+
+  defp sort_missions(missions, col, dir) do
+    sorter =
+      case col do
+        :priority -> &GiTF.Priority.weight(&1.effective_priority)
+        :status -> &Map.get(&1, :status, "")
+        :phase -> &Map.get(&1, :current_phase, "")
+        :budget -> &(&1.budget_pct)
+        :name -> &(Map.get(&1, :name, "") || "")
+        _ -> &GiTF.Priority.weight(&1.effective_priority)
+      end
+
+    sorted = Enum.sort_by(missions, sorter)
+    if dir == :desc, do: Enum.reverse(sorted), else: sorted
   end
 
   defp load_quests do
@@ -149,11 +180,14 @@ defmodule GiTF.Dashboard.MissionsLive do
 
       Map.merge(m, %{effective_priority: priority, budget_pct: budget_pct})
     end)
-    |> Enum.sort_by(fn m ->
-      # Active missions first, then by priority weight, then by insert time
-      active = if Map.get(m, :status) in GiTF.Missions.active_statuses(), do: 0, else: 1
-      {active, GiTF.Priority.weight(m.effective_priority)}
-    end)
+  end
+
+  defp sort_arrow(current_col, dir, col) do
+    if current_col == col do
+      if dir == :asc, do: "▲", else: "▼"
+    else
+      ""
+    end
   end
 
   @impl true
@@ -207,11 +241,11 @@ defmodule GiTF.Dashboard.MissionsLive do
               <tr>
                 <th></th>
                 <th>ID</th>
-                <th>Name</th>
-                <th>Priority</th>
-                <th>Status</th>
-                <th>Phase</th>
-                <th>Budget</th>
+                <th class="sortable" phx-click="sort" phx-value-col="name">Name {sort_arrow(@sort_by, @sort_dir, :name)}</th>
+                <th class="sortable" phx-click="sort" phx-value-col="priority">Priority {sort_arrow(@sort_by, @sort_dir, :priority)}</th>
+                <th class="sortable" phx-click="sort" phx-value-col="status">Status {sort_arrow(@sort_by, @sort_dir, :status)}</th>
+                <th class="sortable" phx-click="sort" phx-value-col="phase">Phase {sort_arrow(@sort_by, @sort_dir, :phase)}</th>
+                <th class="sortable" phx-click="sort" phx-value-col="budget">Budget {sort_arrow(@sort_by, @sort_dir, :budget)}</th>
                 <th>Jobs</th>
                 <th></th>
               </tr>

@@ -186,6 +186,63 @@ defmodule GiTF.Dashboard.Helpers do
   def status_icon_class(_), do: "pending"
 
   @doc """
+  Pushes a toast notification onto the socket's layout component.
+  Call from any LiveView's `handle_info` to surface real-time events.
+
+  Toasts auto-expire after 8 seconds via a self-sent message.
+  """
+  def push_toast(socket, level, message) when level in [:success, :warning, :error, :info] do
+    toast = %{
+      id: "toast-#{:erlang.unique_integer([:positive])}",
+      level: level,
+      message: message,
+      at: DateTime.utc_now()
+    }
+
+    toasts = [toast | Map.get(socket.assigns, :toasts, [])] |> Enum.take(5)
+    # Schedule auto-dismiss
+    Process.send_after(self(), {:dismiss_toast, toast.id}, 8_000)
+    assign(socket, :toasts, toasts)
+  end
+
+  @doc "Handles the auto-dismiss timer. Call from `handle_info`."
+  def handle_dismiss_toast(socket, toast_id) do
+    toasts = Enum.reject(Map.get(socket.assigns, :toasts, []), &(&1.id == toast_id))
+    assign(socket, :toasts, toasts)
+  end
+
+  @doc """
+  Converts a PubSub waggle message into a toast if it's notable.
+  Returns `{:toast, socket}` or `:skip`.
+  """
+  def maybe_toast_waggle(socket, %{subject: subject} = waggle) do
+    case subject do
+      "job_complete" ->
+        {:toast, push_toast(socket, :success, "Op completed: #{waggle[:body] || waggle.from}")}
+
+      "job_failed" ->
+        {:toast, push_toast(socket, :error, "Op failed: #{waggle[:body] || waggle.from}")}
+
+      "quest_advance" ->
+        {:toast, push_toast(socket, :info, "Mission advancing: #{waggle[:body] || ""}")}
+
+      "human_approval" ->
+        {:toast, push_toast(socket, :warning, "Approval needed")}
+
+      "merge_failed" ->
+        {:toast, push_toast(socket, :error, "Merge failed: #{waggle[:body] || waggle.from}")}
+
+      "pr_created" ->
+        {:toast, push_toast(socket, :success, "PR created")}
+
+      _ ->
+        :skip
+    end
+  end
+
+  def maybe_toast_waggle(_socket, _), do: :skip
+
+  @doc """
   Renders a breadcrumb trail. Each crumb is `{label, href}`, the last has no link.
 
   Usage: `<.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {"My Mission", nil}]} />`

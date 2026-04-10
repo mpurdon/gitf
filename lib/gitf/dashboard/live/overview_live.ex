@@ -27,7 +27,10 @@ defmodule GiTF.Dashboard.OverviewLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    {:ok, assign_data(socket)}
+    {:ok,
+     socket
+     |> assign(:toasts, [])
+     |> assign_data()}
   end
 
   @impl true
@@ -36,8 +39,18 @@ defmodule GiTF.Dashboard.OverviewLive do
     {:noreply, assign_data(socket)}
   end
 
-  def handle_info({:waggle_received, _waggle}, socket) do
+  def handle_info({:waggle_received, waggle}, socket) do
+    socket =
+      case maybe_toast_waggle(socket, waggle) do
+        {:toast, s} -> s
+        :skip -> socket
+      end
+
     {:noreply, assign_data(socket)}
+  end
+
+  def handle_info({:dismiss_toast, toast_id}, socket) do
+    {:noreply, handle_dismiss_toast(socket, toast_id)}
   end
 
   def handle_info({:op_updated, _op}, socket) do
@@ -370,7 +383,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
         <h1 class="page-title" style="margin-bottom:0">Dashboard Overview</h1>
         

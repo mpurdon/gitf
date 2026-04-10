@@ -356,6 +356,43 @@ defmodule GiTF.Dashboard.Layouts do
           /* -- Badge orange -------------------------------------------------- */
           .badge-orange { background: #d2992233; color: #d29922; }
 
+          /* -- Toast notifications -------------------------------------------- */
+          .toast-container {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 0.5rem;
+            max-width: 380px;
+          }
+          .toast {
+            padding: 0.65rem 1rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            animation: toast-in 0.3s ease-out;
+            border: 1px solid #30363d;
+            background: #161b22;
+            color: #c9d1d9;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          }
+          .toast-success { border-left: 3px solid #3fb950; }
+          .toast-warning { border-left: 3px solid #d29922; }
+          .toast-error { border-left: 3px solid #f85149; }
+          .toast-info { border-left: 3px solid #58a6ff; }
+          @keyframes toast-in {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+
+          /* -- Sortable columns ----------------------------------------------- */
+          th.sortable { cursor: pointer; user-select: none; }
+          th.sortable:hover { color: #58a6ff; }
+
           /* -- Timeline ------------------------------------------------------ */
           .timeline { position: relative; padding-left: 1.5rem; }
           .timeline-item {

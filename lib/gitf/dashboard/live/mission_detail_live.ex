@@ -38,6 +38,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:report, nil)
          |> assign(:report_loading, false)
          |> assign(:sectors, load_sectors())
+         |> assign(:toasts, [])
          |> assign(:budget_info, %{budget: 0, spent: 0, remaining: 0, pct: 0.0})
          |> assign(:rollback_status, :unknown)
          |> assign(:priority, :normal)
@@ -58,7 +59,19 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     {:noreply, reload(socket)}
   end
 
-  def handle_info({:waggle_received, _}, socket), do: {:noreply, reload(socket)}
+  def handle_info({:waggle_received, waggle}, socket) do
+    socket =
+      case maybe_toast_waggle(socket, waggle) do
+        {:toast, s} -> s
+        :skip -> socket
+      end
+
+    {:noreply, reload(socket)}
+  end
+
+  def handle_info({:dismiss_toast, toast_id}, socket) do
+    {:noreply, handle_dismiss_toast(socket, toast_id)}
+  end
 
   def handle_info({ref, {:report, result}}, socket) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
@@ -337,7 +350,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
       |> Map.put(:phases, @phases)
 
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
 
       <%!-- Header (full width) --%>
       <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), nil}]} />
