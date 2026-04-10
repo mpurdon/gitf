@@ -88,12 +88,12 @@ defmodule GiTF.Dashboard.PlanLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), "/dashboard/missions/#{@mission.id}"}, {"Plan", nil}]} />
 
     <%!-- Header --%>
     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem">
       <div>
         <h1 class="page-title" style="margin-bottom:0.25rem">
-          <a href={"/dashboard/missions/#{@mission.id}"} style="color:#8b949e; text-decoration:none; margin-right:0.4rem; font-size:0.9em" title="Back to Mission">‹</a>
           Plan: {Map.get(@mission, :name, "Mission")}
         </h1>
         <div style="color:#8b949e; font-size:0.85rem; max-width:700px">{@mission[:goal]}</div>

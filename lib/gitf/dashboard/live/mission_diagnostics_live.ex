@@ -284,6 +284,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+      <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), "/dashboard/missions/#{@mission.id}"}, {"Diagnostics", nil}]} />
       <%!-- Header --%>
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem">
         <div>

@@ -121,6 +121,7 @@ defmodule GiTF.Dashboard.DesignLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), "/dashboard/missions/#{@mission.id}"}, {"Design", nil}]} />
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
       <div>

@@ -88,10 +88,17 @@ defmodule GiTF.Dashboard.OpDetailLive do
           end)
       end
 
+    mission =
+      case op[:mission_id] do
+        nil -> nil
+        mid -> GiTF.Archive.get(:missions, mid)
+      end
+
     socket
     |> assign(:retry_chain, retry_chain)
     |> assign(:ghost, ghost)
     |> assign(:shell, shell)
+    |> assign(:mission, mission)
   end
 
   defp build_retry_chain(op) do
@@ -145,6 +152,11 @@ defmodule GiTF.Dashboard.OpDetailLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+      <.breadcrumbs crumbs={[
+        {"Missions", "/dashboard/missions"},
+        {(@mission && Map.get(@mission, :name)) || "Mission", @op[:mission_id] && "/dashboard/missions/#{@op.mission_id}"},
+        {Map.get(@op, :title, "Op"), nil}
+      ]} />
       <%!-- Header --%>
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem">
         <div>

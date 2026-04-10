@@ -53,16 +53,21 @@ defmodule GiTF.Dashboard.Layouts do
             letter-spacing: 0.5px;
           }
           .nav-brand span { color: #d29922; }
-          .nav-links { display: flex; gap: 0.25rem; }
+          .nav-links { display: flex; gap: 0.15rem; flex-wrap: wrap; align-items: center; }
           .nav-links a {
-            padding: 0.4rem 0.85rem;
+            padding: 0.35rem 0.65rem;
             border-radius: 6px;
             color: #8b949e;
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             transition: background 0.15s, color 0.15s;
           }
           .nav-links a:hover { background: #1f2937; color: #c9d1d9; text-decoration: none; }
           .nav-links a.active { background: #1f6feb33; color: #58a6ff; }
+          .nav-sep { width: 1px; height: 18px; background: #30363d; margin: 0 0.25rem; flex-shrink: 0; }
+          .nav-activity {
+            display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+            margin-right: 0.25rem; vertical-align: middle;
+          }
 
           /* -- Main content -------------------------------------------------- */
           .main { padding: 1.5rem 2rem; max-width: 100%; }

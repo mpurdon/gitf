@@ -340,9 +340,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
 
       <%!-- Header (full width) --%>
+      <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), nil}]} />
       <div style="margin-bottom:1.25rem">
           <h1 class="page-title" style="margin-bottom:0.25rem">
-            <a href="/dashboard/missions" style="color:#8b949e; text-decoration:none; margin-right:0.4rem; font-size:0.9em" title="Back to Missions">‹</a>
             {Map.get(@mission, :name, "Mission")}
           </h1>
           <div class={"goal-text #{if @show_full_goal, do: "goal-text-full"}"}>

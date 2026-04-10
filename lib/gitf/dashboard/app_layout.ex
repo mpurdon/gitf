@@ -2,11 +2,16 @@ defmodule GiTF.Dashboard.AppLayout do
   @moduledoc """
   LiveComponent that renders the navigation bar and wraps page content.
 
-  Used as a live_component from each LiveView page so the navigation
-  state (active link highlighting) updates without a full page reload.
+  Navigation is organized into logical groups:
+  - Core: Overview, Missions, Ghosts, Ops activity
+  - Pipeline: Costs, Models, Approvals, Merges
+  - Infrastructure: Sectors, Shells, Providers
+  - Observability: Timeline, Health, Rollback, Autonomy
   """
 
   use Phoenix.LiveComponent
+
+  require GiTF.Ghost.Status, as: GhostStatus
 
   @prefix "/dashboard"
 
@@ -19,36 +24,63 @@ defmodule GiTF.Dashboard.AppLayout do
         _ -> 0
       end
 
+    active_ghosts =
+      try do
+        GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+      rescue
+        _ -> 0
+      end
+
     assigns =
       assigns
       |> assign(:pending_approvals, pending_count)
+      |> assign(:active_ghosts, active_ghosts)
       |> assign(:prefix, @prefix)
 
     ~H"""
     <div>
       <nav class="nav">
-        <div class="nav-brand"><a href="/" style="color:inherit;text-decoration:none">The <span>GiTF</span></a> <span style="font-size:0.7rem;color:#6b7280;font-weight:400;margin-left:0.4rem">v<%= GiTF.version() %></span></div>
+        <div class="nav-brand">
+          <a href="/" style="color:inherit;text-decoration:none">The <span>GiTF</span></a>
+          <span style="font-size:0.65rem;color:#6b7280;font-weight:400;margin-left:0.3rem">v<%= GiTF.version() %></span>
+          <%= if @active_ghosts > 0 do %>
+            <span class="nav-activity pulse" style="background:#3fb950; margin-left:0.4rem" title={"#{@active_ghosts} ghost(s) working"}></span>
+          <% end %>
+        </div>
         <div class="nav-links">
+          <%!-- Core --%>
           <a href={@prefix} class={if @current_path == "/", do: "active"}>Overview</a>
           <a href={"#{@prefix}/missions"} class={if active?(@current_path, "/missions"), do: "active"}>Missions</a>
           <a href={"#{@prefix}/ghosts"} class={if @current_path == "/ghosts", do: "active"}>Ghosts</a>
+          <a href={"#{@prefix}/progress"} class={if @current_path == "/progress", do: "active"}>Activity</a>
+
+          <div class="nav-sep"></div>
+
+          <%!-- Pipeline --%>
           <a href={"#{@prefix}/costs"} class={if @current_path == "/costs", do: "active"}>Costs</a>
           <a href={"#{@prefix}/models"} class={if @current_path == "/models", do: "active"}>Models</a>
-          <a href={"#{@prefix}/links"} class={if @current_path == "/links", do: "active"}>Links</a>
           <a href={"#{@prefix}/approvals"} class={if active?(@current_path, "/approvals"), do: "active"}>
             Approvals
             <%= if @pending_approvals > 0 do %>
               <span class="nav-badge nav-badge-orange">{@pending_approvals}</span>
             <% end %>
           </a>
+          <a href={"#{@prefix}/merges"} class={if @current_path == "/merges", do: "active"}>Merges</a>
+
+          <div class="nav-sep"></div>
+
+          <%!-- Infrastructure --%>
           <a href={"#{@prefix}/sectors"} class={if @current_path == "/sectors", do: "active"}>Sectors</a>
           <a href={"#{@prefix}/shells"} class={if @current_path == "/shells", do: "active"}>Shells</a>
-          <a href={"#{@prefix}/timeline"} class={if active?(@current_path, "/timeline"), do: "active"}>Timeline</a>
-          <a href={"#{@prefix}/merges"} class={if @current_path == "/merges", do: "active"}>Merges</a>
-          <a href={"#{@prefix}/rollback"} class={if @current_path == "/rollback", do: "active"}>Rollback</a>
-          <a href={"#{@prefix}/health"} class={if @current_path == "/health", do: "active"}>Health</a>
-          <a href={"#{@prefix}/autonomy"} class={if @current_path == "/autonomy", do: "active"}>Autonomy</a>
           <a href={"#{@prefix}/providers"} class={if @current_path == "/providers", do: "active"}>Providers</a>
+
+          <div class="nav-sep"></div>
+
+          <%!-- Observability --%>
+          <a href={"#{@prefix}/timeline"} class={if active?(@current_path, "/timeline"), do: "active"}>Timeline</a>
+          <a href={"#{@prefix}/health"} class={if @current_path == "/health", do: "active"}>Health</a>
+          <a href={"#{@prefix}/links"} class={if @current_path == "/links", do: "active"}>Links</a>
+          <a href={"#{@prefix}/rollback"} class={if @current_path == "/rollback", do: "active"}>Rollback</a>
         </div>
       </nav>
       <main class="main">

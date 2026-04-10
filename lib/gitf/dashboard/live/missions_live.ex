@@ -27,18 +27,23 @@ defmodule GiTF.Dashboard.MissionsLive do
      socket
      |> assign(:page_title, "Missions")
      |> assign(:current_path, "/missions")
+     |> assign(:all_missions, missions)
      |> assign(:missions, missions)
+     |> assign(:search, "")
+     |> assign(:status_filter, "all")
      |> assign(:expanded, MapSet.new())}
   end
 
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_interval)
-    {:noreply, assign(socket, :missions, load_quests())}
+    missions = load_quests()
+    {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
   end
 
   def handle_info({:waggle_received, _waggle}, socket) do
-    {:noreply, assign(socket, :missions, load_quests())}
+    missions = load_quests()
+    {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
   end
 
   @impl true
@@ -54,7 +59,16 @@ defmodule GiTF.Dashboard.MissionsLive do
   end
 
   def handle_event("refresh", _params, socket) do
-    {:noreply, assign(socket, :missions, load_quests())}
+    missions = load_quests()
+    {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
+  end
+
+  def handle_event("search", %{"q" => query}, socket) do
+    {:noreply, socket |> assign(:search, query) |> apply_filters()}
+  end
+
+  def handle_event("filter_status", %{"status" => status}, socket) do
+    {:noreply, socket |> assign(:status_filter, status) |> apply_filters()}
   end
 
   def handle_event("start", %{"id" => id}, socket) do
@@ -72,6 +86,39 @@ defmodule GiTF.Dashboard.MissionsLive do
 
   def handle_event("navigate", %{"id" => id}, socket) do
     {:noreply, push_navigate(socket, to: "/dashboard/missions/#{id}")}
+  end
+
+  defp apply_filters(socket) do
+    search = String.downcase(socket.assigns.search || "")
+    status_filter = socket.assigns.status_filter
+
+    filtered =
+      socket.assigns.all_missions
+      |> Enum.filter(fn m ->
+        # Status filter
+        status_match =
+          case status_filter do
+            "all" -> true
+            "active" -> Map.get(m, :status) in GiTF.Missions.active_statuses()
+            "completed" -> Map.get(m, :status) == "completed"
+            "failed" -> Map.get(m, :status) == "failed"
+            _ -> true
+          end
+
+        # Search filter
+        search_match =
+          if search == "" do
+            true
+          else
+            name = String.downcase(Map.get(m, :name, "") || "")
+            goal = String.downcase(Map.get(m, :goal, "") || "")
+            String.contains?(name, search) or String.contains?(goal, search)
+          end
+
+        status_match and search_match
+      end)
+
+    assign(socket, :missions, filtered)
   end
 
   defp load_quests do
@@ -113,11 +160,38 @@ defmodule GiTF.Dashboard.MissionsLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <h1 class="page-title" style="margin-bottom:0">Missions</h1>
         <div style="display:flex; gap:0.5rem">
           <a href="/dashboard/missions/new" class="btn btn-green">New Mission</a>
           <button phx-click="refresh" class="btn btn-blue">Refresh</button>
+        </div>
+      </div>
+
+      <%!-- Search + status filter --%>
+      <div style="display:flex; gap:0.75rem; margin-bottom:1rem; align-items:center; flex-wrap:wrap">
+        <form phx-change="search" style="flex:1; min-width:200px">
+          <input
+            type="text"
+            name="q"
+            value={@search}
+            class="form-input"
+            placeholder="Search missions..."
+            phx-debounce="300"
+            style="width:100%; font-size:0.85rem"
+          />
+        </form>
+        <div style="display:flex; gap:0.25rem">
+          <%= for {label, key} <- [{"All", "all"}, {"Active", "active"}, {"Completed", "completed"}, {"Failed", "failed"}] do %>
+            <button
+              phx-click="filter_status"
+              phx-value-status={key}
+              class={"btn #{if @status_filter == key, do: "btn-blue", else: "btn-grey"}"}
+              style="font-size:0.75rem; padding:0.25rem 0.5rem"
+            >
+              {label}
+            </button>
+          <% end %>
         </div>
       </div>
 

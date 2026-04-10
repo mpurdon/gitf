@@ -184,4 +184,31 @@ defmodule GiTF.Dashboard.Helpers do
   def status_icon_class("failed"), do: "failed"
   def status_icon_class("blocked"), do: "blocked"
   def status_icon_class(_), do: "pending"
+
+  @doc """
+  Renders a breadcrumb trail. Each crumb is `{label, href}`, the last has no link.
+
+  Usage: `<.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {"My Mission", nil}]} />`
+  """
+  attr :crumbs, :list, required: true
+
+  def breadcrumbs(assigns) do
+    ~H"""
+    <nav style="display:flex; align-items:center; gap:0.35rem; margin-bottom:0.75rem; font-size:0.8rem">
+      <%= for {crumb, idx} <- Enum.with_index(@crumbs) do %>
+        <%= if idx > 0 do %>
+          <span style="color:#30363d">/</span>
+        <% end %>
+        <%= case crumb do %>
+          <% {label, href} when is_binary(href) -> %>
+            <a href={href} style="color:#58a6ff">{label}</a>
+          <% {label, _} -> %>
+            <span style="color:#c9d1d9; font-weight:500">{label}</span>
+          <% label when is_binary(label) -> %>
+            <span style="color:#c9d1d9; font-weight:500">{label}</span>
+        <% end %>
+      <% end %>
+    </nav>
+    """
+  end
 end
