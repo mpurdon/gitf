@@ -167,6 +167,30 @@ defmodule GiTF.Dashboard.OverviewLive do
     implementation_quests =
       Enum.count(missions, &(Map.get(&1, :current_phase) == "implementation"))
 
+    # Daily stats
+    today_start = DateTime.utc_now() |> DateTime.to_date() |> DateTime.new!(~T[00:00:00])
+
+    completed_today =
+      Enum.count(missions, fn m ->
+        m.status == "completed" and
+          m[:updated_at] != nil and
+          DateTime.compare(m.updated_at, today_start) != :lt
+      end)
+
+    failed_today =
+      Enum.count(missions, fn m ->
+        m.status == "failed" and
+          m[:updated_at] != nil and
+          DateTime.compare(m.updated_at, today_start) != :lt
+      end)
+
+    ops_completed_today =
+      Enum.count(ops, fn op ->
+        op.status == "done" and
+          op[:updated_at] != nil and
+          DateTime.compare(op.updated_at, today_start) != :lt
+      end)
+
     # Approvals & sectors
     pending_approvals =
       try do
@@ -277,6 +301,9 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:current_sector_id, current_sector_id)
     |> assign(:recent_missions, recent_missions)
     |> assign(:health_status, health_status)
+    |> assign(:completed_today, completed_today)
+    |> assign(:failed_today, failed_today)
+    |> assign(:ops_completed_today, ops_completed_today)
   end
 
   @mini_phases (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++ ["completed"]
@@ -634,9 +661,15 @@ defmodule GiTF.Dashboard.OverviewLive do
           <.dot color="#d29922" /> <span style="color:#d29922; font-weight:600">{@pending_approvals}</span> <span style="color:#6b7280">approvals waiting</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <span style="color:#6b7280">{@sector_count} sectors</span>
+          <span style="color:#6b7280">Today:</span>
+          <span style="color:#3fb950; font-weight:600">{@completed_today}</span>
+          <span style="color:#6b7280">done</span>
+          <%= if @failed_today > 0 do %>
+            <span style="color:#f85149; font-weight:600">{@failed_today}</span>
+            <span style="color:#6b7280">failed</span>
+          <% end %>
           <span style="color:#484f58">&middot;</span>
-          <span style="color:#6b7280">{@quest_count} total missions</span>
+          <span style="color:#8b949e">{@ops_completed_today} ops</span>
         </div>
       </div>
 

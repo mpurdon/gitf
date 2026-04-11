@@ -283,6 +283,34 @@ defmodule GiTF.Dashboard.OpDetailLive do
         </div>
       <% end %>
 
+      <%!-- Failure Info --%>
+      <%= if @op.status == "failed" do %>
+        <div class="panel" style="border-left:3px solid #f85149">
+          <div class="panel-title" style="color:#f85149">Failure Details</div>
+          <%= if Map.get(@op, :error_message) do %>
+            <div style="margin-bottom:0.75rem">
+              <div style="font-size:0.75rem; color:#6b7280; margin-bottom:0.25rem">Error Message</div>
+              <div class="pre-block" style="border-color:#f8514933">{@op.error_message}</div>
+            </div>
+          <% end %>
+          <%= if Map.get(@op, :failure_info) do %>
+            <div style="margin-bottom:0.75rem">
+              <div style="font-size:0.75rem; color:#6b7280; margin-bottom:0.25rem">Failure Analysis</div>
+              <div class="pre-block">{inspect(@op.failure_info, pretty: true, limit: :infinity)}</div>
+            </div>
+          <% end %>
+          <%= if Map.get(@op, :audit_result) do %>
+            <div>
+              <div style="font-size:0.75rem; color:#6b7280; margin-bottom:0.25rem">Audit Output</div>
+              <div class="pre-block">{@op.audit_result}</div>
+            </div>
+          <% end %>
+          <%= if is_nil(Map.get(@op, :error_message)) and is_nil(Map.get(@op, :failure_info)) and is_nil(Map.get(@op, :audit_result)) do %>
+            <div style="color:#8b949e; font-size:0.85rem">No failure details recorded. Check <a href={"/dashboard/missions/#{@op.mission_id}/diagnostics"} style="color:#58a6ff">diagnostics</a> for more info.</div>
+          <% end %>
+        </div>
+      <% end %>
+
       <%!-- Acceptance Criteria --%>
       <%= if Map.get(@op, :acceptance_criteria) do %>
         <div class="panel">

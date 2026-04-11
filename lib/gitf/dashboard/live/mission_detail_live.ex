@@ -43,6 +43,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:budget_info, %{budget: 0, spent: 0, remaining: 0, pct: 0.0})
          |> assign(:rollback_status, :unknown)
          |> assign(:priority, :normal)
+         |> assign(:duration, nil)
          |> compute_op_stats()
          |> reload()}
 
@@ -249,6 +250,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             _ -> :normal
           end
 
+        # Duration
+        duration = compute_duration(mission)
+
         socket
         |> assign(
           mission: mission,
@@ -256,7 +260,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           sectors: load_sectors(),
           budget_info: budget_info,
           rollback_status: rollback_status,
-          priority: priority
+          priority: priority,
+          duration: duration
         )
         |> compute_op_stats()
 
@@ -358,6 +363,34 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     _ -> :ok
   end
 
+  defp compute_duration(mission) do
+    started = mission[:inserted_at]
+
+    case started do
+      %DateTime{} ->
+        ended = if mission[:status] in ["completed", "failed"], do: mission[:updated_at], else: DateTime.utc_now()
+
+        case ended do
+          %DateTime{} ->
+            seconds = DateTime.diff(ended, started, :second)
+
+            cond do
+              seconds < 60 -> "#{seconds}s"
+              seconds < 3600 -> "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
+              true -> "#{div(seconds, 3600)}h #{rem(div(seconds, 60), 60)}m"
+            end
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
   defp load_sectors do
     try do
       GiTF.Sector.list()
@@ -406,6 +439,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">
               {short_id(@mission.id)}
             </span>
+            <%= if @duration do %>
+              <span style="font-size:0.75rem; color:#6b7280">&middot; {@duration}</span>
+            <% end %>
           </div>
         </div>
 
