@@ -58,6 +58,41 @@ defmodule GiTF.Dashboard.PlanLive do
     {:noreply, assign(socket, expanded_ops: MapSet.new(), collapsed: all_groups)}
   end
 
+  def handle_event("approve_plan", _params, socket) do
+    mission = socket.assigns.mission
+    specs = GiTF.Missions.get_artifact(mission.id, "planning") || []
+
+    GiTF.Major.Planner.create_jobs_from_specs(mission.id, specs)
+    GiTF.Major.Orchestrator.advance_quest(mission.id)
+
+    {:noreply,
+     socket
+     |> push_toast(:success, "Plan approved — #{length(specs)} ops created")
+     |> refresh_after_action()}
+  end
+
+  def handle_event("reject_plan", _params, socket) do
+    mission = socket.assigns.mission
+    quest_record = GiTF.Archive.get(:missions, mission.id)
+
+    if quest_record do
+      updated = Map.delete(quest_record, :draft_plan)
+      GiTF.Archive.put(:missions, updated)
+    end
+
+    {:noreply,
+     socket
+     |> push_toast(:warning, "Plan rejected — will be re-planned")
+     |> refresh_after_action()}
+  end
+
+  defp refresh_after_action(socket) do
+    case GiTF.Missions.get(socket.assigns.mission.id) do
+      {:ok, mission} -> refresh_data(socket, mission)
+      _ -> socket
+    end
+  end
+
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
@@ -102,6 +137,10 @@ defmodule GiTF.Dashboard.PlanLive do
       </div>
       <div style="display:flex; gap:0.5rem; align-items:center">
         <span class={"badge #{phase_badge(@mission[:current_phase] || "pending")}"}>{@mission[:current_phase] || "pending"}</span>
+        <%= if @mission[:review_plan] and @mission[:current_phase] in ["planning", "pending"] do %>
+          <button phx-click="approve_plan" class="btn btn-green" style="font-size:0.8rem" data-confirm="Approve this plan and create ops?">Approve Plan</button>
+          <button phx-click="reject_plan" class="btn btn-red" style="font-size:0.8rem" data-confirm="Reject this plan?">Reject</button>
+        <% end %>
         <button phx-click="expand_all" class="btn btn-grey" style="font-size:0.75rem; padding:0.2rem 0.5rem">Expand All</button>
         <button phx-click="collapse_all" class="btn btn-grey" style="font-size:0.75rem; padding:0.2rem 0.5rem">Collapse All</button>
       </div>

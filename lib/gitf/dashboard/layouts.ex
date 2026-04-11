@@ -40,10 +40,12 @@ defmodule GiTF.Dashboard.Layouts do
           .nav {
             background: #161b22;
             border-bottom: 1px solid #30363d;
-            padding: 0 1.5rem;
+            padding: 0.5rem 1.5rem;
             display: flex;
             align-items: center;
-            height: 52px;
+            min-height: 52px;
+            flex-wrap: wrap;
+            gap: 0.25rem;
           }
           .nav-brand {
             font-weight: 700;
