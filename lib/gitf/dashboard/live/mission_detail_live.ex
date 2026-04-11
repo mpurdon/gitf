@@ -44,6 +44,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:rollback_status, :unknown)
          |> assign(:priority, :normal)
          |> assign(:duration, nil)
+         |> assign(:phase_durations, %{})
          |> compute_op_stats()
          |> reload()}
 
@@ -250,8 +251,16 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             _ -> :normal
           end
 
-        # Duration
+        # Duration + phase timings
         duration = compute_duration(mission)
+
+        phase_durations =
+          try do
+            GiTF.Missions.get_phase_transitions(id)
+            |> compute_phase_durations()
+          rescue
+            _ -> %{}
+          end
 
         socket
         |> assign(
@@ -261,7 +270,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           budget_info: budget_info,
           rollback_status: rollback_status,
           priority: priority,
-          duration: duration
+          duration: duration,
+          phase_durations: phase_durations
         )
         |> compute_op_stats()
 
@@ -362,6 +372,32 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   rescue
     _ -> :ok
   end
+
+  defp compute_phase_durations(transitions) when is_list(transitions) do
+    transitions
+    |> Enum.sort_by(&(&1[:transitioned_at] || &1[:inserted_at]), DateTime)
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.reduce(%{}, fn [from, to], acc ->
+      phase = from[:to_phase] || from[:from_phase]
+      ts_from = from[:transitioned_at] || from[:inserted_at]
+      ts_to = to[:transitioned_at] || to[:inserted_at]
+
+      case {ts_from, ts_to} do
+        {%DateTime{}, %DateTime{}} ->
+          seconds = DateTime.diff(ts_to, ts_from, :second)
+          Map.put(acc, phase, format_short_duration(seconds))
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp compute_phase_durations(_), do: %{}
+
+  defp format_short_duration(seconds) when seconds < 60, do: "#{seconds}s"
+  defp format_short_duration(seconds) when seconds < 3600, do: "#{div(seconds, 60)}m"
+  defp format_short_duration(seconds), do: "#{div(seconds, 3600)}h#{rem(div(seconds, 60), 60)}m"
 
   defp compute_duration(mission) do
     started = mission[:inserted_at]
@@ -474,6 +510,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 <% end %>
               </div>
               <div class="step-label">{phase}</div>
+              <%= if @phase_durations[phase] do %>
+                <div style="font-size:0.6rem; color:#6b7280; margin-top:0.1rem">{@phase_durations[phase]}</div>
+              <% end %>
             </div>
           <% end %>
         </div>

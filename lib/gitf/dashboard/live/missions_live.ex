@@ -180,7 +180,26 @@ defmodule GiTF.Dashboard.MissionsLive do
           _ -> 0.0
         end
 
-      Map.merge(m, %{effective_priority: priority, budget_pct: budget_pct})
+      duration =
+        case {m[:inserted_at], m[:updated_at]} do
+          {%DateTime{} = s, %DateTime{} = e} when m.status in ["completed", "failed"] ->
+            secs = DateTime.diff(e, s, :second)
+            cond do
+              secs < 60 -> "#{secs}s"
+              secs < 3600 -> "#{div(secs, 60)}m"
+              true -> "#{div(secs, 3600)}h#{rem(div(secs, 60), 60)}m"
+            end
+          {%DateTime{} = s, _} ->
+            secs = DateTime.diff(DateTime.utc_now(), s, :second)
+            cond do
+              secs < 60 -> "#{secs}s"
+              secs < 3600 -> "#{div(secs, 60)}m"
+              true -> "#{div(secs, 3600)}h#{rem(div(secs, 60), 60)}m"
+            end
+          _ -> "-"
+        end
+
+      Map.merge(m, %{effective_priority: priority, budget_pct: budget_pct, duration: duration})
     end)
   end
 
@@ -248,6 +267,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                 <th class="sortable" phx-click="sort" phx-value-col="status">Status {sort_arrow(@sort_by, @sort_dir, :status)}</th>
                 <th class="sortable" phx-click="sort" phx-value-col="phase">Phase {sort_arrow(@sort_by, @sort_dir, :phase)}</th>
                 <th class="sortable" phx-click="sort" phx-value-col="budget">Budget {sort_arrow(@sort_by, @sort_dir, :budget)}</th>
+                <th>Duration</th>
                 <th>Jobs</th>
                 <th></th>
               </tr>
@@ -287,6 +307,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                       <span style="font-size:0.65rem; color:#6b7280">{mission.budget_pct}%</span>
                     </div>
                   </td>
+                  <td style="font-size:0.8rem; color:#8b949e">{mission.duration}</td>
                   <td>{job_count(mission)}</td>
                   <td>
                     <%= if Map.get(mission, :status) == "pending" do %>
@@ -298,7 +319,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                 </tr>
                 <%= if MapSet.member?(@expanded, mission.id) do %>
                   <tr>
-                    <td colspan="9" style="padding:0">
+                    <td colspan="10" style="padding:0">
                       <div class="detail-content">
                         <%= if has_jobs?(mission) do %>
                           <table>
