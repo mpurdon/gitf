@@ -301,6 +301,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:current_sector_id, current_sector_id)
     |> assign(:recent_missions, recent_missions)
     |> assign(:health_status, health_status)
+    |> assign(:all_missions, missions)
     |> assign(:completed_today, completed_today)
     |> assign(:failed_today, failed_today)
     |> assign(:ops_completed_today, ops_completed_today)
@@ -672,6 +673,38 @@ defmodule GiTF.Dashboard.OverviewLive do
           <span style="color:#8b949e">{@ops_completed_today} ops</span>
         </div>
       </div>
+
+      <%!-- Mission status grid --%>
+      <%= if length(@all_missions) > 0 do %>
+        <div class="panel" style="margin-bottom:1.5rem">
+          <div class="panel-title">All Missions ({length(@all_missions)})</div>
+          <div style="display:flex; flex-wrap:wrap; gap:3px; padding:0.5rem 0">
+            <%= for m <- Enum.sort_by(@all_missions, &(&1[:inserted_at] || DateTime.utc_now()), DateTime) do %>
+              <a
+                href={"/dashboard/missions/#{m.id}"}
+                title={"#{Map.get(m, :name, short_id(m.id))} — #{m.status}"}
+                style={"display:block; width:14px; height:14px; border-radius:2px; background:#{case m.status do
+                  s when s in ["active", "implementation", "research", "design", "planning", "review", "validation", "requirements"] -> "#1f6feb"
+                  "completed" -> "#238636"
+                  "failed" -> "#da3633"
+                  "paused" -> "#d29922"
+                  "paused_budget" -> "#d29922"
+                  _ -> "#21262d"
+                end}; transition:transform 0.1s"}
+                onmouseover="this.style.transform='scale(1.3)'"
+                onmouseout="this.style.transform='scale(1)'"
+              ></a>
+            <% end %>
+          </div>
+          <div style="display:flex; gap:1rem; font-size:0.65rem; color:#6b7280; margin-top:0.25rem">
+            <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:#1f6feb; vertical-align:middle; margin-right:3px"></span>active</span>
+            <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:#238636; vertical-align:middle; margin-right:3px"></span>completed</span>
+            <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:#da3633; vertical-align:middle; margin-right:3px"></span>failed</span>
+            <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:#d29922; vertical-align:middle; margin-right:3px"></span>paused</span>
+            <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:#21262d; vertical-align:middle; margin-right:3px"></span>pending</span>
+          </div>
+        </div>
+      <% end %>
 
       <div class="panel">
         <div class="panel-title">Recent Messages</div>
