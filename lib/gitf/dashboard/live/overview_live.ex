@@ -622,6 +622,24 @@ defmodule GiTF.Dashboard.OverviewLive do
         <a href="/dashboard/autonomy" class="btn btn-grey">Self-Heal</a>
       </div>
 
+      <%!-- Factory operations bar --%>
+      <div style="display:flex; gap:1.5rem; margin-bottom:1.5rem; padding:0.6rem 1rem; background:#161b22; border:1px solid #21262d; border-radius:6px; font-size:0.8rem; flex-wrap:wrap">
+        <div style="display:flex; align-items:center; gap:0.3rem">
+          <.dot color="#3fb950" /> <span style="color:#3fb950; font-weight:600">{@active_ghosts}</span> <span style="color:#6b7280">ghosts working</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.3rem">
+          <.dot color="#58a6ff" /> <span style="color:#58a6ff; font-weight:600">{@active_quests}</span> <span style="color:#6b7280">missions active</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.3rem">
+          <.dot color="#d29922" /> <span style="color:#d29922; font-weight:600">{@pending_approvals}</span> <span style="color:#6b7280">approvals waiting</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.3rem">
+          <span style="color:#6b7280">{@sector_count} sectors</span>
+          <span style="color:#484f58">&middot;</span>
+          <span style="color:#6b7280">{@quest_count} total missions</span>
+        </div>
+      </div>
+
       <div class="panel">
         <div class="panel-title">Recent Messages</div>
         <%= if @recent_waggles == [] do %>
