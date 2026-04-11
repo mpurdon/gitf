@@ -103,6 +103,22 @@ defmodule GiTF.Dashboard.GhostsLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Ghost Agents</h1>
 
+      <%!-- Summary counters --%>
+      <% working = Enum.count(@ghosts, &(Map.get(&1, :status) == "working")) %>
+      <% stopped = Enum.count(@ghosts, &(Map.get(&1, :status) in ["stopped", "crashed"])) %>
+      <% total = length(@ghosts) %>
+      <div style="display:flex; gap:1rem; margin-bottom:1rem">
+        <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
+          <.dot color="#3fb950" /><span style="color:#3fb950; font-weight:600">{working}</span><span style="color:#6b7280">working</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
+          <.dot color="#6b7280" /><span style="color:#8b949e">{total - working - stopped}</span><span style="color:#6b7280">idle</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
+          <.dot color="#f85149" /><span style="color:#f85149">{stopped}</span><span style="color:#6b7280">stopped</span>
+        </div>
+      </div>
+
       <div class="panel">
         <%= if @ghosts == [] do %>
           <div class="empty">No ghosts deployed yet. Ghosts are created when the Major assigns ops.</div>

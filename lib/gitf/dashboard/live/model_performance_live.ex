@@ -78,7 +78,14 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
                 <tr>
                   <td style="font-size:0.85rem">{m.model}</td>
                   <td style="text-align:right">{m.total_ops}</td>
-                  <td style={"text-align:right; color:#{rate_color(m.success_rate)}"}>{format_pct(m.success_rate)}</td>
+                  <td style="text-align:right">
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.35rem">
+                      <div style="width:40px; height:4px; background:#21262d; border-radius:2px; overflow:hidden">
+                        <div style={"height:100%; border-radius:2px; background:#{rate_color(m.success_rate)}; width:#{Float.round((m.success_rate || 0) * 100, 0)}%"}></div>
+                      </div>
+                      <span style={"color:#{rate_color(m.success_rate)}; min-width:36px"}>{format_pct(m.success_rate)}</span>
+                    </div>
+                  </td>
                   <td style="text-align:right">{if m.avg_quality, do: "#{m.avg_quality}", else: "-"}</td>
                   <td style={"text-align:right; color:#{retry_color(m.retry_rate)}"}>{format_pct(m.retry_rate)}</td>
                   <td style="text-align:right; font-family:monospace">{format_cost(m.total_cost)}</td>

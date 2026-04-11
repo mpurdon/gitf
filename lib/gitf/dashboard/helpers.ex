@@ -286,4 +286,71 @@ defmodule GiTF.Dashboard.Helpers do
     </nav>
     """
   end
+
+  @doc """
+  Renders an inline SVG sparkline from a list of numeric values.
+  Useful for showing trends in table cells.
+
+  Options:
+  - `:width` - SVG width (default 80)
+  - `:height` - SVG height (default 20)
+  - `:color` - stroke color (default "#58a6ff")
+  """
+  attr :values, :list, required: true
+  attr :width, :integer, default: 80
+  attr :height, :integer, default: 20
+  attr :color, :string, default: "#58a6ff"
+
+  def sparkline(assigns) do
+    values = assigns.values || []
+    w = assigns.width
+    h = assigns.height
+
+    points =
+      case values do
+        [] ->
+          ""
+
+        [_] ->
+          "#{div(w, 2)},#{div(h, 2)}"
+
+        vals ->
+          max_v = Enum.max(vals)
+          min_v = Enum.min(vals)
+          range = if max_v == min_v, do: 1.0, else: max_v - min_v
+          n = length(vals)
+          step = w / max(n - 1, 1)
+
+          vals
+          |> Enum.with_index()
+          |> Enum.map(fn {v, i} ->
+            x = Float.round(i * step, 1)
+            y = Float.round(h - (v - min_v) / range * (h - 2) - 1, 1)
+            "#{x},#{y}"
+          end)
+          |> Enum.join(" ")
+      end
+
+    assigns = assign(assigns, :points, points)
+
+    ~H"""
+    <svg width={@width} height={@height} viewBox={"0 0 #{@width} #{@height}"} style="display:inline-block; vertical-align:middle">
+      <%= if @points != "" do %>
+        <polyline points={@points} fill="none" stroke={@color} stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+      <% end %>
+    </svg>
+    """
+  end
+
+  @doc """
+  Renders a small colored dot indicator.
+  """
+  attr :color, :string, required: true
+  attr :size, :integer, default: 8
+
+  def dot(assigns) do
+    ~H"""
+    <span style={"display:inline-block; width:#{@size}px; height:#{@size}px; border-radius:50%; background:#{@color}; flex-shrink:0"}></span>
+    """
+  end
 end
