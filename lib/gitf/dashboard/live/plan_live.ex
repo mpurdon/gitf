@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.PlanLive do
   @moduledoc "Real-time plan viewer with grouped checklists tracking op execution."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
   import GiTF.Dashboard.Helpers
   alias GiTF.Dashboard.PlanGrouping
 
@@ -23,6 +24,7 @@ defmodule GiTF.Dashboard.PlanLive do
           |> assign(:current_path, "/dashboard/missions")
           |> assign(:collapsed, MapSet.new())
           |> assign(:expanded_ops, MapSet.new())
+          |> init_toasts()
           |> refresh_data(mission)
 
         {:ok, socket}
@@ -66,9 +68,9 @@ defmodule GiTF.Dashboard.PlanLive do
     end
   end
 
-  def handle_info({:waggle_received, _}, socket) do
+  def handle_info({:waggle_received, waggle}, socket) do
     case GiTF.Missions.get(socket.assigns.mission.id) do
-      {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
+      {:ok, mission} -> {:noreply, socket |> maybe_apply_toast(waggle) |> refresh_data(mission)}
       _ -> {:noreply, socket}
     end
   end
@@ -87,7 +89,7 @@ defmodule GiTF.Dashboard.PlanLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
     <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), "/dashboard/missions/#{@mission.id}"}, {"Plan", nil}]} />
 
     <%!-- Header --%>

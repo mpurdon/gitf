@@ -5,6 +5,7 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -17,7 +18,7 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    {:ok, assign_data(socket)}
+    {:ok, socket |> init_toasts() |> assign_data()}
   end
 
   @impl true
@@ -48,7 +49,7 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
         <h1 class="page-title" style="margin-bottom:0">Model Performance</h1>
         <button phx-click="refresh" class="btn btn-grey" style="font-size:0.8rem">Refresh</button>

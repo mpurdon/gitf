@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
   @moduledoc "Mission creation form."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   @impl true
   def mount(_params, _session, socket) do
@@ -17,7 +18,8 @@ defmodule GiTF.Dashboard.MissionNewLive do
      |> assign(:page_title, "New Mission")
      |> assign(:current_path, "/dashboard/missions")
      |> assign(:sectors, sectors)
-     |> assign(:form, %{"goal" => "", "name" => "", "sector" => "", "quick" => "false"})}
+     |> assign(:form, %{"goal" => "", "name" => "", "sector" => "", "quick" => "false"})
+     |> init_toasts()}
   end
 
   @impl true
@@ -91,7 +93,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="max-width:640px">
         <h1 class="page-title">New Mission</h1>
 

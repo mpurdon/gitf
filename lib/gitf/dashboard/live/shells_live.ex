@@ -5,6 +5,7 @@ defmodule GiTF.Dashboard.ShellsLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -21,6 +22,7 @@ defmodule GiTF.Dashboard.ShellsLive do
      socket
      |> assign(:filter, "active")
      |> assign(:checking_drift, false)
+     |> init_toasts()
      |> assign_data()}
   end
 
@@ -146,7 +148,7 @@ defmodule GiTF.Dashboard.ShellsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <h1 class="page-title" style="margin-bottom:0">Shells & Worktrees</h1>
         <div style="display:flex; gap:0.5rem">

@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
   @moduledoc "Mission diagnostics page — surfaces why missions/ops failed and provides recovery actions."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -26,6 +27,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
          |> assign(:suggested_strategies, %{})
          |> assign(:suggesting, MapSet.new())
          |> assign(:feedback_text, %{})
+         |> init_toasts()
          |> load_diagnostics(id, mission)}
 
       {:error, _} ->
@@ -159,7 +161,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
     {:noreply, reload(socket)}
   end
 
-  def handle_info({:waggle_received, _}, socket), do: {:noreply, reload(socket)}
+  def handle_info({:waggle_received, waggle}, socket), do: {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
 
   def handle_info({ref, {:analysis_result, op_id, result}}, socket) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
@@ -283,7 +285,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), "/dashboard/missions/#{@mission.id}"}, {"Diagnostics", nil}]} />
       <%!-- Header --%>
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem">

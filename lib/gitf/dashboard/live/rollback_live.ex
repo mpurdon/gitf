@@ -6,6 +6,7 @@ defmodule GiTF.Dashboard.RollbackLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -18,7 +19,7 @@ defmodule GiTF.Dashboard.RollbackLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    {:ok, assign_data(socket)}
+    {:ok, socket |> init_toasts() |> assign_data()}
   end
 
   @impl true
@@ -87,7 +88,7 @@ defmodule GiTF.Dashboard.RollbackLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Rollback Management</h1>
 
       <p style="color:#8b949e; font-size:0.85rem; margin-bottom:1.5rem">

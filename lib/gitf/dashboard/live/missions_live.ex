@@ -9,6 +9,7 @@ defmodule GiTF.Dashboard.MissionsLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -33,7 +34,8 @@ defmodule GiTF.Dashboard.MissionsLive do
      |> assign(:status_filter, "all")
      |> assign(:sort_by, :priority)
      |> assign(:sort_dir, :asc)
-     |> assign(:expanded, MapSet.new())}
+     |> assign(:expanded, MapSet.new())
+     |> init_toasts()}
   end
 
   @impl true
@@ -43,9 +45,9 @@ defmodule GiTF.Dashboard.MissionsLive do
     {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
   end
 
-  def handle_info({:waggle_received, _waggle}, socket) do
+  def handle_info({:waggle_received, waggle}, socket) do
     missions = load_quests()
-    {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
+    {:noreply, socket |> maybe_apply_toast(waggle) |> assign(:all_missions, missions) |> apply_filters()}
   end
 
   @impl true
@@ -193,7 +195,7 @@ defmodule GiTF.Dashboard.MissionsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <h1 class="page-title" style="margin-bottom:0">Missions</h1>
         <div style="display:flex; gap:0.5rem">

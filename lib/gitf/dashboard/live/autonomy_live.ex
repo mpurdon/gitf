@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.AutonomyLive do
   @moduledoc "Autonomy tools: self-heal, optimize, predict issues."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   @impl true
   def mount(_params, _session, socket) do
@@ -43,7 +44,8 @@ defmodule GiTF.Dashboard.AutonomyLive do
      |> assign(:predict_result, nil)
      |> assign(:loading, nil)
      |> assign(:scaling, scaling)
-     |> assign(:budget_util, budget_util)}
+     |> assign(:budget_util, budget_util)
+     |> init_toasts()}
   end
 
   @impl true
@@ -93,7 +95,7 @@ defmodule GiTF.Dashboard.AutonomyLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Autonomy</h1>
 
       <%!-- Scaling status --%>

@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
   @moduledoc "Op detail page showing full op metadata, acceptance criteria, and verification."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -21,7 +22,8 @@ defmodule GiTF.Dashboard.OpDetailLive do
          |> assign(:page_title, Map.get(op, :title, "Op"))
          |> assign(:current_path, "/dashboard/missions")
          |> assign(:op, op)
-         |> assign_extras(op)}
+         |> assign_extras(op)
+         |> init_toasts()}
 
       {:error, _} ->
         {:ok,
@@ -37,7 +39,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
     {:noreply, reload(socket)}
   end
 
-  def handle_info({:waggle_received, _}, socket), do: {:noreply, reload(socket)}
+  def handle_info({:waggle_received, waggle}, socket), do: {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
@@ -151,7 +153,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <.breadcrumbs crumbs={[
         {"Missions", "/dashboard/missions"},
         {(@mission && Map.get(@mission, :name)) || "Mission", @op[:mission_id] && "/dashboard/missions/#{@op.mission_id}"},

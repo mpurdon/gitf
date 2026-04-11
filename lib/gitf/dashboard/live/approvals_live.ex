@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   @moduledoc "Approval queue for mission/op approval requests."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -24,7 +25,8 @@ defmodule GiTF.Dashboard.ApprovalsLive do
      |> assign(:approvals, load_approvals())
      |> assign(:action_id, nil)
      |> assign(:action_type, nil)
-     |> assign(:notes, "")}
+     |> assign(:notes, "")
+     |> init_toasts()}
   end
 
   @impl true
@@ -33,8 +35,8 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     {:noreply, assign(socket, :approvals, load_approvals())}
   end
 
-  def handle_info({:waggle_received, _}, socket) do
-    {:noreply, assign(socket, :approvals, load_approvals())}
+  def handle_info({:waggle_received, waggle}, socket) do
+    {:noreply, socket |> maybe_apply_toast(waggle) |> assign(:approvals, load_approvals())}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -110,7 +112,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
         <h1 class="page-title" style="margin-bottom:0">Approvals</h1>
         <button phx-click="refresh" class="btn btn-blue">Refresh</button>

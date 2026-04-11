@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.SectorsLive do
   @moduledoc "Sector management page with local discovery, GitHub import, and manual add."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   @impl true
   def mount(_params, _session, socket) do
@@ -18,7 +19,8 @@ defmodule GiTF.Dashboard.SectorsLive do
      |> assign(:github_repos, [])
      |> assign(:github_loading, false)
      |> assign(:github_error, nil)
-     |> assign(:has_github_token, has_github_token?())}
+     |> assign(:has_github_token, has_github_token?())
+     |> init_toasts()}
   end
 
   # -- Events ----------------------------------------------------------------
@@ -250,7 +252,7 @@ defmodule GiTF.Dashboard.SectorsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Sectors</h1>
 
       <!-- Add sector panel with mode tabs -->

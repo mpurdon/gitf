@@ -8,6 +8,7 @@ defmodule GiTF.Dashboard.GhostsLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -32,17 +33,7 @@ defmodule GiTF.Dashboard.GhostsLive do
   end
 
   def handle_info({:waggle_received, waggle}, socket) do
-    socket =
-      case maybe_toast_waggle(socket, waggle) do
-        {:toast, s} -> s
-        :skip -> socket
-      end
-
-    {:noreply, assign_data(socket)}
-  end
-
-  def handle_info({:dismiss_toast, toast_id}, socket) do
-    {:noreply, handle_dismiss_toast(socket, toast_id)}
+    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
   end
 
   @impl true
@@ -103,7 +94,7 @@ defmodule GiTF.Dashboard.GhostsLive do
     |> assign(:current_path, "/ghosts")
     |> assign(:ghosts, enriched)
     |> assign_new(:expanded, fn -> MapSet.new() end)
-    |> assign_new(:toasts, fn -> [] end)
+    |> init_toasts()
   end
 
   @impl true

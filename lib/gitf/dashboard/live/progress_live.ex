@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.ProgressLive do
   @moduledoc "LiveView showing real-time ghost activity feed."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -17,7 +18,7 @@ defmodule GiTF.Dashboard.ProgressLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    {:ok, assign_data(socket)}
+    {:ok, socket |> init_toasts() |> assign_data()}
   end
 
   @impl true
@@ -25,8 +26,8 @@ defmodule GiTF.Dashboard.ProgressLive do
     {:noreply, assign_data(socket)}
   end
 
-  def handle_info({:waggle_received, _waggle}, socket) do
-    {:noreply, assign_data(socket)}
+  def handle_info({:waggle_received, waggle}, socket) do
+    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
   end
 
   def handle_info(:refresh, socket) do
@@ -102,7 +103,7 @@ defmodule GiTF.Dashboard.ProgressLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Factory Activity</h1>
 
       <!-- Active Ghosts -->

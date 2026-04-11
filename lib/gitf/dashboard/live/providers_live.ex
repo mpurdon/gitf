@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
   @moduledoc "LLM Fleet Control — configure provider priority, fallback strategy, and API keys."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
   import GiTF.Dashboard.Helpers
 
   alias GiTF.Runtime.{ProviderManager, ProviderCircuit}
@@ -44,7 +45,8 @@ defmodule GiTF.Dashboard.ProvidersLive do
      |> assign(:saving, false)
      |> assign(:ollama_running, ollama_running)
      |> assign(:ollama_models, ollama_models)
-     |> assign(:starting_ollama, false)}
+     |> assign(:starting_ollama, false)
+     |> init_toasts()}
   end
 
   # -- Events ----------------------------------------------------------------
@@ -265,7 +267,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
       <h1 class="page-title">LLM Fleet Control</h1>

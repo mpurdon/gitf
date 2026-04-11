@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.DesignLive do
   @moduledoc "Design phase viewer — compare strategy variants, review analysis, and approval."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
   import GiTF.Dashboard.Helpers
 
   @strategies ["minimal", "normal", "complex"]
@@ -29,6 +30,7 @@ defmodule GiTF.Dashboard.DesignLive do
           |> assign(:strategy_instructions, @strategy_instructions)
           |> assign(:collapsed, MapSet.new())
           |> assign(:override_selection, nil)
+          |> init_toasts()
           |> refresh_data(mission)
 
         {:ok, socket}
@@ -106,9 +108,9 @@ defmodule GiTF.Dashboard.DesignLive do
     end
   end
 
-  def handle_info({:waggle_received, _}, socket) do
+  def handle_info({:waggle_received, waggle}, socket) do
     case GiTF.Missions.get(socket.assigns.mission.id) do
-      {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
+      {:ok, mission} -> {:noreply, socket |> maybe_apply_toast(waggle) |> refresh_data(mission)}
       _ -> {:noreply, socket}
     end
   end
@@ -120,7 +122,7 @@ defmodule GiTF.Dashboard.DesignLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
     <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), "/dashboard/missions/#{@mission.id}"}, {"Design", nil}]} />
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">

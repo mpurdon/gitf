@@ -7,6 +7,7 @@ defmodule GiTF.Dashboard.TimelineLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -28,7 +29,7 @@ defmodule GiTF.Dashboard.TimelineLive do
      socket
      |> assign(:mission_id, mission_id)
      |> assign(:filter_type, "all")
-     |> assign(:toasts, [])
+     |> init_toasts()
      |> assign_data()}
   end
 
@@ -39,17 +40,7 @@ defmodule GiTF.Dashboard.TimelineLive do
   end
 
   def handle_info({:waggle_received, waggle}, socket) do
-    socket =
-      case maybe_toast_waggle(socket, waggle) do
-        {:toast, s} -> s
-        :skip -> socket
-      end
-
-    {:noreply, assign_data(socket)}
-  end
-
-  def handle_info({:dismiss_toast, toast_id}, socket) do
-    {:noreply, handle_dismiss_toast(socket, toast_id)}
+    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
   end
 
   def handle_info(_, socket), do: {:noreply, socket}

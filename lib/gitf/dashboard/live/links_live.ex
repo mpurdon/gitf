@@ -8,6 +8,7 @@ defmodule GiTF.Dashboard.LinksLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,13 +24,14 @@ defmodule GiTF.Dashboard.LinksLive do
      |> assign(:current_path, "/links")
      |> assign(:links, links)
      |> assign(:expanded, MapSet.new())
-     |> assign(:filter_subject, "all")}
+     |> assign(:filter_subject, "all")
+     |> init_toasts()}
   end
 
   @impl true
-  def handle_info({:waggle_received, _waggle}, socket) do
+  def handle_info({:waggle_received, waggle}, socket) do
     links = GiTF.Link.list(limit: 50)
-    {:noreply, assign(socket, :links, links)}
+    {:noreply, socket |> maybe_apply_toast(waggle) |> assign(:links, links)}
   end
 
   @impl true
@@ -66,7 +68,7 @@ defmodule GiTF.Dashboard.LinksLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
         <h1 class="page-title" style="margin-bottom:0">Link Messages</h1>
         <button phx-click="refresh" style="background:#1f6feb33; color:#58a6ff; border:1px solid #1f6feb55; padding:0.4rem 1rem; border-radius:6px; cursor:pointer; font-size:0.85rem">

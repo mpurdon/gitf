@@ -5,6 +5,7 @@ defmodule GiTF.Dashboard.HealthLive do
   """
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import Phoenix.HTML, only: [raw: 1]
 
@@ -17,7 +18,7 @@ defmodule GiTF.Dashboard.HealthLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    {:ok, assign_data(socket)}
+    {:ok, socket |> init_toasts() |> assign_data()}
   end
 
   @impl true
@@ -116,7 +117,7 @@ defmodule GiTF.Dashboard.HealthLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">System Health</h1>
 
       <%!-- Status banner --%>

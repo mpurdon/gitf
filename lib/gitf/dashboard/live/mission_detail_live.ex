@@ -2,6 +2,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   @moduledoc "Mission detail page with phase stepper, ops, and contextual actions."
 
   use Phoenix.LiveView
+  use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
 
@@ -38,7 +39,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:report, nil)
          |> assign(:report_loading, false)
          |> assign(:sectors, load_sectors())
-         |> assign(:toasts, [])
+         |> init_toasts()
          |> assign(:budget_info, %{budget: 0, spent: 0, remaining: 0, pct: 0.0})
          |> assign(:rollback_status, :unknown)
          |> assign(:priority, :normal)
@@ -60,17 +61,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   def handle_info({:waggle_received, waggle}, socket) do
-    socket =
-      case maybe_toast_waggle(socket, waggle) do
-        {:toast, s} -> s
-        :skip -> socket
-      end
-
-    {:noreply, reload(socket)}
-  end
-
-  def handle_info({:dismiss_toast, toast_id}, socket) do
-    {:noreply, handle_dismiss_toast(socket, toast_id)}
+    {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
   end
 
   def handle_info({ref, {:report, result}}, socket) when is_reference(ref) do
