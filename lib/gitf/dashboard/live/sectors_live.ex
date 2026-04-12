@@ -384,11 +384,11 @@ defmodule GiTF.Dashboard.SectorsLive do
           <form phx-submit="add_manual" phx-change="update_form" style="display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap">
             <div class="form-group" style="flex:2; margin-bottom:0; min-width:200px">
               <label class="form-label">Path or URL</label>
-              <input type="text" name="path" class="form-input" placeholder="/path/to/repo or https://github.com/user/repo.git" value={@new_path} required />
+              <input id="sector-path" type="text" name="path" class="form-input" placeholder="/path/to/repo or https://github.com/user/repo.git" value={@new_path} phx-debounce="300" required />
             </div>
             <div class="form-group" style="flex:1; margin-bottom:0; min-width:120px">
               <label class="form-label">Name (optional)</label>
-              <input type="text" name="name" class="form-input" placeholder="sector name" value={@new_name} />
+              <input id="sector-name" type="text" name="name" class="form-input" placeholder="sector name" value={@new_name} phx-debounce="300" />
             </div>
             <button type="submit" class="btn btn-green" style="margin-bottom:0">Add</button>
           </form>

@@ -86,6 +86,11 @@ defmodule GiTF.Dashboard.MissionNewLive do
     end
   end
 
+  # AppLayout subscribes to link:major — absorb all PubSub noise on this form page
+  @impl true
+  def handle_info({:waggle_received, _}, socket), do: {:noreply, socket}
+  def handle_info(_, socket), do: {:noreply, socket}
+
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, _key, ""), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, String.trim(value))
@@ -102,12 +107,14 @@ defmodule GiTF.Dashboard.MissionNewLive do
             <div class="form-group">
               <label class="form-label">Goal *</label>
               <textarea
+                id="mission-goal-input"
                 name="mission[goal]"
                 class="form-textarea"
                 placeholder="Describe what you want to accomplish..."
                 style="min-height:120px"
                 required
-              >{@form["goal"]}</textarea>
+                phx-debounce="300"
+              ><%= @form["goal"] %></textarea>
             </div>
 
             <!-- Mode toggle buttons -->
@@ -146,11 +153,13 @@ defmodule GiTF.Dashboard.MissionNewLive do
             <div class="form-group">
               <label class="form-label">Name (optional)</label>
               <input
+                id="mission-name-input"
                 type="text"
                 name="mission[name]"
                 class="form-input"
                 placeholder="Short name for this mission"
                 value={@form["name"]}
+                phx-debounce="300"
               />
             </div>
 

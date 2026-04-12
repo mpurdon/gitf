@@ -163,7 +163,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
                 <%= if @action_type == :approve do %>
                   <div class="form-group">
                     <label class="form-label">Notes (optional)</label>
-                    <textarea class="form-textarea" name="notes" phx-change="update_notes" style="min-height:60px">{@notes}</textarea>
+                    <textarea id="approve-notes" class="form-textarea" name="notes" phx-change="update_notes" phx-debounce="300" style="min-height:60px"><%= @notes %></textarea>
                   </div>
                   <div class="action-bar">
                     <button phx-click="cancel_action" class="btn btn-grey">Cancel</button>
@@ -172,7 +172,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
                 <% else %>
                   <div class="form-group">
                     <label class="form-label">Reason (required)</label>
-                    <textarea class="form-textarea" name="notes" phx-change="update_notes" style="min-height:60px" required>{@notes}</textarea>
+                    <textarea id="reject-notes" class="form-textarea" name="notes" phx-change="update_notes" phx-debounce="300" style="min-height:60px" required><%= @notes %></textarea>
                   </div>
                   <div class="action-bar">
                     <button phx-click="cancel_action" class="btn btn-grey">Cancel</button>
