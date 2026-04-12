@@ -322,15 +322,9 @@ defmodule GiTF.Sector do
   #   https://github.com/owner/repo.git
   #   git@github.com:owner/repo.git
   defp parse_github_url(url) do
-    cond do
-      String.contains?(url, "github.com") ->
-        case Regex.run(~r{github\.com[:/]([^/]+)/([^/.]+)}, url) do
-          [_, owner, repo] -> {owner, repo}
-          _ -> {nil, nil}
-        end
-
-      true ->
-        {nil, nil}
+    case Regex.run(~r{github\.com[:/]([^/]+)/([^/.]+)}, url) do
+      [_, owner, repo] -> {owner, repo}
+      _ -> {nil, nil}
     end
   end
 end

@@ -208,7 +208,7 @@ defmodule GiTF.Major do
 
   @impl true
   def handle_continue(:resume_active_quests, state) do
-    GiTF.Sector.backfill_github_config()
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, &GiTF.Sector.backfill_github_config/0)
     resume_active_quests(state)
     {:noreply, state}
   end

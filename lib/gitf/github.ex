@@ -251,6 +251,10 @@ defmodule GiTF.GitHub do
     end
   end
 
+  @doc "Returns true if a GitHub token is available (env var or config)."
+  @spec has_token?() :: boolean()
+  def has_token?, do: github_token() != nil
+
   @doc "Builds a Req client with GitHub auth."
   @spec client(GiTF.Schema.Sector.t()) :: {:ok, Req.Request.t()} | {:error, :no_github_config}
   def client(sector) do
