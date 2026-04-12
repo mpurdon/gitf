@@ -31,5 +31,6 @@ defmodule GiTF.Dashboard.Router do
     live("/ops/:id", OpDetailLive)
     live("/sectors", SectorsLive)
     live("/autonomy", AutonomyLive)
+    live("/settings", SettingsLive)
   end
 end
