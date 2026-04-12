@@ -300,6 +300,14 @@ defmodule GiTF.Dashboard.OpDetailLive do
         </div>
       <% end %>
 
+      <%!-- Ghost Output Summary --%>
+      <%= if Map.get(@op, :output_summary) do %>
+        <div class="panel" style="border-left:3px solid #3fb950">
+          <div class="panel-title" style="color:#3fb950">Ghost Output</div>
+          <div class="pre-block" style="white-space:pre-wrap; font-size:0.85rem">{@op.output_summary}</div>
+        </div>
+      <% end %>
+
       <%!-- Description --%>
       <%= if Map.get(@op, :description) do %>
         <div class="panel">

@@ -1045,6 +1045,9 @@ defmodule GiTF.Ghost.Worker do
       record_files_changed(state)
     end
 
+    # Save the ghost's final output summary on the op record
+    save_output_summary(state)
+
     case GiTF.Ops.get(state.op_id) do
       {:ok, %{status: "done"}} ->
         :ok
@@ -1232,6 +1235,29 @@ defmodule GiTF.Ghost.Worker do
     e ->
       Logger.debug("Auto-commit failed (non-fatal): #{inspect(e)}")
       :ok
+  end
+
+  defp save_output_summary(state) do
+    output = IO.iodata_to_binary(state.output)
+
+    # Extract the last meaningful text block as summary (truncated)
+    summary =
+      output
+      |> String.split("\n")
+      |> Enum.reject(&(String.trim(&1) == ""))
+      |> Enum.take(-20)
+      |> Enum.join("\n")
+      |> String.slice(0, 2000)
+
+    case GiTF.Ops.get(state.op_id) do
+      {:ok, op} ->
+        Archive.put(:ops, Map.put(op, :output_summary, summary))
+
+      _ ->
+        :ok
+    end
+  rescue
+    _ -> :ok
   end
 
   defp record_files_changed(state) do
