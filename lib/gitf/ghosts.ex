@@ -35,9 +35,20 @@ defmodule GiTF.Ghosts do
   @spec spawn(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def spawn(op_id, sector_id, gitf_root, opts \\ []) do
+    # Per-op Registry lock prevents TOCTOU between check_not_already_assigned
+    # and assign_job. A second spawn attempt for the same op will bail immediately.
+    GiTF.MissionLock.with_lock({:op_spawn, op_id}, [on_contention: :error], fn ->
+      do_spawn(op_id, sector_id, gitf_root, opts)
+    end)
+    |> case do
+      {:error, :locked} -> {:error, :already_spawning}
+      other -> other
+    end
+  end
+
+  defp do_spawn(op_id, sector_id, gitf_root, opts) do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
-    # Atomic check: reject if op already has a ghost assigned (prevents duplicate spawning)
     with {:check_ready, :ok} <- {:check_ready, check_not_already_assigned(op_id)},
          {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
          {:llm_health, :ok} <- {:llm_health, check_llm_available()},

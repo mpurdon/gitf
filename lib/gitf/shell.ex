@@ -40,6 +40,19 @@ defmodule GiTF.Shell do
       })
 
       {:ok, shell}
+    else
+      {:error, reason} = error ->
+        # Clean up any orphaned worktree directory left by a partial git worktree add.
+        # Without this, the next provision attempt for this ghost would fail with
+        # "already exists as a worktree".
+        case sector_path(sector_id) do
+          nil -> :ok
+          sp -> cleanup_orphaned_worktree(sector_id, build_worktree_path(sp, ghost_id))
+        end
+
+        require Logger
+        Logger.warning("Shell.create failed for ghost #{ghost_id}: #{inspect(reason)}")
+        error
     end
   end
 
@@ -231,5 +244,35 @@ defmodule GiTF.Shell do
 
   defp maybe_generate_settings(ghost_id, gitf_root, worktree_path) do
     GiTF.Runtime.Settings.generate(ghost_id, gitf_root, worktree_path)
+  end
+
+  defp sector_path(sector_id) do
+    case GiTF.Sector.get(sector_id) do
+      {:ok, sector} -> sector.path
+      _ -> nil
+    end
+  end
+
+  defp cleanup_orphaned_worktree(_sector_id, nil), do: :ok
+
+  defp cleanup_orphaned_worktree(sector_id, worktree_path) do
+    if File.dir?(worktree_path) do
+      # Remove from git's worktree tracking first, then delete the directory
+      case sector_path(sector_id) do
+        nil ->
+          :ok
+
+        repo_path ->
+          Git.safe_cmd(["worktree", "remove", "--force", worktree_path],
+            cd: repo_path,
+            stderr_to_stdout: true
+          )
+      end
+
+      # If git worktree remove didn't clean it, force-delete the directory
+      if File.dir?(worktree_path), do: File.rm_rf(worktree_path)
+    end
+  rescue
+    _ -> :ok
   end
 end

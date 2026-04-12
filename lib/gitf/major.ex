@@ -995,8 +995,8 @@ defmodule GiTF.Major do
               error -> error
             end
 
-          {:error, :budget_exceeded} ->
-            {:error, :budget_exceeded}
+          {:error, _} = error ->
+            error
         end
 
       {:error, reason} ->
@@ -1023,14 +1023,16 @@ defmodule GiTF.Major do
                 state
             end
 
-          {:error, :budget_exceeded} ->
-            Logger.warning("Budget exceeded for mission #{op.mission_id}, skipping retry")
+          {:error, reason} ->
+            Logger.warning(
+              "Budget check blocked retry for mission #{op.mission_id}: #{inspect(reason)}"
+            )
 
             GiTF.Link.send(
               "major",
               "major",
               "budget_exceeded",
-              "Quest #{op.mission_id} budget exceeded, op #{op_id} retry skipped"
+              "Quest #{op.mission_id} budget blocked (#{inspect(reason)}), op #{op_id} retry skipped"
             )
 
             state
@@ -1148,8 +1150,8 @@ defmodule GiTF.Major do
     # Per-provider circuit breakers handle routing/fallback — no global gate needed.
     # Check budget proactively before spawning
     case check_quest_budget(mission.id) do
-      {:error, :budget_exceeded} ->
-        Logger.warning("Budget exceeded for mission #{mission.id}, skipping spawn")
+      {:error, reason} ->
+        Logger.warning("Budget check blocked spawn for mission #{mission.id}: #{inspect(reason)}")
         state
 
       :ok ->
@@ -1275,7 +1277,14 @@ defmodule GiTF.Major do
       {:error, :budget_exceeded, _spent} -> {:error, :budget_exceeded}
     end
   rescue
-    _ -> :ok
+    e ->
+      # Fail-closed: if we can't verify the budget, don't spawn.
+      # This prevents runaway costs when Archive is unavailable during recovery.
+      Logger.warning(
+        "Budget check failed for mission #{mission_id}: #{Exception.message(e)} — blocking spawn"
+      )
+
+      {:error, :budget_check_failed}
   end
 
   # -- Private: file overlap guard ---------------------------------------------

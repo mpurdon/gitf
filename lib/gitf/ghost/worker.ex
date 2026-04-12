@@ -1109,11 +1109,19 @@ defmodule GiTF.Ghost.Worker do
       true ->
         # Standard ops (and Simplify phase ops): broadcast to Tachikoma for independent verification.
         # The Tachikoma verifies, then forwards to SyncQueue on pass.
-        # Do NOT link_msg Major here — the SyncQueue will link_msg "job_merged" after sync.
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "tachikoma:review",
           {:review_job, state.op_id, state.ghost_id, state.shell_id}
+        )
+
+        # Also send a durable link_msg so Major's waggle recovery can pick this up
+        # if the PubSub broadcast is dropped (Tachikoma down, mailbox full, etc.)
+        GiTF.Link.send(
+          state.ghost_id,
+          "major",
+          "job_complete",
+          "Job #{state.op_id} completed (awaiting verification)"
         )
     end
 
