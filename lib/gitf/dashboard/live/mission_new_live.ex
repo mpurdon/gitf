@@ -190,7 +190,9 @@ defmodule GiTF.Dashboard.MissionNewLive do
 
     if sector && Map.get(sector, :github_owner) && Map.get(sector, :github_repo) do
       # Fetch async to avoid blocking the LiveView
-      Task.async(fn -> GiTF.GitHub.list_issues(sector) end)
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        GiTF.GitHub.list_issues(sector)
+      end)
 
       assign(socket, issues_loading: true, issues_error: nil, selected_issue: nil)
     else
@@ -247,7 +249,6 @@ defmodule GiTF.Dashboard.MissionNewLive do
 
         <div class="panel">
           <form phx-submit="create" phx-change="validate">
-            <!-- Sector selector (always visible, moved up for issue mode) -->
             <div class="form-group">
               <label class="form-label">Sector</label>
               <select name="mission[sector]" class="form-select">
@@ -265,7 +266,6 @@ defmodule GiTF.Dashboard.MissionNewLive do
               </select>
             </div>
 
-            <!-- Issue picker (only in issue mode) -->
             <%= if @source == "issue" do %>
               <div class="form-group">
                 <label class="form-label">Issue</label>
@@ -326,7 +326,6 @@ defmodule GiTF.Dashboard.MissionNewLive do
               </div>
             <% end %>
 
-            <!-- Goal textarea -->
             <div class="form-group">
               <label class="form-label">Goal *</label>
               <textarea

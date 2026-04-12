@@ -14,7 +14,6 @@ defmodule GiTF.Dashboard.SettingsLive do
      |> assign(:current_path, "/dashboard/settings")
      |> assign(:config, config)
      |> assign(:dirty, false)
-     |> assign(:saving, false)
      |> init_toasts()}
   end
 
@@ -128,7 +127,7 @@ defmodule GiTF.Dashboard.SettingsLive do
 
   defp parse_int(v), do: v
 
-  defp g(config, section, key, default \\ "") do
+  defp config_val(config, section, key, default \\ "") do
     config |> Map.get(section, %{}) |> Map.get(key, default) |> to_string()
   end
 
@@ -162,7 +161,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                 type="password"
                 name="config[github][token]"
                 class="form-input"
-                value={g(@config, "github", "token")}
+                value={config_val(@config, "github", "token")}
                 placeholder="ghp_..."
                 phx-debounce="300"
                 autocomplete="off"
@@ -183,7 +182,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                 type="password"
                 name="config[llm][anthropic]"
                 class="form-input"
-                value={get_in(@config, ["llm", "keys", "anthropic"]) || g(@config, "llm", "anthropic")}
+                value={get_in(@config, ["llm", "keys", "anthropic"]) || ""}
                 placeholder="sk-ant-..."
                 phx-debounce="300"
                 autocomplete="off"
@@ -196,7 +195,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                 type="password"
                 name="config[llm][google]"
                 class="form-input"
-                value={get_in(@config, ["llm", "keys", "google"]) || g(@config, "llm", "google")}
+                value={get_in(@config, ["llm", "keys", "google"]) || ""}
                 placeholder="AIza..."
                 phx-debounce="300"
                 autocomplete="off"
@@ -215,7 +214,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                   type="number"
                   name="config[major][max_ghosts]"
                   class="form-input"
-                  value={g(@config, "major", "max_ghosts", "5")}
+                  value={config_val(@config, "major", "max_ghosts", "5")}
                   min="1"
                   max="20"
                   phx-debounce="300"
@@ -242,7 +241,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                   type="number"
                   name="config[costs][budget_usd]"
                   class="form-input"
-                  value={g(@config, "costs", "budget_usd", "10.0")}
+                  value={config_val(@config, "costs", "budget_usd", "10.0")}
                   step="0.5"
                   min="0"
                   phx-debounce="300"
@@ -255,7 +254,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                   type="number"
                   name="config[costs][warn_threshold_usd]"
                   class="form-input"
-                  value={g(@config, "costs", "warn_threshold_usd", "5.0")}
+                  value={config_val(@config, "costs", "warn_threshold_usd", "5.0")}
                   step="0.5"
                   min="0"
                   phx-debounce="300"
@@ -274,7 +273,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                 type="url"
                 name="config[observability][webhook_url]"
                 class="form-input"
-                value={g(@config, "observability", "webhook_url")}
+                value={config_val(@config, "observability", "webhook_url")}
                 placeholder="https://hooks.slack.com/..."
                 phx-debounce="300"
               />
@@ -292,7 +291,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                   type="number"
                   name="config[tachikoma][patrol_interval_ms]"
                   class="form-input"
-                  value={g(@config, "tachikoma", "patrol_interval_ms", "30000")}
+                  value={config_val(@config, "tachikoma", "patrol_interval_ms", "30000")}
                   min="5000"
                   step="1000"
                   phx-debounce="300"
@@ -305,7 +304,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                   type="number"
                   name="config[tachikoma][archive_prune_age_hours]"
                   class="form-input"
-                  value={g(@config, "tachikoma", "archive_prune_age_hours", "48")}
+                  value={config_val(@config, "tachikoma", "archive_prune_age_hours", "48")}
                   min="1"
                   phx-debounce="300"
                 />
