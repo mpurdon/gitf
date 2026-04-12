@@ -23,6 +23,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
          |> assign(:current_path, "/dashboard/missions")
          |> assign(:op, op)
          |> assign_extras(op)
+         |> assign_siblings(op)
          |> init_toasts()}
 
       {:error, _} ->
@@ -64,9 +65,24 @@ defmodule GiTF.Dashboard.OpDetailLive do
 
   defp reload(socket) do
     case GiTF.Ops.get(socket.assigns.op.id) do
-      {:ok, op} -> socket |> assign(:op, op) |> assign_extras(op)
+      {:ok, op} -> socket |> assign(:op, op) |> assign_extras(op) |> assign_siblings(op)
       {:error, _} -> socket
     end
+  end
+
+  defp assign_siblings(socket, op) do
+    all_ops =
+      GiTF.Archive.all(:ops)
+      |> Enum.sort_by(& &1[:inserted_at], {:asc, DateTime})
+
+    idx = Enum.find_index(all_ops, &(&1.id == op.id))
+
+    prev_op = if idx && idx > 0, do: Enum.at(all_ops, idx - 1)
+    next_op = if idx, do: Enum.at(all_ops, idx + 1)
+
+    socket
+    |> assign(:prev_op, prev_op)
+    |> assign(:next_op, next_op)
   end
 
   defp assign_extras(socket, op) do
@@ -173,7 +189,13 @@ defmodule GiTF.Dashboard.OpDetailLive do
             <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">{@op.id}</span>
           </div>
         </div>
-        <div style="display:flex; gap:0.5rem">
+        <div style="display:flex; gap:0.5rem; align-items:center">
+          <%= if @prev_op do %>
+            <a href={"/dashboard/ops/#{@prev_op.id}"} class="btn btn-grey" title={Map.get(@prev_op, :title, "Previous op")}>&larr; Prev</a>
+          <% end %>
+          <%= if @next_op do %>
+            <a href={"/dashboard/ops/#{@next_op.id}"} class="btn btn-grey" title={Map.get(@next_op, :title, "Next op")}>Next &rarr;</a>
+          <% end %>
           <%= if Map.get(@op, :status) == "failed" do %>
             <button phx-click="reset" class="btn btn-blue">Reset</button>
           <% end %>
