@@ -27,6 +27,15 @@ defmodule GiTF.Dashboard.MergeQueueLive do
     {:noreply, assign_data(socket)}
   end
 
+  # React to merge queue changes and waggle messages in real-time
+  def handle_info({:waggle_received, waggle}, socket) do
+    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
+  end
+
+  def handle_info({:sync_queue_updated, _}, socket) do
+    {:noreply, assign_data(socket)}
+  end
+
   def handle_info(_, socket), do: {:noreply, socket}
 
   defp assign_data(socket) do

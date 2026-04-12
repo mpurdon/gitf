@@ -86,11 +86,10 @@ defmodule GiTF.Dashboard.TimelineLive do
           end
       end
 
-    # Use stream for the events list — efficient DOM updates for large lists
     socket
     |> assign(:page_title, "Timeline")
     |> assign(:current_path, "/timeline")
-    |> stream(:events, events, reset: true)
+    |> assign(:events, events)
     |> assign(:missions, missions)
     |> assign(:mission_name, mission_name)
     |> assign(:event_count, length(events))
@@ -109,8 +108,6 @@ defmodule GiTF.Dashboard.TimelineLive do
     |> List.flatten()
     |> Enum.sort_by(& &1.timestamp, {:desc, DateTime})
     |> Enum.take(@max_events)
-    |> Enum.with_index()
-    |> Enum.map(fn {event, idx} -> Map.put_new(event, :id, "evt-#{idx}") end)
   end
 
   defp maybe_add(acc, current, match_all, type, fun) do
@@ -295,15 +292,15 @@ defmodule GiTF.Dashboard.TimelineLive do
 
       <%!-- Timeline --%>
       <div class="panel">
-        <%= if @event_count == 0 do %>
+        <%= if @events == [] do %>
           <div class="empty">No events to display. Events appear as missions run through phases, ops complete, and the factory operates. <a href="/dashboard/missions/new" style="color:#58a6ff">Create a mission</a> to get started.</div>
         <% else %>
-          <div style="position:relative; padding-left:2rem" id="timeline-stream" phx-update="stream">
+          <div style="position:relative; padding-left:2rem">
             <%!-- Vertical line --%>
-            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:#21262d; z-index:0"></div>
+            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:#21262d"></div>
 
-            <%= for {dom_id, event} <- @streams.events do %>
-              <div id={dom_id} style="position:relative; padding-bottom:1rem; padding-left:1.5rem">
+            <%= for event <- @events do %>
+              <div style="position:relative; padding-bottom:1rem; padding-left:1.5rem">
                 <%!-- Dot on the timeline --%>
                 <div style={"position:absolute; left:-0.55rem; top:0.3rem; width:10px; height:10px; border-radius:50%; background:#{event.color}; border:2px solid #0d1117"}></div>
 

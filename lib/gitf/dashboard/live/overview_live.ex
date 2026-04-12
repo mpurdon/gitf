@@ -37,6 +37,7 @@ defmodule GiTF.Dashboard.OverviewLive do
       |> assign(:current_path, "/")
       |> assign(:last_updated, DateTime.utc_now())
       |> assign(:dark_factory, GiTF.Config.dark_factory?())
+      |> assign(:refresh_scheduled, false)
       |> assign_core_data()
       |> assign_async(:health_status, fn -> {:ok, %{health_status: safe_health_check()}} end)
       |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: GiTF.Costs.summary()}} end)
@@ -47,32 +48,26 @@ defmodule GiTF.Dashboard.OverviewLive do
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    # Light refresh — only update counters and timestamps
     {:noreply, assign_core_data(socket)}
   end
 
-  # PubSub: targeted updates instead of full reload
+  # Debounced refresh: PubSub events schedule a single refresh 150ms out.
+  # Multiple events in rapid succession collapse into one data reload.
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply, socket |> assign(:refresh_scheduled, false) |> assign_core_data()}
+  end
+
   def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply,
-     socket
-     |> maybe_apply_toast(waggle)
-     |> assign_core_data()
-     |> assign(:recent_waggles, GiTF.Link.list(limit: 5))}
+    {:noreply, socket |> maybe_apply_toast(waggle) |> schedule_refresh()}
   end
 
-  def handle_info({:op_updated, _op}, socket) do
-    {:noreply, assign_core_data(socket)}
-  end
-
-  def handle_info({:ghost_updated, _ghost}, socket) do
-    {:noreply, assign_core_data(socket)}
-  end
+  def handle_info({:op_updated, _op}, socket), do: {:noreply, schedule_refresh(socket)}
+  def handle_info({:ghost_updated, _ghost}, socket), do: {:noreply, schedule_refresh(socket)}
 
   def handle_info({:cost_recorded, _cost}, socket) do
-    # Cost changed — refresh cost summary async, update counters sync
     {:noreply,
      socket
-     |> assign_core_data()
+     |> schedule_refresh()
      |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: GiTF.Costs.summary()}} end,
        reset: true
      )}
@@ -163,7 +158,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     # Audit stats
     verified_jobs = Enum.count(ops, &(Map.get(&1, :verification_status) == "passed"))
     failed_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "failed"))
-    pending_verification = Enum.count(ops, &(&1[:verification_status] == "pending" and &1.status == "done"))
+    pending_verification = Enum.count(ops, &(&1[:verification_status] == "pending" and &1[:status] == "done"))
 
     # Phase counts
     research_quests = Enum.count(missions, &(&1[:current_phase] == "research"))
@@ -220,6 +215,14 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:ops_completed_today, ops_completed_today)
   end
 
+  defp schedule_refresh(socket) do
+    unless socket.assigns.refresh_scheduled do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
+
   defp compute_context_stats([]), do: {0.0, 0.0, 0}
 
   defp compute_context_stats(active) do
@@ -230,7 +233,8 @@ defmodule GiTF.Dashboard.OverviewLive do
 
   defp count_since(records, status, since) do
     Enum.count(records, fn r ->
-      r.status == status and r[:updated_at] != nil and DateTime.compare(r.updated_at, since) != :lt
+      Map.get(r, :status) == status and r[:updated_at] != nil and
+        DateTime.compare(r[:updated_at], since) != :lt
     end)
   end
 

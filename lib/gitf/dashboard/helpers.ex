@@ -200,12 +200,13 @@ defmodule GiTF.Dashboard.Helpers do
     }
 
     toasts = [toast | Map.get(socket.assigns, :toasts, [])] |> Enum.take(5)
-    # Schedule auto-dismiss
-    Process.send_after(self(), {:dismiss_toast, toast.id}, 8_000)
+    # Client-side: JS.hide handles visual dismiss immediately.
+    # Server-side: timer cleans up assigns to prevent unbounded growth.
+    Process.send_after(self(), {:dismiss_toast, toast.id}, 10_000)
     assign(socket, :toasts, toasts)
   end
 
-  @doc "Handles the auto-dismiss timer. Call from `handle_info`."
+  @doc "Cleans up server-side toast assigns after JS.hide has already hidden them."
   def handle_dismiss_toast(socket, toast_id) do
     toasts = Enum.reject(Map.get(socket.assigns, :toasts, []), &(&1.id == toast_id))
     assign(socket, :toasts, toasts)
