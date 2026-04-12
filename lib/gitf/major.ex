@@ -276,7 +276,7 @@ defmodule GiTF.Major do
         GenServer.reply(state.awaiter, :ok)
       end
 
-      {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
+      {:noreply, state |> Map.put(:port, nil) |> Map.put(:status, :idle) |> Map.put(:awaiter, nil)}
     end
   end
 

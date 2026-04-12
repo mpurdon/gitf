@@ -171,11 +171,25 @@ defmodule GiTF.Audit do
   # Private functions
 
   defp get_job_cell(op) do
+    # Look for active shell first, then any shell with a valid worktree on disk.
+    # Ghosts may have stopped by the time verification runs, but the worktree
+    # still exists and is needed for validation commands and quality checks.
     case Archive.find_one(:shells, fn c ->
            c.ghost_id == op.ghost_id and c.status == "active"
          end) do
-      nil -> {:error, :no_cell}
-      shell -> {:ok, shell}
+      nil ->
+        # Fallback: find any shell for this ghost that still has a worktree on disk
+        case Archive.find_one(:shells, fn c ->
+               c.ghost_id == op.ghost_id and
+                 c[:worktree_path] != nil and
+                 File.dir?(c.worktree_path)
+             end) do
+          nil -> {:error, :no_cell}
+          shell -> {:ok, shell}
+        end
+
+      shell ->
+        {:ok, shell}
     end
   end
 
