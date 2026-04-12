@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.40.71"
+  @version "0.40.72"
 
   def project do
     [

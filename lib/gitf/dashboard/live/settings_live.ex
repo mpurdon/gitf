@@ -172,37 +172,6 @@ defmodule GiTF.Dashboard.SettingsLive do
             </div>
           </div>
 
-          <%!-- LLM Keys --%>
-          <div class="panel" style="margin-bottom:1rem">
-            <h3 style="color:#c9d1d9; margin:0 0 0.75rem; font-size:0.95rem">LLM API Keys</h3>
-            <div class="form-group">
-              <label class="form-label">Anthropic</label>
-              <input
-                id="llm-anthropic"
-                type="password"
-                name="config[llm][anthropic]"
-                class="form-input"
-                value={get_in(@config, ["llm", "keys", "anthropic"]) || ""}
-                placeholder="sk-ant-..."
-                phx-debounce="300"
-                autocomplete="off"
-              />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Google</label>
-              <input
-                id="llm-google"
-                type="password"
-                name="config[llm][google]"
-                class="form-input"
-                value={get_in(@config, ["llm", "keys", "google"]) || ""}
-                placeholder="AIza..."
-                phx-debounce="300"
-                autocomplete="off"
-              />
-            </div>
-          </div>
-
           <%!-- Factory --%>
           <div class="panel" style="margin-bottom:1rem">
             <h3 style="color:#c9d1d9; margin:0 0 0.75rem; font-size:0.95rem">Factory</h3>
