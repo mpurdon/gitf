@@ -178,18 +178,18 @@ defmodule GiTF.Dashboard.OpDetailLive do
         {Map.get(@op, :title, "Op"), nil}
       ]} />
       <%!-- Header --%>
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem">
-        <div>
-          <h1 class="page-title" style="margin-bottom:0.25rem">{Map.get(@op, :title, "Op")}</h1>
-          <div style="display:flex; gap:0.5rem; align-items:center">
-            <span class={"badge #{status_badge(Map.get(@op, :status, "unknown"))}"}>{Map.get(@op, :status, "unknown")}</span>
-            <%= if Map.get(@op, :verification_status) do %>
-              <span class={"badge #{verification_badge(@op.verification_status)}"}>{@op.verification_status}</span>
-            <% end %>
-            <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">{@op.id}</span>
-          </div>
+      <div style="margin-bottom:1.25rem">
+        <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap">
+          <span class={"badge #{status_badge(Map.get(@op, :status, "unknown"))}"}>{Map.get(@op, :status, "unknown")}</span>
+          <%= if Map.get(@op, :verification_status) do %>
+            <span class={"badge #{verification_badge(@op.verification_status)}"}>{@op.verification_status}</span>
+          <% end %>
+          <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">{@op.id}</span>
         </div>
-        <div style="display:flex; gap:0.5rem; align-items:center">
+        <h1 class="page-title" style="margin-bottom:0.75rem; font-size:1.1rem; line-height:1.4; word-break:break-word">
+          {Map.get(@op, :title, "Op")}
+        </h1>
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
           <%= if @prev_op do %>
             <a href={"/dashboard/ops/#{@prev_op.id}"} class="btn btn-grey" title={Map.get(@prev_op, :title, "Previous op")}>&larr; Prev</a>
           <% end %>
@@ -211,6 +211,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
       </div>
 
       <%!-- Metadata --%>
+
       <div class="panel">
         <div class="panel-title">Metadata</div>
         <div class="grid-2">
