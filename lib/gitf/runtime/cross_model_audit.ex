@@ -83,11 +83,23 @@ defmodule GiTF.Runtime.CrossModelAudit do
   # -- Private ---------------------------------------------------------------
 
   defp find_cell(op) do
+    # Try active shell first, then fall back to any shell with worktree on disk.
+    # Ghosts may have stopped by the time cross-model audit runs.
     case GiTF.Archive.find_one(:shells, fn c ->
            c.ghost_id == op.ghost_id and c.status == "active"
          end) do
-      nil -> {:error, :no_cell}
-      shell -> {:ok, shell}
+      nil ->
+        case GiTF.Archive.find_one(:shells, fn c ->
+               c.ghost_id == op.ghost_id and
+                 c[:worktree_path] != nil and
+                 File.dir?(c.worktree_path)
+             end) do
+          nil -> {:error, :no_cell}
+          shell -> {:ok, shell}
+        end
+
+      shell ->
+        {:ok, shell}
     end
   end
 

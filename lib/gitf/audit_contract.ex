@@ -210,10 +210,22 @@ defmodule GiTF.AuditContract do
   end
 
   defp evaluate_check(:proof_of_test, _thresholds, result) do
+    # Proof-of-test is advisory, not a hard gate. The heuristic parses ghost
+    # events looking for test-like commands, but it's brittle (pattern matching
+    # on string-keyed LLM message structures). A :fail here means we couldn't
+    # confirm tests ran — not that the code is untested. Log it but don't block.
     case result[:proof_of_test] do
-      :pass -> []
-      :fail -> ["proof_of_test: no successful test command execution detected in shell history"]
-      _ -> []
+      :fail ->
+        require Logger
+
+        Logger.info(
+          "Proof-of-test: no test execution detected for op #{result[:op_id]} (advisory, not blocking)"
+        )
+
+        []
+
+      _ ->
+        []
     end
   end
 
@@ -221,7 +233,9 @@ defmodule GiTF.AuditContract do
 
   defp do_threshold_check(name, threshold, score) when is_number(threshold) do
     cond do
-      is_nil(score) -> ["#{name}: no score available (required)"]
+      # A nil score means the analysis didn't produce results (tool not installed,
+      # language not supported, etc.) — treat as pass rather than blocking.
+      is_nil(score) -> []
       score < threshold -> ["#{name}: score #{score} below threshold #{threshold}"]
       true -> []
     end

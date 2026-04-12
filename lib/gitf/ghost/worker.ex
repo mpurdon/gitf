@@ -407,6 +407,7 @@ defmodule GiTF.Ghost.Worker do
   @impl true
   def terminate(reason, state) do
     shutdown_handle(state, 2_000)
+    GiTF.Progress.clear(state.ghost_id)
 
     case classify_exit(reason) do
       :clean ->

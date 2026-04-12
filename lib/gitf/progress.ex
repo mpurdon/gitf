@@ -68,6 +68,38 @@ defmodule GiTF.Progress do
     ArgumentError -> :ok
   end
 
+  @doc """
+  Prunes entries for ghosts that are no longer active.
+
+  Call periodically (e.g., from Tachikoma patrol) to prevent unbounded growth.
+  """
+  @spec prune_stale() :: non_neg_integer()
+  def prune_stale do
+    active_ghost_ids =
+      GiTF.Archive.filter(:ghosts, fn g -> g[:status] in ["active", "working"] end)
+      |> MapSet.new(& &1.id)
+
+    pruned =
+      :ets.tab2list(@table)
+      |> Enum.reduce(0, fn {ghost_id, _data}, count ->
+        if ghost_id not in active_ghost_ids do
+          :ets.delete(@table, ghost_id)
+          count + 1
+        else
+          count
+        end
+      end)
+
+    if pruned > 0 do
+      require Logger
+      Logger.debug("Progress: pruned #{pruned} stale entries")
+    end
+
+    pruned
+  rescue
+    ArgumentError -> 0
+  end
+
   @doc "Returns the PubSub topic for progress updates."
   @spec topic() :: String.t()
   def topic, do: @pubsub_topic

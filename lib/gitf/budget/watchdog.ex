@@ -41,6 +41,12 @@ defmodule GiTF.Budget.Watchdog do
     {:noreply, state}
   end
 
+  @impl true
+  def handle_info(msg, state) do
+    Logger.debug("Budget.Watchdog ignoring unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
   defp schedule_check do
     Process.send_after(self(), :check_budgets, @check_interval)
   end

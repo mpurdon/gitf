@@ -367,22 +367,25 @@ defmodule GiTF.Medic do
       {:ok, path} ->
         section_path = Path.join(path, ".gitf")
 
-        # Use df -m to get MB values and a robust regex to extract available space
-        {output, 0} = System.cmd("df", ["-m", section_path], stderr_to_stdout: true)
-
         available_mb =
-          output
-          |> String.split("\n", trim: true)
-          |> Enum.find_value(fn line ->
-            case Regex.run(~r/(\d+)\s+\d+%\s+/, line) do
-              [_, available] ->
-                {n, _} = Integer.parse(available)
-                n
+          case System.cmd("df", ["-m", section_path], stderr_to_stdout: true) do
+            {output, 0} ->
+              output
+              |> String.split("\n", trim: true)
+              |> Enum.find_value(fn line ->
+                case Regex.run(~r/(\d+)\s+\d+%\s+/, line) do
+                  [_, available] ->
+                    {n, _} = Integer.parse(available)
+                    n
 
-              _ ->
-                nil
-            end
-          end)
+                  _ ->
+                    nil
+                end
+              end)
+
+            {_, _} ->
+              nil
+          end
 
         size_bytes = dir_size(section_path)
         size_mb = size_bytes / (1024 * 1024)
@@ -402,7 +405,7 @@ defmodule GiTF.Medic do
             result(
               :disk_space,
               :ok,
-              ".gitf directory is #{format_size(size_bytes)} (#{available_mb} MB available)"
+              ".gitf directory is #{format_size(size_bytes)} (#{available_mb || "?"} MB available)"
             )
         end
 

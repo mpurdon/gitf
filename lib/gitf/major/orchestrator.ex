@@ -539,49 +539,48 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp finalize_merge_to_main(mission) do
-    case GiTF.Sync.merge_quest(mission.id) do
-      {:ok, quest_branch} ->
-        sector = Archive.get(:sectors, mission.sector_id)
-        repo_path = sector.path
+    with {:ok, sector} <- fetch_sector(mission.sector_id),
+         {:ok, quest_branch} <- GiTF.Sync.merge_quest(mission.id) do
+      repo_path = sector.path
 
-        # Capture pre-merge HEAD so we can audit and (later) revert if needed
-        main_before_sha =
-          case GiTF.Git.head_sha(repo_path) do
-            {:ok, sha} -> sha
-            _ -> nil
-          end
-
-        with {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path),
-             :ok <- GiTF.Git.checkout(repo_path, main_branch),
-             :ok <- GiTF.Git.sync(repo_path, quest_branch, no_ff: true),
-             {:ok, merge_commit_sha} <- GiTF.Git.head_sha(repo_path) do
-          GiTF.Missions.store_artifact(mission.id, "sync", %{
-            "status" => "success",
-            "branch" => quest_branch,
-            "merged_at" => DateTime.utc_now(),
-            "merge_commit_sha" => merge_commit_sha,
-            "main_before_sha" => main_before_sha,
-            "main_branch" => main_branch,
-            "revertible" => true
-          })
-
-          {:ok, mission} = GiTF.Missions.get(mission.id)
-          start_simplify(mission)
-        else
-          {:error, reason} ->
-            Logger.warning(
-              "Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}"
-            )
-
-            GiTF.Missions.store_artifact(mission.id, "sync", %{
-              "status" => "failed",
-              "branch" => quest_branch,
-              "error" => inspect(reason)
-            })
-
-            fail_quest(mission.id, "Sync failed: #{inspect(reason)}")
+      # Capture pre-merge HEAD so we can audit and (later) revert if needed
+      main_before_sha =
+        case GiTF.Git.head_sha(repo_path) do
+          {:ok, sha} -> sha
+          _ -> nil
         end
 
+      with {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path),
+           :ok <- GiTF.Git.checkout(repo_path, main_branch),
+           :ok <- GiTF.Git.sync(repo_path, quest_branch, no_ff: true),
+           {:ok, merge_commit_sha} <- GiTF.Git.head_sha(repo_path) do
+        GiTF.Missions.store_artifact(mission.id, "sync", %{
+          "status" => "success",
+          "branch" => quest_branch,
+          "merged_at" => DateTime.utc_now(),
+          "merge_commit_sha" => merge_commit_sha,
+          "main_before_sha" => main_before_sha,
+          "main_branch" => main_branch,
+          "revertible" => true
+        })
+
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_simplify(mission)
+      else
+        {:error, reason} ->
+          Logger.warning(
+            "Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}"
+          )
+
+          GiTF.Missions.store_artifact(mission.id, "sync", %{
+            "status" => "failed",
+            "branch" => quest_branch,
+            "error" => inspect(reason)
+          })
+
+          fail_quest(mission.id, "Sync failed: #{inspect(reason)}")
+      end
+    else
       {:error, reason} ->
         GiTF.Missions.store_artifact(mission.id, "sync", %{
           "status" => "failed",
@@ -598,6 +597,8 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  defp finalize_merge_as_pr(mission, nil), do: finalize_merge_to_main(mission)
+
   defp finalize_merge_as_pr(mission, sector) do
     case GiTF.Sync.merge_quest(mission.id) do
       {:ok, quest_branch} ->
@@ -613,26 +614,32 @@ defmodule GiTF.Major.Orchestrator do
           stderr_to_stdout: true
         )
 
+        # Wrap in Task with timeout — a hung `gh` would hold the MissionLock forever
         pr_result =
-          case System.cmd(
-                 "gh",
-                 [
-                   "pr",
-                   "create",
-                   "--head",
-                   quest_branch,
-                   "--base",
-                   main_branch,
-                   "--title",
-                   String.slice(title, 0, 200),
-                   "--body",
-                   String.slice(body, 0, 4000)
-                 ],
-                 cd: repo_path,
-                 stderr_to_stdout: true
-               ) do
-            {output, 0} -> {:ok, String.trim(output)}
-            {output, _} -> {:error, String.slice(output, 0, 200)}
+          Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+            System.cmd(
+              "gh",
+              [
+                "pr",
+                "create",
+                "--head",
+                quest_branch,
+                "--base",
+                main_branch,
+                "--title",
+                String.slice(title, 0, 200),
+                "--body",
+                String.slice(body, 0, 4000)
+              ],
+              cd: repo_path,
+              stderr_to_stdout: true
+            )
+          end)
+          |> Task.yield(30_000)
+          |> case do
+            {:ok, {output, 0}} -> {:ok, String.trim(output)}
+            {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
+            nil -> {:error, "gh pr create timed out after 30s"}
           end
 
         case pr_result do
@@ -1075,9 +1082,26 @@ defmodule GiTF.Major.Orchestrator do
         # >50% failed: attempt fallback plan
         attempt_fallback_plan(mission)
 
-      Enum.any?(impl_jobs, &(&1.status == "failed")) ->
-        # Let the Major's retry logic handle failures
-        {:ok, "implementation"}
+      Enum.any?(impl_jobs, &(&1.status in ["failed", "rejected"])) ->
+        # Check if all failed ops have exhausted retries — if so, no more progress
+        # is possible and we should escalate to fallback rather than spinning forever
+        failed_ops = Enum.filter(impl_jobs, &(&1.status in ["failed", "rejected"]))
+
+        all_exhausted =
+          Enum.all?(failed_ops, fn op ->
+            Map.get(op, :retry_count, 0) >= 3
+          end)
+
+        if all_exhausted do
+          Logger.warning(
+            "Quest #{mission.id}: #{length(failed_ops)} ops failed with retries exhausted, escalating"
+          )
+
+          attempt_fallback_plan(mission)
+        else
+          # Retries still in flight — let retry logic handle it
+          {:ok, "implementation"}
+        end
 
       true ->
         {:ok, "implementation"}
@@ -2088,4 +2112,11 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp artifact_failed?(_), do: false
+
+  defp fetch_sector(sector_id) do
+    case Archive.get(:sectors, sector_id) do
+      nil -> {:error, :sector_not_found}
+      sector -> {:ok, sector}
+    end
+  end
 end

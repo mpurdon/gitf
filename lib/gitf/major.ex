@@ -1561,7 +1561,10 @@ defmodule GiTF.Major do
       "planning",
       "implementation",
       "validation",
-      "awaiting_approval"
+      "awaiting_approval",
+      "sync",
+      "simplify",
+      "scoring"
     ]
 
     GiTF.Archive.all(:missions)

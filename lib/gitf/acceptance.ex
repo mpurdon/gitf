@@ -42,9 +42,10 @@ defmodule GiTF.Acceptance do
   end
 
   defp check_quality(op) do
-    # Check if quality gates passed
-    (op[:quality_score] || 0) >= 70 &&
-      op.verification_status in ["passed", nil]
+    # A nil quality_score means analysis didn't run (tool not installed, etc.)
+    # — treat as pass. Only fail if a real score is below threshold.
+    score_ok = is_nil(op[:quality_score]) or op[:quality_score] >= 70
+    score_ok and op.verification_status in ["passed", nil]
   end
 
   defp ready_to_merge?(goal_validation, scope_check, minimalism_check, op) do

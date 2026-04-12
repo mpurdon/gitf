@@ -138,6 +138,7 @@ defmodule GiTF.Tachikoma do
       cleanup_orphan_cells()
       cleanup_if_low_disk()
       check_drift()
+      GiTF.Progress.prune_stale()
     end
 
     # Recompute sector intelligence profiles every 20 patrols (~10 min)

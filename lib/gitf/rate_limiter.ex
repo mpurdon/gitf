@@ -8,6 +8,8 @@ defmodule GiTF.RateLimiter do
 
   use GenServer
 
+  require Logger
+
   # -- Public API ------------------------------------------------------------
 
   @doc "Starts a rate limiter with the given bucket config."
@@ -73,6 +75,12 @@ defmodule GiTF.RateLimiter do
   def handle_info(:refill, state) do
     state = refill_tokens(state)
     schedule_refill(state.refill_interval)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(msg, state) do
+    Logger.debug("RateLimiter ignoring unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
