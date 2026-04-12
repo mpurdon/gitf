@@ -155,7 +155,15 @@ defmodule GiTF.Config.Provider do
         |> String.downcase()
         |> String.split("_")
         |> Enum.drop(1)
-        |> Enum.map(&String.to_atom/1)
+        |> Enum.map(fn segment ->
+          # Use existing atoms only — prevents atom table exhaustion from
+          # arbitrary env var names on repeated config reloads
+          try do
+            String.to_existing_atom(segment)
+          rescue
+            ArgumentError -> segment
+          end
+        end)
 
       put_nested(acc, path, value)
     end)

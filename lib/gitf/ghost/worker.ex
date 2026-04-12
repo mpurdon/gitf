@@ -258,32 +258,45 @@ defmodule GiTF.Ghost.Worker do
       track_context_usage(state.ghost_id, [%{"type" => "result", "usage" => usage}])
     end
 
-    # Guard: if the agent loop "succeeded" but consumed 0 tokens and produced
-    # no text, the LLM never actually ran — treat as failure.
-    if input_tokens == 0 and output_tokens == 0 and String.trim(text) == "" do
-      Logger.warning(
-        "Ghost #{state.ghost_id} completed with 0 tokens and empty output — treating as failure"
-      )
+    result_status = Map.get(result, :status)
 
-      mark_failed(state, "Empty response: 0 tokens consumed, no output produced")
-      {:stop, :normal, %{state | status: :failed, handle: nil}}
-    else
-      state = %{
-        state
-        | parsed_events: Enum.reverse(events) ++ state.parsed_events,
-          output: [state.output, text],
-          handle: nil
-      }
+    cond do
+      # Guard: if the agent loop "succeeded" but consumed 0 tokens and produced
+      # no text, the LLM never actually ran — treat as failure.
+      input_tokens == 0 and output_tokens == 0 and String.trim(text) == "" ->
+        Logger.warning(
+          "Ghost #{state.ghost_id} completed with 0 tokens and empty output — treating as failure"
+        )
 
-      try do
-        mark_success(state)
-      rescue
-        e ->
-          Logger.error("Ghost #{state.ghost_id} mark_success crashed: #{Exception.message(e)}")
-          mark_failed(state, "Success handler crashed: #{Exception.message(e)}")
-      end
+        mark_failed(state, "Empty response: 0 tokens consumed, no output produced")
+        {:stop, :normal, %{state | status: :failed, handle: nil}}
 
-      {:stop, :normal, %{state | status: :done}}
+      # Guard: agent hit max iterations without finishing — work is incomplete
+      result_status == :max_iterations ->
+        Logger.warning(
+          "Ghost #{state.ghost_id} hit max iterations — treating as failure for retry"
+        )
+
+        mark_failed(state, "Agent hit max iterations (work incomplete)")
+        {:stop, :normal, %{state | status: :failed, handle: nil}}
+
+      true ->
+        state = %{
+          state
+          | parsed_events: Enum.reverse(events) ++ state.parsed_events,
+            output: [state.output, text],
+            handle: nil
+        }
+
+        try do
+          mark_success(state)
+        rescue
+          e ->
+            Logger.error("Ghost #{state.ghost_id} mark_success crashed: #{Exception.message(e)}")
+            mark_failed(state, "Success handler crashed: #{Exception.message(e)}")
+        end
+
+        {:stop, :normal, %{state | status: :done}}
     end
   end
 
@@ -346,14 +359,9 @@ defmodule GiTF.Ghost.Worker do
     # Stop the current process (port/task)
     state = do_stop(state)
 
-    # Reset the op to pending so it can be re-spawned with transfer context
-    case GiTF.Ops.get(state.op_id) do
-      {:ok, op} ->
-        Archive.put(:ops, %{op | status: "pending"})
-
-      _ ->
-        :ok
-    end
+    # Reset the op to pending so it can be re-spawned with transfer context.
+    # Uses Ops.reset which clears ghost_id and nudges the spawner.
+    GiTF.Ops.reset(state.op_id)
 
     # Notify Major that ghost handed off — Major's op spawner will pick it up
     GiTF.Link.send(

@@ -600,76 +600,75 @@ defmodule GiTF.Major.Orchestrator do
   defp finalize_merge_as_pr(mission, nil), do: finalize_merge_to_main(mission)
 
   defp finalize_merge_as_pr(mission, sector) do
-    case GiTF.Sync.merge_quest(mission.id) do
-      {:ok, quest_branch} ->
-        repo_path = sector.path
-        {:ok, main_branch} = GiTF.Sync.detect_main_branch(repo_path)
+    with {:ok, quest_branch} <- GiTF.Sync.merge_quest(mission.id),
+         repo_path = sector.path,
+         {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path) do
+      title = "gitf: #{mission.name || mission.goal}"
+      body = "Mission #{mission.id}\n\nGoal: #{mission.goal}"
 
-        title = "gitf: #{mission.name || mission.goal}"
-        body = "Mission #{mission.id}\n\nGoal: #{mission.goal}"
+      # Push mission branch and create PR
+      GiTF.Git.safe_cmd(["push", "-u", "origin", quest_branch],
+        cd: repo_path,
+        stderr_to_stdout: true
+      )
 
-        # Push mission branch and create PR
-        GiTF.Git.safe_cmd(["push", "-u", "origin", quest_branch],
-          cd: repo_path,
-          stderr_to_stdout: true
-        )
+      # Wrap in Task with timeout — a hung `gh` would hold the MissionLock forever
+      pr_task =
+        Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+          System.cmd(
+            "gh",
+            [
+              "pr",
+              "create",
+              "--head",
+              quest_branch,
+              "--base",
+              main_branch,
+              "--title",
+              String.slice(title, 0, 200),
+              "--body",
+              String.slice(body, 0, 4000)
+            ],
+            cd: repo_path,
+            stderr_to_stdout: true
+          )
+        end)
 
-        # Wrap in Task with timeout — a hung `gh` would hold the MissionLock forever
-        pr_result =
-          Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
-            System.cmd(
-              "gh",
-              [
-                "pr",
-                "create",
-                "--head",
-                quest_branch,
-                "--base",
-                main_branch,
-                "--title",
-                String.slice(title, 0, 200),
-                "--body",
-                String.slice(body, 0, 4000)
-              ],
-              cd: repo_path,
-              stderr_to_stdout: true
-            )
-          end)
-          |> Task.yield(30_000)
-          |> case do
-            {:ok, {output, 0}} -> {:ok, String.trim(output)}
-            {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
-            nil -> {:error, "gh pr create timed out after 30s"}
-          end
-
-        case pr_result do
-          {:ok, url} ->
-            GiTF.Missions.store_artifact(mission.id, "sync", %{
-              "status" => "pr_created",
-              "branch" => quest_branch,
-              "pr_url" => url
-            })
-
-          {:error, reason} ->
-            Logger.warning("Quest #{mission.id} PR creation failed: #{inspect(reason)}")
-
-            GiTF.Missions.store_artifact(mission.id, "sync", %{
-              "status" => "pr_failed",
-              "branch" => quest_branch,
-              "error" => inspect(reason)
-            })
+      pr_result =
+        case Task.yield(pr_task, 30_000) || Task.shutdown(pr_task, :brutal_kill) do
+          {:ok, {output, 0}} -> {:ok, String.trim(output)}
+          {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
+          nil -> {:error, "gh pr create timed out after 30s"}
         end
 
-        {:ok, mission} = GiTF.Missions.get(mission.id)
-        start_simplify(mission)
+      case pr_result do
+        {:ok, url} ->
+          GiTF.Missions.store_artifact(mission.id, "sync", %{
+            "status" => "pr_created",
+            "branch" => quest_branch,
+            "pr_url" => url
+          })
 
+        {:error, reason} ->
+          Logger.warning("Quest #{mission.id} PR creation failed: #{inspect(reason)}")
+
+          GiTF.Missions.store_artifact(mission.id, "sync", %{
+            "status" => "pr_failed",
+            "branch" => quest_branch,
+            "error" => inspect(reason)
+          })
+      end
+
+      {:ok, mission} = GiTF.Missions.get(mission.id)
+      start_simplify(mission)
+    else
       {:error, reason} ->
         GiTF.Missions.store_artifact(mission.id, "sync", %{
           "status" => "failed",
           "error" => inspect(reason)
         })
 
-        Logger.warning("Quest #{mission.id} merge_quest failed: #{inspect(reason)}")
+        Logger.warning("Quest #{mission.id} PR merge failed: #{inspect(reason)}")
         GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
         GiTF.Missions.update_status!(mission.id)
         {:ok, "completed"}

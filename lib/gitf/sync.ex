@@ -126,33 +126,41 @@ defmodule GiTF.Sync do
     # Detect base branch
     {:ok, base} = detect_main_branch(repo_path)
 
-    # Create PR via gh CLI
-    case System.cmd(
-           "gh",
-           [
-             "pr",
-             "create",
-             "--head",
-             branch,
-             "--base",
-             base,
-             "--title",
-             title,
-             "--body",
-             String.slice(body, 0, 4000)
-           ],
-           cd: repo_path,
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
+    # Create PR via gh CLI — wrapped in Task to prevent sector lock hangs
+    gh_task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        System.cmd(
+          "gh",
+          [
+            "pr",
+            "create",
+            "--head",
+            branch,
+            "--base",
+            base,
+            "--title",
+            title,
+            "--body",
+            String.slice(body, 0, 4000)
+          ],
+          cd: repo_path,
+          stderr_to_stdout: true
+        )
+      end)
+
+    case Task.yield(gh_task, 30_000) || Task.shutdown(gh_task, :brutal_kill) do
+      {:ok, {output, 0}} ->
         url = output |> String.trim()
         Logger.info("PR created via gh CLI: #{url}")
         {:ok, url}
 
-      {output, _code} ->
-        # gh might not be installed or no remote configured
+      {:ok, {output, _code}} ->
         Logger.warning("gh pr create failed: #{String.slice(output, 0, 200)}")
         {:error, {:gh_pr_failed, String.slice(output, 0, 200)}}
+
+      nil ->
+        Logger.warning("gh pr create timed out after 30s")
+        {:error, {:gh_pr_timeout, "timed out after 30s"}}
     end
   rescue
     e ->
@@ -387,11 +395,19 @@ defmodule GiTF.Sync do
   end
 
   defp cleanup_stale_merge_state(repo_path) do
-    merge_head = Path.join([repo_path, ".git", "MERGE_HEAD"])
+    git_dir = Path.join(repo_path, ".git")
+    merge_head = Path.join(git_dir, "MERGE_HEAD")
+    rebase_merge = Path.join(git_dir, "rebase-merge")
+    rebase_apply = Path.join(git_dir, "rebase-apply")
 
     if File.exists?(merge_head) do
-      Logger.warning("Stale MERGE_HEAD found in #{repo_path}, aborting interrupted sync")
-      GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
+      Logger.warning("Stale MERGE_HEAD found in #{repo_path}, aborting interrupted merge")
+      GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+    end
+
+    if File.dir?(rebase_merge) or File.dir?(rebase_apply) do
+      Logger.warning("Stale rebase state found in #{repo_path}, aborting interrupted rebase")
+      GiTF.Git.safe_cmd(["rebase", "--abort"], cd: repo_path, stderr_to_stdout: true)
     end
   rescue
     _ -> :ok

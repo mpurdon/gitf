@@ -215,6 +215,8 @@ defmodule GiTF.Major do
   @impl true
   def handle_info({:waggle_received, link_msg}, state) do
     state = handle_waggle(link_msg, state)
+    # Mark as read to prevent re-processing by the 30s waggle recovery cycle
+    if id = Map.get(link_msg, :id), do: GiTF.Link.mark_read(id)
     {:noreply, state}
   end
 

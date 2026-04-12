@@ -96,7 +96,7 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec requirements_prompt(map(), map(), String.t()) :: String.t()
   def requirements_prompt(mission, research_artifact, historical_context \\ "") do
-    research_json = Jason.encode!(research_artifact)
+    research_json = encode_or(research_artifact, "{}")
 
     """
     # Requirements Phase
@@ -163,8 +163,8 @@ defmodule GiTF.Major.PhasePrompts do
         extra_instructions \\ "",
         historical_context \\ ""
       ) do
-    requirements_json = Jason.encode!(requirements)
-    research_json = Jason.encode!(research)
+    requirements_json = encode_or(requirements, "{}")
+    research_json = encode_or(research, "{}")
 
     instructions = """
     1. Map each requirement to a specific implementation approach
@@ -249,7 +249,7 @@ defmodule GiTF.Major.PhasePrompts do
         historical_context \\ ""
       ) do
     base = design_prompt(mission, requirements, research, extra_instructions, historical_context)
-    review_json = Jason.encode!(review)
+    review_json = encode_or(review, "{}")
 
     base <>
       """
@@ -274,8 +274,8 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec review_prompt(map(), map(), map(), map()) :: String.t()
   def review_prompt(mission, designs, requirements, research) do
-    requirements_json = Jason.encode!(requirements)
-    research_json = Jason.encode!(research)
+    requirements_json = encode_or(requirements, "{}")
+    research_json = encode_or(research, "{}")
 
     designs_section =
       if is_map(designs) and map_size(designs) > 1 do
@@ -398,8 +398,8 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec planning_prompt(map(), map(), map(), map(), String.t()) :: String.t()
   def planning_prompt(mission, design, requirements, review, historical_context \\ "") do
-    design_json = Jason.encode!(design)
-    requirements_json = Jason.encode!(requirements)
+    design_json = encode_or(design, "{}")
+    requirements_json = encode_or(requirements, "{}")
 
     # Extract only actionable review feedback, not the full artifact
     review_section =

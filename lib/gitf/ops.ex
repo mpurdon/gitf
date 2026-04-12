@@ -25,6 +25,8 @@ defmodule GiTF.Ops do
   @transitions %{
     {"pending", :assign} => "assigned",
     {"assigned", :start} => "running",
+    {"assigned", :reset} => "pending",
+    {"running", :reset} => "pending",
     {"running", :complete} => "done",
     {"running", :fail} => "failed",
     {"done", :reject} => "rejected",
