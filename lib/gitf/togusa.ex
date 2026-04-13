@@ -115,7 +115,9 @@ defmodule GiTF.Togusa do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Logger.debug("Togusa.learn_from_failure failed for op #{op_id}: #{Exception.message(e)}")
+      :ok
   end
 
   # -- Fix Prompt Builder ----------------------------------------------------

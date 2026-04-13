@@ -121,7 +121,7 @@ defmodule GiTF.Togusa.FixContext do
               "quality_gate" -> :quality_gate
               "goal_fulfillment" -> :goal_fulfillment
               atom when is_atom(atom) -> atom
-              other -> String.to_existing_atom(other)
+              _ -> :unknown
             end
 
           %{
