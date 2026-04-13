@@ -137,7 +137,7 @@ defmodule GiTF.Dashboard.DesignLive do
     </div>
 
     <div class="tab-bar" style="margin-bottom:1rem">
-      <div class={"tab #{if @active_tab == "compare", do: "tab-active"}"} phx-click="switch_tab" phx-value-tab="compare">Compare</div>
+      <div :if={length(@strategy_list) > 1} class={"tab #{if @active_tab == "compare", do: "tab-active"}"} phx-click="switch_tab" phx-value-tab="compare">Compare</div>
       <div
         :for={strategy <- @strategy_list}
         class={"tab tab-#{strategy} #{if @active_tab == strategy, do: "tab-active"}"}
@@ -402,11 +402,16 @@ defmodule GiTF.Dashboard.DesignLive do
   # -- Data loading ----------------------------------------------------------
 
   defp refresh_data(socket, mission) do
-    designs = %{
-      "minimal" => GiTF.Missions.get_artifact(mission.id, "design_minimal"),
-      "normal" => GiTF.Missions.get_artifact(mission.id, "design_normal"),
-      "complex" => GiTF.Missions.get_artifact(mission.id, "design_complex")
-    }
+    # In fast mode, only the minimal strategy is used
+    active_strategies =
+      if Map.get(mission, :pipeline_mode) == "fast",
+        do: ["minimal"],
+        else: @strategies
+
+    designs =
+      Map.new(active_strategies, fn s ->
+        {s, GiTF.Missions.get_artifact(mission.id, "design_#{s}")}
+      end)
 
     review = GiTF.Missions.get_artifact(mission.id, "review")
 
@@ -418,13 +423,19 @@ defmodule GiTF.Dashboard.DesignLive do
         :view_only
       end
 
-    default_tab = if review, do: review["selected_design"] || "compare", else: "compare"
+    default_tab =
+      cond do
+        review -> review["selected_design"] || "compare"
+        length(active_strategies) == 1 -> hd(active_strategies)
+        true -> "compare"
+      end
     active_tab = Map.get(socket.assigns, :active_tab, default_tab)
 
     socket
     |> assign(:mission, mission)
     |> assign(:mode, mode)
     |> assign(:designs, designs)
+    |> assign(:strategy_list, active_strategies)
     |> assign(:review, review)
     |> assign(:active_tab, active_tab)
   end
