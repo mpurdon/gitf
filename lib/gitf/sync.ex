@@ -81,7 +81,12 @@ defmodule GiTF.Sync do
       end
 
     title = if op, do: op.title, else: "gitf: #{shell.branch}"
-    body = if op, do: op.description || "", else: ""
+
+    base_body = if op, do: op.description || "", else: ""
+
+    body =
+      base_body <>
+        "\n\n---\n*The net is vast and infinite.* — Ghost in the Shell\n"
 
     # If sector has GitHub API config, prefer that
     if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) && op do

@@ -601,7 +601,15 @@ defmodule GiTF.Major.Orchestrator do
          repo_path = sector.path,
          {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path) do
       title = "gitf: #{mission.name || mission.goal}"
-      body = "Mission #{mission.id}\n\nGoal: #{mission.goal}"
+
+      body = """
+      Mission #{mission.id}
+
+      **Goal:** #{mission.goal}
+
+      ---
+      *The net is vast and infinite.* — Ghost in the Shell
+      """
 
       # Push mission branch and create PR
       GiTF.Git.safe_cmd(["push", "-u", "origin", quest_branch],
