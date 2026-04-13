@@ -133,7 +133,7 @@ defmodule GiTF.Sector do
     list()
     |> Enum.each(fn sector ->
       needs_github = sector.path && is_nil(Map.get(sector, :github_owner))
-      needs_strategy = Map.get(sector, :sync_strategy) == "manual"
+      needs_strategy = Map.get(sector, :sync_strategy) in ["manual", "auto_merge"]
 
       if needs_github or needs_strategy do
         {owner, repo} =
