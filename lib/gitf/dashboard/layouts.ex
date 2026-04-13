@@ -263,6 +263,8 @@ defmodule GiTF.Dashboard.Layouts do
             min-width: 20px;
           }
           .step-line-done { background: #3fb950; }
+          .step-failed .step-circle { background: #f8514922; color: #f85149; border: 2px solid #f85149; }
+          .step-failed .step-label { color: #f85149; font-weight: 600; }
           .step-skipped .step-circle { background: #1c2128; color: #4b5563; border: 2px dashed #30363d; opacity: 0.5; }
           .step-skipped .step-label { color: #4b5563; font-style: italic; opacity: 0.5; }
           .step-line-skipped { background: #30363d; border-top: 2px dashed #30363d; height: 0; opacity: 0.3; }

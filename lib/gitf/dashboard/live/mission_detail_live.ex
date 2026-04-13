@@ -561,6 +561,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 <%= cond do %>
                   <% phase_skipped?(@mission, phase) -> %>
                     <span style="color:#4b5563">—</span>
+                  <% phase_failed?(@mission, phase) -> %>
+                    <Heroicons.exclamation_triangle mini class="w-4 h-4" style="color:#f85149" />
                   <% phase_done?(@mission, phase) -> %>
                     <Heroicons.check mini class="w-4 h-4" />
                   <% true -> %>
@@ -903,10 +905,25 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     Map.get(mission, :pipeline_mode) == "fast" and phase in @fast_skipped_phases
   end
 
+  defp phase_failed?(mission, phase) do
+    status = Map.get(mission, :status)
+    current = normalise_phase(Map.get(mission, :current_phase, "pending"))
+
+    cond do
+      # Mission failed on this phase
+      status == "failed" and current == phase -> true
+      # Validation failed and we're back in implementation (fix loop)
+      phase == "validation" and current == "implementation" and
+          Map.get(mission, :fix_context) != nil -> true
+      true -> false
+    end
+  end
+
   defp phase_step_class(mission, phase) do
     current = normalise_phase(Map.get(mission, :current_phase, "pending"))
 
     cond do
+      phase_failed?(mission, phase) -> "step-failed"
       phase == current -> "step-active"
       phase_skipped?(mission, phase) -> "step-skipped"
       phase_done?(mission, phase) -> "step-done"
