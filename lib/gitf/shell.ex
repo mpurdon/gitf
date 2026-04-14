@@ -208,19 +208,23 @@ defmodule GiTF.Shell do
     cutoff = DateTime.utc_now() |> DateTime.add(-@branch_protection_ttl_seconds, :second)
     active_phases = ~w(implementation validation sync simplify scoring)
 
-    # Archived mission records don't contain :ops (stripped by Missions.update_status!),
-    # so we must query ops separately via Ops.list.
-    Archive.filter(:missions, fn m ->
-      recent? = DateTime.compare(m[:updated_at] || m[:inserted_at] || cutoff, cutoff) == :gt
-      active? = m[:status] in ["active", "running"] or m[:phase] in active_phases
-      recent? and active?
-    end)
-    |> Enum.flat_map(fn mission ->
-      GiTF.Ops.list(mission_id: mission.id)
-      |> Enum.map(& &1[:branch])
-      |> Enum.reject(&is_nil/1)
-    end)
-    |> MapSet.new()
+    # Find active mission IDs (archived missions don't contain :ops)
+    active_mission_ids =
+      Archive.filter(:missions, fn m ->
+        recent? = DateTime.compare(m[:updated_at] || m[:inserted_at] || cutoff, cutoff) == :gt
+        active? = m[:status] in ["active", "running"] or m[:phase] in active_phases
+        recent? and active?
+      end)
+      |> MapSet.new(& &1.id)
+
+    # Single scan of all ops, filter to active missions, collect branches
+    if MapSet.size(active_mission_ids) == 0 do
+      MapSet.new()
+    else
+      Archive.all(:ops)
+      |> Enum.filter(&(&1[:mission_id] in active_mission_ids and is_binary(&1[:branch])))
+      |> MapSet.new(& &1[:branch])
+    end
   end
 
   # -- Private helpers -------------------------------------------------------

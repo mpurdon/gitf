@@ -1846,12 +1846,13 @@ defmodule GiTF.Major.Orchestrator do
         with sync_art when is_map(sync_art) <- GiTF.Missions.get_artifact(mission_id, "sync"),
              branch when is_binary(branch) <- sync_art["branch"],
              {:ok, sector} <- GiTF.Sector.get(sector_id) do
-          GiTF.Git.safe_cmd(["branch", "-D", branch], cd: sector.path, stderr_to_stdout: true)
+          GiTF.Git.branch_delete(sector.path, branch)
           GiTF.Git.safe_cmd(["push", "origin", "--delete", branch], cd: sector.path, stderr_to_stdout: true)
           Logger.info("Cleaned up mission branch #{branch}")
         end
       rescue
-        _ -> :ok
+        e ->
+          Logger.warning("Failed to cleanup mission branch for #{mission_id}: #{Exception.message(e)}")
       end
     end)
   end

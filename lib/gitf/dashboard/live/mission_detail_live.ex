@@ -687,23 +687,23 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <div class="report-metrics-grid">
             <div class="metric-card">
               <div class="metric-label">Input</div>
-              <div class="metric-value">{report_number(@report.tokens.input)}</div>
+              <div class="metric-value">{format_number(@report.tokens.input)}</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">Output</div>
-              <div class="metric-value">{report_number(@report.tokens.output)}</div>
+              <div class="metric-value">{format_number(@report.tokens.output)}</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">Cache Read</div>
-              <div class="metric-value">{report_number(@report.tokens.cache_read)}</div>
+              <div class="metric-value">{format_number(@report.tokens.cache_read)}</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">Cache Create</div>
-              <div class="metric-value">{report_number(@report.tokens.cache_create)}</div>
+              <div class="metric-value">{format_number(@report.tokens.cache_create)}</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">Total Tokens</div>
-              <div class="metric-value">{report_number(@report.total_tokens)}</div>
+              <div class="metric-value">{format_number(@report.total_tokens)}</div>
             </div>
           </div>
         </div>
@@ -1101,14 +1101,4 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp file_status_class("A"), do: "badge-green"
   defp file_status_class("D"), do: "badge-red"
   defp file_status_class(_), do: "badge-yellow"
-
-  defp report_number(n) when is_integer(n) do
-    n
-    |> Integer.to_string()
-    |> String.reverse()
-    |> String.replace(~r/.{3}(?=.)/, "\\0,")
-    |> String.reverse()
-  end
-
-  defp report_number(_), do: "0"
 end

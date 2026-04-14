@@ -374,11 +374,12 @@ defmodule GiTF.Sync do
     # Save starting point for rollback
     {:ok, savepoint} = get_head(repo_path)
 
+    # Batch-fetch all branches from origin in a single network call.
+    # Branches may have been pushed to origin but deleted locally by worktree cleanup.
+    ensure_local_branches(repo_path, Enum.map(shells, & &1.branch))
+
     results =
       Enum.map(shells, fn shell ->
-        # Ensure local branch exists — it may have been pushed to origin but deleted locally
-        ensure_local_branch(repo_path, shell.branch)
-
         case GiTF.Git.sync(repo_path, shell.branch, no_ff: true) do
           :ok ->
             Logger.info("Syncd #{shell.branch} into #{quest_branch}")
@@ -409,12 +410,14 @@ defmodule GiTF.Sync do
     end
   end
 
-  # If a local branch was deleted (by worktree cleanup) but exists on origin,
-  # recreate it from the remote tracking branch.
-  defp ensure_local_branch(repo_path, branch) do
-    # Fetch from origin unconditionally — no-op if branch already exists locally.
-    # Avoids TOCTOU race between branch_exists? check and fetch.
-    GiTF.Git.safe_cmd(["fetch", "origin", "#{branch}:#{branch}"],
+  # Batch-fetch branches from origin in a single network call.
+  # Branches may have been deleted locally by worktree cleanup but still exist on origin.
+  defp ensure_local_branches(_repo_path, []), do: :ok
+
+  defp ensure_local_branches(repo_path, branches) do
+    refspecs = Enum.map(branches, fn b -> "#{b}:#{b}" end)
+
+    GiTF.Git.safe_cmd(["fetch", "origin" | refspecs],
       cd: repo_path,
       stderr_to_stdout: true
     )

@@ -43,11 +43,21 @@ defmodule GiTF.Dashboard.Helpers do
   def format_cost(cost, decimals \\ 4)
   def format_cost(cost, decimals) when is_float(cost), do: "$#{:erlang.float_to_binary(cost, decimals: decimals)}"
   def format_cost(cost, decimals) when is_integer(cost), do: "$#{:erlang.float_to_binary(cost * 1.0, decimals: decimals)}"
-  def format_cost(_, _), do: "$0.00"
+  def format_cost(_, decimals), do: "$#{:erlang.float_to_binary(0.0, decimals: decimals)}"
 
   def format_tokens(count) when count >= 1_000_000, do: "#{Float.round(count / 1_000_000, 1)}M"
   def format_tokens(count) when count >= 1_000, do: "#{Float.round(count / 1_000, 1)}K"
   def format_tokens(count), do: "#{count}"
+
+  def format_number(n) when is_integer(n) do
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/.{3}(?=.)/, "\\0,")
+    |> String.reverse()
+  end
+
+  def format_number(_), do: "0"
 
   def format_timestamp(nil), do: "-"
 
