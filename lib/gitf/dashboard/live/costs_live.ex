@@ -77,10 +77,10 @@ defmodule GiTF.Dashboard.CostsLive do
     # Compute summary from filtered costs
     summary = compute_summary(all_costs)
 
-    # Burn rate: total filtered spend / hours in range
-    range_hours = to_float(hours || max(DateTime.diff(DateTime.utc_now(), DateTime.shift(DateTime.utc_now(), hour: -1), :hour), 1))
+    # Burn rate: total filtered spend / active factory hours (not wall-clock)
     total_filtered_cost = all_costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float()
-    burn_rate = if range_hours > 0, do: Float.round(total_filtered_cost / range_hours, 4), else: 0.0
+    active_hours = compute_active_hours(missions, hours)
+    burn_rate = if active_hours > 0, do: Float.round(total_filtered_cost / active_hours, 4), else: 0.0
 
     # Per-mission cost breakdown — group filtered costs by mission_id
     costs_by_mission = Enum.group_by(all_costs, & &1[:mission_id])
@@ -137,6 +137,7 @@ defmodule GiTF.Dashboard.CostsLive do
     |> assign(:current_path, "/costs")
     |> assign(:summary, summary)
     |> assign(:burn_rate, burn_rate)
+    |> assign(:active_hours, active_hours)
     |> assign(:mission_costs, mission_costs)
     |> assign(:trend, trend)
     |> assign(:total_records, length(all_costs))
@@ -158,6 +159,53 @@ defmodule GiTF.Dashboard.CostsLive do
   defp filter_costs_by_range(costs, hours) do
     cutoff = DateTime.shift(DateTime.utc_now(), hour: -hours)
     Enum.filter(costs, fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, cutoff) != :lt end)
+  end
+
+  # Compute hours the factory was actively running missions within the range.
+  # Uses the union of [inserted_at, updated_at] spans for missions that overlap the window.
+  defp compute_active_hours(missions, range_hours) do
+    now = DateTime.utc_now()
+    window_start = if range_hours, do: DateTime.shift(now, hour: -range_hours), else: nil
+
+    spans =
+      missions
+      |> Enum.filter(&(&1.status in ["active", "completed", "failed"]))
+      |> Enum.map(fn m ->
+        start = m[:inserted_at] || now
+        stop = if m.status == "active", do: now, else: m[:updated_at] || now
+
+        # Clamp to the selected range window
+        start = if window_start && DateTime.compare(start, window_start) == :lt, do: window_start, else: start
+        stop = if DateTime.compare(stop, now) == :gt, do: now, else: stop
+
+        {start, stop}
+      end)
+      |> Enum.filter(fn {start, stop} -> DateTime.compare(start, stop) != :gt end)
+      |> Enum.sort_by(fn {start, _} -> DateTime.to_unix(start) end)
+
+    # Merge overlapping spans and sum total seconds
+    merged_seconds =
+      Enum.reduce(spans, {0, nil, nil}, fn {s, e}, {total, cur_start, cur_end} ->
+        cond do
+          is_nil(cur_start) ->
+            {total, s, e}
+
+          DateTime.compare(s, cur_end) != :gt ->
+            # Overlapping — extend current span
+            new_end = if DateTime.compare(e, cur_end) == :gt, do: e, else: cur_end
+            {total, cur_start, new_end}
+
+          true ->
+            # Gap — flush current span, start new one
+            {total + DateTime.diff(cur_end, cur_start, :second), s, e}
+        end
+      end)
+      |> then(fn {total, cur_start, cur_end} ->
+        if cur_start, do: total + DateTime.diff(cur_end, cur_start, :second), else: total
+      end)
+
+    # Convert to hours (minimum 0.01 to avoid division by zero display)
+    max(merged_seconds / 3600.0, 0.0)
   end
 
   defp compute_summary(costs) do
@@ -311,7 +359,8 @@ defmodule GiTF.Dashboard.CostsLive do
             <div class={"card-value #{if @burn_rate > 1.0, do: "red", else: "yellow"}"} style="font-size:1.4rem">
               {format_cost(@burn_rate, 2)}
             </div>
-            <div style="font-size:0.7rem; color:#8b949e">avg/hour ({@total_records} records)</div>
+            <% hrs = Float.round(@active_hours, 1) %>
+            <div style="font-size:0.7rem; color:#8b949e">per active hour ({hrs}h runtime)</div>
           </div>
         </div>
 
