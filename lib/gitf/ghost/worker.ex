@@ -1026,10 +1026,11 @@ defmodule GiTF.Ghost.Worker do
 
   defp mark_success(state) do
     GiTF.Telemetry.end_current_span()
-    update_ghost_status(state.ghost_id, GhostStatus.stopped())
 
-    # Collect phase output or auto-commit BEFORE marking op as done,
-    # so that downstream consumers (SyncQueue, tests) see committed changes.
+    # IMPORTANT: Save all op metadata BEFORE marking ghost as stopped.
+    # Once the ghost is terminal, Tachikoma's cleanup_orphans can delete the shell
+    # and worktree at any time. We must capture branch info, files changed, and
+    # output summary while the shell still exists.
     op =
       case GiTF.Ops.get(state.op_id) do
         {:ok, j} -> j
@@ -1045,10 +1046,11 @@ defmodule GiTF.Ghost.Worker do
       record_files_changed(state)
     end
 
-    # Save the ghost's final output summary and branch info on the op record.
-    # Branch info is critical — sync needs it after worktree cleanup deletes shells.
     save_output_summary(state)
     save_branch_info(state)
+
+    # NOW mark the ghost as stopped — after all shell-dependent work is done
+    update_ghost_status(state.ghost_id, GhostStatus.stopped())
 
     case GiTF.Ops.get(state.op_id) do
       {:ok, %{status: "done"}} ->
@@ -1291,36 +1293,40 @@ defmodule GiTF.Ghost.Worker do
         case GiTF.Ops.get(state.op_id) do
           {:ok, op} ->
             Archive.put(:ops, Map.merge(op, %{branch: branch, shell_id: state.shell_id}))
+            Logger.debug("Ghost #{state.ghost_id}: saved branch #{branch} on op #{state.op_id}")
 
           _ ->
-            :ok
+            Logger.warning("Ghost #{state.ghost_id}: op #{state.op_id} not found for save_branch_info")
         end
 
+      nil ->
+        Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for save_branch_info")
+
       _ ->
-        :ok
+        Logger.warning("Ghost #{state.ghost_id}: shell has no branch field")
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Ghost #{state.ghost_id}: save_branch_info crashed: #{inspect(e)}")
   end
 
   defp record_files_changed(state) do
     case Archive.get(:shells, state.shell_id) do
       %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
-        # Diff against the shell's base SHA to isolate this ghost's changes.
-        # --name-status gives A/M/D classification per file.
         record_diff(state.op_id, path, "#{base}..HEAD")
 
       %{worktree_path: path} when is_binary(path) ->
-        # Fallback: no base SHA recorded, use HEAD~1
         record_diff(state.op_id, path, "HEAD~1..HEAD")
 
-      _ ->
-        :ok
+      nil ->
+        Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for record_files_changed")
+
+      other ->
+        Logger.warning("Ghost #{state.ghost_id}: shell missing worktree_path: #{inspect(Map.keys(other || %{}))}")
     end
   rescue
     e ->
-      Logger.debug("Failed to record files changed: #{inspect(e)}")
-      :ok
+      Logger.warning("Ghost #{state.ghost_id}: record_files_changed crashed: #{inspect(e)}")
   end
 
   defp record_diff(op_id, worktree_path, range) do
@@ -1332,6 +1338,8 @@ defmodule GiTF.Ghost.Worker do
         details = parse_name_status(output)
         files = Enum.map(details, & &1.path)
 
+        Logger.info("Op #{op_id}: diff #{range} found #{length(files)} files changed")
+
         with {:ok, op} <- GiTF.Ops.get(op_id) do
           Archive.put(:ops, Map.merge(op, %{
             files_changed: length(files),
@@ -1340,8 +1348,8 @@ defmodule GiTF.Ghost.Worker do
           }))
         end
 
-      _ ->
-        :ok
+      {output, code} ->
+        Logger.warning("Op #{op_id}: git diff failed (exit #{code}): #{String.slice(output, 0, 200)}")
     end
   end
 
@@ -1357,6 +1365,9 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp mark_failed(state, reason) do
+    # Record costs before marking ghost as terminal — shell may be cleaned up after
+    record_costs_from_events(state)
+
     update_ghost_status(state.ghost_id, GhostStatus.crashed())
     GiTF.Ops.fail(state.op_id)
 
@@ -1365,7 +1376,6 @@ defmodule GiTF.Ghost.Worker do
       error: reason
     })
 
-    record_costs_from_events(state)
     GiTF.Progress.clear(state.ghost_id)
 
     GiTF.Link.send(
