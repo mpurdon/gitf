@@ -428,6 +428,9 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
               <%= if ovhd = @phase_costs.by_phase_type["overhead"] do %>
                 <span style="color:#d29922">Overhead: {format_cost(ovhd.cost)}</span>
               <% end %>
+              <%= if rework = @phase_costs.by_phase_type["rework"] do %>
+                <span style="color:#f85149">Rework: {format_cost(rework.cost)}</span>
+              <% end %>
             </div>
           <% end %>
         </div>

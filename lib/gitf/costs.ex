@@ -219,8 +219,12 @@ defmodule GiTF.Costs do
           true -> "implementation"
         end
 
+      # Fix ops (rework) are identified by the fix_of field linking back to the original op
+      is_rework = is_binary(op[:fix_of])
+
       phase_type =
         cond do
+          is_rework -> "rework"
           phase in @productive_phases -> "productive"
           phase in @overhead_phases -> "overhead"
           true -> "productive"

@@ -119,11 +119,13 @@ defmodule GiTF.Dashboard.CostsLive do
     total_spent = Enum.sum(Enum.map(mission_costs, & &1.spent))
     budget_pct = if total_budget > 0, do: Float.round(total_spent / total_budget * 100, 1), else: 0.0
 
-    # Productive vs overhead percentages for stacked bar
+    # Productive vs overhead vs rework percentages for stacked bar
     prod_data = summary.by_phase_type["productive"]
     overhead_data = summary.by_phase_type["overhead"]
+    rework_data = summary.by_phase_type["rework"]
     prod_pct = if prod_data, do: cost_pct(summary.total_cost, prod_data.cost), else: 0.0
     overhead_pct = if overhead_data, do: cost_pct(summary.total_cost, overhead_data.cost), else: 0.0
+    rework_pct = if rework_data, do: cost_pct(summary.total_cost, rework_data.cost), else: 0.0
 
     socket
     |> assign(:page_title, "Costs")
@@ -142,6 +144,8 @@ defmodule GiTF.Dashboard.CostsLive do
     |> assign(:overhead_pct, overhead_pct)
     |> assign(:prod_cost, if(prod_data, do: prod_data.cost, else: 0.0))
     |> assign(:overhead_cost, if(overhead_data, do: overhead_data.cost, else: 0.0))
+    |> assign(:rework_pct, rework_pct)
+    |> assign(:rework_cost, if(rework_data, do: rework_data.cost, else: 0.0))
   end
 
   defp filter_costs_by_range(costs, nil), do: costs
@@ -362,7 +366,7 @@ defmodule GiTF.Dashboard.CostsLive do
           <%= if @summary.by_phase_type == %{} do %>
             <div class="empty">No cost data recorded yet.</div>
           <% else %>
-            <%!-- Stacked horizontal bar --%>
+            <%!-- Stacked horizontal bar: productive (green) + overhead (yellow) + rework (red) --%>
             <div style="display:flex; height:28px; border-radius:6px; overflow:hidden; margin-bottom:0.5rem">
               <%= if @prod_pct > 0 do %>
                 <div style={"width:#{@prod_pct}%; background:#3fb950; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @prod_pct > 8, do: "0", else: "30px"}"}>
@@ -374,13 +378,18 @@ defmodule GiTF.Dashboard.CostsLive do
                   {if @overhead_pct > 8, do: "#{@overhead_pct}%", else: ""}
                 </div>
               <% end %>
-              <% unknown_pct = max(100.0 - @prod_pct - @overhead_pct, 0) %>
+              <%= if @rework_pct > 0 do %>
+                <div style={"width:#{@rework_pct}%; background:#f85149; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @rework_pct > 8, do: "0", else: "30px"}"}>
+                  {if @rework_pct > 8, do: "#{@rework_pct}%", else: ""}
+                </div>
+              <% end %>
+              <% unknown_pct = max(100.0 - @prod_pct - @overhead_pct - @rework_pct, 0) %>
               <%= if unknown_pct > 1 do %>
                 <div style={"width:#{unknown_pct}%; background:#30363d"}></div>
               <% end %>
             </div>
             <%!-- Legend --%>
-            <div style="display:flex; gap:1.5rem; font-size:0.75rem">
+            <div style="display:flex; gap:1rem; font-size:0.75rem; flex-wrap:wrap">
               <div style="display:flex; align-items:center; gap:0.3rem">
                 <div style="width:10px; height:10px; border-radius:2px; background:#3fb950"></div>
                 <span style="color:#3fb950; font-weight:600">Productive</span>
@@ -391,6 +400,13 @@ defmodule GiTF.Dashboard.CostsLive do
                 <span style="color:#d29922; font-weight:600">Overhead</span>
                 <span style="color:#8b949e">{format_cost(@overhead_cost)} ({@overhead_pct}%)</span>
               </div>
+              <%= if @rework_pct > 0 do %>
+                <div style="display:flex; align-items:center; gap:0.3rem">
+                  <div style="width:10px; height:10px; border-radius:2px; background:#f85149"></div>
+                  <span style="color:#f85149; font-weight:600">Rework</span>
+                  <span style="color:#8b949e">{format_cost(@rework_cost)} ({@rework_pct}%)</span>
+                </div>
+              <% end %>
             </div>
           <% end %>
         </div>
@@ -600,6 +616,7 @@ defmodule GiTF.Dashboard.CostsLive do
 
   defp phase_type_color("productive"), do: "#3fb950"
   defp phase_type_color("overhead"), do: "#d29922"
+  defp phase_type_color("rework"), do: "#f85149"
   defp phase_type_color(_), do: "#8b949e"
 
   @overhead_phases ~w(review validation simplify scoring orchestration)
