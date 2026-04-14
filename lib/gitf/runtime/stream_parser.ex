@@ -62,8 +62,8 @@ defmodule GiTF.Runtime.StreamParser do
     %{
       input_tokens: Map.get(usage, "input_tokens", 0),
       output_tokens: Map.get(usage, "output_tokens", 0),
-      cache_read_tokens: Map.get(usage, "cache_read_tokens", 0),
-      cache_write_tokens: Map.get(usage, "cache_write_tokens", 0),
+      cache_read_tokens: Map.get(usage, "cache_read_input_tokens", Map.get(usage, "cache_read_tokens", 0)),
+      cache_write_tokens: Map.get(usage, "cache_creation_input_tokens", Map.get(usage, "cache_write_tokens", 0)),
       model: Map.get(entry, "model"),
       cost_usd: Map.get(entry, "cost_usd")
     }

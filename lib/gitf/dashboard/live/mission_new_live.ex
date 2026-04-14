@@ -83,10 +83,14 @@ defmodule GiTF.Dashboard.MissionNewLive do
 
       name = "GH-#{number}: #{String.slice(title, 0, 60)}"
 
+      label_names = Enum.map(issue["labels"] || [], & String.downcase(&1["name"] || ""))
+      is_bug = "bug" in label_names
+
       form =
         socket.assigns.form
         |> Map.put("goal", goal)
         |> Map.put("name", name)
+        |> then(fn f -> if is_bug, do: Map.put(f, "quick", "true"), else: f end)
 
       {:noreply,
        socket
