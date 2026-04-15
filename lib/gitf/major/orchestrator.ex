@@ -1265,22 +1265,67 @@ defmodule GiTF.Major.Orchestrator do
         end
 
       true ->
-        # Validation failed — use Togusa's fix context for accumulated tracking
+        # Validation failed — check if we still have fix attempts left.
+        # Important: check the validation artifact's freshness — if a fix ghost
+        # just completed, the old "fail" artifact is stale and we should re-validate
+        # rather than give up.
         fix_ctx = load_mission_fix_context(mission)
 
-        if GiTF.Togusa.FixContext.exhausted?(fix_ctx) do
-          Logger.warning(
-            "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts"
-          )
+        # Check if the latest impl op was a fix that completed AFTER this validation ran
+        latest_impl = latest_completed_impl_op(mission)
+        validation_stale? = validation_artifact_stale?(latest_impl, validation, mission.id)
 
-          fail_quest(mission.id, "Validation failed after #{fix_ctx.attempt} fix attempts")
-        else
-          Logger.info(
-            "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
-          )
+        cond do
+          validation_stale? ->
+            # Fix ghost completed after last validation — re-validate before deciding
+            Logger.info("Quest #{mission.id}: validation artifact is stale (fix completed after), re-validating")
+            start_validation(mission)
 
-          attempt_validation_fixes(mission, validation, fix_ctx)
+          GiTF.Togusa.FixContext.exhausted?(fix_ctx) ->
+            Logger.warning(
+              "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
+            )
+
+            fail_quest(mission.id, "Ghost lost in the net — validation failed after #{fix_ctx.attempt} attempts")
+
+          true ->
+            Logger.info(
+              "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
+            )
+
+            attempt_validation_fixes(mission, validation, fix_ctx)
         end
+    end
+  end
+
+  defp latest_completed_impl_op(mission) do
+    mission.ops
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.filter(&(&1.status == "done"))
+    |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
+    |> List.first()
+  end
+
+  defp validation_artifact_stale?(nil, _validation, _mid), do: false
+
+  defp validation_artifact_stale?(latest_impl, _validation, mission_id) do
+    # Check if the latest completed impl op finished after the last validation op started
+    last_validation_op =
+      case GiTF.Missions.get(mission_id) do
+        {:ok, m} ->
+          m.ops
+          |> Enum.filter(&(&1[:phase] == "validation" and &1.status == "done"))
+          |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
+          |> List.first()
+        _ -> nil
+      end
+
+    case {latest_impl[:inserted_at], last_validation_op && last_validation_op[:inserted_at]} do
+      {%DateTime{} = impl_at, %DateTime{} = val_at} ->
+        DateTime.compare(impl_at, val_at) == :gt
+
+      _ ->
+        false
     end
   end
 
@@ -1700,12 +1745,12 @@ defmodule GiTF.Major.Orchestrator do
     # Feed the learning loop — analyze failed ops
     ingest_failure_outcome(mission_id)
 
-    GiTF.Missions.transition_phase(mission_id, "completed", reason)
-    GiTF.Missions.update_status!(mission_id)
+    GiTF.Missions.transition_phase(mission_id, "ghost_in_the_shell", reason)
+    GiTF.Missions.update(mission_id, %{status: "failed"})
 
     GiTF.Observability.Alerts.dispatch_webhook(
       :quest_failed,
-      "Quest #{mission_id} failed: #{reason}"
+      "Quest #{mission_id} lost in the net: #{reason}"
     )
 
     # Record failure outcome in the Ledger
@@ -1714,7 +1759,7 @@ defmodule GiTF.Major.Orchestrator do
       _ -> :ok
     end
 
-    {:ok, "completed"}
+    {:ok, "failed"}
   end
 
   defp classify_mission_failure(mission_id, reason) do

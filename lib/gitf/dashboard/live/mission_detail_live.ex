@@ -1012,6 +1012,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp phase_icon(assigns), do: ~H"<span>{@phase |> String.first() |> String.upcase()}</span>"
 
   defp normalise_phase("awaiting_approval"), do: "sync"
+  defp normalise_phase("ghost_in_the_shell"), do: "completed"
   defp normalise_phase(phase), do: phase
 
   # Fast mode skips only the review phase (single design, no comparison needed)
