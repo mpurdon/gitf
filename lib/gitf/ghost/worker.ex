@@ -145,7 +145,8 @@ defmodule GiTF.Ghost.Worker do
       parsed_events: [],
       opts: opts,
       backup_timer: schedule_checkpoint(),
-      fallback_attempted: false
+      fallback_attempted: false,
+      last_activity_at: System.monotonic_time(:second)
     }
 
     {:ok, state, {:continue, :provision}}
@@ -216,7 +217,8 @@ defmodule GiTF.Ghost.Worker do
      %{
        state
        | output: [state.output, data],
-         parsed_events: Enum.reverse(events) ++ state.parsed_events
+         parsed_events: Enum.reverse(events) ++ state.parsed_events,
+         last_activity_at: System.monotonic_time(:second)
      }}
   end
 
@@ -338,7 +340,7 @@ defmodule GiTF.Ghost.Worker do
         :ok
     end
 
-    {:noreply, state}
+    {:noreply, %{state | last_activity_at: System.monotonic_time(:second)}}
   end
 
   def handle_info(:backup, state) do
@@ -379,31 +381,40 @@ defmodule GiTF.Ghost.Worker do
     {:noreply, state}
   end
 
-  def handle_info(:verify_beacon, %{status: :running} = state) do
-    alive? =
-      handle_alive?(state)
+  # Recurring heartbeat — checks process health and activity staleness.
+  # Self-schedules every @heartbeat_interval_ms while ghost is running.
+  @heartbeat_interval_ms :timer.seconds(15)
+  @stale_threshold_seconds 120
 
-    has_output? = state.parsed_events != []
+  def handle_info(:verify_beacon, %{status: :running} = state) do
+    alive? = handle_alive?(state)
+    now = System.monotonic_time(:second)
+    idle_seconds = now - state.last_activity_at
 
     cond do
       not alive? ->
-        Logger.warning("Beacon check failed: ghost #{state.ghost_id} process is dead after 10s")
-        mark_failed(state, "Process died within 10 seconds of spawning")
+        Logger.warning("Ghost #{state.ghost_id}: process is dead")
+        mark_failed(state, "Underlying process died")
         {:stop, :normal, %{state | status: :failed}}
 
-      not has_output? ->
-        Logger.warning("Beacon check: ghost #{state.ghost_id} alive but no output after 10s")
-        # Process is alive but silent -- not fatal, just log a warning
-        {:noreply, state}
+      idle_seconds > @stale_threshold_seconds ->
+        Logger.warning(
+          "Ghost #{state.ghost_id}: no activity for #{idle_seconds}s (threshold: #{@stale_threshold_seconds}s), killing"
+        )
+
+        kill_handle(state)
+        mark_failed(state, "No activity for #{idle_seconds} seconds")
+        {:stop, :normal, %{state | status: :failed}}
 
       true ->
-        Logger.debug("Beacon check passed for ghost #{state.ghost_id}")
+        # Healthy — reschedule
+        Process.send_after(self(), :verify_beacon, @heartbeat_interval_ms)
         {:noreply, state}
     end
   end
 
   def handle_info(:verify_beacon, state) do
-    # Ghost is no longer running (already completed or failed), ignore
+    # Ghost is no longer running (completed or failed), don't reschedule
     {:noreply, state}
   end
 
@@ -488,6 +499,23 @@ defmodule GiTF.Ghost.Worker do
       {:task, task} -> Process.alive?(task.pid)
       {:port, port} -> port_alive?(port)
       nil -> false
+    end
+  end
+
+  defp kill_handle(state) do
+    case state.handle do
+      {:task, task} ->
+        Task.shutdown(task, :brutal_kill)
+
+      {:port, port} ->
+        try do
+          Port.close(port)
+        rescue
+          _ -> :ok
+        end
+
+      nil ->
+        :ok
     end
   end
 
