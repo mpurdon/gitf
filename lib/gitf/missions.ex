@@ -351,51 +351,56 @@ defmodule GiTF.Missions do
 
   @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(mission_id) do
-    with {:ok, mission} <- get(mission_id) do
-      impl_jobs = Enum.reject(mission.ops, & &1[:phase_job])
+    # Read ops fresh — these are in a separate collection, not affected by the mission lock
+    ops = GiTF.Ops.list(mission_id: mission_id)
+    impl_jobs = Enum.reject(ops, & &1[:phase_job])
 
-      # Exclude failed ops that have been retried (active retry exists)
-      retried_ids =
-        impl_jobs
-        |> Enum.map(& &1[:retry_of])
-        |> Enum.reject(&is_nil/1)
-        |> MapSet.new()
+    retried_ids =
+      impl_jobs
+      |> Enum.map(& &1[:retry_of])
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
 
-      active_jobs =
-        Enum.reject(impl_jobs, fn op ->
-          op.status == "failed" and MapSet.member?(retried_ids, op.id)
-        end)
+    active_jobs =
+      Enum.reject(impl_jobs, fn op ->
+        op.status == "failed" and MapSet.member?(retried_ids, op.id)
+      end)
 
-      op_statuses = Enum.map(active_jobs, & &1.status)
+    op_statuses = Enum.map(active_jobs, & &1.status)
 
-      if mission.status == "planning" and op_statuses == [] do
-        {:ok, mission |> Map.delete(:ops)}
-      else
-        new_status = compute_status(op_statuses)
+    # Atomic read-modify-write on the mission record
+    result =
+      Archive.update(:missions, mission_id, fn mission ->
+        if mission.status == "planning" and op_statuses == [] do
+          mission
+        else
+          new_status = compute_status(op_statuses)
 
-        # Don't allow "completed" while still in post-implementation phases —
-        # simplify/scoring/sync must finish first via complete_quest
-        new_status =
-          if new_status == "completed" and Map.get(mission, :current_phase) in @pipeline_phases do
-            Logger.debug("Mission #{mission_id}: suppressing premature 'completed' — still in #{mission.current_phase} phase")
-            "active"
-          else
-            new_status
-          end
+          new_status =
+            if new_status == "completed" and Map.get(mission, :current_phase) in @pipeline_phases do
+              Logger.debug("Mission #{mission_id}: suppressing premature 'completed' — still in #{mission.current_phase} phase")
+              "active"
+            else
+              new_status
+            end
 
-        updated = %{mission | status: new_status} |> Map.delete(:ops)
-        result = Archive.put(:missions, updated)
-
-        if new_status == "completed" and mission.status != "completed" do
-          GiTF.Telemetry.emit([:gitf, :mission, :completed], %{}, %{
-            mission_id: mission.id,
-            name: mission.name
-          })
+          %{mission | status: new_status}
         end
+      end)
 
-        result
-      end
+    # Emit telemetry outside the lock
+    case result do
+      {:ok, %{status: "completed"} = mission} ->
+        GiTF.Telemetry.emit([:gitf, :mission, :completed], %{}, %{
+          mission_id: mission.id,
+          name: mission[:name]
+        })
+
+      _ ->
+        :ok
     end
+
+    result
   end
 
   @doc """
@@ -422,15 +427,10 @@ defmodule GiTF.Missions do
   """
   @spec store_artifact(String.t(), String.t(), map()) :: {:ok, map()} | {:error, :not_found}
   def store_artifact(mission_id, phase, artifact) do
-    case Archive.get(:missions, mission_id) do
-      nil ->
-        {:error, :not_found}
-
-      mission ->
-        artifacts = Map.get(mission, :artifacts, %{})
-        updated = Map.put(mission, :artifacts, Map.put(artifacts, phase, artifact))
-        Archive.put(:missions, updated)
-    end
+    Archive.update(:missions, mission_id, fn mission ->
+      artifacts = Map.get(mission, :artifacts, %{})
+      Map.put(mission, :artifacts, Map.put(artifacts, phase, artifact))
+    end)
   end
 
   @doc """

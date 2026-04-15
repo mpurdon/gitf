@@ -1071,11 +1071,14 @@ defmodule GiTF.Ghost.Worker do
       collect_phase_output(state, op)
     else
       auto_commit_worktree(state)
-      record_files_changed(state)
     end
 
-    save_output_summary(state)
-    save_branch_info(state)
+    # Gather all metadata, then write atomically to prevent partial updates
+    metadata = gather_completion_metadata(state, is_phase_job)
+
+    if metadata != %{} do
+      Archive.update(:ops, state.op_id, fn op -> Map.merge(op, metadata) end)
+    end
 
     # NOW mark the ghost as stopped — after all shell-dependent work is done
     update_ghost_status(state.ghost_id, GhostStatus.stopped())
@@ -1284,10 +1287,15 @@ defmodule GiTF.Ghost.Worker do
       :ok
   end
 
-  defp save_output_summary(state) do
+  # Collects all op metadata in one pass — branch info, files changed, output summary.
+  # Returns a map to merge atomically via Archive.update.
+  defp gather_completion_metadata(state, is_phase_job) do
+    shell = Archive.get(:shells, state.shell_id)
+    metadata = %{}
+
+    # Output summary
     output = IO.iodata_to_binary(state.output)
 
-    # Extract the last meaningful text block as summary (truncated)
     summary =
       output
       |> String.split("\n")
@@ -1296,60 +1304,52 @@ defmodule GiTF.Ghost.Worker do
       |> Enum.join("\n")
       |> String.slice(0, 2000)
 
-    case GiTF.Ops.get(state.op_id) do
-      {:ok, op} ->
-        Archive.put(:ops, Map.put(op, :output_summary, summary))
+    metadata = Map.put(metadata, :output_summary, summary)
 
-      _ ->
-        :ok
-    end
-  rescue
-    _ -> :ok
-  end
+    # Branch info
+    metadata =
+      case shell do
+        %{branch: branch} when is_binary(branch) ->
+          Logger.debug("Ghost #{state.ghost_id}: saved branch #{branch} on op #{state.op_id}")
+          Map.merge(metadata, %{branch: branch, shell_id: state.shell_id})
 
-  defp save_branch_info(state) do
-    case Archive.get(:shells, state.shell_id) do
-      %{branch: branch} when is_binary(branch) ->
-        case GiTF.Ops.get(state.op_id) do
-          {:ok, op} ->
-            Archive.put(:ops, Map.merge(op, %{branch: branch, shell_id: state.shell_id}))
-            Logger.debug("Ghost #{state.ghost_id}: saved branch #{branch} on op #{state.op_id}")
+        nil ->
+          Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for branch info")
+          metadata
+
+        _ ->
+          metadata
+      end
+
+    # Files changed (only for non-phase ops)
+    metadata =
+      if not is_phase_job do
+        case shell do
+          %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
+            collect_file_changes(state, metadata, path, "#{base}..HEAD")
+
+          %{worktree_path: path} when is_binary(path) ->
+            collect_file_changes(state, metadata, path, "HEAD~1..HEAD")
+
+          nil ->
+            Logger.warning("Ghost #{state.ghost_id}: shell not found for record_files_changed")
+            metadata
 
           _ ->
-            Logger.warning("Ghost #{state.ghost_id}: op #{state.op_id} not found for save_branch_info")
+            metadata
         end
+      else
+        metadata
+      end
 
-      nil ->
-        Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for save_branch_info")
-
-      _ ->
-        Logger.warning("Ghost #{state.ghost_id}: shell has no branch field")
-    end
+    metadata
   rescue
     e ->
-      Logger.warning("Ghost #{state.ghost_id}: save_branch_info crashed: #{inspect(e)}")
+      Logger.warning("Ghost #{state.ghost_id}: gather_completion_metadata failed: #{inspect(e)}")
+      %{}
   end
 
-  defp record_files_changed(state) do
-    case Archive.get(:shells, state.shell_id) do
-      %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
-        record_diff(state.op_id, path, "#{base}..HEAD")
-
-      %{worktree_path: path} when is_binary(path) ->
-        record_diff(state.op_id, path, "HEAD~1..HEAD")
-
-      nil ->
-        Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for record_files_changed")
-
-      other ->
-        Logger.warning("Ghost #{state.ghost_id}: shell missing worktree_path: #{inspect(Map.keys(other || %{}))}")
-    end
-  rescue
-    e ->
-      Logger.warning("Ghost #{state.ghost_id}: record_files_changed crashed: #{inspect(e)}")
-  end
-
-  defp record_diff(op_id, worktree_path, range) do
+  defp collect_file_changes(state, metadata, worktree_path, range) do
     case GiTF.Git.safe_cmd(["diff", "--name-status", range],
            cd: worktree_path,
            stderr_to_stdout: true
@@ -1357,19 +1357,17 @@ defmodule GiTF.Ghost.Worker do
       {output, 0} ->
         details = parse_name_status(output)
         files = Enum.map(details, & &1.path)
+        Logger.info("Op #{state.op_id}: diff #{range} found #{length(files)} files changed")
 
-        Logger.info("Op #{op_id}: diff #{range} found #{length(files)} files changed")
-
-        with {:ok, op} <- GiTF.Ops.get(op_id) do
-          Archive.put(:ops, Map.merge(op, %{
-            files_changed: length(files),
-            changed_files: files,
-            changed_files_detail: details
-          }))
-        end
+        Map.merge(metadata, %{
+          files_changed: length(files),
+          changed_files: files,
+          changed_files_detail: details
+        })
 
       {output, code} ->
-        Logger.warning("Op #{op_id}: git diff failed (exit #{code}): #{String.slice(output, 0, 200)}")
+        Logger.warning("Op #{state.op_id}: git diff failed (exit #{code}): #{String.slice(output, 0, 200)}")
+        metadata
     end
   end
 

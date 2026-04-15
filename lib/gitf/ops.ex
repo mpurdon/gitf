@@ -120,11 +120,12 @@ defmodule GiTF.Ops do
   """
   @spec assign(String.t(), String.t()) :: {:ok, map()} | {:error, atom()}
   def assign(op_id, ghost_id) do
-    with {:ok, op} <- get(op_id),
-         {:ok, next_status} <- validate_transition(op.status, :assign) do
-      updated = %{op | status: next_status, ghost_id: ghost_id}
-      Archive.put(:ops, updated)
-    end
+    Archive.update(:ops, op_id, fn op ->
+      case validate_transition(op.status, :assign) do
+        {:ok, next_status} -> %{op | status: next_status, ghost_id: ghost_id}
+        {:error, _} -> op
+      end
+    end)
   end
 
   @doc "Starts a op. Transitions: assigned -> running."
@@ -353,30 +354,33 @@ defmodule GiTF.Ops do
   # -- Private helpers ---------------------------------------------------------
 
   defp transition(op_id, action) do
-    with {:ok, op} <- get(op_id),
-         {:ok, next_status} <- validate_transition(op.status, action) do
-      updated = %{op | status: next_status}
-      result = Archive.put(:ops, updated)
+    result =
+      Archive.update(:ops, op_id, fn op ->
+        case validate_transition(op.status, action) do
+          {:ok, next_status} -> %{op | status: next_status}
+          {:error, _} -> op
+        end
+      end)
 
-      case action do
-        :start ->
-          GiTF.Telemetry.emit([:gitf, :op, :started], %{}, %{
-            op_id: op_id,
-            mission_id: op.mission_id
-          })
+    # Emit telemetry after the atomic write
+    case {action, result} do
+      {:start, {:ok, op}} ->
+        GiTF.Telemetry.emit([:gitf, :op, :started], %{}, %{
+          op_id: op_id,
+          mission_id: op.mission_id
+        })
 
-        :complete ->
-          GiTF.Telemetry.emit([:gitf, :op, :completed], %{}, %{
-            op_id: op_id,
-            mission_id: op.mission_id
-          })
+      {:complete, {:ok, op}} ->
+        GiTF.Telemetry.emit([:gitf, :op, :completed], %{}, %{
+          op_id: op_id,
+          mission_id: op.mission_id
+        })
 
-        _ ->
-          :ok
-      end
-
-      result
+      _ ->
+        :ok
     end
+
+    result
   end
 
   defp validate_transition(current_status, action) do

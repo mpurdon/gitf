@@ -79,6 +79,49 @@ defmodule GiTF.Archive do
     {:ok, record}
   end
 
+  @doc """
+  Atomically updates a record by reading, applying `update_fn`, and writing
+  under the file lock. Prevents read-modify-write races where two processes
+  read the same record, modify it independently, and the last write wins.
+
+  The `update_fn` receives the current record and must return the updated record.
+  Returns `{:ok, updated_record}` or `{:error, :not_found}`.
+
+  ## Example
+
+      Archive.update(:ops, op_id, fn op ->
+        Map.merge(op, %{branch: "ghost/abc", files_changed: 3})
+      end)
+  """
+  @spec update(atom(), String.t(), (map() -> map())) :: {:ok, map()} | {:error, :not_found}
+  def update(collection, id, update_fn) when is_function(update_fn, 1) do
+    with_lock(
+      fn data ->
+        col = Map.get(data, collection, %{})
+
+        case Map.get(col, id) do
+          nil ->
+            # Signal not-found through process dictionary (lock fn must return data)
+            Process.put(:archive_update_result, {:error, :not_found})
+            data
+
+          record ->
+            updated = record |> update_fn.() |> ensure_updated_at()
+            Process.put(:archive_update_result, {:ok, updated})
+            col = Map.put(col, id, updated)
+            Map.put(data, collection, col)
+        end
+      end,
+      collection
+    )
+
+    case Process.delete(:archive_update_result) do
+      {:ok, updated} -> {:ok, updated}
+      {:error, :not_found} -> {:error, :not_found}
+      nil -> {:error, :not_found}
+    end
+  end
+
   @doc "Deletes a record by collection and ID."
   @spec delete(atom(), String.t()) :: :ok
   def delete(collection, id) do
