@@ -23,8 +23,20 @@ config :gitf, GiTF.Dashboard.Endpoint,
   live_view: [signing_salt: "gitf_live_salt_123"]
 
 config :llm_db,
-  data_dir: Path.join(System.user_home!(), ".gitf/llm_db"),
+  # data_dir is resolved at runtime via GITF_HOME (see config/runtime.exs) so
+  # containers don't freeze in the build user's home directory.
   compile_embed: true
+
+# Timeouts — consolidated so ops can tune without editing module attributes.
+# Values in milliseconds unless suffixed with `_seconds`.
+config :gitf, :timeouts,
+  # Ghost worker heartbeat / staleness
+  heartbeat_interval_ms: 15_000,
+  stale_threshold_seconds: 120,
+  # Major lifecycle
+  pending_timeout_seconds: 600,
+  assigned_timeout_seconds: 600,
+  clarification_timeout_ms: 15 * 60 * 1_000
 
 config :gitf, :llm,
   execution_mode: :api,

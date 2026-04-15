@@ -382,14 +382,13 @@ defmodule GiTF.Ghost.Worker do
   end
 
   # Recurring heartbeat — checks process health and activity staleness.
-  # Self-schedules every @heartbeat_interval_ms while ghost is running.
-  @heartbeat_interval_ms :timer.seconds(15)
-  @stale_threshold_seconds 120
-
+  # Timeouts live in `config :gitf, :timeouts` (see config/config.exs) so ops
+  # can tune them at runtime without editing source.
   def handle_info(:verify_beacon, %{status: :running} = state) do
     alive? = handle_alive?(state)
     now = System.monotonic_time(:second)
     idle_seconds = now - state.last_activity_at
+    stale_threshold = timeout_cfg(:stale_threshold_seconds, 120)
 
     cond do
       not alive? ->
@@ -397,9 +396,9 @@ defmodule GiTF.Ghost.Worker do
         mark_failed(state, "Underlying process died")
         {:stop, :normal, %{state | status: :failed}}
 
-      idle_seconds > @stale_threshold_seconds ->
+      idle_seconds > stale_threshold ->
         Logger.warning(
-          "Ghost #{state.ghost_id}: no activity for #{idle_seconds}s (threshold: #{@stale_threshold_seconds}s), killing"
+          "Ghost #{state.ghost_id}: no activity for #{idle_seconds}s (threshold: #{stale_threshold}s), killing"
         )
 
         kill_handle(state)
@@ -408,7 +407,7 @@ defmodule GiTF.Ghost.Worker do
 
       true ->
         # Healthy — reschedule
-        Process.send_after(self(), :verify_beacon, @heartbeat_interval_ms)
+        Process.send_after(self(), :verify_beacon, timeout_cfg(:heartbeat_interval_ms, 15_000))
         {:noreply, state}
     end
   end
@@ -419,7 +418,12 @@ defmodule GiTF.Ghost.Worker do
   end
 
   def handle_info(msg, state) do
-    Logger.debug("Ghost #{state.ghost_id} received unexpected message: #{inspect(msg)}")
+    Logger.warning(
+      "Ghost #{state.ghost_id} received unexpected message: #{inspect(msg)}",
+      ghost_id: state.ghost_id,
+      op_id: state.op_id
+    )
+
     {:noreply, state}
   end
 
@@ -469,7 +473,14 @@ defmodule GiTF.Ghost.Worker do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning(
+        "Ghost #{state.ghost_id} terminate handler failed: #{Exception.message(e)}",
+        ghost_id: state.ghost_id,
+        op_id: state.op_id
+      )
+
+      :ok
   end
 
   defp classify_exit(:normal), do: :clean
@@ -526,7 +537,11 @@ defmodule GiTF.Ghost.Worker do
       GiTF.Transfer.create(state.ghost_id)
     rescue
       e ->
-        Logger.debug("Crash context save failed for ghost #{state.ghost_id}: #{inspect(e)}")
+        Logger.warning(
+          "Crash context save failed for ghost #{state.ghost_id}: #{Exception.message(e)}",
+          ghost_id: state.ghost_id,
+          op_id: state.op_id
+        )
     end
   end
 
@@ -599,6 +614,7 @@ defmodule GiTF.Ghost.Worker do
       end
 
     GiTF.Telemetry.start_ghost_span(state.ghost_id, state.op_id, mission_id)
+    provision_start_ms = System.monotonic_time(:millisecond)
 
     with {:shell, {:ok, shell}} <- {:shell, create_shell(state)},
          {:update, :ok} <- {:update, update_ghost_working(state, shell)},
@@ -619,6 +635,18 @@ defmodule GiTF.Ghost.Worker do
       case spawn_api_or_cli(state, shell) do
         {:ok, handle} ->
           Process.send_after(self(), :verify_beacon, 10_000)
+
+          GiTF.Telemetry.emit(
+            [:gitf, :ghost, :spawned],
+            %{duration_ms: System.monotonic_time(:millisecond) - provision_start_ms},
+            %{
+              ghost_id: state.ghost_id,
+              op_id: state.op_id,
+              mission_id: mission_id,
+              sector_id: state.sector_id
+            }
+          )
+
           {:ok, attach_handle(state, shell, handle)}
 
         {:error, reason} ->
@@ -646,10 +674,23 @@ defmodule GiTF.Ghost.Worker do
       _ -> false
     end
   rescue
-    _ -> false
+    e ->
+      Logger.warning(
+        "ghost_restarting? lookup failed for #{ghost_id}: #{Exception.message(e)}",
+        ghost_id: ghost_id
+      )
+
+      false
   end
 
   defp provision_auto_resume(state) do
+    # Enrich logging metadata with mission_id so resumed-ghost logs carry
+    # the same structured context as fresh provisioning.
+    case GiTF.Ops.get(state.op_id) do
+      {:ok, op} -> GiTF.Logger.set_ghost_context(state.ghost_id, state.op_id, op.mission_id)
+      _ -> :ok
+    end
+
     # Look up shell via ghost record (O(1)) or fall back to linear scan
     shell_record =
       case Archive.get(:ghosts, state.ghost_id) do
@@ -760,6 +801,13 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp provision_revive(state) do
+    # Enrich logging metadata with mission_id so revived-ghost logs carry
+    # the same structured context as fresh provisioning.
+    case GiTF.Ops.get(state.op_id) do
+      {:ok, op} -> GiTF.Logger.set_ghost_context(state.ghost_id, state.op_id, op.mission_id)
+      _ -> :ok
+    end
+
     shell_id = Keyword.fetch!(state.opts, :shell_id)
 
     with {:ok, shell} <- GiTF.Shell.get(shell_id),
@@ -1013,7 +1061,11 @@ defmodule GiTF.Ghost.Worker do
     end
   rescue
     e ->
-      Logger.debug("Task skill research failed (non-fatal): #{inspect(e)}")
+      Logger.warning(
+        "Task skill research failed (non-fatal): #{Exception.message(e)}",
+        op_id: op_id
+      )
+
       :ok
   end
 
@@ -1276,7 +1328,12 @@ defmodule GiTF.Ghost.Worker do
     end
   rescue
     e ->
-      Logger.debug("Auto-commit failed (non-fatal): #{inspect(e)}")
+      Logger.warning(
+        "Auto-commit failed for ghost #{state.ghost_id} op #{state.op_id}: #{Exception.message(e)}",
+        ghost_id: state.ghost_id,
+        op_id: state.op_id
+      )
+
       :ok
   end
 
@@ -1448,8 +1505,16 @@ defmodule GiTF.Ghost.Worker do
     update_ghost_status(state.ghost_id, GhostStatus.crashed())
     GiTF.Ops.fail(state.op_id)
 
+    mission_id =
+      case GiTF.Ops.get(state.op_id) do
+        {:ok, %{mission_id: mid}} -> mid
+        _ -> nil
+      end
+
     GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
       ghost_id: state.ghost_id,
+      op_id: state.op_id,
+      mission_id: mission_id,
       error: reason
     })
 
@@ -1749,4 +1814,7 @@ defmodule GiTF.Ghost.Worker do
   rescue
     _ -> :ok
   end
+
+  # Timeouts are tuned via `config :gitf, :timeouts` at runtime.
+  defp timeout_cfg(key, default), do: Application.get_env(:gitf, :timeouts, [])[key] || default
 end

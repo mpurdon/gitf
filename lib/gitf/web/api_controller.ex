@@ -26,6 +26,20 @@ defmodule GiTF.Web.ApiController do
     })
   end
 
+  # -- Readiness ---------------------------------------------------------------
+
+  def ready(conn, _params) do
+    case GiTF.Readiness.probe() do
+      {:ok, checks} ->
+        json(conn, %{data: %{status: "ready", checks: checks}})
+
+      {:error, checks} ->
+        conn
+        |> put_status(503)
+        |> json(%{data: %{status: "not_ready", checks: checks}})
+    end
+  end
+
   # -- Metrics -----------------------------------------------------------------
 
   def metrics(conn, _params) do

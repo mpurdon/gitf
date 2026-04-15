@@ -7,6 +7,10 @@ config :gitf, GiTF.Repo, database: ".gitf/gitf.db"
 # For GenServer changes, run recompile() in the IEx session.
 config :gitf, GiTF.Web.Endpoint, code_reloader: true
 
+# Dev: allow local-IP auth bypass for convenient CLI access. Disabled in prod.
+config :gitf, :local_ip_bypass, true
+config :gitf, :trust_x_forwarded_for, false
+
 config :logger, level: :debug
 
 # OpenTelemetry — stdout exporter for dev visibility

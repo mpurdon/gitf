@@ -208,6 +208,7 @@ defmodule GiTF.Major do
   def handle_continue(:resume_active_quests, state) do
     Task.Supervisor.start_child(GiTF.TaskSupervisor, &GiTF.Sector.backfill_github_config/0)
     resume_active_quests(state)
+    GiTF.Readiness.mark_ready()
     {:noreply, state}
   end
 
@@ -521,7 +522,7 @@ defmodule GiTF.Major do
   end
 
   def handle_info(msg, state) do
-    Logger.debug("Major received unexpected message: #{inspect(msg)}")
+    Logger.warning("Major received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -561,18 +562,20 @@ defmodule GiTF.Major do
 
   # -- Private: op state timeout detection ------------------------------------
 
-  @pending_timeout_seconds 600
-  @assigned_timeout_seconds 600
+  # Timeouts live in `config :gitf, :timeouts` (see config/config.exs).
+  defp timeout_cfg(key, default), do: Application.get_env(:gitf, :timeouts, [])[key] || default
 
   defp timeout_stale_jobs do
     now = DateTime.utc_now()
+    pending_timeout = timeout_cfg(:pending_timeout_seconds, 600)
+    assigned_timeout = timeout_cfg(:assigned_timeout_seconds, 600)
 
     # Timeout ops stuck in "pending" for too long (>10 min)
     GiTF.Archive.filter(:ops, fn j -> j.status == "pending" end)
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
-      if age > @pending_timeout_seconds do
+      if age > pending_timeout do
         # Only fail if the op is supposed to be active (has a mission that's running)
         quest_active? =
           case GiTF.Archive.get(:missions, op.mission_id) do
@@ -593,7 +596,7 @@ defmodule GiTF.Major do
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
-      if age > @assigned_timeout_seconds do
+      if age > assigned_timeout do
         Logger.warning("Job #{op.id} stuck assigned for #{age}s, failing for retry")
         GiTF.Ops.fail(op.id)
       end
@@ -692,8 +695,16 @@ defmodule GiTF.Major do
           state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
           advance_quest(link_msg.from, state)
 
-        _ ->
+        {:ok, op} ->
           # Non-terminal verification state — leave active_ghosts tracking intact.
+          Logger.warning(
+            "job_awaiting_verification no-op for op #{op_id}: status=#{inspect(op.status)} verification_status=#{inspect(Map.get(op, :verification_status))}"
+          )
+
+          state
+
+        _ ->
+          Logger.warning("job_awaiting_verification: op #{op_id} not found")
           state
       end
     else
@@ -939,8 +950,6 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  @clarification_timeout_ms :timer.minutes(15)
-
   defp handle_link_received(%{subject: "clarification_needed"} = link_msg, state) do
     Logger.warning("Clarification request from ghost #{link_msg.from}: #{link_msg.body}")
 
@@ -964,7 +973,7 @@ defmodule GiTF.Major do
       Process.send_after(
         self(),
         {:clarification_timeout, ghost_id, link_msg.body},
-        @clarification_timeout_ms
+        timeout_cfg(:clarification_timeout_ms, 15 * 60 * 1_000)
       )
 
     %{state | clarification_timers: Map.put(state.clarification_timers, ghost_id, ref)}
@@ -973,7 +982,10 @@ defmodule GiTF.Major do
   end
 
   defp handle_link_received(link_msg, state) do
-    Logger.debug("Major received link_msg from #{link_msg.from}: #{link_msg.subject}")
+    Logger.warning(
+      "Major received unhandled link_msg from #{link_msg.from}: subject=#{inspect(link_msg.subject)}"
+    )
+
     state
   end
 
@@ -1228,6 +1240,8 @@ defmodule GiTF.Major do
         |> Enum.with_index()
         |> Enum.reduce(state, fn {op, idx}, acc ->
           # Stagger: sleep before every spawn except the first
+          # TODO(harden): replace Process.sleep with send_after pattern so the
+          # Major mailbox isn't blocked while spawning a batch of jobs.
           if idx > 0 and stagger_delay > 0, do: Process.sleep(stagger_delay)
 
           # Triage before spawning
@@ -1859,6 +1873,8 @@ defmodule GiTF.Major do
       # Spawn each selected op with triage + recon logic
       Enum.with_index(ops_to_spawn)
       |> Enum.reduce(state, fn {{op, mission}, idx}, acc ->
+        # TODO(harden): replace Process.sleep with send_after pattern so the
+        # Major mailbox isn't blocked while spawning a batch of jobs.
         if idx > 0 and stagger_delay > 0, do: Process.sleep(stagger_delay)
 
         {complexity, pipeline} = GiTF.Triage.triage(op)
@@ -2023,11 +2039,20 @@ defmodule GiTF.Major do
 
   defp find_op_for_ghost(ghost_id) do
     case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} -> ghost.op_id
-      _ -> nil
+      {:ok, ghost} ->
+        ghost.op_id
+
+      error ->
+        Logger.warning("find_op_for_ghost: ghost #{ghost_id} not found: #{inspect(error)}")
+        nil
     end
   rescue
-    _ -> nil
+    e ->
+      Logger.warning(
+        "find_op_for_ghost crashed for #{ghost_id}: #{Exception.message(e)}"
+      )
+
+      nil
   end
 
   defp extract_op_id_from_body(body) when is_binary(body) do

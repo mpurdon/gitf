@@ -85,6 +85,7 @@ defmodule GiTF.Application do
     # -----------------------------------------------------------------------
 
     foundation = [
+      GiTF.Readiness,
       {Phoenix.PubSub, name: GiTF.PubSub},
       # Config.Provider must start before Archive (migrations / Archive may read config)
       Supervisor.child_spec(
@@ -123,7 +124,12 @@ defmodule GiTF.Application do
              {GiTF.Budget.Watchdog, []},
              {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}
            ],
-           [strategy: :rest_for_one, name: GiTF.Core.Supervisor]
+           [
+             strategy: :rest_for_one,
+             name: GiTF.Core.Supervisor,
+             max_restarts: 10,
+             max_seconds: 30
+           ]
          ]}
     }
 
@@ -132,7 +138,10 @@ defmodule GiTF.Application do
         [
           {GiTF.MCPServer.SocketListener, []},
           {GiTF.ViewModel, []},
-          {GiTF.PubSubBridge, []}
+          {GiTF.PubSubBridge, []},
+          # Graceful shutdown: drain in-flight HTTP requests before stopping
+          # cowboy listeners. Must come after endpoints in the sibling list.
+          {Plug.Cowboy.Drainer, refs: [GiTF.Web.Endpoint.HTTP]}
         ]
 
     interface = %{
@@ -238,7 +247,12 @@ defmodule GiTF.Application do
           {Supervisor, :start_link,
            [
              bg_children,
-             [strategy: :one_for_one, name: GiTF.Background.Supervisor]
+             [
+               strategy: :one_for_one,
+               name: GiTF.Background.Supervisor,
+               max_restarts: 5,
+               max_seconds: 60
+             ]
            ]}
       }
     ]

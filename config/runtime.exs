@@ -1,5 +1,19 @@
 import Config
 
+# Logger level — runtime-tunable so a release doesn't need rebuilding.
+log_level =
+  case System.get_env("LOG_LEVEL", "info") do
+    "" -> :info
+    level -> String.to_existing_atom(level)
+  end
+
+config :logger, level: log_level
+
+# llm_db data dir — resolved against GITF_HOME at runtime to avoid baking in
+# the build user's home directory inside container images.
+gitf_home = System.get_env("GITF_HOME") || Path.join(System.user_home!(), ".gitf")
+config :llm_db, data_dir: Path.join(gitf_home, "llm_db")
+
 if config_env() == :prod do
   port = String.to_integer(System.get_env("GITF_PORT") || "4000")
   host = System.get_env("GITF_HOST") || "0.0.0.0"

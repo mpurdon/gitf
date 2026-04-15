@@ -509,7 +509,10 @@ defmodule GiTF.Missions do
       true
     end)
   rescue
-    _ -> 0
+    e ->
+      require Logger
+      Logger.warning("compact_old_artifacts failed: #{Exception.message(e)}")
+      0
   end
 
   @keep_artifacts ~w(requirements scoring)
@@ -655,7 +658,15 @@ defmodule GiTF.Missions do
     end)
     |> Enum.any?()
   rescue
-    _ -> false
+    e ->
+      require Logger
+
+      Logger.warning(
+        "recent_duplicate_transition? failed for mission #{mission_id}: #{Exception.message(e)}",
+        mission_id: mission_id
+      )
+
+      false
   end
 
   defp compare_at(%{inserted_at: %DateTime{} = dt}, cutoff), do: DateTime.compare(dt, cutoff)

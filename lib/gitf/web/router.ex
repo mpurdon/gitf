@@ -13,10 +13,30 @@ defmodule GiTF.Web.Router do
 
   pipeline :api_public do
     plug(:accepts, ["json"])
+    plug(GiTF.Web.RateLimitPlug,
+      max_requests: 600,
+      window_seconds: 60,
+      bucket: :api_public
+    )
   end
 
   pipeline :api do
     plug(:accepts, ["json"])
+    plug(GiTF.Web.RateLimitPlug,
+      max_requests: 60,
+      window_seconds: 60,
+      bucket: :api
+    )
+    plug(:require_local_or_api_key)
+  end
+
+  pipeline :metrics do
+    plug(:accepts, ["json", "text"])
+    plug(GiTF.Web.RateLimitPlug,
+      max_requests: 600,
+      window_seconds: 60,
+      bucket: :metrics
+    )
     plug(:require_local_or_api_key)
   end
 
@@ -64,10 +84,17 @@ defmodule GiTF.Web.Router do
     live("/settings", SettingsLive)
   end
 
-  # Health + metrics endpoints — no auth required (monitoring/Prometheus scraping)
+  # Liveness probe — process alive, no auth
   scope "/api/v1", GiTF.Web do
     pipe_through(:api_public)
     get("/health", ApiController, :health)
+    get("/ready", ApiController, :ready)
+  end
+
+  # Metrics — auth required (local bypass gated by config + optional
+  # x-forwarded-for trust). Prometheus scrapers should provide an API key.
+  scope "/api/v1", GiTF.Web do
+    pipe_through(:metrics)
     get("/metrics", ApiController, :metrics)
   end
 
@@ -121,10 +148,35 @@ defmodule GiTF.Web.Router do
 
   # Restrict API to localhost unless a valid API key is provided.
   # The API key is read from the section config file (api_key field).
+  #
+  # Local-IP auth bypass is gated by config:
+  #   config :gitf, :local_ip_bypass, true | false   (default: true in dev, false in prod)
+  #   config :gitf, :trust_x_forwarded_for, false    (if true, uses X-Forwarded-For for local? check)
+  #
+  # In reverse-proxied deployments all traffic appears as 127.0.0.1, so the
+  # bypass is unsafe unless explicitly enabled and (optionally) XFF is trusted.
   defp require_local_or_api_key(conn, _opts) do
-    remote_ip = conn.remote_ip
+    bypass_enabled? = Application.get_env(:gitf, :local_ip_bypass, false)
+    trust_xff? = Application.get_env(:gitf, :trust_x_forwarded_for, false)
 
-    if local_ip?(remote_ip) do
+    remote_ip =
+      if trust_xff? do
+        case Plug.Conn.get_req_header(conn, "x-forwarded-for") do
+          [xff | _] ->
+            xff
+            |> String.split(",")
+            |> List.first()
+            |> String.trim()
+            |> parse_ip(conn.remote_ip)
+
+          _ ->
+            conn.remote_ip
+        end
+      else
+        conn.remote_ip
+      end
+
+    if bypass_enabled? and local_ip?(remote_ip) do
       conn
     else
       case Plug.Conn.get_req_header(conn, "x-api-key") do
@@ -150,6 +202,13 @@ defmodule GiTF.Web.Router do
   defp local_ip?({127, 0, 0, 1}), do: true
   defp local_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
   defp local_ip?(_), do: false
+
+  defp parse_ip(str, fallback) do
+    case :inet.parse_address(String.to_charlist(str)) do
+      {:ok, ip} -> ip
+      _ -> fallback
+    end
+  end
 
   defp valid_api_key?(key) do
     case GiTF.Config.get(:api_key) do

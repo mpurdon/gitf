@@ -74,6 +74,7 @@ defmodule GiTF.MCPServer.Handlers do
         end
       end
 
+    missions = Enum.take(missions, cap_limit(args["limit"], 100, 500))
     {:ok, json_text(Enum.map(missions, &serialize_mission/1))}
   end
 
@@ -105,6 +106,7 @@ defmodule GiTF.MCPServer.Handlers do
         end
       end
 
+    ops = Enum.take(ops, cap_limit(args["limit"], 100, 500))
     {:ok, json_text(Enum.map(ops, &serialize_op/1))}
   end
 
@@ -130,11 +132,12 @@ defmodule GiTF.MCPServer.Handlers do
         end
       end
 
+    ghosts = Enum.take(ghosts, cap_limit(args["limit"], 100, 500))
     {:ok, json_text(Enum.map(ghosts, &serialize_ghost/1))}
   end
 
-  def call("list_sectors", _args) do
-    sectors = GiTF.Sector.list()
+  def call("list_sectors", args) do
+    sectors = GiTF.Sector.list() |> Enum.take(cap_limit(args["limit"], 100, 500))
     {:ok, json_text(Enum.map(sectors, &serialize_sector/1))}
   end
 
@@ -161,8 +164,20 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("show_artifact", %{"mission_id" => mid, "phase" => phase}) do
     case GiTF.Missions.get_artifact(mid, phase) do
-      nil -> {:ok, json_text(%{error: "No artifact found for phase '#{phase}'"})}
-      artifact -> {:ok, json_text(artifact)}
+      nil ->
+        {:ok, json_text(%{error: "No artifact found for phase '#{phase}'"})}
+
+      artifact ->
+        {truncated_artifact, truncated?} = truncate_artifact(artifact, 10_000)
+
+        payload =
+          if truncated? do
+            wrap_truncated(truncated_artifact)
+          else
+            truncated_artifact
+          end
+
+        {:ok, json_text(payload)}
     end
   end
 
@@ -171,16 +186,28 @@ defmodule GiTF.MCPServer.Handlers do
   def call("ghost_output", %{"op_id" => op_id}) do
     case GiTF.Ops.get(op_id) do
       {:ok, op} ->
-        {:ok, json_text(%{
+        {output_summary, out_trunc?} = truncate_string(op[:output_summary], 10_000)
+        {changed_files_detail, det_trunc?} = truncate_any(op[:changed_files_detail], 10_000)
+
+        base = %{
           op_id: op_id,
-          output_summary: op[:output_summary],
+          output_summary: output_summary,
           files_changed: op[:files_changed],
           changed_files: op[:changed_files],
-          changed_files_detail: op[:changed_files_detail],
+          changed_files_detail: changed_files_detail,
           branch: op[:branch],
           audit_result: op[:audit_result],
           verification_status: op[:verification_status]
-        })}
+        }
+
+        payload =
+          if out_trunc? or det_trunc? do
+            Map.put(base, :truncated, true)
+          else
+            base
+          end
+
+        {:ok, json_text(payload)}
 
       {:error, _} ->
         {:error, "Op not found: #{op_id}"}
@@ -300,7 +327,7 @@ defmodule GiTF.MCPServer.Handlers do
   def call("mission_timeline", %{"id" => id} = args) do
     case GiTF.Missions.get(id) do
       {:ok, _mission} ->
-        limit = args["limit"] || 50
+        limit = cap_limit(args["limit"], 50, 500)
         events = GiTF.EventStore.timeline(id)
         events = Enum.take(events, limit)
 
@@ -646,6 +673,71 @@ defmodule GiTF.MCPServer.Handlers do
       sync_strategy: s[:sync_strategy]
     }
   end
+
+  # -- Limit + truncation helpers ---------------------------------------------
+
+  defp cap_limit(nil, default, max), do: min(default, max)
+
+  defp cap_limit(value, _default, max) when is_integer(value) and value > 0 do
+    min(value, max)
+  end
+
+  defp cap_limit(value, default, max) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, _} when n > 0 -> min(n, max)
+      _ -> min(default, max)
+    end
+  end
+
+  defp cap_limit(_, default, max), do: min(default, max)
+
+  defp truncate_string(nil, _), do: {nil, false}
+
+  defp truncate_string(str, max) when is_binary(str) do
+    if byte_size(str) > max do
+      {binary_part(str, 0, max) <> "...[truncated]", true}
+    else
+      {str, false}
+    end
+  end
+
+  defp truncate_string(other, _), do: {other, false}
+
+  defp truncate_any(nil, _), do: {nil, false}
+
+  defp truncate_any(value, max) when is_binary(value), do: truncate_string(value, max)
+
+  defp truncate_any(value, max) do
+    # Serialize non-string values and truncate their string form so a giant
+    # map or list can't blow the response budget.
+    encoded =
+      case Jason.encode(value) do
+        {:ok, s} -> s
+        _ -> inspect(value, limit: :infinity, printable_limit: :infinity)
+      end
+
+    if byte_size(encoded) > max do
+      {binary_part(encoded, 0, max) <> "...[truncated]", true}
+    else
+      {value, false}
+    end
+  end
+
+  defp truncate_artifact(artifact, max) when is_binary(artifact) do
+    truncate_string(artifact, max)
+  end
+
+  defp truncate_artifact(artifact, max) when is_map(artifact) do
+    Enum.reduce(artifact, {%{}, false}, fn {k, v}, {acc, trunc?} ->
+      {v2, t2} = truncate_any(v, max)
+      {Map.put(acc, k, v2), trunc? or t2}
+    end)
+  end
+
+  defp truncate_artifact(other, max), do: truncate_any(other, max)
+
+  defp wrap_truncated(v) when is_map(v), do: Map.put(v, :truncated, true)
+  defp wrap_truncated(v), do: %{truncated: true, data: v}
 
   defp serialize_link(l) do
     %{

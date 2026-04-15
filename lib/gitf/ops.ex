@@ -423,7 +423,15 @@ defmodule GiTF.Ops do
       _ -> :normal
     end
   rescue
-    _ -> :normal
+    e ->
+      require Logger
+
+      Logger.warning(
+        "inherit_mission_priority failed for mission #{mission_id}: #{Exception.message(e)}",
+        mission_id: mission_id
+      )
+
+      :normal
   end
 
   defp normalize_risk(level) when is_atom(level), do: level

@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.40.127"
+  @version "0.40.128"
 
   def project do
     [
@@ -42,7 +42,14 @@ defmodule GiTF.MixProject do
       gitf: [
         steps: [:assemble],
         applications: [runtime_tools: :permanent],
-        cookie: "gitf_#{:erlang.phash2(System.user_home!())}"
+        # Production deployments MUST set RELEASE_COOKIE to a stable secret
+        # via the environment (see rel/vm.args.eex). We intentionally do NOT
+        # derive a cookie from System.user_home!() here — in a container that
+        # resolves to the builder's home, not the runtime host's, which made
+        # the cookie effectively unstable across images. If RELEASE_COOKIE is
+        # unset, OTP generates a random cookie at assembly time, which is
+        # fine for single-node local use.
+        vm_args: "rel/vm.args.eex"
       ]
     ]
   end

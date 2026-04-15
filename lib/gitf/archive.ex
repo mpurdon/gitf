@@ -380,7 +380,9 @@ defmodule GiTF.Archive do
             {:store_data_loss, "all_backups_exhausted"}
           )
         rescue
-          _ -> :ok
+          e ->
+            Logger.warning("Archive data-loss PubSub broadcast failed: #{Exception.message(e)}")
+            :ok
         end
 
         %{}
@@ -403,9 +405,17 @@ defmodule GiTF.Archive do
       {:error, reason} ->
         require Logger
         Logger.error("Archive write failed: #{inspect(reason)}")
-        # Still update cache so in-memory state is consistent
+        # Still update cache so in-memory state is consistent.
+        # NOTE: This creates in-memory/disk divergence — the cache now holds
+        # data that was not successfully persisted. We flag this in telemetry
+        # so health checks can detect the condition; we do NOT invalidate the
+        # cache because that would cause callers to read stale pre-write data.
         cache_put(data, changed_collection)
-        GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{reason: reason})
+
+        GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{
+          reason: reason,
+          cache_disk_divergent: true
+        })
     end
   end
 
@@ -430,7 +440,10 @@ defmodule GiTF.Archive do
       File.write(backup_path, binary)
     end
   rescue
-    _ -> :ok
+    e ->
+      require Logger
+      Logger.warning("Archive maybe_backup failed for #{path}: #{Exception.message(e)}")
+      :ok
   end
 
   # Rotate backups: .bak -> .bak.2, .bak.2 -> .bak.3, etc.
@@ -442,7 +455,10 @@ defmodule GiTF.Archive do
       if File.exists?(src), do: File.rename(src, dst)
     end)
   rescue
-    _ -> :ok
+    e ->
+      require Logger
+      Logger.warning("Archive rotate_backups failed for #{path}: #{Exception.message(e)}")
+      :ok
   end
 
   # -- ETS cache ---------------------------------------------------------------
