@@ -91,6 +91,43 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "show_artifact",
+        description:
+          "Get a phase artifact for a mission (research, requirements, design, planning, validation, sync, scoring). Shows the actual output from that phase.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            mission_id: %{type: "string", description: "Mission ID"},
+            phase: %{type: "string", description: "Phase name: research, requirements, design, planning, validation, sync, scoring"}
+          },
+          required: ["mission_id", "phase"]
+        }
+      },
+      %{
+        name: "ghost_output",
+        description:
+          "Get the output summary for a ghost's op. Shows what the ghost actually produced (last 20 lines of output).",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            op_id: %{type: "string", description: "Op ID"}
+          },
+          required: ["op_id"]
+        }
+      },
+      %{
+        name: "mission_diagnosis",
+        description:
+          "Comprehensive diagnostic for a mission: phase artifacts, validation results, sync status, error details, fix loop history. Use this to understand why a mission failed or stalled.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Mission ID"}
+          },
+          required: ["id"]
+        }
+      },
+      %{
         name: "list_links",
         description: "List inter-agent messages (links) between the Major and ghosts.",
         inputSchema: %{

@@ -159,6 +159,102 @@ defmodule GiTF.MCPServer.Handlers do
     {:ok, json_text(stats)}
   end
 
+  def call("show_artifact", %{"mission_id" => mid, "phase" => phase}) do
+    case GiTF.Missions.get_artifact(mid, phase) do
+      nil -> {:ok, json_text(%{error: "No artifact found for phase '#{phase}'"})}
+      artifact -> {:ok, json_text(artifact)}
+    end
+  end
+
+  def call("show_artifact", _), do: {:error, "Missing required parameters: mission_id, phase"}
+
+  def call("ghost_output", %{"op_id" => op_id}) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        {:ok, json_text(%{
+          op_id: op_id,
+          output_summary: op[:output_summary],
+          files_changed: op[:files_changed],
+          changed_files: op[:changed_files],
+          changed_files_detail: op[:changed_files_detail],
+          branch: op[:branch],
+          audit_result: op[:audit_result],
+          verification_status: op[:verification_status]
+        })}
+
+      {:error, _} ->
+        {:error, "Op not found: #{op_id}"}
+    end
+  end
+
+  def call("ghost_output", _), do: {:error, "Missing required parameter: op_id"}
+
+  def call("mission_diagnosis", %{"id" => id}) do
+    case GiTF.Missions.get(id) do
+      {:ok, mission} ->
+        # Collect all phase artifacts
+        phases = ~w(research requirements design planning validation sync scoring)
+        artifacts = Map.new(phases, fn p ->
+          {p, GiTF.Missions.get_artifact(id, p)}
+        end) |> Enum.reject(fn {_, v} -> is_nil(v) end) |> Map.new()
+
+        # Collect impl op details (files, branch, output, fix lineage)
+        impl_ops = mission.ops
+          |> Enum.reject(& &1[:phase_job])
+          |> Enum.map(fn op ->
+            %{
+              id: op.id,
+              title: op.title,
+              status: op.status,
+              files_changed: op[:files_changed],
+              branch: op[:branch],
+              fix_of: op[:fix_of],
+              output_summary: op[:output_summary] && String.slice(op[:output_summary], 0, 500),
+              audit_result: op[:audit_result],
+              verification_status: op[:verification_status]
+            }
+          end)
+
+        # Validation ops with their artifacts
+        validation_ops = mission.ops
+          |> Enum.filter(& &1[:phase] == "validation")
+          |> Enum.map(fn op ->
+            %{
+              id: op.id,
+              status: op.status,
+              output_summary: op[:output_summary] && String.slice(op[:output_summary], 0, 500)
+            }
+          end)
+
+        # Phase transitions
+        transitions = GiTF.Missions.get_phase_transitions(id)
+          |> Enum.map(fn t ->
+            %{from: t[:from_phase], to: t[:to_phase], reason: t[:reason], at: to_string(t[:inserted_at])}
+          end)
+
+        diagnosis = %{
+          mission_id: id,
+          name: mission[:name],
+          status: mission.status,
+          current_phase: mission[:current_phase],
+          pipeline_mode: mission[:pipeline_mode],
+          artifacts: artifacts,
+          impl_ops: impl_ops,
+          validation_ops: validation_ops,
+          phase_transitions: transitions,
+          total_ops: length(mission.ops),
+          fix_ops: length(Enum.filter(impl_ops, & &1[:fix_of]))
+        }
+
+        {:ok, json_text(diagnosis)}
+
+      {:error, _} ->
+        {:error, "Mission not found: #{id}"}
+    end
+  end
+
+  def call("mission_diagnosis", _), do: {:error, "Missing required parameter: id"}
+
   def call("list_links", args) do
     opts =
       Enum.reduce(args, [], fn
@@ -524,7 +620,19 @@ defmodule GiTF.MCPServer.Handlers do
         }
       end)
 
+    # Include output summary, branch info, audit result, fix lineage
+    extra = %{
+      output_summary: j[:output_summary],
+      branch: j[:branch],
+      shell_id: j[:shell_id],
+      audit_result: j[:audit_result],
+      fix_of: j[:fix_of],
+      fix_context: j[:fix_context],
+      changed_files_detail: j[:changed_files_detail]
+    }
+
     detail
+    |> Map.merge(extra)
     |> Map.put(:ghost, ghost_info)
     |> Map.put(:recent_events, recent_events)
   end
