@@ -1141,12 +1141,13 @@ defmodule GiTF.Ghost.Worker do
           {:review_job, state.op_id, state.ghost_id, state.shell_id}
         )
 
-        # Also send a durable link_msg so Major's waggle recovery can pick this up
-        # if the PubSub broadcast is dropped (Tachikoma down, mailbox full, etc.)
+        # Durable backup link — uses "job_awaiting_verification" (not "job_complete")
+        # so it doesn't trigger a duplicate toast. Major's link_received recovery can
+        # pick this up if the PubSub broadcast to Tachikoma is dropped.
         GiTF.Link.send(
           state.ghost_id,
           "major",
-          "job_complete",
+          "job_awaiting_verification",
           "Job #{state.op_id} completed (awaiting verification)"
         )
     end

@@ -213,7 +213,7 @@ defmodule GiTF.Major do
 
   @impl true
   def handle_info({:link_received, link_msg}, state) do
-    state = handle_waggle(link_msg, state)
+    state = handle_link_received(link_msg, state)
     # Mark as read to prevent re-processing by the 30s waggle recovery cycle
     if id = Map.get(link_msg, :id), do: GiTF.Link.mark_read(id)
     {:noreply, state}
@@ -604,14 +604,14 @@ defmodule GiTF.Major do
   # dispatches to pattern-matched handlers. Heavier orchestration logic
   # will move to dedicated context modules as the system grows.
 
-  defp handle_waggle(%{subject: "job_complete"} = link_msg, state) do
+  defp handle_link_received(%{subject: "job_complete"} = link_msg, state) do
     Logger.info("Ghost #{link_msg.from} reports op complete. Initiating verification...")
 
     # We remove from active_ghosts immediately so Major doesn't think it's still "working"
     # but we don't advance mission yet.
     state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
 
-    op_id = find_job_for_bee(link_msg.from)
+    op_id = find_op_for_ghost(link_msg.from)
 
     if op_id do
       # Phase ops (research, design, etc.) don't need verification — skip straight to advance
@@ -665,23 +665,50 @@ defmodule GiTF.Major do
     end
   end
 
-  defp handle_waggle(%{subject: "job_failed"} = link_msg, state) do
+  # Backup link for standard ops — Tachikoma is the primary verification handler.
+  # Only advance if the op is already verified (Tachikoma handled it) or done.
+  defp handle_link_received(%{subject: "job_awaiting_verification"} = link_msg, state) do
+    state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
+
+    op_id = find_op_for_ghost(link_msg.from)
+
+    if op_id do
+      case GiTF.Ops.get(op_id) do
+        {:ok, %{verification_status: "passed"}} ->
+          # Tachikoma already verified — advance
+          notify_run_job_completed(op_id)
+          advance_quest(link_msg.from, state)
+
+        {:ok, %{status: "done"}} ->
+          # Op already done — advance
+          advance_quest(link_msg.from, state)
+
+        _ ->
+          # Still pending — Tachikoma will handle it, nothing to do
+          state
+      end
+    else
+      state
+    end
+  end
+
+  defp handle_link_received(%{subject: "job_failed"} = link_msg, state) do
     Logger.warning("Ghost #{link_msg.from} reports op failed: #{link_msg.body}")
     state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
 
-    op_id = find_job_for_bee(link_msg.from)
+    op_id = find_op_for_ghost(link_msg.from)
     if op_id, do: notify_run_job_failed(op_id)
 
     maybe_retry_job(link_msg, state)
   end
 
-  defp handle_waggle(%{subject: "validation_failed"} = link_msg, state) do
+  defp handle_link_received(%{subject: "validation_failed"} = link_msg, state) do
     Logger.warning("Ghost #{link_msg.from} reports validation failed: #{link_msg.body}")
     state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
     maybe_retry_job(link_msg, state)
   end
 
-  defp handle_waggle(%{subject: "merge_conflict_warning"} = link_msg, state) do
+  defp handle_link_received(%{subject: "merge_conflict_warning"} = link_msg, state) do
     Logger.warning("Sync conflict detected from ghost #{link_msg.from}: #{link_msg.body}")
 
     # Extract shell_id from the ghost record
@@ -704,7 +731,7 @@ defmodule GiTF.Major do
           Logger.info("Conflict resolved via rebase for shell #{shell_id}")
 
           # Re-run validation after rebase before merging
-          op_id = find_job_for_bee(link_msg.from)
+          op_id = find_op_for_ghost(link_msg.from)
 
           validation_ok? =
             if op_id do
@@ -746,12 +773,12 @@ defmodule GiTF.Major do
     end
   end
 
-  defp handle_waggle(%{subject: "merge_failed"} = link_msg, state) do
+  defp handle_link_received(%{subject: "merge_failed"} = link_msg, state) do
     Logger.warning("Sync failed from #{link_msg.from}: #{link_msg.body}")
     state
   end
 
-  defp handle_waggle(%{subject: "job_merged"} = link_msg, state) do
+  defp handle_link_received(%{subject: "job_merged"} = link_msg, state) do
     Logger.info("SyncQueue reports: #{link_msg.body}")
 
     # Extract op_id from body (format: "Job <op_id> merged successfully (tier N)")
@@ -776,7 +803,7 @@ defmodule GiTF.Major do
     end
   end
 
-  defp handle_waggle(%{subject: "scout_complete"} = link_msg, state) do
+  defp handle_link_received(%{subject: "scout_complete"} = link_msg, state) do
     # A recon ghost finished. Parse its findings and inject them into the parent op.
     case Jason.decode(link_msg.body) do
       {:ok, %{"scout_op_id" => scout_op_id, "parent_op_id" => parent_op_id, "output" => output}} ->
@@ -802,23 +829,23 @@ defmodule GiTF.Major do
     state
   end
 
-  defp handle_waggle(%{subject: "job_retry_created"} = link_msg, state) do
+  defp handle_link_received(%{subject: "job_retry_created"} = link_msg, state) do
     Logger.info("Tachikoma created retry op: #{link_msg.body}")
     # The retry op will be picked up by the periodic op spawner
     state
   end
 
-  defp handle_waggle(%{subject: "job_exhausted_retries"} = link_msg, state) do
+  defp handle_link_received(%{subject: "job_exhausted_retries"} = link_msg, state) do
     Logger.warning("Job exhausted retries: #{link_msg.body}")
     state
   end
 
-  defp handle_waggle(%{subject: "reimagine_job_created"} = link_msg, state) do
+  defp handle_link_received(%{subject: "reimagine_job_created"} = link_msg, state) do
     Logger.info("Sync resolver created re-imagine op: #{link_msg.body}")
     state
   end
 
-  defp handle_waggle(%{subject: "backup"} = link_msg, state) do
+  defp handle_link_received(%{subject: "backup"} = link_msg, state) do
     ghost_id = link_msg.from
     Logger.debug("Backup from ghost #{ghost_id}: #{link_msg.body}")
 
@@ -846,7 +873,7 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  defp handle_waggle(%{subject: "resource_warning"} = link_msg, state) do
+  defp handle_link_received(%{subject: "resource_warning"} = link_msg, state) do
     ghost_id = link_msg.from
     Logger.warning("Resource warning from ghost #{ghost_id}: #{link_msg.body}")
 
@@ -862,7 +889,7 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  defp handle_waggle(%{subject: "quest_advance"} = link_msg, state) do
+  defp handle_link_received(%{subject: "quest_advance"} = link_msg, state) do
     # Handle mission phase advancement requests
     mission_id = link_msg.body
 
@@ -877,7 +904,7 @@ defmodule GiTF.Major do
     state
   end
 
-  defp handle_waggle(%{subject: "human_approval"} = link_msg, state) do
+  defp handle_link_received(%{subject: "human_approval"} = link_msg, state) do
     case Jason.decode(link_msg.body) do
       {:ok, %{"action" => "approve", "mission_id" => mission_id} = data} ->
         opts = %{
@@ -905,7 +932,7 @@ defmodule GiTF.Major do
 
   @clarification_timeout_ms :timer.minutes(15)
 
-  defp handle_waggle(%{subject: "clarification_needed"} = link_msg, state) do
+  defp handle_link_received(%{subject: "clarification_needed"} = link_msg, state) do
     Logger.warning("Clarification request from ghost #{link_msg.from}: #{link_msg.body}")
 
     Phoenix.PubSub.broadcast(
@@ -936,7 +963,7 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  defp handle_waggle(link_msg, state) do
+  defp handle_link_received(link_msg, state) do
     Logger.debug("Major received link_msg from #{link_msg.from}: #{link_msg.subject}")
     state
   end
@@ -1887,7 +1914,7 @@ defmodule GiTF.Major do
       GiTF.Link.mark_read(link_msg.id)
 
       try do
-        handle_waggle(link_msg, acc)
+        handle_link_received(link_msg, acc)
       rescue
         e ->
           Logger.warning(
@@ -1986,7 +2013,7 @@ defmodule GiTF.Major do
     end
   end
 
-  defp find_job_for_bee(ghost_id) do
+  defp find_op_for_ghost(ghost_id) do
     case GiTF.Ghosts.get(ghost_id) do
       {:ok, ghost} -> ghost.op_id
       _ -> nil
@@ -2005,7 +2032,7 @@ defmodule GiTF.Major do
   defp extract_op_id_from_body(_), do: nil
 
   defp reimagine_conflicted_job(shell_id, link_msg, state) do
-    op_id = find_job_for_bee(link_msg.from)
+    op_id = find_op_for_ghost(link_msg.from)
 
     if op_id do
       Logger.info("Reimagining conflicted op #{op_id} (shell #{inspect(shell_id)})")
