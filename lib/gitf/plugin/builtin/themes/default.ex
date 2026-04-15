@@ -37,10 +37,10 @@ defmodule GiTF.Plugin.Builtin.Themes.Default do
       thinking: :bright_black,
 
       # Activity panel
-      bee_working: :green,
+      ghost_working: :green,
       ghost_idle: :white,
-      bee_stopped: :bright_black,
-      bee_crashed: :red,
+      ghost_stopped: :bright_black,
+      ghost_crashed: :red,
 
       # Status bar
       status_bg: :blue,

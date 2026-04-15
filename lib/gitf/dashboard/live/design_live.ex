@@ -108,9 +108,9 @@ defmodule GiTF.Dashboard.DesignLive do
     end
   end
 
-  def handle_info({:waggle_received, waggle}, socket) do
+  def handle_info({:link_received, link}, socket) do
     case GiTF.Missions.get(socket.assigns.mission.id) do
-      {:ok, mission} -> {:noreply, socket |> maybe_apply_toast(waggle) |> refresh_data(mission)}
+      {:ok, mission} -> {:noreply, socket |> maybe_apply_toast(link) |> refresh_data(mission)}
       _ -> {:noreply, socket}
     end
   end

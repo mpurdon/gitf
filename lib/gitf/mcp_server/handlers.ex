@@ -12,7 +12,7 @@ defmodule GiTF.MCPServer.Handlers do
     health = GiTF.Observability.Health.check()
 
     recent_failures =
-      (GiTF.EventStore.list(type: :bee_failed, limit: 10) ++
+      (GiTF.EventStore.list(type: :ghost_failed, limit: 10) ++
          GiTF.EventStore.list(type: :merge_failed, limit: 5) ++
          GiTF.EventStore.list(type: :error, limit: 5))
       |> Enum.sort_by(& &1.timestamp, {:desc, DateTime})
@@ -146,7 +146,7 @@ defmodule GiTF.MCPServer.Handlers do
       total_input_tokens: summary.total_input_tokens,
       total_output_tokens: summary.total_output_tokens,
       by_model: summary.by_model,
-      by_ghost: summary.by_bee,
+      by_ghost: summary.by_ghost,
       by_category: summary.by_category
     }
 

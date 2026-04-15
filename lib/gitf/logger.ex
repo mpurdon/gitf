@@ -9,8 +9,8 @@ defmodule GiTF.Logger do
   require Logger
 
   @doc "Sets process metadata for a ghost."
-  @spec set_bee_context(String.t(), String.t(), String.t() | nil) :: :ok
-  def set_bee_context(ghost_id, op_id, mission_id \\ nil) do
+  @spec set_ghost_context(String.t(), String.t(), String.t() | nil) :: :ok
+  def set_ghost_context(ghost_id, op_id, mission_id \\ nil) do
     meta = [ghost_id: ghost_id, op_id: op_id]
     meta = if mission_id, do: Keyword.put(meta, :mission_id, mission_id), else: meta
     Logger.metadata(meta)

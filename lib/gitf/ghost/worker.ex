@@ -130,7 +130,7 @@ defmodule GiTF.Ghost.Worker do
     gitf_root = Keyword.fetch!(opts, :gitf_root)
 
     # Set correlation IDs for structured logging
-    GiTF.Logger.set_bee_context(ghost_id, op_id)
+    GiTF.Logger.set_ghost_context(ghost_id, op_id)
 
     state = %{
       ghost_id: ghost_id,
@@ -563,7 +563,7 @@ defmodule GiTF.Ghost.Worker do
     {is_phase_job, mission_id} =
       case GiTF.Ops.get(state.op_id) do
         {:ok, op} ->
-          GiTF.Logger.set_bee_context(state.ghost_id, state.op_id, op.mission_id)
+          GiTF.Logger.set_ghost_context(state.ghost_id, state.op_id, op.mission_id)
           {Map.get(op, :phase_job, false), op.mission_id}
 
         _ ->
@@ -573,7 +573,7 @@ defmodule GiTF.Ghost.Worker do
     GiTF.Telemetry.start_ghost_span(state.ghost_id, state.op_id, mission_id)
 
     with {:shell, {:ok, shell}} <- {:shell, create_shell(state)},
-         {:update, :ok} <- {:update, update_bee_working(state, shell)},
+         {:update, :ok} <- {:update, update_ghost_working(state, shell)},
          {:transition, :ok} <- {:transition, maybe_transition_job(state)},
          {:agent, :ok} <- {:agent, maybe_ensure_agent(state, shell)} do
       # Apply role-based tool restrictions via settings.local.json
@@ -598,7 +598,7 @@ defmodule GiTF.Ghost.Worker do
             "Spawn failed for ghost #{state.ghost_id}, rolling back shell #{shell.id}"
           )
 
-          rollback_cell(shell.id)
+          rollback_shell(shell.id)
           {:error, reason}
       end
     else
@@ -607,7 +607,7 @@ defmodule GiTF.Ghost.Worker do
         # We check whether shell_id is set by looking at state -- if create_shell
         # succeeded but a subsequent step failed, the shell variable is not in scope
         # here, so we look it up by ghost_id.
-        rollback_cell_for_bee(state.ghost_id)
+        rollback_shell_for_ghost(state.ghost_id)
         {:error, {step, reason}}
     end
   end
@@ -662,7 +662,7 @@ defmodule GiTF.Ghost.Worker do
 
           state = %{state | opts: Keyword.put(state.opts, :prompt, prompt)}
 
-          with :ok <- update_bee_working(state, shell),
+          with :ok <- update_ghost_working(state, shell),
                {:ok, handle} <- spawn_api_or_cli(state, shell) do
             Process.send_after(self(), :verify_beacon, 10_000)
             {:ok, attach_handle(state, shell, handle)}
@@ -735,7 +735,7 @@ defmodule GiTF.Ghost.Worker do
     shell_id = Keyword.fetch!(state.opts, :shell_id)
 
     with {:ok, shell} <- GiTF.Shell.get(shell_id),
-         :ok <- update_bee_working(state, shell),
+         :ok <- update_ghost_working(state, shell),
          {:ok, handle} <- spawn_api_or_cli(state, shell) do
       {:ok, attach_handle(state, shell, handle)}
     end
@@ -752,10 +752,10 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  defp update_bee_working(state, shell) do
+  defp update_ghost_working(state, shell) do
     case Archive.get(:ghosts, state.ghost_id) do
       nil ->
-        {:error, :bee_not_found}
+        {:error, :ghost_not_found}
 
       ghost ->
         updated =
@@ -1645,7 +1645,7 @@ defmodule GiTF.Ghost.Worker do
 
   # -- Private: spawn rollback ------------------------------------------------
 
-  defp rollback_cell(shell_id) do
+  defp rollback_shell(shell_id) do
     GiTF.Shell.remove(shell_id, force: true)
   rescue
     e ->
@@ -1653,10 +1653,10 @@ defmodule GiTF.Ghost.Worker do
       :ok
   end
 
-  defp rollback_cell_for_bee(ghost_id) do
+  defp rollback_shell_for_ghost(ghost_id) do
     case Archive.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> :ok
-      shell -> rollback_cell(shell.id)
+      shell -> rollback_shell(shell.id)
     end
   rescue
     _ -> :ok

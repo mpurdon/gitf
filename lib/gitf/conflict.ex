@@ -141,13 +141,13 @@ defmodule GiTF.Conflict do
   """
   @spec check_between_cells(String.t(), String.t()) ::
           {:ok, :clean} | {:error, :conflicts, [String.t()]} | {:error, term()}
-  def check_between_cells(cell_id_a, cell_id_b) do
-    with {:ok, cell_a} <- fetch_cell(cell_id_a),
-         {:ok, cell_b} <- fetch_cell(cell_id_b),
-         {:ok, sector} <- fetch_sector(cell_a.sector_id),
+  def check_between_cells(shell_id_a, shell_id_b) do
+    with {:ok, shell_a} <- fetch_cell(shell_id_a),
+         {:ok, shell_b} <- fetch_cell(shell_id_b),
+         {:ok, sector} <- fetch_sector(shell_a.sector_id),
          {:ok, main_branch} <- detect_main_branch(sector.path) do
-      files_a = changed_files(sector.path, cell_a.branch, main_branch)
-      files_b = changed_files(sector.path, cell_b.branch, main_branch)
+      files_a = changed_files(sector.path, shell_a.branch, main_branch)
+      files_b = changed_files(sector.path, shell_b.branch, main_branch)
 
       overlap = MapSet.intersection(MapSet.new(files_a), MapSet.new(files_b)) |> MapSet.to_list()
 
@@ -239,14 +239,14 @@ defmodule GiTF.Conflict do
 
   defp fetch_cell(shell_id) do
     case Archive.get(:shells, shell_id) do
-      nil -> {:error, :cell_not_found}
+      nil -> {:error, :shell_not_found}
       shell -> {:ok, shell}
     end
   end
 
   defp fetch_sector(sector_id) do
     case Archive.get(:sectors, sector_id) do
-      nil -> {:error, :comb_not_found}
+      nil -> {:error, :sector_not_found}
       sector -> {:ok, sector}
     end
   end

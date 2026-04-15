@@ -26,7 +26,7 @@ defmodule GiTF.Progress do
 
     :ets.insert(@table, {ghost_id, entry})
 
-    Phoenix.PubSub.broadcast(GiTF.PubSub, @pubsub_topic, {:bee_progress, ghost_id, entry})
+    Phoenix.PubSub.broadcast(GiTF.PubSub, @pubsub_topic, {:ghost_progress, ghost_id, entry})
     :ok
   rescue
     e in ArgumentError ->

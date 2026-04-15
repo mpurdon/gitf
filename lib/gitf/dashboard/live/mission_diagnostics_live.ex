@@ -161,8 +161,8 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
     {:noreply, reload(socket)}
   end
 
-  def handle_info({:waggle_received, waggle}, socket),
-    do: {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
+  def handle_info({:link_received, link}, socket),
+    do: {:noreply, socket |> maybe_apply_toast(link) |> reload()}
 
   def handle_info({ref, {:analysis_result, op_id, result}}, socket) when is_reference(ref) do
     Process.demonitor(ref, [:flush])

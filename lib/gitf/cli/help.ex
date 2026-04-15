@@ -13,11 +13,11 @@ defmodule GiTF.CLI.Help do
     IO.puts("💡 Next steps:")
     IO.puts("   1. Add a codebase:    section sector add /path/to/repo --auto")
     IO.puts("   2. Create a mission:    section mission new \"Build feature X\"")
-    IO.puts("   3. Start the Major:   section queen")
+    IO.puts("   3. Start the Major:   section major")
     IO.puts("   4. Monitor progress:  section watch")
   end
 
-  def show_tip(:comb_added) do
+  def show_tip(:sector_added) do
     IO.puts("")
     IO.puts("💡 What's next:")
     IO.puts("   • Create a mission:     section mission new \"Your goal here\"")
@@ -28,12 +28,12 @@ defmodule GiTF.CLI.Help do
   def show_tip(:quest_created) do
     IO.puts("")
     IO.puts("💡 To start working on this mission:")
-    IO.puts("   • Start the Major:    section queen")
+    IO.puts("   • Start the Major:    section major")
     IO.puts("   • Monitor progress:   section watch")
     IO.puts("   • View in dashboard:  section dashboard")
   end
 
-  def show_tip(:bee_spawned) do
+  def show_tip(:ghost_spawned) do
     IO.puts("")
     IO.puts("💡 Monitor your ghost:")
     IO.puts("   • Watch progress:     section watch")
@@ -82,7 +82,7 @@ defmodule GiTF.CLI.Help do
     """
   end
 
-  def show_examples(:comb_add) do
+  def show_examples(:sector_add) do
     """
     Examples:
       # Auto-detect project type
@@ -159,7 +159,7 @@ defmodule GiTF.CLI.Help do
       section mission new "goal"            Create mission
       section mission list                  List all missions
       section mission show <id>             Show mission details
-      section queen                       Start Major coordinator
+      section major                       Start Major coordinator
 
     Monitoring:
       section watch                       Live progress monitor

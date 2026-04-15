@@ -647,7 +647,7 @@ defmodule GiTF.TUI.App do
         (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()]
       end)
 
-    bee_summary =
+    ghost_summary =
       if active_ghosts == [],
         do: "None active",
         else:
@@ -701,7 +701,7 @@ defmodule GiTF.TUI.App do
     Workspace: #{cwd}
 
     Current section state:
-    Ghosts: #{bee_summary}
+    Ghosts: #{ghost_summary}
     Quests: #{quest_summary}
     Jobs: #{job_summary}
 
@@ -939,13 +939,13 @@ defmodule GiTF.TUI.App do
       end)
       |> Enum.map(fn b -> Map.put(b, :mission_id, job_quest_map[b[:op_id]]) end)
 
-    bee_logs = read_bee_logs(active_ghosts)
+    ghost_logs = read_ghost_logs(active_ghosts)
 
     activity =
       model.activity
       |> Activity.update_bees(active_ghosts)
       |> Activity.update_quests(missions)
-      |> Activity.update_bee_logs(bee_logs)
+      |> Activity.update_ghost_logs(ghost_logs)
 
     %{model | activity: activity, ops: ops}
   end
@@ -962,14 +962,14 @@ defmodule GiTF.TUI.App do
           script_path = Path.join(run_dir, "#{ghost[:id]}.sh")
 
           cond do
-            bee_log_completed?(log_path) ->
+            ghost_log_completed?(log_path) ->
               debug("reaper: ghost #{ghost[:id]} completed (result in log)")
-              summary = bee_log_last_message(log_path)
+              summary = ghost_log_last_message(log_path)
               mark_bee_done(ghost)
               [{ghost[:id], :done, summary}]
 
             not script_running?(script_path) and File.exists?(log_path) ->
-              if bee_log_has_error?(log_path) do
+              if ghost_log_has_error?(log_path) do
                 debug("reaper: ghost #{ghost[:id]} failed (process dead, error in log)")
                 mark_bee_failed(ghost, "Process died")
                 [{ghost[:id], :failed, "Process died"}]
@@ -997,7 +997,7 @@ defmodule GiTF.TUI.App do
     _ -> []
   end
 
-  defp bee_log_last_message(path) do
+  defp ghost_log_last_message(path) do
     if File.exists?(path) do
       path
       |> File.stream!()
@@ -1021,7 +1021,7 @@ defmodule GiTF.TUI.App do
     _ -> "(error reading log)"
   end
 
-  defp bee_log_completed?(path) do
+  defp ghost_log_completed?(path) do
     if File.exists?(path) do
       # Check last few lines for a "result" type (Claude finished successfully)
       path
@@ -1043,7 +1043,7 @@ defmodule GiTF.TUI.App do
     _ -> false
   end
 
-  defp bee_log_has_error?(path) do
+  defp ghost_log_has_error?(path) do
     if File.exists?(path) do
       path
       |> File.stream!()
@@ -1108,7 +1108,7 @@ defmodule GiTF.TUI.App do
     end
   end
 
-  defp read_bee_logs(ghosts) do
+  defp read_ghost_logs(ghosts) do
     case GiTF.gitf_dir() do
       {:ok, root} ->
         run_dir = Path.join([root, ".gitf", "run"])

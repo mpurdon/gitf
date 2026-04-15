@@ -11,7 +11,7 @@ defmodule GiTF.TUI.Views.Activity do
 
   def render(model) do
     %{activity: activity} = model
-    bees_by_quest = Enum.group_by(activity.ghosts, fn b -> b[:mission_id] end)
+    ghosts_by_mission = Enum.group_by(activity.ghosts, fn b -> b[:mission_id] end)
     budget_status = model[:budget_status] || []
     backups = model[:backups] || %{}
     runs = model[:runs] || []
@@ -20,17 +20,17 @@ defmodule GiTF.TUI.Views.Activity do
       if Enum.empty?(activity.missions) and Enum.empty?(activity.ghosts) do
         label(content: "Idle")
       else
-        render_quests(activity.missions, bees_by_quest, activity.bee_logs, budget_status, backups) ++
-          render_orphan_bees(bees_by_quest, activity.bee_logs, backups) ++
+        render_quests(activity.missions, ghosts_by_mission, activity.ghost_logs, budget_status, backups) ++
+          render_orphan_ghosts(ghosts_by_mission, activity.ghost_logs, backups) ++
           render_runs(runs)
       end
     end
   end
 
-  defp render_quests(missions, bees_by_quest, bee_logs, budget_status, backups) do
+  defp render_quests(missions, ghosts_by_mission, ghost_logs, budget_status, backups) do
     Enum.flat_map(missions, fn mission ->
       mission_id = mission[:id]
-      quest_bees = Map.get(bees_by_quest, mission_id, [])
+      mission_ghosts = Map.get(ghosts_by_mission, mission_id, [])
       current_phase = mission[:current_phase] || mission[:status]
       name = to_s(mission[:name] || mission[:goal] || mission[:title])
       short_name = String.slice(name, 0, 30)
@@ -45,12 +45,12 @@ defmodule GiTF.TUI.Views.Activity do
           text(content: budget_text, color: budget_color)
         end
       ] ++
-        render_phase_tracker(current_phase, artifacts, quest_bees, bee_logs, backups) ++
+        render_phase_tracker(current_phase, artifacts, mission_ghosts, ghost_logs, backups) ++
         [label(content: "")]
     end)
   end
 
-  defp render_phase_tracker(current_phase, artifacts, ghosts, bee_logs, backups) do
+  defp render_phase_tracker(current_phase, artifacts, ghosts, ghost_logs, backups) do
     Enum.flat_map(@phases, fn phase ->
       {marker, color} =
         cond do
@@ -67,12 +67,12 @@ defmodule GiTF.TUI.Views.Activity do
       ]
 
       # Show active ghosts under the current phase
-      bee_labels =
+      ghost_labels =
         if phase == to_s(current_phase) do
           Enum.flat_map(ghosts, fn ghost ->
             ghost_id = to_s(ghost[:id])
             status = to_s(ghost[:status] || ghost[:state])
-            log_lines = Map.get(bee_logs, ghost[:id], [])
+            log_lines = Map.get(ghost_logs, ghost[:id], [])
             backup = Map.get(backups, ghost[:id])
 
             [
@@ -90,7 +90,7 @@ defmodule GiTF.TUI.Views.Activity do
           []
         end
 
-      phase_label ++ bee_labels
+      phase_label ++ ghost_labels
     end)
   end
 
@@ -122,18 +122,18 @@ defmodule GiTF.TUI.Views.Activity do
     ]
   end
 
-  defp render_orphan_bees(bees_by_quest, bee_logs, backups) do
-    case Map.get(bees_by_quest, nil, []) do
+  defp render_orphan_ghosts(ghosts_by_mission, ghost_logs, backups) do
+    case Map.get(ghosts_by_mission, nil, []) do
       [] -> []
-      ghosts -> render_bees(ghosts, bee_logs, "", backups)
+      ghosts -> render_bees(ghosts, ghost_logs, "", backups)
     end
   end
 
-  defp render_bees(ghosts, bee_logs, indent, backups) do
+  defp render_bees(ghosts, ghost_logs, indent, backups) do
     Enum.flat_map(ghosts, fn ghost ->
       ghost_id = to_s(ghost[:id])
       status = to_s(ghost[:status] || ghost[:state])
-      log_lines = Map.get(bee_logs, ghost[:id], [])
+      log_lines = Map.get(ghost_logs, ghost[:id], [])
       backup = Map.get(backups, ghost[:id])
 
       [

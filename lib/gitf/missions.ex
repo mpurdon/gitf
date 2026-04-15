@@ -581,7 +581,7 @@ defmodule GiTF.Missions do
 
   # Returns true if an identical transition was recorded in the last 30 seconds.
   # Prevents the append-only log from accumulating duplicates when the same
-  # phase advance is triggered multiple times (waggle retry, recovery cycles).
+  # phase advance is triggered multiple times (link_received retry, recovery cycles).
   defp recent_duplicate_transition?(mission_id, from_phase, to_phase) do
     cutoff = DateTime.shift(DateTime.utc_now(), second: -30)
 

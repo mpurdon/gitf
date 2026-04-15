@@ -36,7 +36,7 @@ defmodule GiTF.Runtime.Loadout do
     static =
       case tool_set do
         :readonly -> readonly_tools(working_dir)
-        :major -> standard_tools(working_dir) ++ queen_tools()
+        :major -> standard_tools(working_dir) ++ major_tools()
         _ -> standard_tools(working_dir)
       end
 
@@ -151,7 +151,7 @@ defmodule GiTF.Runtime.Loadout do
 
   # -- Major Tools -------------------------------------------------------------
 
-  defp queen_tools do
+  defp major_tools do
     [
       build_tool("list_quests", "List all active missions and their statuses", [], fn _args ->
         list_quests()

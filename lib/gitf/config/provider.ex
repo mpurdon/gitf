@@ -113,7 +113,7 @@ defmodule GiTF.Config.Provider do
         models: %{default: "reqllm", providers: %{}},
         themes: %{default: "default"}
       },
-      queen: %{
+      major: %{
         max_ghosts: 5,
         max_retries: 3
       },

@@ -19,7 +19,7 @@ defmodule GiTF.Audit do
   @spec verify_job(String.t(), keyword()) :: {:ok, atom(), map()} | {:error, term()}
   def verify_job(op_id, opts \\ []) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
-         {:ok, shell} <- get_job_cell(op),
+         {:ok, shell} <- get_op_shell(op),
          {:ok, sector} <- Archive.fetch(:sectors, op.sector_id) do
       # Check graduated clearance — auto-approve eligible ops
       authority_level = GiTF.Clearance.verification_level(op)
@@ -170,7 +170,7 @@ defmodule GiTF.Audit do
 
   # Private functions
 
-  defp get_job_cell(op) do
+  defp get_op_shell(op) do
     # Look for active shell first, then any shell with a valid worktree on disk.
     # Ghosts may have stopped by the time verification runs, but the worktree
     # still exists and is needed for validation commands and quality checks.
@@ -184,7 +184,7 @@ defmodule GiTF.Audit do
                  c[:worktree_path] != nil and
                  File.dir?(c.worktree_path)
              end) do
-          nil -> {:error, :no_cell}
+          nil -> {:error, :no_shell}
           shell -> {:ok, shell}
         end
 

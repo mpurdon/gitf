@@ -1291,7 +1291,7 @@ defmodule GiTF.Web.Live.Dashboard do
   defp complexity_badge(_), do: "bg-gray-700 text-gray-400"
 
   defp event_type_badge(type)
-       when type in [:bee_spawned, :bee_completed, :bee_failed, :bee_stopped],
+       when type in [:ghost_spawned, :ghost_completed, :ghost_failed, :ghost_stopped],
        do: "bg-blue-900 text-blue-300"
 
   defp event_type_badge(type)

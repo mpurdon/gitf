@@ -123,29 +123,29 @@ defmodule GiTF.Telemetry do
   end
 
   defp map_event([:gitf, :ghost, :spawned], measurements, meta) do
-    {:bee_spawned, Map.get(meta, :ghost_id, "unknown"), measurements,
+    {:ghost_spawned, Map.get(meta, :ghost_id, "unknown"), measurements,
      %{op_id: meta[:op_id], mission_id: meta[:mission_id]}}
   end
 
   defp map_event([:gitf, :ghost, :completed], measurements, meta) do
-    {:bee_completed, Map.get(meta, :ghost_id, "unknown"), measurements,
+    {:ghost_completed, Map.get(meta, :ghost_id, "unknown"), measurements,
      %{op_id: meta[:op_id], mission_id: meta[:mission_id]}}
   end
 
   defp map_event([:gitf, :ghost, :failed], measurements, meta) do
-    {:bee_failed, Map.get(meta, :ghost_id, "unknown"),
+    {:ghost_failed, Map.get(meta, :ghost_id, "unknown"),
      Map.merge(measurements, %{error: meta[:error]}),
      %{op_id: meta[:op_id], mission_id: meta[:mission_id]}}
   end
 
   defp map_event([:gitf, :ghost, :spawn_failed], measurements, meta) do
-    {:bee_failed, Map.get(meta, :ghost_id, "unknown"),
+    {:ghost_failed, Map.get(meta, :ghost_id, "unknown"),
      Map.merge(measurements, %{step: meta[:step], reason: meta[:reason]}),
      %{op_id: meta[:op_id], sector_id: meta[:sector_id]}}
   end
 
   defp map_event([:gitf, :ghost, :provision_failed], measurements, meta) do
-    {:bee_failed, Map.get(meta, :ghost_id, "unknown"),
+    {:ghost_failed, Map.get(meta, :ghost_id, "unknown"),
      Map.merge(measurements, %{step: meta[:step], reason: meta[:reason]}), %{op_id: meta[:op_id]}}
   end
 
@@ -175,7 +175,7 @@ defmodule GiTF.Telemetry do
   end
 
   defp map_event([:gitf, :phase, :spawn_failed], measurements, meta) do
-    {:bee_failed, Map.get(meta, :mission_id, "unknown"),
+    {:ghost_failed, Map.get(meta, :mission_id, "unknown"),
      Map.merge(measurements, %{phase: meta[:phase], reason: meta[:reason]}),
      %{mission_id: meta[:mission_id], op_id: meta[:op_id]}}
   end

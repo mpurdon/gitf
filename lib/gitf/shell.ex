@@ -156,14 +156,14 @@ defmodule GiTF.Shell do
   def cleanup_orphans do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    active_cells = Archive.filter(:shells, fn c -> c.status == "active" end)
+    active_shells = Archive.filter(:shells, fn c -> c.status == "active" end)
 
     # Collect branches that belong to missions still in sync-pending phases.
     # These must NOT be deleted even if the ghost is terminal.
     protected_branches = sync_pending_branches()
 
     orphan_count =
-      Enum.count(active_cells, fn shell ->
+      Enum.count(active_shells, fn shell ->
         orphan? =
           case Archive.get(:ghosts, shell.ghost_id) do
             nil -> true

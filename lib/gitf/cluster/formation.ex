@@ -8,11 +8,11 @@ defmodule GiTF.Cluster.Formation do
   ## Usage
 
       # On Node A (Leader):
-      iex --name queen@192.168.1.10 --cookie secret -S mix
+      iex --name major@192.168.1.10 --cookie secret -S mix
 
       # On Node B (Worker):
       iex --name worker1@192.168.1.11 --cookie secret -S mix
-      iex> GiTF.Cluster.Formation.join("queen@192.168.1.10")
+      iex> GiTF.Cluster.Formation.join("major@192.168.1.10")
 
   """
 

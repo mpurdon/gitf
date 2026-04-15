@@ -278,14 +278,14 @@ defmodule GiTF.Sync do
 
   defp fetch_cell(shell_id) do
     case Archive.get(:shells, shell_id) do
-      nil -> {:error, :cell_not_found}
+      nil -> {:error, :shell_not_found}
       shell -> {:ok, shell}
     end
   end
 
   defp fetch_sector(sector_id) do
     case Archive.get(:sectors, sector_id) do
-      nil -> {:error, :comb_not_found}
+      nil -> {:error, :sector_not_found}
       sector -> {:ok, sector}
     end
   end

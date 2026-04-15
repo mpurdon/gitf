@@ -8,7 +8,7 @@ defmodule GiTF.Dashboard.Toastable do
 
   This:
   1. Injects `@toasts []` into initial assigns (call `init_toasts/1` in mount)
-  2. Adds `handle_info` clauses for waggle → toast conversion and auto-dismiss
+  2. Adds `handle_info` clauses for link_received → toast conversion and auto-dismiss
   3. Passes toasts to AppLayout automatically
 
   Pages must call `init_toasts(socket)` in their mount, and pass
@@ -18,17 +18,17 @@ defmodule GiTF.Dashboard.Toastable do
   defmacro __using__(_opts) do
     quote do
       import GiTF.Dashboard.Helpers,
-        only: [push_toast: 3, handle_dismiss_toast: 2, maybe_toast_waggle: 2]
+        only: [push_toast: 3, handle_dismiss_toast: 2, maybe_toast_link: 2]
 
       defp init_toasts(socket) do
         Phoenix.Component.assign_new(socket, :toasts, fn -> [] end)
       end
 
-      # Auto-convert notable waggle messages to toasts.
-      # Pages that define their own {:waggle_received, _} handler can still
-      # call `maybe_apply_toast(socket, waggle)` manually.
-      defp maybe_apply_toast(socket, waggle) do
-        case maybe_toast_waggle(socket, waggle) do
+      # Auto-convert notable link messages to toasts.
+      # Pages that define their own {:link_received, _} handler can still
+      # call `maybe_apply_toast(socket, link)` manually.
+      defp maybe_apply_toast(socket, link) do
+        case maybe_toast_link(socket, link) do
           {:toast, s} -> s
           :skip -> socket
         end

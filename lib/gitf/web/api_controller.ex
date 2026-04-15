@@ -423,7 +423,7 @@ defmodule GiTF.Web.ApiController do
         end
       end
 
-    json(conn, %{data: Enum.map(ghosts, &serialize_bee/1)})
+    json(conn, %{data: Enum.map(ghosts, &serialize_ghost/1)})
   end
 
   def stop_ghost(conn, %{"id" => id}) do
@@ -517,7 +517,7 @@ defmodule GiTF.Web.ApiController do
         total_input_tokens: summary.total_input_tokens,
         total_output_tokens: summary.total_output_tokens,
         by_model: summary.by_model,
-        by_bee: summary.by_bee,
+        by_ghost: summary.by_ghost,
         by_category: summary.by_category
       }
     })
@@ -672,7 +672,7 @@ defmodule GiTF.Web.ApiController do
     }
   end
 
-  defp serialize_bee(b) do
+  defp serialize_ghost(b) do
     %{
       id: b.id,
       name: b.name,

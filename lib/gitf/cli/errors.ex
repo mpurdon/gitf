@@ -68,7 +68,7 @@ defmodule GiTF.CLI.Errors do
     """
   end
 
-  def format_error(:bee_not_found, %{ghost_id: id}) do
+  def format_error(:ghost_not_found, %{ghost_id: id}) do
     """
     Error: Ghost not found: #{id}
 
@@ -82,7 +82,7 @@ defmodule GiTF.CLI.Errors do
     """
   end
 
-  def format_error(:comb_not_found, %{sector_id: id}) do
+  def format_error(:sector_not_found, %{sector_id: id}) do
     """
     Error: Sector not found: #{id}
 

@@ -466,10 +466,10 @@ defmodule GiTF.Medic do
   defp fix_major_workspace do
     case GiTF.gitf_dir() do
       {:ok, path} ->
-        queen_dir = Path.join([path, ".gitf", "major"])
-        major_md = Path.join(queen_dir, "MAJOR.md")
+        major_dir = Path.join([path, ".gitf", "major"])
+        major_md = Path.join(major_dir, "MAJOR.md")
 
-        with :ok <- File.mkdir_p(queen_dir),
+        with :ok <- File.mkdir_p(major_dir),
              :ok <- File.write(major_md, GiTF.Init.major_instructions()) do
           result(:major_workspace, :ok, "Regenerated MAJOR.md")
         else
@@ -505,12 +505,12 @@ defmodule GiTF.Medic do
       {:ok, path} ->
         regenerated = 0
 
-        # Regenerate queen settings
-        queen_workspace = Path.join([path, ".gitf", "major"])
+        # Regenerate major settings
+        major_workspace = Path.join([path, ".gitf", "major"])
 
         regenerated =
-          if File.dir?(queen_workspace) do
-            case GiTF.Runtime.Settings.generate_major(path, queen_workspace) do
+          if File.dir?(major_workspace) do
+            case GiTF.Runtime.Settings.generate_major(path, major_workspace) do
               :ok -> regenerated + 1
               _ -> regenerated
             end
@@ -611,9 +611,9 @@ defmodule GiTF.Medic do
   defp format_size(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MB"
 
   defp collect_settings_files(gitf_root) do
-    queen_settings = Path.join([gitf_root, ".gitf", "major", ".claude", "settings.json"])
+    major_settings = Path.join([gitf_root, ".gitf", "major", ".claude", "settings.json"])
 
-    cell_settings =
+    shell_settings =
       try do
         Archive.filter(:shells, fn c -> c.status == "active" end)
         |> Enum.map(fn shell ->
@@ -623,7 +623,7 @@ defmodule GiTF.Medic do
         _ -> []
       end
 
-    [queen_settings | cell_settings]
+    [major_settings | shell_settings]
     |> Enum.filter(&File.exists?/1)
   end
 

@@ -35,8 +35,8 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     {:noreply, assign(socket, :approvals, load_approvals())}
   end
 
-  def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply, socket |> maybe_apply_toast(waggle) |> assign(:approvals, load_approvals())}
+  def handle_info({:link_received, link}, socket) do
+    {:noreply, socket |> maybe_apply_toast(link) |> assign(:approvals, load_approvals())}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}

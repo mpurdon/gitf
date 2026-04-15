@@ -40,10 +40,10 @@ defmodule GiTF.Observability.Health do
   @spec alive?() :: boolean()
   def alive? do
     # Check critical processes exist
-    queen_alive = Process.whereis(GiTF.Major) != nil
+    major_alive = Process.whereis(GiTF.Major) != nil
     store_ok = check_store() == :ok
 
-    if not queen_alive or not store_ok do
+    if not major_alive or not store_ok do
       false
     else
       # Check for zombie: active missions exist but no op activity for 30+ minutes

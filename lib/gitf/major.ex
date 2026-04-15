@@ -212,7 +212,7 @@ defmodule GiTF.Major do
   end
 
   @impl true
-  def handle_info({:waggle_received, link_msg}, state) do
+  def handle_info({:link_received, link_msg}, state) do
     state = handle_waggle(link_msg, state)
     # Mark as read to prevent re-processing by the 30s waggle recovery cycle
     if id = Map.get(link_msg, :id), do: GiTF.Link.mark_read(id)
@@ -838,7 +838,7 @@ defmodule GiTF.Major do
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
       "section:progress",
-      {:bee_checkpoint, ghost_id, backup_data}
+      {:ghost_checkpoint, ghost_id, backup_data}
     )
 
     %{state | last_checkpoint: last_checkpoint}
@@ -2120,7 +2120,7 @@ defmodule GiTF.Major do
   defp register_with_run(nil, _ghost_id, _op_id), do: :ok
 
   defp register_with_run(run, ghost_id, op_id) do
-    GiTF.Run.add_bee(run.id, ghost_id)
+    GiTF.Run.add_ghost(run.id, ghost_id)
 
     if op_id not in run.op_ids do
       GiTF.Run.add_job(run.id, op_id)

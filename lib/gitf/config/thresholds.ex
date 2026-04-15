@@ -11,8 +11,8 @@ defmodule GiTF.Config.Thresholds do
       lock_stale_seconds = 5
       lock_steal_attempts = 500
       drone_poll_interval_ms = 30000
-      queen_max_retries = 3
-      waggle_stale_seconds = 30
+      major_max_retries = 3
+      link_stale_seconds = 30
       alert_quest_stuck_seconds = 1800
       alert_quality_drop = 70
       alert_cost_spike_multiplier = 2.0
@@ -29,8 +29,8 @@ defmodule GiTF.Config.Thresholds do
     lock_stale_seconds: 5,
     lock_steal_attempts: 500,
     drone_poll_interval_ms: 30_000,
-    queen_max_retries: 3,
-    waggle_stale_seconds: 30,
+    major_max_retries: 3,
+    link_stale_seconds: 30,
     alert_quest_stuck_seconds: 1800,
     alert_quality_drop: 70,
     alert_cost_spike_multiplier: 2.0,

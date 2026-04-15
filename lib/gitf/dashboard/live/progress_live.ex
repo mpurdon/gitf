@@ -25,12 +25,12 @@ defmodule GiTF.Dashboard.ProgressLive do
 
   @impl true
   # Real-time: progress events drive updates immediately
-  def handle_info({:bee_progress, _ghost_id, _data}, socket) do
+  def handle_info({:ghost_progress, _ghost_id, _data}, socket) do
     {:noreply, assign_data(socket)}
   end
 
-  def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
+  def handle_info({:link_received, link}, socket) do
+    {:noreply, socket |> maybe_apply_toast(link) |> assign_data()}
   end
 
   def handle_info(:heartbeat, socket) do
@@ -215,9 +215,9 @@ defmodule GiTF.Dashboard.ProgressLive do
   defp context_color(pct) when pct > 0.4, do: "#d29922"
   defp context_color(_), do: "#3fb950"
 
-  defp event_badge(:bee_spawned), do: "badge-blue"
-  defp event_badge(:bee_completed), do: "badge-green"
-  defp event_badge(:bee_failed), do: "badge-red"
+  defp event_badge(:ghost_spawned), do: "badge-blue"
+  defp event_badge(:ghost_completed), do: "badge-green"
+  defp event_badge(:ghost_failed), do: "badge-red"
   defp event_badge(:job_transition), do: "badge-yellow"
   defp event_badge(:merge_succeeded), do: "badge-green"
   defp event_badge(:merge_failed), do: "badge-red"
@@ -226,10 +226,10 @@ defmodule GiTF.Dashboard.ProgressLive do
   defp event_badge(:error), do: "badge-red"
   defp event_badge(_), do: "badge-grey"
 
-  defp format_event_type(:bee_spawned), do: "spawned"
-  defp format_event_type(:bee_completed), do: "completed"
-  defp format_event_type(:bee_failed), do: "failed"
-  defp format_event_type(:bee_stopped), do: "stopped"
+  defp format_event_type(:ghost_spawned), do: "spawned"
+  defp format_event_type(:ghost_completed), do: "completed"
+  defp format_event_type(:ghost_failed), do: "failed"
+  defp format_event_type(:ghost_stopped), do: "stopped"
   defp format_event_type(:job_transition), do: "op"
   defp format_event_type(:quest_created), do: "mission"
   defp format_event_type(:quest_completed), do: "mission"
@@ -238,7 +238,7 @@ defmodule GiTF.Dashboard.ProgressLive do
   defp format_event_type(:error), do: "error"
   defp format_event_type(type), do: type |> to_string() |> String.replace("_", " ")
 
-  defp event_summary(%{type: :bee_failed, data: data}) do
+  defp event_summary(%{type: :ghost_failed, data: data}) do
     step = Map.get(data, :step) || Map.get(data, "step")
     reason = Map.get(data, :reason) || Map.get(data, :error) || Map.get(data, "error")
     parts = [step && "at #{step}", reason && truncate(inspect(reason), 60)]

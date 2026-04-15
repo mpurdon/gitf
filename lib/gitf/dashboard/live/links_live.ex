@@ -30,9 +30,9 @@ defmodule GiTF.Dashboard.LinksLive do
   end
 
   @impl true
-  def handle_info({:waggle_received, waggle}, socket) do
+  def handle_info({:link_received, link}, socket) do
     links = GiTF.Link.list(limit: 50)
-    {:noreply, socket |> maybe_apply_toast(waggle) |> assign(:links, links)}
+    {:noreply, socket |> maybe_apply_toast(link) |> assign(:links, links)}
   end
 
   @impl true

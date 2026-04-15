@@ -39,8 +39,8 @@ defmodule GiTF.Dashboard.TimelineLive do
     {:noreply, stream_events(socket)}
   end
 
-  def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply, socket |> maybe_apply_toast(waggle) |> stream_events()}
+  def handle_info({:link_received, link}, socket) do
+    {:noreply, socket |> maybe_apply_toast(link) |> stream_events()}
   end
 
   def handle_info(_, socket), do: {:noreply, socket}

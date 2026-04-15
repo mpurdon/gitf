@@ -43,7 +43,7 @@ defmodule GiTF.Runtime.Models do
   @doc """
   Spawns an interactive model session.
 
-  In API mode, delegates to `run_agent/3` with queen tools.
+  In API mode, delegates to `run_agent/3` with major tools.
   Resolves the active plugin and delegates to its `spawn_interactive/2`.
   """
   @spec spawn_interactive(String.t(), keyword()) ::

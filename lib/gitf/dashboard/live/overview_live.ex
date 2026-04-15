@@ -57,8 +57,8 @@ defmodule GiTF.Dashboard.OverviewLive do
     {:noreply, socket |> assign(:refresh_scheduled, false) |> assign_core_data()}
   end
 
-  def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply, socket |> maybe_apply_toast(waggle) |> schedule_refresh()}
+  def handle_info({:link_received, link}, socket) do
+    {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
   end
 
   def handle_info({:op_updated, _op}, socket), do: {:noreply, schedule_refresh(socket)}
@@ -196,7 +196,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:active_ghosts, active_ghosts)
     |> assign(:quest_count, length(missions))
     |> assign(:active_quests, active_quests)
-    |> assign(:recent_waggles, GiTF.Link.list(limit: 5))
+    |> assign(:recent_links, GiTF.Link.list(limit: 5))
     |> assign(:active_processes, safe_active_count())
     |> assign(:avg_context, avg_context)
     |> assign(:peak_context, peak_context)
@@ -736,10 +736,10 @@ defmodule GiTF.Dashboard.OverviewLive do
 
       <div class="panel">
         <div class="panel-title">Recent Messages</div>
-        <%= if @recent_waggles == [] do %>
+        <%= if @recent_links == [] do %>
           <div class="empty">No messages yet.</div>
         <% else %>
-          <%= for link_msg <- @recent_waggles do %>
+          <%= for link_msg <- @recent_links do %>
             <div class={"link_msg-item #{unless link_msg.read, do: "link_msg-unread"}"}>
               <div class="link_msg-subject" style="display:flex;align-items:center;"><.link_msg_icon subject={link_msg.subject} /> {link_msg.subject || "(no subject)"}</div>
               <div class="link_msg-meta">

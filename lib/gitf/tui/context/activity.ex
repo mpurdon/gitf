@@ -3,13 +3,13 @@ defmodule GiTF.TUI.Context.Activity do
   Manages the activity status, including factory health, active ghosts, and missions.
   """
 
-  defstruct factory_status: :ok, ghosts: [], missions: [], bee_logs: %{}
+  defstruct factory_status: :ok, ghosts: [], missions: [], ghost_logs: %{}
 
   @type t :: %__MODULE__{
           factory_status: :ok | :error | :maintenance,
           ghosts: list(map()),
           missions: list(map()),
-          bee_logs: map()
+          ghost_logs: map()
         }
 
   def new do
@@ -28,7 +28,7 @@ defmodule GiTF.TUI.Context.Activity do
     %{state | missions: missions}
   end
 
-  def update_bee_logs(state, bee_logs) do
-    %{state | bee_logs: bee_logs}
+  def update_ghost_logs(state, ghost_logs) do
+    %{state | ghost_logs: ghost_logs}
   end
 end

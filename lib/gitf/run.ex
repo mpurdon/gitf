@@ -45,8 +45,8 @@ defmodule GiTF.Run do
 
   Returns `{:ok, run}` or `{:error, :not_found}`.
   """
-  @spec add_bee(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def add_bee(run_id, ghost_id) do
+  @spec add_ghost(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
+  def add_ghost(run_id, ghost_id) do
     case Archive.get(:runs, run_id) do
       nil ->
         {:error, :not_found}

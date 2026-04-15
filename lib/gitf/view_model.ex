@@ -75,16 +75,16 @@ defmodule GiTF.ViewModel do
   end
 
   @impl true
-  def handle_info({:waggle_received, link_msg}, state) do
-    links = [summarize_waggle(link_msg) | state.recent_waggles] |> Enum.take(50)
-    state = %{state | recent_waggles: links, updated_at: now()}
+  def handle_info({:link_received, link_msg}, state) do
+    links = [summarize_link(link_msg) | state.recent_links] |> Enum.take(50)
+    state = %{state | recent_links: links, updated_at: now()}
     publish(state)
     {:noreply, state}
   end
 
-  def handle_info({:bee_progress, ghost_id, entry}, state) do
-    progress = Map.put(state.bee_progress, ghost_id, entry)
-    state = %{state | bee_progress: progress, updated_at: now()}
+  def handle_info({:ghost_progress, ghost_id, entry}, state) do
+    progress = Map.put(state.ghost_progress, ghost_id, entry)
+    state = %{state | ghost_progress: progress, updated_at: now()}
     publish(state)
     {:noreply, state}
   end
@@ -114,8 +114,8 @@ defmodule GiTF.ViewModel do
       ghosts: [],
       missions: [],
       ops: [],
-      bee_progress: %{},
-      recent_waggles: [],
+      ghost_progress: %{},
+      recent_links: [],
       recent_intents: [],
       costs: %{total: 0, count: 0},
       updated_at: now()
@@ -146,7 +146,7 @@ defmodule GiTF.ViewModel do
     _ -> %{total: 0, count: 0}
   end
 
-  defp summarize_waggle(link_msg) do
+  defp summarize_link(link_msg) do
     %{
       from: link_msg.from,
       to: link_msg.to,

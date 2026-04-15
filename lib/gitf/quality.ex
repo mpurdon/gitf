@@ -227,7 +227,7 @@ defmodule GiTF.Quality do
   def set_thresholds(sector_id, thresholds) do
     case Archive.get(:sectors, sector_id) do
       nil ->
-        {:error, :comb_not_found}
+        {:error, :sector_not_found}
 
       sector ->
         updated = Map.put(sector, :quality_thresholds, thresholds)

@@ -393,7 +393,7 @@ defmodule GiTF.Ghosts do
   defp update_bee_working(ghost_id, shell) do
     case Archive.get(:ghosts, ghost_id) do
       nil ->
-        {:error, :bee_not_found}
+        {:error, :ghost_not_found}
 
       ghost ->
         updated =

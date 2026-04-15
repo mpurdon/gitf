@@ -32,7 +32,7 @@ defmodule GiTF.Link do
     }
 
     {:ok, link_msg} = Archive.insert(:links, record)
-    broadcast(to, {:waggle_received, link_msg})
+    broadcast(to, {:link_received, link_msg})
 
     GiTF.Telemetry.emit([:gitf, :link_msg, :sent], %{}, %{
       from: from,
@@ -111,8 +111,8 @@ defmodule GiTF.Link do
   Returns `{:ok, link_msg}` or `{:error, :not_found}`.
   """
   @spec mark_read(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def mark_read(waggle_id) do
-    case Archive.get(:links, waggle_id) do
+  def mark_read(link_id) do
+    case Archive.get(:links, link_id) do
       nil ->
         {:error, :not_found}
 

@@ -27,9 +27,9 @@ defmodule GiTF.Brief do
   def brief(role, identifier)
 
   def brief(:major, gitf_root) do
-    queen_md_path = Path.join([gitf_root, ".gitf", "major", "MAJOR.md"])
+    major_md_path = Path.join([gitf_root, ".gitf", "major", "MAJOR.md"])
 
-    with {:ok, instructions} <- File.read(queen_md_path) do
+    with {:ok, instructions} <- File.read(major_md_path) do
       state_summary = build_major_state_summary()
       {:ok, instructions <> "\n\n" <> state_summary}
     end
@@ -37,7 +37,7 @@ defmodule GiTF.Brief do
 
   def brief(:ghost, ghost_id) do
     with {:ok, ghost} <- fetch_bee(ghost_id) do
-      markdown = build_bee_briefing(ghost)
+      markdown = build_ghost_briefing(ghost)
       transfer_section = build_handoff_section(ghost_id)
       {:ok, markdown <> transfer_section}
     end
@@ -58,7 +58,7 @@ defmodule GiTF.Brief do
       Archive.filter(:missions, fn q -> q.status in ["pending", "active", "planning"] end)
 
     pending_jobs = Archive.filter(:ops, fn j -> j.status == "pending" end)
-    recent_waggles = GiTF.Link.list(to: "major", limit: 10)
+    recent_links = GiTF.Link.list(to: "major", limit: 10)
 
     planning_quests = Enum.filter(pending_quests, &(&1.status == "planning"))
     quest_specs_section = format_quest_specs(planning_quests)
@@ -77,8 +77,8 @@ defmodule GiTF.Brief do
       "### Pending Jobs (#{length(pending_jobs)})",
       format_jobs(pending_jobs),
       "",
-      "### Recent Messages to Major (#{length(recent_waggles)})",
-      format_waggles(recent_waggles)
+      "### Recent Messages to Major (#{length(recent_links)})",
+      format_links(recent_links)
     ]
 
     Enum.join(sections, "\n")
@@ -127,9 +127,9 @@ defmodule GiTF.Brief do
     |> Enum.join("\n")
   end
 
-  defp format_waggles([]), do: "None."
+  defp format_links([]), do: "None."
 
-  defp format_waggles(links) do
+  defp format_links(links) do
     links
     |> Enum.map(fn w ->
       read_marker = if w.read, do: "[read]", else: "[unread]"
@@ -188,14 +188,14 @@ defmodule GiTF.Brief do
 
   defp fetch_bee(ghost_id) do
     case Archive.get(:ghosts, ghost_id) do
-      nil -> {:error, :bee_not_found}
+      nil -> {:error, :ghost_not_found}
       ghost -> {:ok, ghost}
     end
   end
 
-  defp build_bee_briefing(ghost) do
-    op = fetch_job_for_bee(ghost)
-    shell = fetch_cell_for_bee(ghost)
+  defp build_ghost_briefing(ghost) do
+    op = fetch_op_for_ghost(ghost)
+    shell = fetch_shell_for_ghost(ghost)
     links = GiTF.Link.list_unread(ghost.id)
 
     quest_context = build_quest_context(op)
@@ -208,18 +208,18 @@ defmodule GiTF.Brief do
       "",
       quest_context,
       "## Your Workspace",
-      format_cell_detail(shell),
+      format_shell_detail(shell),
       "",
       "## Agent Profile",
       format_agent_section(shell),
       "",
       "## Unread Messages (#{length(links)})",
-      format_waggles(links),
+      format_links(links),
       "",
       "## Rules",
       "- Complete your assigned op and nothing else.",
-      "- When done, send a link_msg to the queen: `gitf link send --to queen --subject \"job_complete\" --body \"<summary>\"`",
-      "- If you are blocked, send: `gitf link send --to queen --subject \"job_blocked\" --body \"<reason>\"`",
+      "- When done, send a link_msg to the major: `gitf link send --to major --subject \"job_complete\" --body \"<summary>\"`",
+      "- If you are blocked, send: `gitf link send --to major --subject \"job_blocked\" --body \"<reason>\"`",
       "- Do NOT modify files outside your worktree.",
       friction_rules(op)
     ]
@@ -229,15 +229,15 @@ defmodule GiTF.Brief do
     |> Enum.join("\n")
   end
 
-  defp fetch_job_for_bee(%{op_id: nil}), do: nil
+  defp fetch_op_for_ghost(%{op_id: nil}), do: nil
 
-  defp fetch_job_for_bee(%{op_id: op_id}) when is_binary(op_id) do
+  defp fetch_op_for_ghost(%{op_id: op_id}) when is_binary(op_id) do
     Archive.get(:ops, op_id)
   end
 
-  defp fetch_job_for_bee(_bee), do: nil
+  defp fetch_op_for_ghost(_ghost), do: nil
 
-  defp fetch_cell_for_bee(ghost) do
+  defp fetch_shell_for_ghost(ghost) do
     Archive.filter(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
     |> List.first()
   end
@@ -258,9 +258,9 @@ defmodule GiTF.Brief do
     Enum.join(lines, "\n")
   end
 
-  defp format_cell_detail(nil), do: "No shell assigned."
+  defp format_shell_detail(nil), do: "No shell assigned."
 
-  defp format_cell_detail(shell) do
+  defp format_shell_detail(shell) do
     [
       "Path: `#{shell.worktree_path}`",
       "Branch: `#{shell.branch}`"

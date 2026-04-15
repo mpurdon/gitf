@@ -48,7 +48,7 @@ defmodule GiTF.Runtime.CrossModelAudit do
   @spec audit_job(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def audit_job(op_id, opts \\ []) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
-         {:ok, shell} <- find_cell(op),
+         {:ok, shell} <- find_shell(op),
          {:ok, diff} <- get_diff(shell) do
       if String.trim(diff) == "" do
         {:ok, %{score: 100, issues: [], severity: :none, model: "none", skipped: true}}
@@ -82,7 +82,7 @@ defmodule GiTF.Runtime.CrossModelAudit do
 
   # -- Private ---------------------------------------------------------------
 
-  defp find_cell(op) do
+  defp find_shell(op) do
     # Try active shell first, then fall back to any shell with worktree on disk.
     # Ghosts may have stopped by the time cross-model audit runs.
     case GiTF.Archive.find_one(:shells, fn c ->
@@ -94,7 +94,7 @@ defmodule GiTF.Runtime.CrossModelAudit do
                  c[:worktree_path] != nil and
                  File.dir?(c.worktree_path)
              end) do
-          nil -> {:error, :no_cell}
+          nil -> {:error, :no_shell}
           shell -> {:ok, shell}
         end
 

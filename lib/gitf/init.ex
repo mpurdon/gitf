@@ -11,7 +11,7 @@ defmodule GiTF.Init do
       <path>/
       +-- .gitf/
           +-- config.toml
-          +-- queen/
+          +-- major/
           |   +-- MAJOR.md
           +-- store/             (ETF file store directory)
   """
@@ -61,7 +61,7 @@ defmodule GiTF.Init do
 
   ### Communication
   - `gitf link send --from queen --to <ghost-id> --subject "guidance" --body "message"` -- Send a message
-  - `gitf link list --to queen` -- Check messages to you
+  - `gitf link list --to major` -- Check messages to you
   - `gitf link show <link_msg-id>` -- Read a specific message
 
   ### Monitoring
@@ -196,7 +196,7 @@ defmodule GiTF.Init do
 
   ### Phase 6: Monitor and Report
   1. Check ghost status: `gitf ghost list`
-  2. Read messages: `gitf link list --to queen`
+  2. Read messages: `gitf link list --to major`
   3. When a ghost completes, spawn ghosts for newly unblocked ops
   4. When all ops for a mission complete, report the result to the user
   5. If a ghost reports being blocked, help unblock it or reassign the work
@@ -278,10 +278,10 @@ defmodule GiTF.Init do
   defp validate_path(_gitf_dir, true), do: :ok
 
   defp create_directories(gitf_dir) do
-    queen_dir = Path.join(gitf_dir, "major")
+    major_dir = Path.join(gitf_dir, "major")
     quests_dir = Path.join(gitf_dir, "missions")
 
-    with :ok <- File.mkdir_p(queen_dir),
+    with :ok <- File.mkdir_p(major_dir),
          :ok <- File.mkdir_p(quests_dir) do
       :ok
     end

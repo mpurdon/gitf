@@ -23,7 +23,7 @@ defmodule GiTF.CLI.Completions do
 
   @top_commands ~w(
     mission ghost sector op ops plugin medic dashboard costs status version
-    init server queen onboard verify quality intel heal optimize
+    init server major onboard verify quality intel heal optimize
     deadlock monitor accept scope brief quickref tachikoma budget watch
     validate transfer conflict github shell link_msg completions
   )

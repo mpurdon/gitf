@@ -228,8 +228,8 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
 
   defp format_notification(event, payload) do
     case event do
-      :bee_completed -> "Ghost #{payload[:ghost_id]} completed op #{payload[:op_id]}"
-      :bee_failed -> "Ghost #{payload[:ghost_id]} failed: #{payload[:error]}"
+      :ghost_completed -> "Ghost #{payload[:ghost_id]} completed op #{payload[:op_id]}"
+      :ghost_failed -> "Ghost #{payload[:ghost_id]} failed: #{payload[:error]}"
       :quest_completed -> "Quest #{payload[:mission_id]} completed!"
       :link_msg -> payload[:text] || "New link_msg message"
       _ -> "GiTF event: #{event} #{inspect(payload)}"

@@ -105,7 +105,7 @@ defmodule GiTF.Observability.Metrics do
   end
 
   def handle_telemetry([:gitf, :ghost, :completed], %{duration_ms: ms}, _meta, _config) do
-    record(:bee_duration_ms, ms)
+    record(:ghost_duration_ms, ms)
   end
 
   def handle_telemetry([:gitf, :ghost, :failed], _measurements, _meta, _config) do

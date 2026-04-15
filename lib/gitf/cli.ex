@@ -461,7 +461,7 @@ defmodule GiTF.CLI do
             Format.success("✓ Quick onboarded: #{result.sector.name}")
             Format.info("  Language: #{result.project_info.language}")
             Format.info("  Path: #{result.sector.path}")
-            GiTF.CLI.Help.show_tip(:comb_added)
+            GiTF.CLI.Help.show_tip(:sector_added)
 
           {:error, reason} ->
             Format.error("Onboarding failed: #{reason}")
@@ -485,7 +485,7 @@ defmodule GiTF.CLI do
               do: Format.info("  Validation: #{result.project_info.validation_command}")
 
             Format.info("  Path: #{result.sector.path}")
-            GiTF.CLI.Help.show_tip(:comb_added)
+            GiTF.CLI.Help.show_tip(:sector_added)
 
           {:error, reason} ->
             Format.error("Onboarding failed: #{reason}")
@@ -1563,21 +1563,21 @@ defmodule GiTF.CLI do
 
   defp dispatch([:brief], result) do
     ghost_id = result_get(result, :options, :ghost)
-    queen? = result_get(result, :flags, :major) || false
+    major? = result_get(result, :flags, :major) || false
 
     if GiTF.Client.remote?() do
       # In remote mode, brief is a no-op — the ghost works without local context injection
       :ok
     else
       cond do
-        queen? ->
+        major? ->
           do_prime_major()
 
         is_binary(ghost_id) ->
           do_prime_bee(ghost_id)
 
         true ->
-          Format.error("Specify --queen or --ghost <id>")
+          Format.error("Specify --major or --ghost <id>")
       end
     end
   end
@@ -1710,7 +1710,7 @@ defmodule GiTF.CLI do
     ghost_id = result_get(result, :args, :ghost_id)
 
     if GiTF.Client.remote?() do
-      case GiTF.Client.complete_bee(ghost_id) do
+      case GiTF.Client.complete_ghost(ghost_id) do
         :ok -> Format.success("Ghost #{ghost_id} marked as completed.")
         {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
       end
@@ -1742,7 +1742,7 @@ defmodule GiTF.CLI do
     reason = result_get(result, :options, :reason) || "unknown"
 
     if GiTF.Client.remote?() do
-      case GiTF.Client.fail_bee(ghost_id, reason) do
+      case GiTF.Client.fail_ghost(ghost_id, reason) do
         :ok -> Format.success("Ghost #{ghost_id} marked as failed: #{reason}")
         {:error, err} -> Format.error("Failed: #{inspect(err)}")
       end
@@ -2382,14 +2382,14 @@ defmodule GiTF.CLI do
       IO.puts("")
     end
 
-    by_bee = summary[:by_bee] || %{}
+    by_ghost = summary[:by_ghost] || %{}
 
-    if map_size(by_bee) > 0 do
+    if map_size(by_ghost) > 0 do
       IO.puts("By ghost:")
       headers = ["Ghost ID", "Cost", "Input Tokens", "Output Tokens"]
 
       rows =
-        Enum.map(by_bee, fn {ghost_id, data} ->
+        Enum.map(by_ghost, fn {ghost_id, data} ->
           cost = (data[:cost] || 0.0) / 1
 
           [
@@ -2412,7 +2412,7 @@ defmodule GiTF.CLI do
       model = result_get(result, :options, :model)
 
       if is_nil(ghost_id) or is_nil(input) or is_nil(output) do
-        Format.error("--ghost, --input, and --output are required (or use --queen)")
+        Format.error("--ghost, --input, and --output are required (or use --major)")
       else
         attrs = %{input_tokens: input, output_tokens: output, model: model}
 
@@ -2425,9 +2425,9 @@ defmodule GiTF.CLI do
         end
       end
     else
-      queen? = result_get(result, :flags, :major) || false
+      major? = result_get(result, :flags, :major) || false
 
-      if queen? do
+      if major? do
         record_major_costs()
       else
         ghost_id = result_get(result, :options, :ghost)
@@ -2436,7 +2436,7 @@ defmodule GiTF.CLI do
         model = result_get(result, :options, :model)
 
         if is_nil(ghost_id) or is_nil(input) or is_nil(output) do
-          Format.error("--ghost, --input, and --output are required (or use --queen)")
+          Format.error("--ghost, --input, and --output are required (or use --major)")
         else
           attrs = %{input_tokens: input, output_tokens: output, model: model}
           {:ok, cost} = GiTF.Costs.record(ghost_id, attrs)
@@ -2486,7 +2486,7 @@ defmodule GiTF.CLI do
       {:ok, link_msg} ->
         Format.success("Transfer created for #{ghost_id} (link_msg #{link_msg.id})")
 
-      {:error, :bee_not_found} ->
+      {:error, :ghost_not_found} ->
         show_not_found_error(:ghost, ghost_id)
 
       {:error, reason} ->
@@ -3120,7 +3120,7 @@ defmodule GiTF.CLI do
             "Major cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
           )
         else
-          Format.info("No new queen costs to record.")
+          Format.info("No new major costs to record.")
         end
 
       {:error, _} ->
@@ -3180,7 +3180,7 @@ defmodule GiTF.CLI do
 
   # Uses CLI.Errors for rich, contextual not-found messages with suggestions.
   defp show_not_found_error(:ghost, id),
-    do: IO.puts(GiTF.CLI.Errors.format_error(:bee_not_found, %{ghost_id: id}))
+    do: IO.puts(GiTF.CLI.Errors.format_error(:ghost_not_found, %{ghost_id: id}))
 
   defp show_not_found_error(:mission, id),
     do: IO.puts(GiTF.CLI.Errors.format_error(:quest_not_found, %{mission_id: id}))
@@ -3189,7 +3189,7 @@ defmodule GiTF.CLI do
     do: IO.puts(GiTF.CLI.Errors.format_error(:job_not_found, %{op_id: id}))
 
   defp show_not_found_error(:sector, id),
-    do: IO.puts(GiTF.CLI.Errors.format_error(:comb_not_found, %{sector_id: id}))
+    do: IO.puts(GiTF.CLI.Errors.format_error(:sector_not_found, %{sector_id: id}))
 
   defp resolve_sector_id(explicit) when is_binary(explicit), do: {:ok, explicit}
 
@@ -3225,7 +3225,7 @@ defmodule GiTF.CLI do
   defp do_prime_bee(ghost_id) do
     case GiTF.Brief.brief(:ghost, ghost_id) do
       {:ok, markdown} -> IO.puts(markdown)
-      {:error, :bee_not_found} -> show_not_found_error(:ghost, ghost_id)
+      {:error, :ghost_not_found} -> show_not_found_error(:ghost, ghost_id)
       {:error, reason} -> Format.error("Brief failed: #{inspect(reason)}")
     end
   end
@@ -3433,9 +3433,9 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        queen: [
+        major: [
           name: "major",
-          about: "Start the queen orchestrator for a mission"
+          about: "Start the major orchestrator for a mission"
         ],
         ghost: [
           name: "ghost",
@@ -3948,9 +3948,9 @@ defmodule GiTF.CLI do
               name: "record",
               about: "Manually record a cost entry",
               flags: [
-                queen: [
-                  long: "--queen",
-                  help: "Record costs for the queen session (reads from latest transcript)"
+                major: [
+                  long: "--major",
+                  help: "Record costs for the major session (reads from latest transcript)"
                 ]
               ],
               options: [
@@ -4298,8 +4298,8 @@ defmodule GiTF.CLI do
           name: "brief",
           about: "Output context prompt for a Major or Ghost session",
           flags: [
-            queen: [
-              long: "--queen",
+            major: [
+              long: "--major",
               help: "Brief the Major with instructions and section state"
             ]
           ],

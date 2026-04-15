@@ -17,10 +17,10 @@ defmodule GiTF.EventStore do
   alias GiTF.Archive
 
   @event_types [
-    :bee_spawned,
-    :bee_completed,
-    :bee_failed,
-    :bee_stopped,
+    :ghost_spawned,
+    :ghost_completed,
+    :ghost_failed,
+    :ghost_stopped,
     :job_created,
     :job_transition,
     :job_verified,
@@ -34,7 +34,7 @@ defmodule GiTF.EventStore do
     :quest_created,
     :quest_completed,
     :quest_failed,
-    :waggle_sent,
+    :link_sent,
     :backup,
     :error
   ]
@@ -54,8 +54,8 @@ defmodule GiTF.EventStore do
 
   ## Examples
 
-      iex> GiTF.EventStore.record(:bee_spawned, "ghost-abc123", %{model: "sonnet"})
-      {:ok, %{type: :bee_spawned, entity_id: "ghost-abc123", ...}}
+      iex> GiTF.EventStore.record(:ghost_spawned, "ghost-abc123", %{model: "sonnet"})
+      {:ok, %{type: :ghost_spawned, entity_id: "ghost-abc123", ...}}
   """
   @spec record(atom(), String.t(), map()) :: {:ok, map()} | {:error, :invalid_event_type}
   def record(event_type, entity_id, data) do

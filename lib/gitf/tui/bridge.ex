@@ -8,7 +8,7 @@ defmodule GiTF.TUI.Bridge do
 
   ## Intent Event Bus
 
-  Instead of broadcasting raw text on `"queen:input"`, the Bridge publishes
+  Instead of broadcasting raw text on `"major:input"`, the Bridge publishes
   structured intent events on `"section:intent"`. Both TUI and future Raylib
   clients publish to the same topic:
 
@@ -55,14 +55,14 @@ defmodule GiTF.TUI.Bridge do
   @doc """
   Send user input text to the Major via the intent event bus.
 
-  Also broadcasts on `"queen:input"` for backwards compatibility.
+  Also broadcasts on `"major:input"` for backwards compatibility.
   """
   @spec send_to_major(String.t()) :: :ok
   def send_to_major(text) do
     # New: structured intent event
     publish_intent(:user_input, %{text: text})
     # Backwards-compatible: raw broadcast
-    Phoenix.PubSub.broadcast(GiTF.PubSub, "queen:input", {:user_input, text})
+    Phoenix.PubSub.broadcast(GiTF.PubSub, "major:input", {:user_input, text})
     :ok
   end
 

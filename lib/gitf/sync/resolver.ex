@@ -669,14 +669,14 @@ defmodule GiTF.Sync.Resolver do
             {:ok, %{id: shell_id, branch: branch, sector_id: sid, ghost_id: nil}}
 
           _ ->
-            {:error, :cell_not_found}
+            {:error, :shell_not_found}
         end
     end
   end
 
   defp fetch_sector(sector_id) do
     case Archive.get(:sectors, sector_id) do
-      nil -> {:error, :comb_not_found}
+      nil -> {:error, :sector_not_found}
       sector -> {:ok, sector}
     end
   end

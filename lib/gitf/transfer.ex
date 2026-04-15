@@ -57,8 +57,8 @@ defmodule GiTF.Transfer do
   and returns the transfer context as markdown.
   """
   @spec resume(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def resume(_ghost_id, transfer_waggle_id) do
-    case Archive.get(:links, transfer_waggle_id) do
+  def resume(_ghost_id, transfer_link_id) do
+    case Archive.get(:links, transfer_link_id) do
       nil ->
         {:error, :transfer_not_found}
 
@@ -158,7 +158,7 @@ defmodule GiTF.Transfer do
 
   defp fetch_bee(ghost_id) do
     case Archive.get(:ghosts, ghost_id) do
-      nil -> {:error, :bee_not_found}
+      nil -> {:error, :ghost_not_found}
       ghost -> {:ok, ghost}
     end
   end
@@ -169,7 +169,7 @@ defmodule GiTF.Transfer do
     Archive.get(:ops, op_id)
   end
 
-  defp fetch_job(_bee), do: nil
+  defp fetch_job(_ghost), do: nil
 
   defp fetch_cell(ghost_id) do
     Archive.filter(:shells, fn c -> c.ghost_id == ghost_id end)

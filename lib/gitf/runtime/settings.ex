@@ -85,7 +85,7 @@ defmodule GiTF.Runtime.Settings do
   Builds settings for the Major's interactive Claude session.
 
   Includes the same tool permissions as ghost settings, plus hooks for
-  queen-specific priming and cost recording.
+  major-specific priming and cost recording.
   """
   @spec build_major_settings(String.t()) :: map()
   def build_major_settings(gitf_root) do
@@ -93,14 +93,14 @@ defmodule GiTF.Runtime.Settings do
 
     %{
       "permissions" => %{
-        "allow" => queen_allowed_tools(gitf_bin)
+        "allow" => major_allowed_tools(gitf_bin)
       },
       "hooks" => %{
         "SessionStart" => [
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{gitf_bin} brief --queen"}
+              %{"type" => "command", "command" => "#{gitf_bin} brief --major"}
             ]
           }
         ],
@@ -108,7 +108,7 @@ defmodule GiTF.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{gitf_bin} costs record --queen"}
+              %{"type" => "command", "command" => "#{gitf_bin} costs record --major"}
             ]
           }
         ]
@@ -117,12 +117,12 @@ defmodule GiTF.Runtime.Settings do
   end
 
   @doc """
-  Generates and writes settings into the queen workspace `.claude/` directory.
+  Generates and writes settings into the major workspace `.claude/` directory.
 
   Returns `:ok` on success or `{:error, reason}` on failure.
   """
   @spec generate_major(String.t(), String.t()) :: :ok | {:error, term()}
-  def generate_major(gitf_root, queen_workspace) do
+  def generate_major(gitf_root, major_workspace) do
     if GiTF.Runtime.ModelResolver.api_mode?() do
       # API mode: no CLI process, no settings file needed
       :ok
@@ -132,7 +132,7 @@ defmodule GiTF.Runtime.Settings do
           :ok
 
         settings ->
-          write_settings_json(queen_workspace, settings)
+          write_settings_json(major_workspace, settings)
       end
     end
   end
@@ -145,8 +145,8 @@ defmodule GiTF.Runtime.Settings do
   This is called during shell provisioning to ensure the ghost has
   proper permissions before Claude launches.
   """
-  @spec generate_for_cell(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  def generate_for_cell(ghost_id, gitf_root, worktree_path) do
+  @spec generate_for_shell(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def generate_for_shell(ghost_id, gitf_root, worktree_path) do
     generate(ghost_id, gitf_root, worktree_path)
   end
 
@@ -282,7 +282,7 @@ defmodule GiTF.Runtime.Settings do
     end
   end
 
-  defp queen_allowed_tools(gitf_bin) do
+  defp major_allowed_tools(gitf_bin) do
     [
       "Bash(#{gitf_bin}:*)",
       "Bash(git:*)",

@@ -46,11 +46,11 @@ defmodule GiTF.Dashboard.MissionsLive do
     {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
   end
 
-  def handle_info({:waggle_received, waggle}, socket) do
+  def handle_info({:link_received, link}, socket) do
     missions = load_quests()
 
     {:noreply,
-     socket |> maybe_apply_toast(waggle) |> assign(:all_missions, missions) |> apply_filters()}
+     socket |> maybe_apply_toast(link) |> assign(:all_missions, missions) |> apply_filters()}
   end
 
   @impl true

@@ -202,11 +202,11 @@ defmodule GiTF.Tachikoma do
     retry_failed_ops()
     check_blocked_ops()
 
-    queen_results = check_major_heartbeat()
+    major_results = check_major_heartbeat()
 
     all_results =
       results ++
-        budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ queen_results
+        budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ major_results
 
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
@@ -266,7 +266,7 @@ defmodule GiTF.Tachikoma do
   defp check_merge_conflicts do
     GiTF.Conflict.check_all_active()
     |> Enum.flat_map(fn
-      {:ok, _cell_id, :clean} ->
+      {:ok, _shell_id, :clean} ->
         []
 
       {:error, shell_id, :conflicts, files} ->
@@ -467,7 +467,7 @@ defmodule GiTF.Tachikoma do
 
           [
             %{
-              name: "queen_heartbeat",
+              name: "major_heartbeat",
               status: :error,
               message:
                 "Major is not running but #{length(active_quests)} mission(s) are active (restart attempted)"
@@ -482,7 +482,7 @@ defmodule GiTF.Tachikoma do
             :exit, {:timeout, _} ->
               [
                 %{
-                  name: "queen_heartbeat",
+                  name: "major_heartbeat",
                   status: :warn,
                   message: "Major is unresponsive (timeout)"
                 }
@@ -495,7 +495,7 @@ defmodule GiTF.Tachikoma do
 
               [
                 %{
-                  name: "queen_heartbeat",
+                  name: "major_heartbeat",
                   status: :error,
                   message: "Major process is dead (restart attempted)"
                 }
@@ -808,13 +808,13 @@ defmodule GiTF.Tachikoma do
     # Prune old read links (48h) and very old unread links (7d) to prevent unbounded growth
     unread_cutoff = DateTime.shift(DateTime.utc_now(), day: -7)
 
-    pruned_waggles =
+    pruned_links =
       GiTF.Archive.filter(:links, fn w ->
         (w.read == true and DateTime.compare(w.inserted_at, cutoff) == :lt) or
           (w.read != true and DateTime.compare(w.inserted_at, unread_cutoff) == :lt)
       end)
 
-    Enum.each(pruned_waggles, fn w ->
+    Enum.each(pruned_links, fn w ->
       GiTF.Archive.delete(:links, w.id)
     end)
 
@@ -868,12 +868,12 @@ defmodule GiTF.Tachikoma do
     compacted = GiTF.Missions.compact_old_artifacts(compact_days)
 
     total =
-      length(pruned_waggles) + length(pruned_runs) + pruned_costs + pruned_audits +
+      length(pruned_links) + length(pruned_runs) + pruned_costs + pruned_audits +
         pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_patterns + compacted
 
     if total > 0 do
       Logger.info(
-        "Archive pruned: #{length(pruned_waggles)} links, #{length(pruned_runs)} runs, " <>
+        "Archive pruned: #{length(pruned_links)} links, #{length(pruned_runs)} runs, " <>
           "#{pruned_costs} costs, #{pruned_audits} audits, #{pruned_debriefs} debriefs, " <>
           "#{pruned_transitions} transitions, #{pruned_snapshots} snapshots, " <>
           "#{pruned_patterns} patterns, #{compacted} artifacts compacted"

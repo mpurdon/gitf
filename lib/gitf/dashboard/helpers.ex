@@ -221,25 +221,25 @@ defmodule GiTF.Dashboard.Helpers do
   end
 
   @doc """
-  Converts a PubSub waggle message into a toast if it's notable.
+  Converts a PubSub link message into a toast if it's notable.
   Returns `{:toast, socket}` or `:skip`.
   """
-  def maybe_toast_waggle(socket, %{subject: subject} = waggle) do
+  def maybe_toast_link(socket, %{subject: subject} = link) do
     case subject do
       "job_complete" ->
-        {:toast, push_toast(socket, :success, "Op completed: #{waggle[:body] || waggle.from}")}
+        {:toast, push_toast(socket, :success, "Op completed: #{link[:body] || link.from}")}
 
       "job_failed" ->
-        {:toast, push_toast(socket, :error, "Op failed: #{waggle[:body] || waggle.from}")}
+        {:toast, push_toast(socket, :error, "Op failed: #{link[:body] || link.from}")}
 
       "quest_advance" ->
-        {:toast, push_toast(socket, :info, "Mission advancing: #{waggle[:body] || ""}")}
+        {:toast, push_toast(socket, :info, "Mission advancing: #{link[:body] || ""}")}
 
       "human_approval" ->
         {:toast, push_toast(socket, :warning, "Approval needed")}
 
       "merge_failed" ->
-        {:toast, push_toast(socket, :error, "Merge failed: #{waggle[:body] || waggle.from}")}
+        {:toast, push_toast(socket, :error, "Merge failed: #{link[:body] || link.from}")}
 
       "pr_created" ->
         {:toast, push_toast(socket, :success, "PR created")}
@@ -249,7 +249,7 @@ defmodule GiTF.Dashboard.Helpers do
     end
   end
 
-  def maybe_toast_waggle(_socket, _), do: :skip
+  def maybe_toast_link(_socket, _), do: :skip
 
   @doc "Formats a timestamp as relative time (e.g., '2m ago', '1h ago')."
   def relative_time(nil), do: "-"

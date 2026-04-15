@@ -74,8 +74,8 @@ defmodule GiTF.Costs do
   end
 
   @doc "Returns all cost records for a given ghost."
-  @spec for_bee(String.t()) :: [map()]
-  def for_bee(ghost_id) do
+  @spec for_ghost(String.t()) :: [map()]
+  def for_ghost(ghost_id) do
     Archive.filter(:costs, fn c -> c.ghost_id == ghost_id end)
     |> Enum.sort_by(& &1.recorded_at, {:desc, DateTime})
   end
@@ -154,7 +154,7 @@ defmodule GiTF.Costs do
       total_cache_write_tokens:
         costs |> Enum.map(&Map.get(&1, :cache_write_tokens, 0)) |> Enum.sum(),
       by_model: group_costs_by(costs, fn c -> Map.get(c, :model) end),
-      by_bee: group_costs_by(costs, &Map.get(&1, :ghost_id)),
+      by_ghost: group_costs_by(costs, &Map.get(&1, :ghost_id)),
       by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown")),
       by_phase: group_costs_by(costs, &Map.get(&1, :phase, "unknown")),
       by_phase_type: group_costs_by(costs, &Map.get(&1, :phase_type, "unknown"))

@@ -213,7 +213,7 @@ defmodule GiTF.Ops do
   def reset(op_id, feedback \\ nil) do
     with {:ok, op} <- get(op_id),
          {:ok, next_status} <- validate_transition(op.status, :reset) do
-      cleanup_bee_and_cell(op.ghost_id)
+      cleanup_ghost_and_shell(op.ghost_id)
 
       new_description =
         if feedback do
@@ -259,9 +259,9 @@ defmodule GiTF.Ops do
     end
   end
 
-  defp cleanup_bee_and_cell(nil), do: :ok
+  defp cleanup_ghost_and_shell(nil), do: :ok
 
-  defp cleanup_bee_and_cell(ghost_id) do
+  defp cleanup_ghost_and_shell(ghost_id) do
     # Stop the ghost worker process if running
     GiTF.Ghosts.stop(ghost_id)
 
@@ -290,7 +290,7 @@ defmodule GiTF.Ops do
   def kill(op_id) do
     case get(op_id) do
       {:ok, op} ->
-        cleanup_bee_and_cell(op[:ghost_id])
+        cleanup_ghost_and_shell(op[:ghost_id])
 
         # Remove dependencies in both directions
         Archive.filter(:op_dependencies, fn d ->
@@ -576,7 +576,7 @@ defmodule GiTF.Ops do
   @spec unblock_dependents(String.t()) :: :ok
   def unblock_dependents(op_id) do
     # Serialize concurrent calls for the same op so multiple code paths
-    # (waggle handler, retry, phase advance) don't duplicate work.
+    # (link_received handler, retry, phase advance) don't duplicate work.
     # On contention, skip — the other caller will do it.
     GiTF.MissionLock.with_lock(
       {:unblock_dependents, op_id},

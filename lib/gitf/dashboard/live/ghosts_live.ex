@@ -32,8 +32,8 @@ defmodule GiTF.Dashboard.GhostsLive do
     {:noreply, assign_data(socket)}
   end
 
-  def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
+  def handle_info({:link_received, link}, socket) do
+    {:noreply, socket |> maybe_apply_toast(link) |> assign_data()}
   end
 
   @impl true

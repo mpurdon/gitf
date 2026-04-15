@@ -69,9 +69,9 @@ defmodule GiTF.Client do
   # Ghosts
   def list_bees, do: get("/api/v1/ghosts") |> unwrap_data()
   def stop_ghost(id), do: post("/api/v1/ghosts/#{id}/stop") |> unwrap_ok()
-  def complete_bee(id), do: post("/api/v1/ghosts/#{id}/complete") |> unwrap_ok()
+  def complete_ghost(id), do: post("/api/v1/ghosts/#{id}/complete") |> unwrap_ok()
 
-  def fail_bee(id, reason \\ "unknown"),
+  def fail_ghost(id, reason \\ "unknown"),
     do: post("/api/v1/ghosts/#{id}/fail", %{reason: reason}) |> unwrap_ok()
 
   # Sectors
