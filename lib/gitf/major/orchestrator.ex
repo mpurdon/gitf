@@ -205,7 +205,9 @@ defmodule GiTF.Major.Orchestrator do
            [on_contention: :skip],
            fn -> do_advance_quest(mission_id) end
          ) do
-      :ok -> {:ok, :already_advancing}
+      # Lock contention — another process is already advancing this mission.
+      # Return a distinct atom so callers don't confuse this with a real phase result.
+      :ok -> {:contended, mission_id}
       other -> other
     end
   end
@@ -865,7 +867,9 @@ defmodule GiTF.Major.Orchestrator do
   @default_phase_timeout_seconds 900
 
   defp check_and_advance(mission, phase, next_fn) do
-    artifact = GiTF.Missions.get_artifact(mission.id, phase)
+    # Artifact may not be visible yet if Archive write is slightly delayed.
+    artifact = GiTF.Missions.get_artifact(mission.id, phase) ||
+      (Process.sleep(500) && GiTF.Missions.get_artifact(mission.id, phase))
 
     if artifact && !artifact_failed?(artifact) do
       # Refresh mission to get latest state
@@ -937,7 +941,10 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp check_research_and_advance(mission) do
-    artifact = GiTF.Missions.get_artifact(mission.id, "research")
+    # Artifact may not be visible yet if Archive write is slightly delayed.
+    # Retry once after a brief pause before falling through to the timeout path.
+    artifact = GiTF.Missions.get_artifact(mission.id, "research") ||
+      (Process.sleep(500) && GiTF.Missions.get_artifact(mission.id, "research"))
 
     if artifact && !artifact_failed?(artifact) do
       complexity = Map.get(artifact, "complexity") || "high"
@@ -957,6 +964,7 @@ defmodule GiTF.Major.Orchestrator do
         start_requirements(mission)
       end
     else
+      Logger.warning("Quest #{mission.id}: research artifact not found, falling back to check_and_advance")
       check_and_advance(mission, "research", &start_requirements/1)
     end
   end

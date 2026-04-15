@@ -221,6 +221,19 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
+  def handle_info({:retry_advance, mission_id}, state) do
+    state = case GiTF.Missions.get(mission_id) do
+      {:ok, mission} when mission.status == "active" ->
+        case GiTF.Major.Orchestrator.advance_quest(mission_id) do
+          {:contended, _} -> state
+          {:ok, _} -> spawn_ready_jobs(mission, state)
+          _ -> state
+        end
+      _ -> state
+    end
+    {:noreply, state}
+  end
+
   def handle_info({port, {:exit_status, _status}}, %{port: port} = state) when is_port(port) do
     Logger.info("Major's Claude session ended")
 
@@ -1068,10 +1081,14 @@ defmodule GiTF.Major do
 
           state
 
+        {:contended, _} ->
+          # Another process is already advancing this mission — don't interfere.
+          # Schedule a retry so we pick up the result after the other caller finishes.
+          Process.send_after(self(), {:retry_advance, mission_id}, 2_000)
+          state
+
         {:ok, _new_phase} ->
-          # Orchestrator returned a non-completed phase; check actual mission status
-          # in case update_status! already marked it completed (simple missions
-          # without the phase system)
+          # Orchestrator advanced to a new phase — spawn any ready ops
           case GiTF.Missions.get(mission_id) do
             {:ok, %{status: "completed"} = mission} ->
               Logger.info("Quest completed: #{mission.name} (#{mission_id})")
@@ -1093,7 +1110,7 @@ defmodule GiTF.Major do
           end
 
         {:error, _reason} ->
-          # Fall back to original logic
+          # Fall back to checking mission status directly
           case GiTF.Missions.get(mission_id) do
             {:ok, %{status: "completed"} = mission} ->
               Logger.info("Quest completed: #{mission.name} (#{mission_id})")
