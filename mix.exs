@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.40.128"
+  @version "0.40.129"
 
   def project do
     [
@@ -40,7 +40,9 @@ defmodule GiTF.MixProject do
   defp releases do
     [
       gitf: [
-        steps: [:assemble],
+        # Set RELEASE_TAR=1 at build time to also emit a deployable tarball
+        # artifact (for non-Docker deploys).
+        steps: if(System.get_env("RELEASE_TAR") == "1", do: [:assemble, :tar], else: [:assemble]),
         applications: [runtime_tools: :permanent],
         # Production deployments MUST set RELEASE_COOKIE to a stable secret
         # via the environment (see rel/vm.args.eex). We intentionally do NOT

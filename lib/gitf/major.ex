@@ -1060,13 +1060,37 @@ defmodule GiTF.Major do
         end
 
       {:error, reason} ->
-        Logger.debug("Intelligent retry unavailable for op #{op_id}: #{inspect(reason)}")
+        log_retry_failure(:intelligent_retry, op_id, reason, feedback)
         {:error, reason}
     end
   rescue
     e ->
-      Logger.debug("Intelligent retry crashed for op #{op_id}: #{inspect(e)}")
+      log_retry_failure(:intelligent_retry, op_id, {:crash, Exception.message(e)}, feedback)
       {:error, :intelligent_retry_failed}
+  end
+
+  defp log_retry_failure(kind, op_id, reason, feedback) do
+    {mission_id, retry_count, classified} =
+      case GiTF.Ops.get(op_id) do
+        {:ok, op} ->
+          {op[:mission_id], Map.get(op, :retry_count, 0),
+           Map.get(op, :last_failure_reason) || Map.get(op, :failure_classification)}
+
+        _ ->
+          {nil, nil, nil}
+      end
+
+    feedback_preview =
+      case feedback do
+        bin when is_binary(bin) -> String.slice(bin, 0, 100)
+        other -> inspect(other, limit: 20, printable_limit: 100)
+      end
+
+    Logger.warning(
+      "#{kind} failed op=#{op_id} mission=#{inspect(mission_id)} " <>
+        "retry_count=#{inspect(retry_count)} classified=#{inspect(classified)} " <>
+        "reason=#{inspect(reason, limit: 50)} feedback=#{feedback_preview}"
+    )
   end
 
   defp simple_retry(op_id, feedback, state) do
@@ -1079,11 +1103,13 @@ defmodule GiTF.Major do
                 state
 
               {:error, reason} ->
-                Logger.warning("Retry spawn failed for op #{op_id}: #{inspect(reason)}")
+                log_retry_failure(:simple_retry_spawn, op_id, reason, feedback)
                 state
             end
 
           {:error, reason} ->
+            log_retry_failure(:simple_retry_budget, op_id, reason, feedback)
+
             Logger.warning(
               "Budget check blocked retry for mission #{op.mission_id}: #{inspect(reason)}"
             )
@@ -1099,7 +1125,7 @@ defmodule GiTF.Major do
         end
 
       {:error, reason} ->
-        Logger.warning("Could not reset op #{op_id} for retry: #{inspect(reason)}")
+        log_retry_failure(:simple_retry_reset, op_id, reason, feedback)
         state
     end
   end
@@ -2055,14 +2081,33 @@ defmodule GiTF.Major do
       nil
   end
 
+  # Prefer the explicit `op_id: <id>` prefix senders now prepend to link bodies.
+  # Falls back to the legacy "Job <id>" regex for older/in-flight messages.
+  # Emits a warning when extraction returns nil so regressions in senders are
+  # visible rather than silently dropping work.
   defp extract_op_id_from_body(body) when is_binary(body) do
-    case Regex.run(~r/Job ([\w-]+)/, body) do
-      [_, op_id] -> op_id
-      _ -> nil
+    cond do
+      match = Regex.run(~r/\bop_id:\s*([\w-]+)/, body) ->
+        [_, op_id] = match
+        op_id
+
+      match = Regex.run(~r/Job ([\w-]+)/, body) ->
+        [_, op_id] = match
+        op_id
+
+      true ->
+        Logger.warning(
+          "extract_op_id_from_body: no op_id found in link body: #{String.slice(body, 0, 200)}"
+        )
+
+        nil
     end
   end
 
-  defp extract_op_id_from_body(_), do: nil
+  defp extract_op_id_from_body(body) do
+    Logger.warning("extract_op_id_from_body: non-binary body #{inspect(body)}")
+    nil
+  end
 
   defp reimagine_conflicted_job(shell_id, link_msg, state) do
     op_id = find_op_for_ghost(link_msg.from)

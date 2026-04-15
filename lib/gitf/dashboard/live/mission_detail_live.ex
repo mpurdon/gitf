@@ -24,31 +24,37 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     case GiTF.Missions.get(id) do
       {:ok, mission} ->
-        ops = GiTF.Ops.list(mission_id: id)
+        # On the disconnected HTTP render, skip the expensive ops list + reload;
+        # the connected mount does the real fetch.
+        ops = if connected?(socket), do: GiTF.Ops.list(mission_id: id), else: []
 
-        {:ok,
-         socket
-         |> assign(:page_title, Map.get(mission, :name, "Mission"))
-         |> assign(:current_path, "/dashboard/missions")
-         |> assign(:mission, mission)
-         |> assign(:ops, ops)
-         |> assign(:op_filter, "active")
-         |> assign(:show_full_goal, false)
-         |> assign(:selected_phase, nil)
-         |> assign(:artifact, nil)
-         |> assign(:report, nil)
-         |> assign(:report_loading, false)
-         |> assign(:sectors, load_sectors())
-         |> init_toasts()
-         |> assign(:budget_info, %{budget: 0, spent: 0, remaining: 0, pct: 0.0})
-         |> assign(:rollback_status, :unknown)
-         |> assign(:priority, :normal)
-         |> assign(:duration, nil)
-         |> assign(:phase_durations, %{})
-         |> assign(:confirm_remove, false)
-         |> assign(:removing, false)
-         |> compute_op_stats()
-         |> reload()}
+        socket =
+          socket
+          |> assign(:page_title, Map.get(mission, :name, "Mission"))
+          |> assign(:current_path, "/dashboard/missions")
+          |> assign(:mission, mission)
+          |> assign(:ops, ops)
+          |> assign(:op_filter, "active")
+          |> assign(:show_full_goal, false)
+          |> assign(:selected_phase, nil)
+          |> assign(:artifact, nil)
+          |> assign(:report, nil)
+          |> assign(:report_loading, false)
+          |> assign(:sectors, if(connected?(socket), do: load_sectors(), else: []))
+          |> init_toasts()
+          |> assign(:budget_info, %{budget: 0, spent: 0, remaining: 0, pct: 0.0})
+          |> assign(:rollback_status, :unknown)
+          |> assign(:priority, :normal)
+          |> assign(:duration, nil)
+          |> assign(:phase_durations, %{})
+          |> assign(:confirm_remove, false)
+          |> assign(:removing, false)
+          |> assign(:refresh_scheduled, false)
+          |> compute_op_stats()
+
+        socket = if connected?(socket), do: reload(socket), else: socket
+
+        {:ok, socket}
 
       {:error, _} ->
         {:ok,
@@ -61,11 +67,16 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    {:noreply, reload(socket)}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_info({:link_received, link}, socket) do
-    {:noreply, socket |> maybe_apply_toast(link) |> reload()}
+    {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
+  end
+
+  # Debounced refresh: collapse rapid PubSub events into one reload 150ms out.
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply, socket |> assign(:refresh_scheduled, false) |> reload()}
   end
 
   def handle_info({ref, {:report, result}}, socket) when is_reference(ref) do
@@ -100,6 +111,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
 
   @impl true
   def handle_event("start", _params, socket) do

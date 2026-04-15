@@ -1,7 +1,15 @@
 defmodule GiTF.MCPServer.Handlers do
   @moduledoc "Tool execution handlers for the MCP server."
 
+  require Logger
   require GiTF.Ghost.Status, as: GhostStatus
+
+  # Default stuck-mission threshold: 2 hours
+  @default_stuck_threshold_ms 2 * 60 * 60 * 1000
+
+  # Non-terminal mission phases — a mission stuck in these past the threshold
+  # suggests orchestration or ghost-pool issues.
+  @terminal_phases ~w(completed closed killed)
 
   def call("factory_status", _args) do
     missions = GiTF.Missions.list()
@@ -31,10 +39,13 @@ defmodule GiTF.MCPServer.Handlers do
         }
       end)
 
+    stuck_count = count_stuck_missions(missions)
+
     result = %{
       missions: %{
         total: length(missions),
         active: length(active_missions),
+        stuck: stuck_count,
         items: Enum.map(active_missions, &summarize_mission/1)
       },
       ghosts: %{
@@ -49,6 +60,7 @@ defmodule GiTF.MCPServer.Handlers do
       },
       health: to_string(health.status),
       version: GiTF.version(),
+      stuck_missions: stuck_count,
       recent_failures: recent_failures
     }
 
@@ -162,122 +174,130 @@ defmodule GiTF.MCPServer.Handlers do
     {:ok, json_text(stats)}
   end
 
-  def call("show_artifact", %{"mission_id" => mid, "phase" => phase}) do
-    case GiTF.Missions.get_artifact(mid, phase) do
-      nil ->
-        {:ok, json_text(%{error: "No artifact found for phase '#{phase}'"})}
+  def call("show_artifact", %{"mission_id" => mid, "phase" => phase} = args) do
+    safe_handler("show_artifact", args, fn ->
+      case GiTF.Missions.get_artifact(mid, phase) do
+        nil ->
+          {:ok, json_text(%{error: "No artifact found for phase '#{phase}'"})}
 
-      artifact ->
-        {truncated_artifact, truncated?} = truncate_artifact(artifact, 10_000)
+        artifact ->
+          {truncated_artifact, truncated?} = truncate_artifact(artifact, 10_000)
 
-        payload =
-          if truncated? do
-            wrap_truncated(truncated_artifact)
-          else
-            truncated_artifact
-          end
+          payload =
+            if truncated? do
+              wrap_truncated(truncated_artifact)
+            else
+              truncated_artifact
+            end
 
-        {:ok, json_text(payload)}
-    end
+          {:ok, json_text(payload)}
+      end
+    end)
   end
 
   def call("show_artifact", _), do: {:error, "Missing required parameters: mission_id, phase"}
 
-  def call("ghost_output", %{"op_id" => op_id}) do
-    case GiTF.Ops.get(op_id) do
-      {:ok, op} ->
-        {output_summary, out_trunc?} = truncate_string(op[:output_summary], 10_000)
-        {changed_files_detail, det_trunc?} = truncate_any(op[:changed_files_detail], 10_000)
+  def call("ghost_output", %{"op_id" => op_id} = args) do
+    safe_handler("ghost_output", args, fn ->
+      case GiTF.Ops.get(op_id) do
+        {:ok, op} ->
+          {output_summary, out_trunc?} = truncate_string(op[:output_summary], 10_000)
+          {changed_files_detail, det_trunc?} = truncate_any(op[:changed_files_detail], 10_000)
 
-        base = %{
-          op_id: op_id,
-          output_summary: output_summary,
-          files_changed: op[:files_changed],
-          changed_files: op[:changed_files],
-          changed_files_detail: changed_files_detail,
-          branch: op[:branch],
-          audit_result: op[:audit_result],
-          verification_status: op[:verification_status]
-        }
+          base = %{
+            op_id: op_id,
+            output_summary: output_summary,
+            files_changed: op[:files_changed],
+            changed_files: op[:changed_files],
+            changed_files_detail: changed_files_detail,
+            branch: op[:branch],
+            audit_result: op[:audit_result],
+            verification_status: op[:verification_status]
+          }
 
-        payload =
-          if out_trunc? or det_trunc? do
-            Map.put(base, :truncated, true)
-          else
-            base
-          end
+          payload =
+            if out_trunc? or det_trunc? do
+              Map.put(base, :truncated, true)
+            else
+              base
+            end
 
-        {:ok, json_text(payload)}
+          {:ok, json_text(payload)}
 
-      {:error, _} ->
-        {:error, "Op not found: #{op_id}"}
-    end
+        {:error, _} ->
+          {:error, "Op not found: #{op_id}"}
+      end
+    end)
   end
 
   def call("ghost_output", _), do: {:error, "Missing required parameter: op_id"}
 
-  def call("mission_diagnosis", %{"id" => id}) do
-    case GiTF.Missions.get(id) do
-      {:ok, mission} ->
-        # Collect all phase artifacts
-        phases = ~w(research requirements design planning validation sync scoring)
-        artifacts = Map.new(phases, fn p ->
-          {p, GiTF.Missions.get_artifact(id, p)}
-        end) |> Enum.reject(fn {_, v} -> is_nil(v) end) |> Map.new()
+  def call("mission_diagnosis", %{"id" => id} = args) do
+    safe_handler("mission_diagnosis", args, fn ->
+      case GiTF.Missions.get(id) do
+        {:ok, mission} ->
+          # Collect all phase artifacts
+          phases = ~w(research requirements design planning validation sync scoring)
+          artifacts = Map.new(phases, fn p ->
+            {p, GiTF.Missions.get_artifact(id, p)}
+          end) |> Enum.reject(fn {_, v} -> is_nil(v) end) |> Map.new()
 
-        # Collect impl op details (files, branch, output, fix lineage)
-        impl_ops = mission.ops
-          |> Enum.reject(& &1[:phase_job])
-          |> Enum.map(fn op ->
-            %{
-              id: op.id,
-              title: op.title,
-              status: op.status,
-              files_changed: op[:files_changed],
-              branch: op[:branch],
-              fix_of: op[:fix_of],
-              output_summary: op[:output_summary] && String.slice(op[:output_summary], 0, 500),
-              audit_result: op[:audit_result],
-              verification_status: op[:verification_status]
-            }
-          end)
+          ops = Map.get(mission, :ops, [])
 
-        # Validation ops with their artifacts
-        validation_ops = mission.ops
-          |> Enum.filter(& &1[:phase] == "validation")
-          |> Enum.map(fn op ->
-            %{
-              id: op.id,
-              status: op.status,
-              output_summary: op[:output_summary] && String.slice(op[:output_summary], 0, 500)
-            }
-          end)
+          # Collect impl op details (files, branch, output, fix lineage)
+          impl_ops = ops
+            |> Enum.reject(& &1[:phase_job])
+            |> Enum.map(fn op ->
+              %{
+                id: op.id,
+                title: op.title,
+                status: op.status,
+                files_changed: op[:files_changed],
+                branch: op[:branch],
+                fix_of: op[:fix_of],
+                output_summary: op[:output_summary] && String.slice(op[:output_summary], 0, 500),
+                audit_result: op[:audit_result],
+                verification_status: op[:verification_status]
+              }
+            end)
 
-        # Phase transitions
-        transitions = GiTF.Missions.get_phase_transitions(id)
-          |> Enum.map(fn t ->
-            %{from: t[:from_phase], to: t[:to_phase], reason: t[:reason], at: to_string(t[:inserted_at])}
-          end)
+          # Validation ops with their artifacts
+          validation_ops = ops
+            |> Enum.filter(& &1[:phase] == "validation")
+            |> Enum.map(fn op ->
+              %{
+                id: op.id,
+                status: op.status,
+                output_summary: op[:output_summary] && String.slice(op[:output_summary], 0, 500)
+              }
+            end)
 
-        diagnosis = %{
-          mission_id: id,
-          name: mission[:name],
-          status: mission.status,
-          current_phase: mission[:current_phase],
-          pipeline_mode: mission[:pipeline_mode],
-          artifacts: artifacts,
-          impl_ops: impl_ops,
-          validation_ops: validation_ops,
-          phase_transitions: transitions,
-          total_ops: length(mission.ops),
-          fix_ops: length(Enum.filter(impl_ops, & &1[:fix_of]))
-        }
+          # Phase transitions
+          transitions = GiTF.Missions.get_phase_transitions(id)
+            |> Enum.map(fn t ->
+              %{from: t[:from_phase], to: t[:to_phase], reason: t[:reason], at: to_string(t[:inserted_at])}
+            end)
 
-        {:ok, json_text(diagnosis)}
+          diagnosis = %{
+            mission_id: id,
+            name: mission[:name],
+            status: mission.status,
+            current_phase: mission[:current_phase],
+            pipeline_mode: mission[:pipeline_mode],
+            artifacts: artifacts,
+            impl_ops: impl_ops,
+            validation_ops: validation_ops,
+            phase_transitions: transitions,
+            total_ops: length(ops),
+            fix_ops: length(Enum.filter(impl_ops, & &1[:fix_of]))
+          }
 
-      {:error, _} ->
-        {:error, "Mission not found: #{id}"}
-    end
+          {:ok, json_text(diagnosis)}
+
+        {:error, _} ->
+          {:error, "Mission not found: #{id}"}
+      end
+    end)
   end
 
   def call("mission_diagnosis", _), do: {:error, "Missing required parameter: id"}
@@ -301,7 +321,7 @@ defmodule GiTF.MCPServer.Handlers do
     case GiTF.Report.generate(id) do
       {:ok, report} -> {:ok, GiTF.Report.format(report)}
       {:error, :not_found} -> {:error, "Mission not found: #{id}"}
-      {:error, reason} -> {:error, inspect(reason)}
+      {:error, reason} -> {:error, log_and_sanitize("mission_report", reason)}
     end
   end
 
@@ -325,28 +345,30 @@ defmodule GiTF.MCPServer.Handlers do
   end
 
   def call("mission_timeline", %{"id" => id} = args) do
-    case GiTF.Missions.get(id) do
-      {:ok, _mission} ->
-        limit = cap_limit(args["limit"], 50, 500)
-        events = GiTF.EventStore.timeline(id)
-        events = Enum.take(events, limit)
+    safe_handler("mission_timeline", args, fn ->
+      case GiTF.Missions.get(id) do
+        {:ok, _mission} ->
+          limit = cap_limit(args["limit"], 50, 500)
+          events = GiTF.EventStore.timeline(id)
+          events = Enum.take(events, limit)
 
-        formatted =
-          Enum.map(events, fn event ->
-            %{
-              type: to_string(event.type),
-              entity_id: event.entity_id,
-              timestamp: to_string(event.timestamp),
-              data: event.data,
-              metadata: event.metadata
-            }
-          end)
+          formatted =
+            Enum.map(events, fn event ->
+              %{
+                type: to_string(event.type),
+                entity_id: event.entity_id,
+                timestamp: to_string(event.timestamp),
+                data: event.data,
+                metadata: event.metadata
+              }
+            end)
 
-        {:ok, json_text(formatted)}
+          {:ok, json_text(formatted)}
 
-      {:error, :not_found} ->
-        {:error, "Mission not found: #{id}"}
-    end
+        {:error, :not_found} ->
+          {:error, "Mission not found: #{id}"}
+      end
+    end)
   end
 
   def call("mission_timeline", _), do: {:error, "Missing required parameter: id"}
@@ -362,7 +384,7 @@ defmodule GiTF.MCPServer.Handlers do
 
       case GiTF.Missions.create(attrs) do
         {:ok, mission} -> {:ok, json_text(serialize_mission(mission))}
-        {:error, reason} -> {:error, inspect(reason)}
+        {:error, reason} -> {:error, log_and_sanitize("create_mission", reason)}
       end
     end
   end
@@ -383,7 +405,7 @@ defmodule GiTF.MCPServer.Handlers do
           {:ok, json_text(%{id: id, status: "active", phase: phase})}
 
         {:error, reason} ->
-          {:error, "Failed to start mission: #{inspect(reason)}"}
+          {:error, "Failed to start mission: #{log_and_sanitize("start_mission", reason)}"}
       end
     end
   end
@@ -428,7 +450,7 @@ defmodule GiTF.MCPServer.Handlers do
       case GiTF.Ops.reset(id) do
         {:ok, op} -> {:ok, json_text(serialize_op(op))}
         {:error, :not_found} -> {:error, "Op not found: #{id}"}
-        {:error, reason} -> {:error, inspect(reason)}
+        {:error, reason} -> {:error, log_and_sanitize("reset_op", reason)}
       end
     end
   end
@@ -501,7 +523,7 @@ defmodule GiTF.MCPServer.Handlers do
             %{provider: provider.name, status: "error", error: msg, details: ctx}
 
           {:error, reason} ->
-            %{provider: provider.name, status: "error", error: inspect(reason)}
+            %{provider: provider.name, status: "error", error: log_and_sanitize("test_provider", reason)}
         end
       end)
 
@@ -519,7 +541,7 @@ defmodule GiTF.MCPServer.Handlers do
         {:ok, json_text(%{provider: name, status: "error", error: msg, details: ctx})}
 
       {:error, reason} ->
-        {:ok, json_text(%{provider: name, status: "error", error: inspect(reason)})}
+        {:ok, json_text(%{provider: name, status: "error", error: log_and_sanitize("test_provider", reason)})}
     end
   end
 
@@ -531,6 +553,76 @@ defmodule GiTF.MCPServer.Handlers do
 
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}
+
+  # Wraps a read-handler body in try/rescue so an unexpected crash is logged
+  # with handler name + args and returned as a structured error that does not
+  # leak stacktraces or struct internals to the MCP client.
+  defp safe_handler(name, args, fun) when is_function(fun, 0) do
+    try do
+      fun.()
+    rescue
+      e ->
+        Logger.error(
+          "MCP handler #{name} crashed: #{Exception.message(e)} args=#{inspect(args, limit: 50, printable_limit: 500)}"
+        )
+
+        {:error,
+         json_text(%{
+           kind: "internal_error",
+           handler: name,
+           message: Exception.message(e)
+         })}
+    end
+  end
+
+  # Sanitizes an error term into a short client-facing string. Known atoms get
+  # human-readable messages; unknown shapes collapse to "internal error". The
+  # original term is logged separately so operators can still debug.
+  defp sanitize_error(:not_found), do: "not found"
+  defp sanitize_error(:invalid_transition), do: "invalid state transition"
+  defp sanitize_error(:locked), do: "resource locked, try again"
+  defp sanitize_error(:timeout), do: "operation timed out"
+  defp sanitize_error(:max_retries_exceeded), do: "max retries exceeded"
+  defp sanitize_error(:budget_exceeded), do: "budget exceeded"
+  defp sanitize_error(atom) when is_atom(atom), do: to_string(atom)
+  defp sanitize_error(bin) when is_binary(bin), do: bin
+  defp sanitize_error({atom, _}) when is_atom(atom), do: sanitize_error(atom)
+  defp sanitize_error(_), do: "internal error"
+
+  defp log_and_sanitize(handler, reason) do
+    Logger.warning("MCP handler #{handler} returned error: #{inspect(reason, limit: 50)}")
+    sanitize_error(reason)
+  end
+
+  # Counts missions whose current_phase is non-terminal and whose updated_at is
+  # older than the configured threshold. Used by factory_status to surface
+  # orchestration stalls at a glance.
+  defp count_stuck_missions(missions) do
+    threshold_ms =
+      case Application.get_env(:gitf, :timeouts) do
+        nil -> @default_stuck_threshold_ms
+        kw -> Keyword.get(kw, :stuck_mission_threshold_ms, @default_stuck_threshold_ms)
+      end
+
+    now = DateTime.utc_now()
+
+    Enum.count(missions, fn m ->
+      phase = m[:current_phase]
+      updated_at = m[:updated_at] || m[:inserted_at]
+
+      cond do
+        phase in [nil | @terminal_phases] -> false
+        is_nil(updated_at) -> false
+        true ->
+          case DateTime.diff(now, updated_at, :millisecond) do
+            diff when diff >= threshold_ms -> true
+            _ -> false
+          end
+      end
+    end)
+  rescue
+    _ -> 0
+  end
 
   # -- Serializers -------------------------------------------------------------
 

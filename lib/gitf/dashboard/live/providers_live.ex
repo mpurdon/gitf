@@ -13,19 +13,27 @@ defmodule GiTF.Dashboard.ProvidersLive do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "provider:circuit")
     end
 
-    {configured, unconfigured} = ProviderManager.list_providers()
+    # Skip all provider fetches on the disconnected HTTP render pass;
+    # the connected mount performs the real load.
+    {configured, unconfigured, priority, fallback, circuits, stats, ollama_running, ollama_models} =
+      if connected?(socket) do
+        {c, u} = ProviderManager.list_providers()
+        running = GiTF.Runtime.Ollama.running?()
 
-    # Ollama status
-    ollama_running = GiTF.Runtime.Ollama.running?()
+        models =
+          if running do
+            case GiTF.Runtime.Ollama.list_models() do
+              {:ok, m} -> m
+              _ -> []
+            end
+          else
+            []
+          end
 
-    ollama_models =
-      if ollama_running do
-        case GiTF.Runtime.Ollama.list_models() do
-          {:ok, models} -> models
-          _ -> []
-        end
+        {c, u, ProviderManager.provider_priority(), ProviderManager.fallback_strategy(),
+         load_circuit_states(), load_stats(), running, models}
       else
-        []
+        {[], [], [], "priority_chain", %{}, %{}, false, []}
       end
 
     {:ok,
@@ -34,18 +42,19 @@ defmodule GiTF.Dashboard.ProvidersLive do
      |> assign(:current_path, "/providers")
      |> assign(:configured, configured)
      |> assign(:unconfigured, unconfigured)
-     |> assign(:priority, ProviderManager.provider_priority())
-     |> assign(:fallback_strategy, ProviderManager.fallback_strategy())
+     |> assign(:priority, priority)
+     |> assign(:fallback_strategy, fallback)
      |> assign(:expanded, nil)
      |> assign(:editing, %{})
      |> assign(:test_results, %{})
-     |> assign(:circuit_states, load_circuit_states())
-     |> assign(:stats, load_stats())
+     |> assign(:circuit_states, circuits)
+     |> assign(:stats, stats)
      |> assign(:dirty, false)
      |> assign(:saving, false)
      |> assign(:ollama_running, ollama_running)
      |> assign(:ollama_models, ollama_models)
      |> assign(:starting_ollama, false)
+     |> assign(:refresh_scheduled, false)
      |> init_toasts()}
   end
 
@@ -261,15 +270,28 @@ defmodule GiTF.Dashboard.ProvidersLive do
   end
 
   def handle_info({:circuit_reset, _provider, _latency}, socket) do
-    {:noreply, assign(socket, :circuit_states, load_circuit_states())}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_info({:circuit_opened, _provider, _failure_mode}, socket) do
-    {:noreply, assign(socket, :circuit_states, load_circuit_states())}
+    {:noreply, schedule_refresh(socket)}
+  end
+
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply,
+     socket |> assign(:refresh_scheduled, false) |> assign(:circuit_states, load_circuit_states())}
   end
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
   def handle_info(_, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
 
   # -- Render ----------------------------------------------------------------
 

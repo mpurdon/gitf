@@ -239,7 +239,7 @@ defmodule GiTF.Ghost.Worker do
   def handle_info({port, {:exit_status, exit_code}}, %{handle: {:port, port}} = state) do
     Logger.warning("Ghost #{state.ghost_id} exited with status #{exit_code}")
     output = IO.iodata_to_binary(state.output)
-    mark_failed(state, "Exit code #{exit_code}: #{String.slice(output, 0, 500)}")
+    mark_failed(state, "Exit code #{exit_code}: #{String.slice(output, 0, 500) |> :binary.copy()}")
     {:stop, :normal, %{state | status: :failed, handle: nil}}
   end
 
@@ -636,10 +636,20 @@ defmodule GiTF.Ghost.Worker do
         {:ok, handle} ->
           Process.send_after(self(), :verify_beacon, 10_000)
 
+          # Split metadata into bounded-cardinality `labels` (safe for Prometheus
+          # label sets) and high-cardinality `attributes` (op_id, ghost_id,
+          # mission_id — log/trace only, never label keys).
           GiTF.Telemetry.emit(
             [:gitf, :ghost, :spawned],
             %{duration_ms: System.monotonic_time(:millisecond) - provision_start_ms},
             %{
+              labels: %{sector_id: state.sector_id, status: :spawned},
+              attributes: %{
+                ghost_id: state.ghost_id,
+                op_id: state.op_id,
+                mission_id: mission_id
+              },
+              # Legacy flat keys retained for existing listeners until migration
               ghost_id: state.ghost_id,
               op_id: state.op_id,
               mission_id: mission_id,
@@ -1144,7 +1154,10 @@ defmodule GiTF.Ghost.Worker do
         GiTF.Ops.unblock_dependents(state.op_id)
     end
 
+    # See :spawned event above — same labels/attributes split for cardinality safety.
     GiTF.Telemetry.emit([:gitf, :ghost, :completed], %{}, %{
+      labels: %{status: :completed, sector_id: state.sector_id},
+      attributes: %{ghost_id: state.ghost_id, op_id: state.op_id},
       ghost_id: state.ghost_id,
       op_id: state.op_id
     })
@@ -1174,7 +1187,7 @@ defmodule GiTF.Ghost.Worker do
         # Phase ops: single durable delivery via Link (persisted, waggle-recoverable).
         # No redundant GenServer.cast — it caused lock contention and duplicate toasts.
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
-        body = "Job #{state.op_id} completed successfully (phase: #{op.phase})"
+        body = "op_id: #{state.op_id}\nJob #{state.op_id} completed successfully (phase: #{op.phase})"
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
         {:ok, _link_msg} = GiTF.Link.send(state.ghost_id, "major", "job_complete", body)
 
@@ -1184,7 +1197,7 @@ defmodule GiTF.Ghost.Worker do
           state.ghost_id,
           "major",
           "job_complete",
-          "Job #{state.op_id} completed (skip_verification)"
+          "op_id: #{state.op_id}\nJob #{state.op_id} completed (skip_verification)"
         )
 
       true ->
@@ -1203,7 +1216,7 @@ defmodule GiTF.Ghost.Worker do
           state.ghost_id,
           "major",
           "job_awaiting_verification",
-          "Job #{state.op_id} completed (awaiting verification)"
+          "op_id: #{state.op_id}\nJob #{state.op_id} completed (awaiting verification)"
         )
     end
 
@@ -1232,7 +1245,7 @@ defmodule GiTF.Ghost.Worker do
         summary = extract_fallback_summary(raw_output)
 
         fallback_artifact = %{
-          "raw_output" => String.slice(raw_output, 0, 50_000),
+          "raw_output" => String.slice(raw_output, 0, 50_000) |> :binary.copy(),
           "parse_failed" => true,
           "parse_error" => inspect(reason),
           "summary" => summary,
@@ -1247,7 +1260,7 @@ defmodule GiTF.Ghost.Worker do
       raw_output = IO.iodata_to_binary(state.output)
 
       fallback_artifact = %{
-        "raw_output" => String.slice(raw_output, 0, 50_000),
+        "raw_output" => String.slice(raw_output, 0, 50_000) |> :binary.copy(),
         "parse_failed" => true,
         "parse_error" => inspect(e)
       }
@@ -1283,6 +1296,7 @@ defmodule GiTF.Ghost.Worker do
     |> Enum.take(-10)
     |> Enum.join("\n")
     |> String.slice(0, 1000)
+    |> :binary.copy()
     |> case do
       "" -> "Ghost output contained no parseable JSON"
       summary -> summary
@@ -1394,6 +1408,7 @@ defmodule GiTF.Ghost.Worker do
           |> Enum.take(-20)
           |> Enum.join("\n")
           |> String.slice(0, 2000)
+          |> :binary.copy()
 
         Map.put(metadata, :output_summary, summary)
       rescue
@@ -1512,6 +1527,12 @@ defmodule GiTF.Ghost.Worker do
       end
 
     GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
+      labels: %{status: :failed, sector_id: state.sector_id},
+      attributes: %{
+        ghost_id: state.ghost_id,
+        op_id: state.op_id,
+        mission_id: mission_id
+      },
       ghost_id: state.ghost_id,
       op_id: state.op_id,
       mission_id: mission_id,

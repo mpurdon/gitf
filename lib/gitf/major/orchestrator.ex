@@ -1832,7 +1832,10 @@ defmodule GiTF.Major.Orchestrator do
           """
 
           filename = "POST_MORTEM_#{mission.id}.md"
-          File.write!(Path.join(path, filename), content)
+          post_mortem_path = Path.join(path, filename)
+          post_mortem_tmp = post_mortem_path <> ".tmp"
+          File.write!(post_mortem_tmp, content)
+          File.rename!(post_mortem_tmp, post_mortem_path)
           Logger.info("Generated post-mortem for quest #{mission.id} at #{path}/#{filename}")
         end
 

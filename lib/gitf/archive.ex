@@ -356,7 +356,15 @@ defmodule GiTF.Archive do
           try do
             data = :erlang.binary_to_term(binary)
             Logger.warning("Archive corrupted — recovered from #{Path.basename(backup)}")
-            File.write(data_path(), binary)
+            # Atomic rewrite via temp+rename so a crash mid-recovery doesn't
+            # leave the primary file half-written.
+            recovery_tmp = data_path() <> ".tmp"
+            with :ok <- File.write(recovery_tmp, binary),
+                 :ok <- File.rename(recovery_tmp, data_path()) do
+              :ok
+            else
+              _ -> :ok
+            end
             {:halt, data}
           rescue
             _ ->
@@ -437,7 +445,18 @@ defmodule GiTF.Archive do
 
     if should_backup do
       rotate_backups(path)
-      File.write(backup_path, binary)
+      # Atomic temp+rename (matches primary write at write_data/2).
+      backup_tmp = backup_path <> ".tmp"
+      with :ok <- File.write(backup_tmp, binary),
+           :ok <- File.rename(backup_tmp, backup_path) do
+        :ok
+      else
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Archive backup write failed: #{inspect(reason)}")
+          File.rm(backup_tmp)
+          :ok
+      end
     end
   rescue
     e ->

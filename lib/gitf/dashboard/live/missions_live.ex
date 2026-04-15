@@ -23,7 +23,9 @@ defmodule GiTF.Dashboard.MissionsLive do
       Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
-    missions = load_quests()
+    # Avoid double-mount cost: skip the expensive load_quests on the initial
+    # HTTP render. Connected mount does the real load.
+    missions = if connected?(socket), do: load_quests(), else: []
 
     {:ok,
      socket
@@ -36,21 +38,57 @@ defmodule GiTF.Dashboard.MissionsLive do
      |> assign(:sort_by, :priority)
      |> assign(:sort_dir, :asc)
      |> assign(:expanded, MapSet.new())
+     |> assign(:refresh_scheduled, false)
+     |> assign(:loading, false)
      |> init_toasts()}
   end
 
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    missions = load_quests()
-    {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_info({:link_received, link}, socket) do
-    missions = load_quests()
+    {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
+  end
 
+  # Debounced refresh: collapse rapid PubSub events into a single reload 150ms out.
+  def handle_info(:debounced_refresh, socket) do
+    parent = self()
+
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      missions = load_quests()
+      send(parent, {:missions_loaded, missions})
+    end)
+
+    {:noreply, socket |> assign(:refresh_scheduled, false) |> assign(:loading, true)}
+  end
+
+  def handle_info({:missions_loaded, missions}, socket) do
     {:noreply,
-     socket |> maybe_apply_toast(link) |> assign(:all_missions, missions) |> apply_filters()}
+     socket |> assign(:all_missions, missions) |> assign(:loading, false) |> apply_filters()}
+  end
+
+  def handle_info({:start_quest_result, {:ok, _}}, socket) do
+    {:noreply, socket |> put_flash(:info, "Mission started.") |> schedule_refresh()}
+  end
+
+  def handle_info({:start_quest_result, {:error, reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:loading, false)
+     |> put_flash(:error, "Failed to start: #{inspect(reason)}")}
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
   end
 
   @impl true
@@ -66,8 +104,7 @@ defmodule GiTF.Dashboard.MissionsLive do
   end
 
   def handle_event("refresh", _params, socket) do
-    missions = load_quests()
-    {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_event("search", %{"q" => query}, socket) do
@@ -92,22 +129,23 @@ defmodule GiTF.Dashboard.MissionsLive do
   end
 
   def handle_event("start", %{"id" => id}, socket) do
-    case GiTF.Major.Orchestrator.start_quest(id) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Mission started.")
-         |> assign(:missions, load_quests())}
+    # Orchestrator.start_quest/1 can be slow (spawns ghost, writes archive).
+    # Offload to async Task and refresh on PubSub event afterwards.
+    parent = self()
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
-    end
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      result = GiTF.Major.Orchestrator.start_quest(id)
+      send(parent, {:start_quest_result, result})
+    end)
+
+    {:noreply, socket |> put_flash(:info, "Starting mission...") |> assign(:loading, true)}
   end
 
   def handle_event("navigate", %{"id" => id}, socket) do
     {:noreply, push_navigate(socket, to: "/dashboard/missions/#{id}")}
   end
 
+  # TODO(harden): convert @missions to stream/3 to avoid re-sending full list on diffs
   defp apply_filters(socket) do
     search = String.downcase(socket.assigns.search || "")
     status_filter = socket.assigns.status_filter

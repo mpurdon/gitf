@@ -24,6 +24,7 @@ defmodule GiTF.Dashboard.CostsLive do
      socket
      |> assign(:cost_sort, :spent)
      |> assign(:trend_range, "Today")
+     |> assign(:refresh_scheduled, false)
      |> init_toasts()
      |> assign_data()}
   end
@@ -55,16 +56,30 @@ defmodule GiTF.Dashboard.CostsLive do
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    {:noreply, assign_data(socket)}
+    {:noreply, schedule_refresh(socket)}
   end
 
-  def handle_info({:cost_recorded, _cost}, socket), do: {:noreply, assign_data(socket)}
+  def handle_info({:cost_recorded, _cost}, socket), do: {:noreply, schedule_refresh(socket)}
 
   def handle_info({:link_received, link}, socket),
-    do: {:noreply, socket |> maybe_apply_toast(link) |> assign_data()}
+    do: {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
+
+  # Debounced refresh: collapse rapid PubSub events into one aggregation 150ms out.
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply, socket |> assign(:refresh_scheduled, false) |> assign_data()}
+  end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
+
+  # TODO(harden): @mission_costs and @trend can grow large — consider stream/3
   defp assign_data(socket) do
     all_costs_raw = GiTF.Archive.all(:costs)
     missions = GiTF.Missions.list()

@@ -368,20 +368,13 @@ defmodule GiTF.Medic do
         section_path = Path.join(path, ".gitf")
 
         available_mb =
-          case System.cmd("df", ["-m", section_path], stderr_to_stdout: true) do
+          case System.cmd("df", ["-Pk", section_path],
+                 stderr_to_stdout: true,
+                 env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+               ) do
             {output, 0} ->
-              output
-              |> String.split("\n", trim: true)
-              |> Enum.find_value(fn line ->
-                case Regex.run(~r/(\d+)\s+\d+%\s+/, line) do
-                  [_, available] ->
-                    {n, _} = Integer.parse(available)
-                    n
-
-                  _ ->
-                    nil
-                end
-              end)
+              # POSIX df -Pk: Filesystem 1024-blocks Used Available Capacity Mounted-on
+              parse_df_available_mb(output)
 
             {_, _} ->
               nil
@@ -412,6 +405,26 @@ defmodule GiTF.Medic do
       {:error, _} ->
         result(:disk_space, :warn, "Cannot check: not in a gitf workspace")
     end
+  end
+
+  # Parse `df -Pk` output (6 columns: FS 1024-blocks Used Available Capacity Mount)
+  # and return available MB. Returns nil on parse failure.
+  defp parse_df_available_mb(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.drop(1)
+    |> Enum.find_value(fn line ->
+      case String.split(line, ~r/\s+/, trim: true) do
+        [_fs, _total, _used, avail, _cap, _mount | _] ->
+          case Integer.parse(avail) do
+            {kb, _} -> div(kb, 1024)
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+    end)
   end
 
   # -- Fix implementations ---------------------------------------------------

@@ -22,6 +22,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
          |> assign(:page_title, Map.get(op, :title, "Op"))
          |> assign(:current_path, "/dashboard/missions")
          |> assign(:op, op)
+         |> assign(:refresh_scheduled, false)
          |> assign_extras(op)
          |> assign_siblings(op)
          |> init_toasts()}
@@ -37,13 +38,26 @@ defmodule GiTF.Dashboard.OpDetailLive do
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    {:noreply, reload(socket)}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_info({:link_received, link}, socket),
-    do: {:noreply, socket |> maybe_apply_toast(link) |> reload()}
+    do: {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
+
+  # Debounced refresh: collapse rapid PubSub events into one reload 150ms out.
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply, socket |> assign(:refresh_scheduled, false) |> reload()}
+  end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
 
   @impl true
   def handle_event("reset", _params, socket) do

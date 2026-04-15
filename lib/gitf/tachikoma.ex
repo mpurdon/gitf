@@ -654,7 +654,13 @@ defmodule GiTF.Tachikoma do
   defp cleanup_if_low_disk do
     case GiTF.gitf_dir() do
       {:ok, gitf_root} ->
-        task = Task.async(fn -> System.cmd("df", ["-m", gitf_root], stderr_to_stdout: true) end)
+        task =
+          Task.async(fn ->
+            System.cmd("df", ["-Pk", gitf_root],
+              stderr_to_stdout: true,
+              env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+            )
+          end)
 
         df_result =
           case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
@@ -664,15 +670,21 @@ defmodule GiTF.Tachikoma do
 
         case df_result do
           {output, 0} ->
-            # Parse df output: find the line for the gitf root and extract available MB.
-            # Handles different df formats by matching the digits before the percentage.
+            # POSIX df -Pk: Filesystem 1024-blocks Used Available Capacity Mounted-on
             available_mb =
               output
               |> String.split("\n", trim: true)
+              |> Enum.drop(1)
               |> Enum.find_value(fn line ->
-                case Regex.run(~r/(\d+)\s+\d+%\s+/, line) do
-                  [_, available] -> to_integer_safe(available)
-                  _ -> nil
+                case String.split(line, ~r/\s+/, trim: true) do
+                  [_fs, _total, _used, avail, _cap, _mount | _] ->
+                    case to_integer_safe(avail) do
+                      nil -> nil
+                      kb -> div(kb, 1024)
+                    end
+
+                  _ ->
+                    nil
                 end
               end)
 

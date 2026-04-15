@@ -29,6 +29,7 @@ defmodule GiTF.Dashboard.TimelineLive do
      socket
      |> assign(:mission_id, mission_id)
      |> assign(:filter_type, "all")
+     |> assign(:refresh_scheduled, false)
      |> init_toasts()
      |> stream_events()}
   end
@@ -36,14 +37,27 @@ defmodule GiTF.Dashboard.TimelineLive do
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    {:noreply, stream_events(socket)}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_info({:link_received, link}, socket) do
-    {:noreply, socket |> maybe_apply_toast(link) |> stream_events()}
+    {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
+  end
+
+  # Debounced refresh: collapse rapid PubSub events into one stream rebuild 150ms out.
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply, socket |> assign(:refresh_scheduled, false) |> stream_events()}
   end
 
   def handle_info(_, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
 
   @impl true
   def handle_event("filter_type", %{"type" => type}, socket) do
@@ -67,6 +81,8 @@ defmodule GiTF.Dashboard.TimelineLive do
      |> stream_events()}
   end
 
+  # TODO(harden): @events list is assigned wholesale; convert to stream/3 to avoid
+  # re-sending the full event list on every diff.
   defp stream_events(socket) do
     mission_id = socket.assigns.mission_id
     filter_type = socket.assigns.filter_type

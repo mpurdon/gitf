@@ -530,7 +530,11 @@ defmodule GiTF.TUI.App do
   end
 
   defp debug(msg) do
-    File.write("/tmp/gitf_tui_debug.log", "[#{DateTime.utc_now()}] #{msg}\n", [:append])
+    File.write(
+      Path.join(System.tmp_dir!(), "gitf_tui_debug.log"),
+      "[#{DateTime.utc_now()}] #{msg}\n",
+      [:append]
+    )
   end
 
   defp submit_input(model) do
@@ -1058,8 +1062,13 @@ defmodule GiTF.TUI.App do
   end
 
   defp script_running?(script_path) do
-    # Check if any process is running this script
-    case System.cmd("pgrep", ["-f", script_path], stderr_to_stdout: true) do
+    # Check if any process is running this script.
+    # pgrep -f behavior / argv truncation differs between BSD (macOS) and procps (Linux);
+    # we force LC_ALL=C for stable output. Exit code 0 means a match, 1 means no match.
+    case System.cmd("pgrep", ["-f", script_path],
+           stderr_to_stdout: true,
+           env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+         ) do
       {_, 0} -> true
       _ -> false
     end

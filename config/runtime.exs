@@ -16,7 +16,9 @@ config :llm_db, data_dir: Path.join(gitf_home, "llm_db")
 
 if config_env() == :prod do
   port = String.to_integer(System.get_env("GITF_PORT") || "4000")
-  host = System.get_env("GITF_HOST") || "0.0.0.0"
+  # Default to loopback. Operators must explicitly set GITF_HOST=0.0.0.0
+  # (e.g. inside a container behind a reverse proxy) to bind all interfaces.
+  host = System.get_env("GITF_HOST") || "127.0.0.1"
   {:ok, ip} = host |> String.to_charlist() |> :inet.parse_address()
 
   secret =

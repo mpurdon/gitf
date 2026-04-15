@@ -215,7 +215,10 @@ defmodule GiTF.Runtime.Loadout do
 
     task =
       Task.async(fn ->
-        System.cmd("grep", grep_args, stderr_to_stdout: true)
+        System.cmd("grep", grep_args,
+          stderr_to_stdout: true,
+          env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+        )
       end)
 
     case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do
@@ -240,12 +243,12 @@ defmodule GiTF.Runtime.Loadout do
             # When sandboxed, we don't pass host HOME, we rely on sandbox HOME (/tmp or similar)
             GiTF.Sandbox.wrap_command("bash", ["-c", command],
               cd: working_dir,
-              env: [{"HOME", "/tmp"}]
+              env: [{"HOME", System.tmp_dir!()}]
             )
           else
             # Fallback for local execution
             {"bash", ["-c", command],
-             cd: working_dir, env: [{"HOME", System.get_env("HOME", "/tmp")}]}
+             cd: working_dir, env: [{"HOME", System.get_env("HOME", System.tmp_dir!())}]}
           end
 
         # Ensure output is captured
@@ -362,7 +365,8 @@ defmodule GiTF.Runtime.Loadout do
     cmd = if type == "pr", do: "pr", else: "issue"
 
     case System.cmd("gh", [cmd, "view", to_string(number), "--repo", repo],
-           stderr_to_stdout: true
+           stderr_to_stdout: true,
+           env: [{"LC_ALL", "C"}, {"LANG", "C"}]
          ) do
       {output, 0} -> {:ok, output}
       {output, _} -> {:ok, "gh #{cmd} view error: #{output}"}

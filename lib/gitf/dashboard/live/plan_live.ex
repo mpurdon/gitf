@@ -24,6 +24,7 @@ defmodule GiTF.Dashboard.PlanLive do
           |> assign(:current_path, "/dashboard/missions")
           |> assign(:collapsed, MapSet.new())
           |> assign(:expanded_ops, MapSet.new())
+          |> assign(:refresh_scheduled, false)
           |> init_toasts()
           |> refresh_data(mission)
 
@@ -104,20 +105,33 @@ defmodule GiTF.Dashboard.PlanLive do
   end
 
   def handle_info({:link_received, link}, socket) do
-    case GiTF.Missions.get(socket.assigns.mission.id) do
-      {:ok, mission} -> {:noreply, socket |> maybe_apply_toast(link) |> refresh_data(mission)}
-      _ -> {:noreply, socket}
-    end
+    {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
   end
 
   def handle_info({:gitf_event, _}, socket) do
+    {:noreply, schedule_refresh(socket)}
+  end
+
+  # Debounced refresh: collapse rapid PubSub events into one mission re-fetch 150ms out.
+  def handle_info(:debounced_refresh, socket) do
     case GiTF.Missions.get(socket.assigns.mission.id) do
-      {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
-      _ -> {:noreply, socket}
+      {:ok, mission} ->
+        {:noreply, socket |> assign(:refresh_scheduled, false) |> refresh_data(mission)}
+
+      _ ->
+        {:noreply, assign(socket, :refresh_scheduled, false)}
     end
   end
 
   def handle_info(_, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
 
   # -- Render ----------------------------------------------------------------
 

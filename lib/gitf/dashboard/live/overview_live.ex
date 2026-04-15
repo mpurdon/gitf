@@ -29,7 +29,8 @@ defmodule GiTF.Dashboard.OverviewLive do
       Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
-    # Fast mount: set defaults synchronously, load expensive data async
+    # Fast mount: set defaults synchronously, load expensive data async.
+    # Skip the (relatively heavy) core data compute on the disconnected HTTP render.
     socket =
       socket
       |> init_toasts()
@@ -38,11 +39,53 @@ defmodule GiTF.Dashboard.OverviewLive do
       |> assign(:last_updated, DateTime.utc_now())
       |> assign(:dark_factory, GiTF.Config.dark_factory?())
       |> assign(:refresh_scheduled, false)
-      |> assign_core_data()
-      |> assign_async(:health_status, fn -> {:ok, %{health_status: safe_health_check()}} end)
-      |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: billing_cycle_summary()}} end)
+      |> assign_empty_core_data()
+
+    socket =
+      if connected?(socket) do
+        socket
+        |> assign_core_data()
+        |> assign_async(:health_status, fn -> {:ok, %{health_status: safe_health_check()}} end)
+        |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: billing_cycle_summary()}} end)
+      else
+        socket
+        |> assign(:health_status, %{ok?: false, result: nil})
+        |> assign(:cost_summary, %{ok?: false, result: nil})
+      end
 
     {:ok, socket}
+  end
+
+  # Empty placeholder assigns so the initial disconnected render doesn't
+  # KeyError when referencing core-data fields.
+  defp assign_empty_core_data(socket) do
+    socket
+    |> assign(:ghost_count, 0)
+    |> assign(:active_ghosts, 0)
+    |> assign(:quest_count, 0)
+    |> assign(:active_quests, 0)
+    |> assign(:recent_links, [])
+    |> assign(:active_processes, 0)
+    |> assign(:avg_context, 0.0)
+    |> assign(:peak_context, 0.0)
+    |> assign(:fuel_remaining, 100.0)
+    |> assign(:high_context_bees, 0)
+    |> assign(:active_ghost_list, [])
+    |> assign(:verified_jobs, 0)
+    |> assign(:failed_verification, 0)
+    |> assign(:pending_verification, 0)
+    |> assign(:research_quests, 0)
+    |> assign(:planning_quests, 0)
+    |> assign(:implementation_quests, 0)
+    |> assign(:pending_approvals, 0)
+    |> assign(:sector_count, 0)
+    |> assign(:recent_sectors, [])
+    |> assign(:current_sector_id, nil)
+    |> assign(:recent_missions, [])
+    |> assign(:all_missions, [])
+    |> assign(:completed_today, 0)
+    |> assign(:failed_today, 0)
+    |> assign(:ops_completed_today, 0)
   end
 
   @impl true
@@ -61,6 +104,17 @@ defmodule GiTF.Dashboard.OverviewLive do
     {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
   end
 
+  def handle_info({:dark_factory_result, new_val, :ok}, socket) do
+    {:noreply,
+     socket
+     |> put_flash(:info, "Dark Factory Mode #{if new_val, do: "ENABLED", else: "DISABLED"}")
+     |> assign(:dark_factory, new_val)}
+  end
+
+  def handle_info({:dark_factory_result, _new_val, {:error, reason}}, socket) do
+    {:noreply, put_flash(socket, :error, "Failed to update config: #{inspect(reason)}")}
+  end
+
   def handle_info({:op_updated, _op}, socket), do: {:noreply, schedule_refresh(socket)}
   def handle_info({:ghost_updated, _ghost}, socket), do: {:noreply, schedule_refresh(socket)}
 
@@ -76,17 +130,15 @@ defmodule GiTF.Dashboard.OverviewLive do
   @impl true
   def handle_event("toggle_dark_factory", _params, socket) do
     new_val = !socket.assigns.dark_factory
+    parent = self()
 
-    case GiTF.Config.update_major_config(%{"dark_factory" => new_val}) do
-      :ok ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Dark Factory Mode #{if new_val, do: "ENABLED", else: "DISABLED"}")
-         |> assign(:dark_factory, new_val)}
+    # Config writes can block on disk IO; offload so the handler returns immediately.
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      result = GiTF.Config.update_major_config(%{"dark_factory" => new_val})
+      send(parent, {:dark_factory_result, new_val, result})
+    end)
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to update config: #{inspect(reason)}")}
-    end
+    {:noreply, socket}
   end
 
   @impl true

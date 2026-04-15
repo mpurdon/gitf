@@ -195,6 +195,19 @@ defmodule GiTF.CLI.Chat do
   end
 
   defp grab_clipboard_image do
+    case :os.type() do
+      {:unix, :darwin} ->
+        grab_clipboard_image_darwin()
+
+      {:unix, _} ->
+        grab_clipboard_image_linux()
+
+      _ ->
+        {:error, "Clipboard image paste is not supported on this platform."}
+    end
+  end
+
+  defp grab_clipboard_image_darwin do
     script = ~S"""
     try
       set imageData to the clipboard as «class PNGf»
@@ -209,13 +222,47 @@ defmodule GiTF.CLI.Chat do
     end try
     """
 
-    case System.cmd("osascript", ["-e", script], stderr_to_stdout: true) do
+    case System.cmd("osascript", ["-e", script],
+           stderr_to_stdout: true,
+           env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+         ) do
       {path, 0} ->
         path = String.trim(path)
         if path == "NO_IMAGE", do: {:error, "No image on clipboard."}, else: {:ok, path}
 
       _ ->
         {:error, "Could not access clipboard."}
+    end
+  end
+
+  defp grab_clipboard_image_linux do
+    target = Path.join(System.tmp_dir!(), "gitf_clipboard.png")
+
+    cond do
+      bin = System.find_executable("wl-paste") ->
+        case System.cmd(bin, ["--type", "image/png"], stderr_to_stdout: false) do
+          {data, 0} when byte_size(data) > 0 ->
+            File.write!(target, data)
+            {:ok, target}
+
+          _ ->
+            {:error, "No image on clipboard (wl-paste)."}
+        end
+
+      bin = System.find_executable("xclip") ->
+        case System.cmd(bin, ["-selection", "clipboard", "-t", "image/png", "-o"],
+               stderr_to_stdout: false
+             ) do
+          {data, 0} when byte_size(data) > 0 ->
+            File.write!(target, data)
+            {:ok, target}
+
+          _ ->
+            {:error, "No image on clipboard (xclip)."}
+        end
+
+      true ->
+        {:error, "Clipboard image paste requires wl-paste or xclip on Linux."}
     end
   end
 

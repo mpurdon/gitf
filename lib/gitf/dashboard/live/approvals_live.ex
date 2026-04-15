@@ -18,28 +18,46 @@ defmodule GiTF.Dashboard.ApprovalsLive do
       Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
+    # Skip approvals fetch on the disconnected HTTP render pass.
+    approvals = if connected?(socket), do: load_approvals(), else: []
+
     {:ok,
      socket
      |> assign(:page_title, "Approvals")
      |> assign(:current_path, "/approvals")
-     |> assign(:approvals, load_approvals())
+     |> assign(:approvals, approvals)
      |> assign(:action_id, nil)
      |> assign(:action_type, nil)
      |> assign(:notes, "")
+     |> assign(:refresh_scheduled, false)
      |> init_toasts()}
   end
 
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    {:noreply, assign(socket, :approvals, load_approvals())}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_info({:link_received, link}, socket) do
-    {:noreply, socket |> maybe_apply_toast(link) |> assign(:approvals, load_approvals())}
+    {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
+  end
+
+  # Debounced refresh: collapse rapid PubSub events into one reload 150ms out.
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply,
+     socket |> assign(:refresh_scheduled, false) |> assign(:approvals, load_approvals())}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
 
   @impl true
   def handle_event("show_approve", %{"id" => id}, socket) do

@@ -612,16 +612,47 @@ defmodule GiTF.Ops do
   """
   @spec unblock_dependents(String.t()) :: :ok
   def unblock_dependents(op_id) do
+    unblock_dependents(op_id, 0)
+  end
+
+  @max_unblock_retries 3
+  @unblock_retry_delay_ms 1_000
+
+  @spec unblock_dependents(String.t(), non_neg_integer()) :: :ok
+  def unblock_dependents(op_id, attempt) do
     # Serialize concurrent calls for the same op so multiple code paths
     # (link_received handler, retry, phase advance) don't duplicate work.
-    # On contention, skip — the other caller will do it.
-    GiTF.MissionLock.with_lock(
-      {:unblock_dependents, op_id},
-      [on_contention: :skip],
-      fn -> do_unblock_dependents(op_id) end
-    )
+    # If another caller holds the lock but then crashes before finishing,
+    # dependents would stay blocked forever — so on contention, schedule a
+    # bounded async retry instead of silently skipping.
+    result =
+      GiTF.MissionLock.with_lock(
+        {:unblock_dependents, op_id},
+        [on_contention: :error],
+        fn -> do_unblock_dependents(op_id) end
+      )
 
-    :ok
+    case result do
+      {:error, :locked} when attempt < @max_unblock_retries ->
+        Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+          Process.sleep(@unblock_retry_delay_ms)
+          unblock_dependents(op_id, attempt + 1)
+        end)
+
+        :ok
+
+      {:error, :locked} ->
+        require Logger
+
+        Logger.warning(
+          "unblock_dependents(#{op_id}): lock contention persisted past #{@max_unblock_retries} retries; dependents may remain blocked"
+        )
+
+        :ok
+
+      _ ->
+        :ok
+    end
   end
 
   defp do_unblock_dependents(op_id) do

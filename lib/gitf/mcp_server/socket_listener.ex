@@ -59,6 +59,7 @@ defmodule GiTF.MCPServer.SocketListener do
                {:ifaddr, {:local, path}},
                :binary,
                packet: :line,
+               packet_size: 1_048_576,
                active: false,
                reuseaddr: true,
                recbuf: 65_536,

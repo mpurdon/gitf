@@ -535,12 +535,24 @@ defmodule GiTF.Ghosts do
         {:error, reason} -> throw({:script_chmod_failed, reason})
       end
 
-      # Spawn detached: nohup + redirect + disown via a subshell
+      # Spawn detached: prefer nohup, fall back to setsid if nohup is missing
+      # (distroless / minimal containers). If neither exists, surface a clear error.
+      detacher =
+        System.find_executable("nohup") ||
+          System.find_executable("setsid")
+
+      if is_nil(detacher) do
+        throw(
+          {:detacher_missing,
+           "Neither nohup nor setsid is available on PATH; cannot spawn detached ghost worker."}
+        )
+      end
+
       port =
-        Port.open({:spawn, "nohup #{script_path} >/dev/null 2>&1 & echo $!"}, [
-          :binary,
-          :exit_status
-        ])
+        Port.open(
+          {:spawn, "#{detacher} #{script_path} >/dev/null 2>&1 & echo $!"},
+          [:binary, :exit_status]
+        )
 
       os_pid =
         receive do

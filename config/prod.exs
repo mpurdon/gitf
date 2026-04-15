@@ -1,6 +1,15 @@
 import Config
 
-config :gitf, GiTF.Repo, database: ".gitf/gitf.db"
+# OpenTelemetry in prod: ratio-based sampling (default 10%) to avoid
+# exporting 100% of traces. Override via OTEL_TRACES_SAMPLER_ARG.
+otel_sample_ratio =
+  case Float.parse(System.get_env("OTEL_TRACES_SAMPLER_ARG") || "0.1") do
+    {f, _} -> f
+    :error -> 0.1
+  end
+
+config :opentelemetry,
+  sampler: {:parent_based, %{root: {:trace_id_ratio_based, otel_sample_ratio}}}
 
 config :gitf, GiTF.Web.Endpoint,
   debug_errors: false,

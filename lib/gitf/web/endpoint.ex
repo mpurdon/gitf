@@ -37,7 +37,9 @@ defmodule GiTF.Web.Endpoint do
     at: "/",
     from: :gitf,
     gzip: false,
-    only: ~w(assets fonts images favicon.ico robots.txt)
+    only: ~w(assets fonts images favicon.ico robots.txt),
+    cache_control_for_etags: "public, max-age=31536000, immutable",
+    cache_control_for_vsn_requests: "public, max-age=31536000, immutable"
   )
 
   plug(Plug.RequestId)

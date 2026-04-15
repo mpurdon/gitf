@@ -95,7 +95,10 @@ defmodule GiTF.Major.Research do
   defp list_source_files(path) do
     task =
       Task.async(fn ->
-        System.cmd("find", [path, "-type", "f", "-not", "-path", "*/.*"], stderr_to_stdout: true)
+        System.cmd("find", [path, "-type", "f", "-not", "-path", "*/.*"],
+          stderr_to_stdout: true,
+          env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+        )
       end)
 
     case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do

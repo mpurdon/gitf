@@ -258,7 +258,7 @@ defmodule GiTF.CLI do
 
   defp start_major do
     File.write(
-      "/tmp/gitf_tui_debug.log",
+      Path.join(System.tmp_dir!(), "gitf_tui_debug.log"),
       "[#{DateTime.utc_now()}] start_major called, gitf_dir=#{inspect(GiTF.gitf_dir())}\n",
       [:append]
     )
@@ -269,7 +269,7 @@ defmodule GiTF.CLI do
         result = GenServer.start(GiTF.Major, %{gitf_root: root}, name: GiTF.Major)
 
         File.write(
-          "/tmp/gitf_tui_debug.log",
+          Path.join(System.tmp_dir!(), "gitf_tui_debug.log"),
           "[#{DateTime.utc_now()}] Major start: #{inspect(result)}\n",
           [:append]
         )

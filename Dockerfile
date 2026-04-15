@@ -37,6 +37,7 @@ WORKDIR /app
 # - curl/ca-certificates: for API calls
 # - openssl: for BEAM crypto
 # - locales: for proper encoding
+# - inotify-tools: required by :fs dep for filesystem watching on Linux
 RUN apt-get update &&
     apt-get install -y --no-install-recommends
     git
@@ -46,6 +47,7 @@ RUN apt-get update &&
     openssl
     libncurses5
     locales
+    inotify-tools
     && rm -rf /var/lib/apt/lists/*
 
 # Set locale

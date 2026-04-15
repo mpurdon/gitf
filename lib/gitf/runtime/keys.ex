@@ -156,7 +156,8 @@ defmodule GiTF.Runtime.Keys do
     case System.cmd(
            "aws",
            ["configure", "export-credentials", "--profile", profile, "--format", "env"],
-           stderr_to_stdout: true
+           stderr_to_stdout: true,
+           env: [{"LC_ALL", "C"}, {"LANG", "C"}]
          ) do
       {output, 0} ->
         output

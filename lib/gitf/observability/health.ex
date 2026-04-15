@@ -85,7 +85,14 @@ defmodule GiTF.Observability.Health do
         path -> Path.dirname(path)
       end
 
-    task = Task.async(fn -> System.cmd("df", ["-k", gitf_dir], stderr_to_stdout: true) end)
+    # POSIX -P forces the 6-column layout on macOS + Linux.
+    task =
+      Task.async(fn ->
+        System.cmd("df", ["-Pk", gitf_dir],
+          stderr_to_stdout: true,
+          env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+        )
+      end)
 
     df_result =
       case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do

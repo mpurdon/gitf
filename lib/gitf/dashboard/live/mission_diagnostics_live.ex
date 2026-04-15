@@ -27,6 +27,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
          |> assign(:suggested_strategies, %{})
          |> assign(:suggesting, MapSet.new())
          |> assign(:feedback_text, %{})
+         |> assign(:refresh_scheduled, false)
          |> init_toasts()
          |> load_diagnostics(id, mission)}
 
@@ -158,11 +159,16 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
   @impl true
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
-    {:noreply, reload(socket)}
+    {:noreply, schedule_refresh(socket)}
   end
 
   def handle_info({:link_received, link}, socket),
-    do: {:noreply, socket |> maybe_apply_toast(link) |> reload()}
+    do: {:noreply, socket |> maybe_apply_toast(link) |> schedule_refresh()}
+
+  # Debounced refresh: collapse rapid PubSub events into one diagnostics reload 150ms out.
+  def handle_info(:debounced_refresh, socket) do
+    {:noreply, socket |> assign(:refresh_scheduled, false) |> reload()}
+  end
 
   def handle_info({ref, {:analysis_result, op_id, result}}, socket) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
@@ -204,6 +210,14 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp schedule_refresh(socket) do
+    if !socket.assigns[:refresh_scheduled] do
+      Process.send_after(self(), :debounced_refresh, 150)
+    end
+
+    assign(socket, :refresh_scheduled, true)
+  end
 
   # -- Events ----------------------------------------------------------------
 

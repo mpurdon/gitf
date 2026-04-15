@@ -406,6 +406,9 @@ defmodule GiTF.Git do
   """
   def safe_cmd(args, opts \\ []) do
     git_path = System.find_executable("git") || "/usr/bin/git"
+    # Ensure English/POSIX output regardless of host locale so parsers work on Linux prod.
+    env = Keyword.get(opts, :env, []) ++ [{"LC_ALL", "C"}, {"LANG", "C"}]
+    opts = Keyword.put(opts, :env, env)
     task = Task.async(fn -> System.cmd(git_path, args, opts) end)
 
     case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, 5_000) do

@@ -56,6 +56,10 @@ defmodule GiTF.CLI.Select do
   defp do_interactive(prompt, opts, multi?) do
     # hide cursor
     IO.write("\e[?25l")
+    # stty -g output format differs between BSD (macOS) and GNU (Linux).
+    # This is safe here because the saved blob is only restored on the same
+    # host within the same process lifetime (see `after` block below). Do NOT
+    # persist this string across hosts.
     stty_save = System.cmd("stty", ["-g"], stderr_to_stdout: true) |> elem(0) |> String.trim()
     System.cmd("stty", ["raw", "-echo"], stderr_to_stdout: true)
 
