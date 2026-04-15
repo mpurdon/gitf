@@ -405,7 +405,8 @@ defmodule GiTF.Git do
   Returns `{output, exit_code}` or `{"git command timed out", 1}`.
   """
   def safe_cmd(args, opts \\ []) do
-    task = Task.async(fn -> System.cmd("/usr/bin/git", args, opts) end)
+    git_path = System.find_executable("git") || "/usr/bin/git"
+    task = Task.async(fn -> System.cmd(git_path, args, opts) end)
 
     case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, result} -> result

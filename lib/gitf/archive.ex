@@ -403,10 +403,31 @@ defmodule GiTF.Archive do
   # -- ETS cache ---------------------------------------------------------------
 
   defp init_cache do
-    :ets.new(@cache_table, [:named_table, :public, :set, read_concurrency: true])
-    # Warm cache from disk
-    data = read_data_from_disk()
-    cache_put(data)
+    # If an heir is available, reclaim the table from it (in case we're
+    # restarting after a crash and the heir is currently the owner).
+    # Otherwise, create it fresh with the heir (if any) as the designated heir.
+    heir_pid = GiTF.Archive.TableHeir.pid()
+
+    case :ets.info(@cache_table, :owner) do
+      :undefined ->
+        opts = [:named_table, :public, :set, read_concurrency: true]
+
+        opts =
+          if is_pid(heir_pid) do
+            opts ++ [{:heir, heir_pid, :transfer}]
+          else
+            opts
+          end
+
+        :ets.new(@cache_table, opts)
+        data = read_data_from_disk()
+        cache_put(data)
+
+      _owner ->
+        # Table already exists — heir likely owns it. Claim it back.
+        if is_pid(heir_pid), do: GiTF.Archive.TableHeir.claim(@cache_table)
+        :ok
+    end
   rescue
     ArgumentError -> :ok
   end

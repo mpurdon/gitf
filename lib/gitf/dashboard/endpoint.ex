@@ -12,8 +12,14 @@ defmodule GiTF.Dashboard.Endpoint do
   @session_options [
     store: :cookie,
     key: "_hive_dashboard",
-    signing_salt: "gitf_salt",
-    same_site: "Lax"
+    signing_salt:
+      System.get_env("LIVE_VIEW_SIGNING_SALT") ||
+        (if Mix.env() == :prod,
+           do: raise("LIVE_VIEW_SIGNING_SALT env var required in prod"),
+           else: "gitf_salt_dev"),
+    same_site: "Lax",
+    http_only: true,
+    secure: Mix.env() == :prod
   ]
 
   socket("/live", Phoenix.LiveView.Socket,

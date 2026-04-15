@@ -49,11 +49,34 @@ defmodule GiTF.Sandbox do
     configured = Application.get_env(:gitf, :sandbox_adapter)
 
     cond do
-      configured -> configured
-      GiTF.Sandbox.Bubblewrap.available?() -> GiTF.Sandbox.Bubblewrap
-      GiTF.Sandbox.SandboxExec.available?() -> GiTF.Sandbox.SandboxExec
-      GiTF.Sandbox.Docker.available?() -> GiTF.Sandbox.Docker
-      true -> GiTF.Sandbox.Local
+      configured ->
+        configured
+
+      true ->
+        # Prefer the OS-native sandbox adapter first:
+        # - macOS -> sandbox-exec
+        # - Linux -> bubblewrap
+        # Fall back to Docker, then Local.
+        case :os.type() do
+          {:unix, :darwin} ->
+            cond do
+              GiTF.Sandbox.SandboxExec.available?() -> GiTF.Sandbox.SandboxExec
+              GiTF.Sandbox.Docker.available?() -> GiTF.Sandbox.Docker
+              true -> GiTF.Sandbox.Local
+            end
+
+          {:unix, :linux} ->
+            cond do
+              GiTF.Sandbox.Bubblewrap.available?() -> GiTF.Sandbox.Bubblewrap
+              GiTF.Sandbox.Docker.available?() -> GiTF.Sandbox.Docker
+              true -> GiTF.Sandbox.Local
+            end
+
+          _ ->
+            if GiTF.Sandbox.Docker.available?(),
+              do: GiTF.Sandbox.Docker,
+              else: GiTF.Sandbox.Local
+        end
     end
   end
 end

@@ -40,20 +40,15 @@ defmodule GiTF.Application do
 
     setup_file_logging()
 
-    # Start Config.Provider early — loads global config, then project overlay
-    GiTF.Config.Provider.start_link(gitf_root: gitf_root)
-
-    # Push LLM timeout into ReqLLM's application env so all providers respect it
-    llm_timeout = GiTF.Config.Provider.get([:llm, :receive_timeout_ms]) || 60_000
-    Application.put_env(:req_llm, :receive_timeout, llm_timeout)
-
+    # Keys must load before any supervised child may use them
     GiTF.Runtime.Keys.load()
 
     if GiTF.Runtime.ModelResolver.ollama_mode?() do
       GiTF.Runtime.ModelResolver.setup_ollama_env()
     end
 
-    # Set up AWS credentials for Bedrock if it's in the provider priority
+    # Set up AWS credentials for Bedrock if it's in the provider priority.
+    # Wrapped — ProviderManager may not be ready yet in some envs.
     try do
       if "bedrock" in GiTF.Runtime.ProviderManager.provider_priority() do
         GiTF.Runtime.ProviderManager.ensure_aws_credentials()
@@ -62,14 +57,10 @@ defmodule GiTF.Application do
       _ -> :ok
     end
 
-    validate_config()
-
     GiTF.Progress.init()
     GiTF.CircuitBreaker.init()
-    # Reset any circuit breaker state from previous sessions
-    GiTF.CircuitBreaker.reset("api:llm")
-    for key <- GiTF.CircuitBreaker.list_open("llm:"), do: GiTF.CircuitBreaker.reset(key)
     GiTF.Observability.Metrics.init()
+    # Telemetry handlers must be attached before children that emit events start
     GiTF.Telemetry.attach_default_handlers()
     GiTF.Observability.Metrics.attach_handlers()
 
@@ -95,10 +86,24 @@ defmodule GiTF.Application do
 
     foundation = [
       {Phoenix.PubSub, name: GiTF.PubSub},
+      # Config.Provider must start before Archive (migrations / Archive may read config)
+      Supervisor.child_spec(
+        {GiTF.Config.Provider, [gitf_root: gitf_root]},
+        id: GiTF.Config.Provider
+      ),
+      # ETS heir must start before Archive so Archive's cache can be made recoverable
+      GiTF.Archive.TableHeir,
       {GiTF.Archive,
        data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!(), ".gitf/store"))},
       {Registry, keys: :unique, name: GiTF.Registry},
-      {Task.Supervisor, name: GiTF.TaskSupervisor}
+      {Task.Supervisor, name: GiTF.TaskSupervisor},
+      # Deferred init — non-critical one-shot work under supervision. Runs after
+      # Archive/Config.Provider are up. :transient so normal completion doesn't restart.
+      Supervisor.child_spec(
+        {Task, &__MODULE__.deferred_init/0},
+        id: GiTF.DeferredInit,
+        restart: :transient
+      )
     ]
 
     core = %{
@@ -237,6 +242,37 @@ defmodule GiTF.Application do
            ]}
       }
     ]
+  end
+
+  @doc """
+  Non-critical init work run under supervision as a Task child, so it can't
+  block boot and any crash is observed by the supervisor rather than taking
+  down application start.
+  """
+  def deferred_init do
+    # Push LLM timeout into ReqLLM's application env
+    try do
+      llm_timeout = GiTF.Config.Provider.get([:llm, :receive_timeout_ms]) || 60_000
+      Application.put_env(:req_llm, :receive_timeout, llm_timeout)
+    rescue
+      e -> Logger.warning("deferred_init: llm timeout setup failed: #{inspect(e)}")
+    end
+
+    # Reset any stale circuit breaker state from a prior session
+    try do
+      GiTF.CircuitBreaker.reset("api:llm")
+      for key <- GiTF.CircuitBreaker.list_open("llm:"), do: GiTF.CircuitBreaker.reset(key)
+    rescue
+      e -> Logger.warning("deferred_init: circuit breaker reset failed: #{inspect(e)}")
+    end
+
+    try do
+      validate_config()
+    rescue
+      e -> Logger.warning("deferred_init: validate_config failed: #{inspect(e)}")
+    end
+
+    :ok
   end
 
   defp validate_config do

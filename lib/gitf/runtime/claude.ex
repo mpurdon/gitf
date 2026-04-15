@@ -14,11 +14,9 @@ defmodule GiTF.Runtime.Claude do
   OS-level ports. The caller owns the port and receives its messages.
   """
 
-  @common_locations [
-    "/usr/local/bin/claude",
-    "/usr/bin/claude",
-    "/opt/homebrew/bin/claude"
-  ]
+  # Rely on PATH via System.find_executable/1. Hardcoded fallbacks
+  # (e.g. /opt/homebrew/bin) are platform-specific and mask real problems.
+  @common_locations []
 
   # -- Public API ------------------------------------------------------------
 

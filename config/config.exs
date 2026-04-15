@@ -10,10 +10,17 @@ config :gitf, GiTF.Web.Endpoint,
     "GITF_SECRET_KEY_BASE_CHANGEME_1234567890_extra_padding_to_reach_64_bytes_minimum!!",
   pubsub_server: GiTF.PubSub,
   live_view: [signing_salt: "gitf_live_salt_123"],
+  session_signing_salt: "gitf_session_salt_dev",
+  session_secure: false,
   render_errors: [
     formats: [html: GiTF.Web.ErrorHTML, json: GiTF.Web.ErrorJSON],
     layout: false
   ]
+
+config :gitf, GiTF.Dashboard.Endpoint,
+  session_signing_salt: "gitf_dashboard_salt_dev",
+  session_secure: false,
+  live_view: [signing_salt: "gitf_live_salt_123"]
 
 config :llm_db,
   data_dir: Path.join(System.user_home!(), ".gitf/llm_db"),

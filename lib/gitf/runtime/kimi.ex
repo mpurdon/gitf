@@ -10,12 +10,9 @@ defmodule GiTF.Runtime.Kimi do
   - **Headless** (`spawn_headless/3`): runs a single prompt to completion
   """
 
-  @common_locations [
-    Path.expand("~/.local/bin/kimi"),
-    "/usr/local/bin/kimi",
-    "/usr/bin/kimi",
-    "/opt/homebrew/bin/kimi"
-  ]
+  # Rely on PATH via System.find_executable/1. Hardcoded fallbacks
+  # (e.g. /opt/homebrew/bin) are platform-specific and mask real problems.
+  @common_locations []
 
   # -- Public API ------------------------------------------------------------
 

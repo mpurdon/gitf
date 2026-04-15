@@ -5,9 +5,13 @@ defmodule GiTF.Web.Endpoint do
     store: :cookie,
     key: "_gitf_key",
     signing_salt:
-      :crypto.hash(:sha256, "gitf_session_" <> to_string(:erlang.phash2({node(), :os.getpid()})))
-      |> Base.encode64(padding: false)
-      |> binary_part(0, 24)
+      System.get_env("SESSION_SIGNING_SALT") ||
+        (if Mix.env() == :prod,
+           do: raise("SESSION_SIGNING_SALT env var required in prod"),
+           else: "gitf_web_salt_dev"),
+    same_site: "Lax",
+    http_only: true,
+    secure: Mix.env() == :prod
   ]
 
   socket("/socket", GiTF.Web.UserSocket,
