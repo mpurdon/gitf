@@ -122,8 +122,11 @@ defmodule GiTF.Ops do
   def assign(op_id, ghost_id) do
     Archive.update(:ops, op_id, fn op ->
       case validate_transition(op.status, :assign) do
-        {:ok, next_status} -> %{op | status: next_status, ghost_id: ghost_id}
-        {:error, _} -> op
+        {:ok, next_status} ->
+          {:ok, %{op | status: next_status, ghost_id: ghost_id}}
+
+        {:error, _} = err ->
+          err
       end
     end)
   end
@@ -212,36 +215,50 @@ defmodule GiTF.Ops do
   """
   @spec reset(String.t(), String.t() | nil) :: {:ok, map()} | {:error, atom()}
   def reset(op_id, feedback \\ nil) do
-    with {:ok, op} <- get(op_id),
-         {:ok, next_status} <- validate_transition(op.status, :reset) do
-      cleanup_ghost_and_shell(op.ghost_id)
+    # Peek to capture ghost_id for cleanup (cleanup has side effects on
+    # other collections — kept outside the atomic op update).
+    case get(op_id) do
+      {:error, :not_found} ->
+        {:error, :not_found}
 
-      new_description =
-        if feedback do
-          (op.description || "") <> "\n\n## Feedback from previous attempt:\n\n" <> feedback
-        else
-          op.description
+      {:ok, %{ghost_id: ghost_id}} ->
+        cleanup_ghost_and_shell(ghost_id)
+
+        result =
+          Archive.update(:ops, op_id, fn op ->
+            case validate_transition(op.status, :reset) do
+              {:ok, next_status} ->
+                new_description =
+                  if feedback do
+                    (op.description || "") <>
+                      "\n\n## Feedback from previous attempt:\n\n" <> feedback
+                  else
+                    op.description
+                  end
+
+                retry_count = Map.get(op, :retry_count, 0) + 1
+
+                {:ok,
+                 %{
+                   op
+                   | status: next_status,
+                     ghost_id: nil,
+                     retry_count: retry_count,
+                     description: new_description
+                 }}
+
+              {:error, _} = err ->
+                err
+            end
+          end)
+
+        # Nudge Major's spawner so the reset op gets picked up immediately
+        case Process.whereis(GiTF.Major) do
+          pid when is_pid(pid) -> send(pid, :spawn_ready_jobs)
+          _ -> :ok
         end
 
-      retry_count = Map.get(op, :retry_count, 0) + 1
-
-      updated = %{
-        op
-        | status: next_status,
-          ghost_id: nil,
-          retry_count: retry_count,
-          description: new_description
-      }
-
-      result = Archive.put(:ops, updated)
-
-      # Nudge Major's spawner so the reset op gets picked up immediately
-      case Process.whereis(GiTF.Major) do
-        pid when is_pid(pid) -> send(pid, :spawn_ready_jobs)
-        _ -> :ok
-      end
-
-      result
+        result
     end
   end
 
@@ -253,11 +270,12 @@ defmodule GiTF.Ops do
   """
   @spec revive(String.t(), String.t()) :: {:ok, map()} | {:error, atom()}
   def revive(op_id, ghost_id) do
-    with {:ok, op} <- get(op_id),
-         {:ok, next_status} <- validate_transition(op.status, :revive) do
-      updated = %{op | status: next_status, ghost_id: ghost_id}
-      Archive.put(:ops, updated)
-    end
+    Archive.update(:ops, op_id, fn op ->
+      case validate_transition(op.status, :revive) do
+        {:ok, next_status} -> {:ok, %{op | status: next_status, ghost_id: ghost_id}}
+        {:error, _} = err -> err
+      end
+    end)
   end
 
   defp cleanup_ghost_and_shell(nil), do: :ok
@@ -272,11 +290,10 @@ defmodule GiTF.Ops do
       shell -> GiTF.Shell.remove(shell.id, force: true)
     end
 
-    # Mark ghost as stopped
-    case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} -> Archive.put(:ghosts, %{ghost | status: GhostStatus.stopped()})
-      _ -> :ok
-    end
+    # Mark ghost as stopped atomically
+    Archive.update(:ghosts, ghost_id, fn ghost ->
+      %{ghost | status: GhostStatus.stopped()}
+    end)
 
     :ok
   end
@@ -357,20 +374,24 @@ defmodule GiTF.Ops do
     result =
       Archive.update(:ops, op_id, fn op ->
         case validate_transition(op.status, action) do
-          {:ok, next_status} -> %{op | status: next_status}
-          {:error, _} -> op
+          {:ok, next_status} ->
+            transitioned = op.status != next_status
+            {:ok, %{op | status: next_status}, %{transitioned: transitioned}}
+
+          {:error, _} = err ->
+            err
         end
       end)
 
-    # Emit telemetry after the atomic write
+    # Emit telemetry after the atomic write — only on a real transition.
     case {action, result} do
-      {:start, {:ok, op}} ->
+      {:start, {:ok, op, %{transitioned: true}}} ->
         GiTF.Telemetry.emit([:gitf, :op, :started], %{}, %{
           op_id: op_id,
           mission_id: op.mission_id
         })
 
-      {:complete, {:ok, op}} ->
+      {:complete, {:ok, op, %{transitioned: true}}} ->
         GiTF.Telemetry.emit([:gitf, :op, :completed], %{}, %{
           op_id: op_id,
           mission_id: op.mission_id
@@ -380,7 +401,11 @@ defmodule GiTF.Ops do
         :ok
     end
 
-    result
+    # Preserve the historical public contract: {:ok, op} | {:error, reason}
+    case result do
+      {:ok, op, _meta} -> {:ok, op}
+      other -> other
+    end
   end
 
   defp validate_transition(current_status, action) do

@@ -498,7 +498,11 @@ defmodule GiTF.Major do
           {:ok, %{status: s} = ghost}
           when s in [GhostStatus.restarting(), GhostStatus.working(), GhostStatus.starting()] ->
             Logger.warning("Ghost #{ghost_id} did not recover, failing op #{op_id}")
-            GiTF.Archive.put(:ghosts, %{ghost | status: GhostStatus.crashed()})
+
+            GiTF.Archive.update(:ghosts, ghost.id, fn g ->
+              %{g | status: GhostStatus.crashed()}
+            end)
+
             GiTF.Ops.fail(op_id)
 
             GiTF.Link.send(
@@ -616,9 +620,13 @@ defmodule GiTF.Major do
     if op_id do
       # Phase ops (research, design, etc.) don't need verification — skip straight to advance
       case GiTF.Ops.get(op_id) do
-        {:ok, %{phase_job: true} = op} ->
+        {:ok, %{phase_job: true}} ->
           Logger.info("Phase op #{op_id} completed, skipping verification")
-          GiTF.Archive.put(:ops, Map.put(op, :verification_status, "skipped"))
+
+          GiTF.Archive.update(:ops, op_id, fn o ->
+            Map.put(o, :verification_status, "skipped")
+          end)
+
           notify_run_job_completed(op_id)
           state = advance_quest(link_msg.from, state)
           state
@@ -667,24 +675,25 @@ defmodule GiTF.Major do
 
   # Backup link for standard ops — Tachikoma is the primary verification handler.
   # Only advance if the op is already verified (Tachikoma handled it) or done.
+  # IMPORTANT: Only remove the ghost from `active_ghosts` on terminal states.
+  # A duplicate `job_awaiting_verification` link while the ghost is still
+  # actively being verified must not wipe its tracking entry.
   defp handle_link_received(%{subject: "job_awaiting_verification"} = link_msg, state) do
-    state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
-
     op_id = find_op_for_ghost(link_msg.from)
 
     if op_id do
       case GiTF.Ops.get(op_id) do
-        {:ok, %{verification_status: "passed"}} ->
-          # Tachikoma already verified — advance
+        {:ok, %{verification_status: vs}} when vs in ["passed", "done"] ->
+          state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
           notify_run_job_completed(op_id)
           advance_quest(link_msg.from, state)
 
         {:ok, %{status: "done"}} ->
-          # Op already done — advance
+          state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
           advance_quest(link_msg.from, state)
 
         _ ->
-          # Still pending — Tachikoma will handle it, nothing to do
+          # Non-terminal verification state — leave active_ghosts tracking intact.
           state
       end
     else
@@ -1370,14 +1379,11 @@ defmodule GiTF.Major do
   # -- Private: triage helpers -------------------------------------------------
 
   defp triage_store_job(op, complexity, pipeline) do
-    case GiTF.Ops.get(op.id) do
-      {:ok, current} ->
-        updated = %{current | triage_result: %{complexity: complexity, pipeline: pipeline}}
-        GiTF.Archive.put(:ops, updated)
+    GiTF.Archive.update(:ops, op.id, fn current ->
+      %{current | triage_result: %{complexity: complexity, pipeline: pipeline}}
+    end)
 
-      _ ->
-        :ok
-    end
+    :ok
   rescue
     _ -> :ok
   end
@@ -1688,7 +1694,9 @@ defmodule GiTF.Major do
           maybe_retry_job(link_msg, state)
         end
 
-        GiTF.Archive.put(:ghosts, %{ghost | status: GhostStatus.crashed()})
+        GiTF.Archive.update(:ghosts, ghost.id, fn g ->
+          %{g | status: GhostStatus.crashed()}
+        end)
       else
         if seconds_since > stall_seconds do
           Logger.warning(

@@ -138,14 +138,52 @@ defmodule GiTF.Missions do
   @doc "Update fields on a mission record."
   @spec update(String.t(), map()) :: {:ok, map()} | {:error, :not_found}
   def update(mission_id, attrs) do
+    Archive.update(:missions, mission_id, fn mission -> Map.merge(mission, attrs) end)
+  end
+
+  @doc """
+  Atomically marks a mission as failed.
+
+  Sets `current_phase = "completed"` AND `status = "failed"` in a single
+  Archive.update/3 closure so a crash between the two writes cannot leave the
+  mission in an inconsistent state. Also records a phase_transition event
+  (best-effort, outside the record lock).
+
+  Returns `{:ok, mission}` or `{:error, :not_found}`.
+  """
+  @spec fail_quest(String.t(), String.t() | nil) :: {:ok, map()} | {:error, :not_found}
+  def fail_quest(mission_id, reason \\ nil) do
+    # Best-effort append-only event log for the phase transition.
     case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
 
       mission ->
-        updated = Map.merge(mission, attrs)
-        Archive.put(:missions, updated)
-        {:ok, updated}
+        from_phase = Map.get(mission, :current_phase, "pending")
+
+        if !recent_duplicate_transition?(mission_id, from_phase, "completed") do
+          Archive.insert(:mission_phase_transitions, %{
+            mission_id: mission_id,
+            from_phase: from_phase,
+            to_phase: "completed",
+            reason: reason,
+            seq: System.monotonic_time(:microsecond)
+          })
+
+          GiTF.EventStore.record(:phase_transition, mission_id, %{
+            from: from_phase,
+            to: "completed",
+            reason: reason,
+            outcome: "failed"
+          })
+        end
+
+        Archive.update(:missions, mission_id, fn m ->
+          m
+          |> Map.put(:current_phase, "completed")
+          |> Map.put(:status, "failed")
+          |> Map.put(:failure_reason, reason)
+        end)
     end
   end
 
@@ -252,8 +290,9 @@ defmodule GiTF.Missions do
         end
       end)
 
-      updated = %{mission | status: "closed"} |> Map.delete(:ops)
-      Archive.put(:missions, updated)
+      Archive.update(:missions, mission_id, fn m ->
+        %{m | status: "closed"} |> Map.delete(:ops)
+      end)
     end
   end
 
@@ -321,17 +360,10 @@ defmodule GiTF.Missions do
   """
   @spec set_planning(String.t()) :: {:ok, map()} | {:error, term()}
   def set_planning(mission_id) do
-    case Archive.get(:missions, mission_id) do
-      nil ->
-        {:error, :not_found}
-
-      %{status: "pending"} = mission ->
-        updated = %{mission | status: "planning"}
-        Archive.put(:missions, updated)
-
-      _quest ->
-        {:error, :invalid_transition}
-    end
+    Archive.update(:missions, mission_id, fn
+      %{status: "pending"} = m -> {:ok, %{m | status: "planning"}}
+      _other -> {:error, :invalid_transition}
+    end)
   end
 
   @doc """
@@ -351,46 +383,65 @@ defmodule GiTF.Missions do
 
   @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(mission_id) do
-    # Read ops fresh — these are in a separate collection, not affected by the mission lock
-    ops = GiTF.Ops.list(mission_id: mission_id)
-    impl_jobs = Enum.reject(ops, & &1[:phase_job])
-
-    retried_ids =
-      impl_jobs
-      |> Enum.map(& &1[:retry_of])
-      |> Enum.reject(&is_nil/1)
-      |> MapSet.new()
-
-    active_jobs =
-      Enum.reject(impl_jobs, fn op ->
-        op.status == "failed" and MapSet.member?(retried_ids, op.id)
-      end)
-
-    op_statuses = Enum.map(active_jobs, & &1.status)
-
-    # Atomic read-modify-write on the mission record
+    # Atomic read-modify-write on the mission record. Read ops INSIDE the
+    # closure so the ops snapshot we compute status from is the same one
+    # we write against — closing the read-then-lock race.
     result =
       Archive.update(:missions, mission_id, fn mission ->
-        if mission.status == "planning" and op_statuses == [] do
-          mission
-        else
-          new_status = compute_status(op_statuses)
+        # Terminal-state guard: never overwrite "failed" or "completed" here.
+        # `fail_quest` and `complete_quest` are the only paths allowed to set
+        # those, and a recomputed status must not regress them.
+        cond do
+          mission.status == "failed" ->
+            {:ok, mission, %{transitioned: false, old_status: "failed"}}
 
-          new_status =
-            if new_status == "completed" and Map.get(mission, :current_phase) in @pipeline_phases do
-              Logger.debug("Mission #{mission_id}: suppressing premature 'completed' — still in #{mission.current_phase} phase")
-              "active"
+          mission.status == "completed" ->
+            {:ok, mission, %{transitioned: false, old_status: "completed"}}
+
+          true ->
+            ops = GiTF.Ops.list(mission_id: mission_id)
+            impl_jobs = Enum.reject(ops, & &1[:phase_job])
+
+            retried_ids =
+              impl_jobs
+              |> Enum.map(& &1[:retry_of])
+              |> Enum.reject(&is_nil/1)
+              |> MapSet.new()
+
+            active_jobs =
+              Enum.reject(impl_jobs, fn op ->
+                op.status == "failed" and MapSet.member?(retried_ids, op.id)
+              end)
+
+            op_statuses = Enum.map(active_jobs, & &1.status)
+
+            if mission.status == "planning" and op_statuses == [] do
+              {:ok, mission, %{transitioned: false, old_status: mission.status}}
             else
-              new_status
-            end
+              new_status = compute_status(op_statuses)
 
-          %{mission | status: new_status}
+              new_status =
+                if new_status == "completed" and Map.get(mission, :current_phase) in @pipeline_phases do
+                  Logger.debug(
+                    "Mission #{mission_id}: suppressing premature 'completed' — still in #{mission.current_phase} phase"
+                  )
+
+                  "active"
+                else
+                  new_status
+                end
+
+              transitioned = new_status != mission.status
+
+              {:ok, %{mission | status: new_status},
+               %{transitioned: transitioned, old_status: mission.status}}
+            end
         end
       end)
 
-    # Emit telemetry outside the lock
+    # Emit telemetry outside the lock, but only on an actual transition.
     case result do
-      {:ok, %{status: "completed"} = mission} ->
+      {:ok, %{status: "completed"} = mission, %{transitioned: true}} ->
         GiTF.Telemetry.emit([:gitf, :mission, :completed], %{}, %{
           mission_id: mission.id,
           name: mission[:name]
@@ -400,7 +451,10 @@ defmodule GiTF.Missions do
         :ok
     end
 
-    result
+    case result do
+      {:ok, mission, _meta} -> {:ok, mission}
+      other -> other
+    end
   end
 
   @doc """
@@ -466,30 +520,27 @@ defmodule GiTF.Missions do
   """
   @spec compact_artifacts(String.t()) :: :ok
   def compact_artifacts(mission_id) do
-    case Archive.get(:missions, mission_id) do
-      nil ->
-        :ok
+    Archive.update(:missions, mission_id, fn mission ->
+      artifacts = Map.get(mission, :artifacts, %{})
 
-      mission ->
-        artifacts = Map.get(mission, :artifacts, %{})
+      compacted =
+        Map.new(artifacts, fn {phase, artifact} ->
+          if phase in @keep_artifacts or is_compacted?(artifact) do
+            {phase, artifact}
+          else
+            {phase,
+             %{
+               "compacted" => true,
+               "phase" => phase,
+               "compacted_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+             }}
+          end
+        end)
 
-        compacted =
-          Map.new(artifacts, fn {phase, artifact} ->
-            if phase in @keep_artifacts or is_compacted?(artifact) do
-              {phase, artifact}
-            else
-              {phase,
-               %{
-                 "compacted" => true,
-                 "phase" => phase,
-                 "compacted_at" => DateTime.utc_now() |> DateTime.to_iso8601()
-               }}
-            end
-          end)
+      Map.put(mission, :artifacts, compacted)
+    end)
 
-        Archive.put(:missions, Map.put(mission, :artifacts, compacted))
-        :ok
-    end
+    :ok
   end
 
   defp has_uncompacted_artifacts?(mission) do
@@ -527,15 +578,10 @@ defmodule GiTF.Missions do
   @spec record_phase_job(String.t(), String.t(), String.t()) ::
           {:ok, map()} | {:error, :not_found}
   def record_phase_job(mission_id, phase, op_id) do
-    case Archive.get(:missions, mission_id) do
-      nil ->
-        {:error, :not_found}
-
-      mission ->
-        phase_jobs = Map.get(mission, :phase_jobs, %{})
-        updated = Map.put(mission, :phase_jobs, Map.put(phase_jobs, phase, op_id))
-        Archive.put(:missions, updated)
-    end
+    Archive.update(:missions, mission_id, fn mission ->
+      phase_jobs = Map.get(mission, :phase_jobs, %{})
+      Map.put(mission, :phase_jobs, Map.put(phase_jobs, phase, op_id))
+    end)
   end
 
   # -- Phase Management --------------------------------------------------------
@@ -549,6 +595,10 @@ defmodule GiTF.Missions do
   @spec transition_phase(String.t(), String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
   def transition_phase(mission_id, to_phase, reason \\ nil) do
+    # Record the transition log entry + event FIRST (it's an append-only event
+    # keyed on the caller's view of current_phase). The authoritative update
+    # of current_phase/status is then done atomically via Archive.update so
+    # concurrent callers don't clobber each other.
     case Archive.get(:missions, mission_id) do
       nil ->
         {:error, :not_found}
@@ -565,7 +615,6 @@ defmodule GiTF.Missions do
             seq: System.monotonic_time(:microsecond)
           })
 
-          # Record in event store for timeline visibility
           GiTF.EventStore.record(:phase_transition, mission_id, %{
             from: from_phase,
             to: to_phase,
@@ -573,21 +622,22 @@ defmodule GiTF.Missions do
           })
         end
 
-        # Update mission phase and derive status from the phase.
-        # The put is always idempotent — same value is harmless.
-        status =
-          case to_phase do
-            "completed" -> mission.status
-            "pending" -> "pending"
-            _ -> "active"
-          end
+        Archive.update(:missions, mission_id, fn m ->
+          # Read status/phase fresh inside the lock
+          status =
+            case to_phase do
+              "completed" -> m.status
+              "pending" -> "pending"
+              _ -> "active"
+            end
 
-        updated =
-          mission
+          # Respect terminal "failed" status — never regress it here.
+          status = if m.status == "failed", do: "failed", else: status
+
+          m
           |> Map.put(:current_phase, to_phase)
           |> Map.put(:status, status)
-
-        Archive.put(:missions, updated)
+        end)
     end
   end
 

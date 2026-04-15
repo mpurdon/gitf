@@ -781,21 +781,17 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp update_ghost_working(state, shell) do
-    case Archive.get(:ghosts, state.ghost_id) do
-      nil ->
-        {:error, :ghost_not_found}
-
-      ghost ->
-        updated =
-          Map.merge(ghost, %{
-            status: GhostStatus.working(),
-            shell_id: shell.id,
-            shell_path: shell.worktree_path,
-            pid: inspect(self())
-          })
-
-        Archive.put(:ghosts, updated)
-        :ok
+    case Archive.update(:ghosts, state.ghost_id, fn ghost ->
+           Map.merge(ghost, %{
+             status: GhostStatus.working(),
+             shell_id: shell.id,
+             shell_path: shell.worktree_path,
+             pid: inspect(self())
+           })
+         end) do
+      {:ok, _} -> :ok
+      {:error, :not_found} -> {:error, :ghost_not_found}
+      {:error, _} = err -> err
     end
   end
 
@@ -913,8 +909,12 @@ defmodule GiTF.Ghost.Worker do
         send(worker_pid, {:agent_progress, ghost_id, event})
       end)
 
+    # Run AgentLoop under the shared Task.Supervisor with async_nolink so an
+    # AgentLoop crash does NOT bring down this Worker. The existing
+    # {:DOWN, ref, :process, _, reason} handle_info clause already treats
+    # such a crash as a job failure (calls mark_failed).
     task =
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
         try do
           GiTF.Runtime.AgentLoop.run(prompt, working_dir, agent_opts)
         rescue
@@ -1240,9 +1240,10 @@ defmodule GiTF.Ghost.Worker do
   defp auto_commit_worktree(state) do
     case Archive.get(:shells, state.shell_id) do
       %{worktree_path: path} when is_binary(path) ->
-        # Use System.cmd directly (not safe_cmd which uses Task.async/link)
-        # to avoid linked-task crashes killing the Worker
-        case System.cmd("git", ["status", "--porcelain"], cd: path, stderr_to_stdout: true) do
+        # All git calls go through safe_git_cmd/3 which enforces a timeout via
+        # Task.Supervisor.async_nolink so a hung or crashing git subprocess
+        # cannot wedge or kill the Worker GenServer.
+        case safe_git_cmd(["status", "--porcelain"], path, 30_000) do
           {output, 0} when output != "" ->
             op_title =
               case GiTF.Ops.get(state.op_id) do
@@ -1251,27 +1252,19 @@ defmodule GiTF.Ghost.Worker do
               end
 
             # Add all changes except .claude/ (generated settings that cause merge conflicts)
-            System.cmd("git", ["add", "-A"], cd: path, stderr_to_stdout: true)
-
-            System.cmd("git", ["reset", "HEAD", "--", ".claude/"],
-              cd: path,
-              stderr_to_stdout: true
-            )
+            safe_git_cmd(["add", "-A"], path, 30_000)
+            safe_git_cmd(["reset", "HEAD", "--", ".claude/"], path, 30_000)
 
             # Only commit if there are staged changes left
-            {staged, 0} =
-              System.cmd("git", ["diff", "--cached", "--name-only"],
-                cd: path,
-                stderr_to_stdout: true
-              )
+            case safe_git_cmd(["diff", "--cached", "--name-only"], path, 30_000) do
+              {staged, 0} ->
+                if String.trim(staged) != "" do
+                  safe_git_cmd(["commit", "-m", "gitf: #{op_title}"], path, 30_000)
+                  Logger.debug("Auto-committed changes in worktree for ghost #{state.ghost_id}")
+                end
 
-            if String.trim(staged) != "" do
-              System.cmd("git", ["commit", "-m", "gitf: #{op_title}"],
-                cd: path,
-                stderr_to_stdout: true
-              )
-
-              Logger.debug("Auto-committed changes in worktree for ghost #{state.ghost_id}")
+              _ ->
+                :ok
             end
 
           _ ->
@@ -1287,55 +1280,125 @@ defmodule GiTF.Ghost.Worker do
       :ok
   end
 
+  # Runs a git command under a Task.Supervisor.async_nolink so:
+  #   - hangs are bounded by `timeout_ms` (default 30s)
+  #   - a crash in the shell-out task cannot bring down the Worker
+  defp safe_git_cmd(args, cwd, timeout_ms) do
+    git = System.find_executable("git") || "/usr/bin/git"
+
+    task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        System.cmd(git, args, cd: cwd, stderr_to_stdout: true)
+      end)
+
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        Logger.warning("git #{Enum.join(args, " ")} crashed: #{inspect(reason)}")
+        {"git crashed: #{inspect(reason)}", 1}
+
+      nil ->
+        Logger.warning("git #{Enum.join(args, " ")} timed out after #{timeout_ms}ms")
+        {"git command timed out", 1}
+    end
+  end
+
   # Collects all op metadata in one pass — branch info, files changed, output summary.
-  # Returns a map to merge atomically via Archive.update.
+  # Returns a map to merge atomically via Archive.update. Each section is wrapped
+  # in its own try/rescue so one failure (e.g. a hung/broken git repo) doesn't
+  # discard the other sections (e.g. output_summary).
   defp gather_completion_metadata(state, is_phase_job) do
-    shell = Archive.get(:shells, state.shell_id)
+    shell =
+      try do
+        Archive.get(:shells, state.shell_id)
+      rescue
+        e ->
+          Logger.error(
+            "Ghost #{state.ghost_id}: shell lookup failed: " <>
+              Exception.format(:error, e, __STACKTRACE__)
+          )
+
+          nil
+      end
+
     metadata = %{}
 
-    # Output summary
-    output = IO.iodata_to_binary(state.output)
+    # Output summary — always preserve this even if other sections fail.
+    metadata =
+      try do
+        output = IO.iodata_to_binary(state.output)
 
-    summary =
-      output
-      |> String.split("\n")
-      |> Enum.reject(&(String.trim(&1) == ""))
-      |> Enum.take(-20)
-      |> Enum.join("\n")
-      |> String.slice(0, 2000)
+        summary =
+          output
+          |> String.split("\n")
+          |> Enum.reject(&(String.trim(&1) == ""))
+          |> Enum.take(-20)
+          |> Enum.join("\n")
+          |> String.slice(0, 2000)
 
-    metadata = Map.put(metadata, :output_summary, summary)
+        Map.put(metadata, :output_summary, summary)
+      rescue
+        e ->
+          Logger.error(
+            "Ghost #{state.ghost_id}: output summary failed: " <>
+              Exception.format(:error, e, __STACKTRACE__)
+          )
+
+          metadata
+      end
 
     # Branch info
     metadata =
-      case shell do
-        %{branch: branch} when is_binary(branch) ->
-          Logger.debug("Ghost #{state.ghost_id}: saved branch #{branch} on op #{state.op_id}")
-          Map.merge(metadata, %{branch: branch, shell_id: state.shell_id})
+      try do
+        case shell do
+          %{branch: branch} when is_binary(branch) ->
+            Logger.debug("Ghost #{state.ghost_id}: saved branch #{branch} on op #{state.op_id}")
+            Map.merge(metadata, %{branch: branch, shell_id: state.shell_id})
 
-        nil ->
-          Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for branch info")
-          metadata
+          nil ->
+            Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for branch info")
+            metadata
 
-        _ ->
+          _ ->
+            metadata
+        end
+      rescue
+        e ->
+          Logger.error(
+            "Ghost #{state.ghost_id}: branch metadata failed: " <>
+              Exception.format(:error, e, __STACKTRACE__)
+          )
+
           metadata
       end
 
     # Files changed (only for non-phase ops)
     metadata =
       if not is_phase_job do
-        case shell do
-          %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
-            collect_file_changes(state, metadata, path, "#{base}..HEAD")
+        try do
+          case shell do
+            %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
+              collect_file_changes(state, metadata, path, "#{base}..HEAD")
 
-          %{worktree_path: path} when is_binary(path) ->
-            collect_file_changes(state, metadata, path, "HEAD~1..HEAD")
+            %{worktree_path: path} when is_binary(path) ->
+              collect_file_changes(state, metadata, path, "HEAD~1..HEAD")
 
-          nil ->
-            Logger.warning("Ghost #{state.ghost_id}: shell not found for record_files_changed")
-            metadata
+            nil ->
+              Logger.warning("Ghost #{state.ghost_id}: shell not found for record_files_changed")
+              metadata
 
-          _ ->
+            _ ->
+              metadata
+          end
+        rescue
+          e ->
+            Logger.error(
+              "Ghost #{state.ghost_id}: files_changed metadata failed: " <>
+                Exception.format(:error, e, __STACKTRACE__)
+            )
+
             metadata
         end
       else
@@ -1343,10 +1406,6 @@ defmodule GiTF.Ghost.Worker do
       end
 
     metadata
-  rescue
-    e ->
-      Logger.warning("Ghost #{state.ghost_id}: gather_completion_metadata failed: #{inspect(e)}")
-      %{}
   end
 
   defp collect_file_changes(state, metadata, worktree_path, range) do
@@ -1499,10 +1558,12 @@ defmodule GiTF.Ghost.Worker do
       fallback = if current_model, do: GiTF.Runtime.ModelResolver.fallback(current_model)
 
       if fallback do
-        # Update ghost record with fallback model
-        case Archive.get(:ghosts, state.ghost_id) do
-          nil -> :no_fallback
-          ghost -> Archive.put(:ghosts, %{ghost | assigned_model: fallback})
+        # Update ghost record with fallback model atomically
+        case Archive.update(:ghosts, state.ghost_id, fn ghost ->
+               %{ghost | assigned_model: fallback}
+             end) do
+          {:ok, _} -> :ok
+          _ -> :no_fallback
         end
 
         # Re-spawn the API task with fallback model
@@ -1511,7 +1572,7 @@ defmodule GiTF.Ghost.Worker do
             prompt = build_prompt(state)
 
             task =
-              Task.async(fn ->
+              Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
                 GiTF.Runtime.AgentLoop.run(prompt, path,
                   model: fallback,
                   tool_set: :standard,
@@ -1543,9 +1604,9 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp update_ghost_status(ghost_id, status) do
-    case Archive.get(:ghosts, ghost_id) do
-      nil -> :ok
-      ghost -> Archive.put(:ghosts, %{ghost | status: status})
+    case Archive.update(:ghosts, ghost_id, fn ghost -> %{ghost | status: status} end) do
+      {:ok, _} -> :ok
+      _ -> :ok
     end
   end
 

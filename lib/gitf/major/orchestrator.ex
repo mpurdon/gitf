@@ -172,14 +172,11 @@ defmodule GiTF.Major.Orchestrator do
       redesign_count = Map.get(mission, :redesign_count, 0)
 
       if redesign_count < max_redesign_for(mission.sector_id) do
-        quest_record = Archive.get(:missions, mission_id)
-
-        updated =
-          quest_record
-          |> Map.put(:redesign_count, redesign_count + 1)
+        Archive.update(:missions, mission_id, fn q ->
+          q
+          |> Map.update(:redesign_count, 1, &(&1 + 1))
           |> Map.put(:redesign_reason, reason)
-
-        Archive.put(:missions, updated)
+        end)
 
         {:ok, mission} = GiTF.Missions.get(mission_id)
         start_design(mission)
@@ -388,14 +385,9 @@ defmodule GiTF.Major.Orchestrator do
         end
 
       # Store strategy count so advance logic knows how many to wait for
-      quest_record = Archive.get(:missions, mission.id)
-
-      if quest_record do
-        Archive.put(
-          :missions,
-          Map.put(quest_record, :design_strategy_count, length(strategies))
-        )
-      end
+      Archive.update(:missions, mission.id, fn q ->
+        Map.put(q, :design_strategy_count, length(strategies))
+      end)
 
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "design")
 
@@ -1036,9 +1028,9 @@ defmodule GiTF.Major.Orchestrator do
         redesign_count = Map.get(mission, :redesign_count, 0)
 
         if redesign_count < max_redesign_for(mission.sector_id) do
-          quest_record = Archive.get(:missions, mission.id)
-          updated = Map.put(quest_record, :redesign_count, redesign_count + 1)
-          Archive.put(:missions, updated)
+          Archive.update(:missions, mission.id, fn q ->
+            Map.update(q, :redesign_count, 1, &(&1 + 1))
+          end)
 
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_design(mission)
@@ -1143,15 +1135,12 @@ defmodule GiTF.Major.Orchestrator do
           "Quest #{mission.id}: >50% impl ops failed, switching to fallback plan (#{fallback.strategy})"
         )
 
-        # Record tried plan
-        quest_record = Archive.get(:missions, mission.id)
-
-        if quest_record do
-          tried = Map.get(quest_record, :tried_plans, [])
-          current_plan = Map.get(quest_record, :draft_plan, %{})
-          updated = Map.put(quest_record, :tried_plans, [current_plan | tried])
-          Archive.put(:missions, updated)
-        end
+        # Record tried plan atomically
+        Archive.update(:missions, mission.id, fn q ->
+          tried = Map.get(q, :tried_plans, [])
+          current_plan = Map.get(q, :draft_plan, %{})
+          Map.put(q, :tried_plans, [current_plan | tried])
+        end)
 
         # Re-enter implementation with fallback plan
         specs = fallback.tasks
@@ -1184,11 +1173,10 @@ defmodule GiTF.Major.Orchestrator do
             "Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)"
           )
 
-          # Bump replan count before attempting
-          quest_record = Archive.get(:missions, mission.id)
-
-          if quest_record,
-            do: Archive.put(:missions, Map.put(quest_record, :replan_count, replan_count + 1))
+          # Bump replan count atomically before attempting
+          Archive.update(:missions, mission.id, fn q ->
+            Map.update(q, :replan_count, 1, &(&1 + 1))
+          end)
 
           with {:ok, replan} <- Planner.replan_from_failures(mission.id),
                tasks when is_list(tasks) and tasks != [] <- replan.tasks do
@@ -1523,10 +1511,11 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp store_mission_fix_context(mission_id, fix_ctx) do
-    case Archive.get(:missions, mission_id) do
-      nil -> :ok
-      record -> Archive.put(:missions, Map.put(record, :fix_context, GiTF.Togusa.FixContext.to_map(fix_ctx)))
-    end
+    Archive.update(:missions, mission_id, fn record ->
+      Map.put(record, :fix_context, GiTF.Togusa.FixContext.to_map(fix_ctx))
+    end)
+
+    :ok
   end
 
   defp learn_from_validation_failure(mission, validation) do
@@ -1745,8 +1734,9 @@ defmodule GiTF.Major.Orchestrator do
     # Feed the learning loop — analyze failed ops
     ingest_failure_outcome(mission_id)
 
-    GiTF.Missions.transition_phase(mission_id, "completed", reason)
-    GiTF.Missions.update(mission_id, %{status: "failed"})
+    # Atomically set current_phase="completed" + status="failed" so a crash
+    # between writes can't leave the mission inconsistent.
+    GiTF.Missions.fail_quest(mission_id, reason)
 
     GiTF.Observability.Alerts.dispatch_webhook(
       :quest_failed,
@@ -2262,32 +2252,33 @@ defmodule GiTF.Major.Orchestrator do
 
       [single] ->
         # Only one sector — auto-assign it
-        case GiTF.Archive.get(:missions, mission.id) do
-          nil ->
-            {:error, :no_sector_assigned}
-
-          record ->
-            GiTF.Archive.put(:missions, Map.put(record, :sector_id, single.id))
+        case GiTF.Archive.update(:missions, mission.id, fn record ->
+               Map.put(record, :sector_id, single.id)
+             end) do
+          {:ok, _} ->
             Logger.info("Auto-assigned sector #{single.name} to mission #{mission.id}")
             :ok
+
+          _ ->
+            {:error, :no_sector_assigned}
         end
 
       _multiple ->
         # Multiple sectors — try to use the current default
         case GiTF.Sector.current() do
           {:ok, current} ->
-            case GiTF.Archive.get(:missions, mission.id) do
-              nil ->
-                {:error, :no_sector_assigned}
-
-              record ->
-                GiTF.Archive.put(:missions, Map.put(record, :sector_id, current.id))
-
+            case GiTF.Archive.update(:missions, mission.id, fn record ->
+                   Map.put(record, :sector_id, current.id)
+                 end) do
+              {:ok, _} ->
                 Logger.info(
                   "Auto-assigned current sector #{current.name} to mission #{mission.id}"
                 )
 
                 :ok
+
+              _ ->
+                {:error, :no_sector_assigned}
             end
 
           _ ->

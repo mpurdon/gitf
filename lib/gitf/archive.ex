@@ -84,16 +84,36 @@ defmodule GiTF.Archive do
   under the file lock. Prevents read-modify-write races where two processes
   read the same record, modify it independently, and the last write wins.
 
-  The `update_fn` receives the current record and must return the updated record.
-  Returns `{:ok, updated_record}` or `{:error, :not_found}`.
+  The `update_fn` receives the current record and may return any of:
+
+    * `record` — the updated record (plain form)
+    * `{:ok, record}` — tagged success
+    * `{:ok, record, metadata}` — success with caller metadata (returned
+       as `{:ok, record, metadata}` to the caller — useful for surfacing
+       transition info such as whether a status actually changed)
+    * `{:error, reason}` — reject the write and return `{:error, reason}`
+       to the caller; the record is NOT modified on disk
+
+  Returns `{:ok, updated_record}`, `{:ok, updated_record, metadata}`,
+  `{:error, :not_found}`, `{:error, reason}` (from closure), or
+  `{:error, {:exception, error}}` if the closure raised (stacktrace logged).
 
   ## Example
 
       Archive.update(:ops, op_id, fn op ->
         Map.merge(op, %{branch: "ghost/abc", files_changed: 3})
       end)
+
+      # Validation / tagged return:
+      Archive.update(:ops, op_id, fn op ->
+        case validate(op) do
+          :ok -> {:ok, %{op | status: "done"}}
+          {:error, r} -> {:error, r}
+        end
+      end)
   """
-  @spec update(atom(), String.t(), (map() -> map())) :: {:ok, map()} | {:error, :not_found}
+  @spec update(atom(), String.t(), (map() -> any())) ::
+          {:ok, map()} | {:ok, map(), map()} | {:error, term()}
   def update(collection, id, update_fn) when is_function(update_fn, 1) do
     with_lock(
       fn data ->
@@ -101,25 +121,50 @@ defmodule GiTF.Archive do
 
         case Map.get(col, id) do
           nil ->
-            # Signal not-found through process dictionary (lock fn must return data)
-            Process.put(:archive_update_result, {:error, :not_found})
-            data
+            {data, {:error, :not_found}}
 
           record ->
-            updated = record |> update_fn.() |> ensure_updated_at()
-            Process.put(:archive_update_result, {:ok, updated})
-            col = Map.put(col, id, updated)
-            Map.put(data, collection, col)
+            try do
+              case update_fn.(record) do
+                {:error, reason} ->
+                  {data, {:error, reason}}
+
+                {:ok, updated, metadata} when is_map(updated) ->
+                  updated = ensure_updated_at(updated)
+                  col = Map.put(col, id, updated)
+                  new_data = Map.put(data, collection, col)
+                  {new_data, {:ok, updated, metadata}}
+
+                {:ok, updated} when is_map(updated) ->
+                  updated = ensure_updated_at(updated)
+                  col = Map.put(col, id, updated)
+                  new_data = Map.put(data, collection, col)
+                  {new_data, {:ok, updated}}
+
+                updated when is_map(updated) ->
+                  updated = ensure_updated_at(updated)
+                  col = Map.put(col, id, updated)
+                  new_data = Map.put(data, collection, col)
+                  {new_data, {:ok, updated}}
+
+                other ->
+                  {data, {:error, {:bad_update_fn_return, other}}}
+              end
+            rescue
+              e ->
+                require Logger
+
+                Logger.error(
+                  "Archive.update closure for #{inspect(collection)}/#{id} raised: " <>
+                    Exception.format(:error, e, __STACKTRACE__)
+                )
+
+                {data, {:error, {:exception, e}}}
+            end
         end
       end,
       collection
     )
-
-    case Process.delete(:archive_update_result) do
-      {:ok, updated} -> {:ok, updated}
-      {:error, :not_found} -> {:error, :not_found}
-      nil -> {:error, :not_found}
-    end
   end
 
   @doc "Deletes a record by collection and ID."
@@ -481,13 +526,26 @@ defmodule GiTF.Archive do
     ArgumentError -> :ok
   end
 
+  # `mutate_fn` may return either the new data map, or a `{new_data, result}`
+  # tuple. In the latter case, `with_lock` returns `result`; otherwise it
+  # returns `:ok`. This lets callers smuggle values (e.g. the updated record,
+  # transition metadata, error tags) out of the lock closure without using
+  # the process dictionary (which is not reentrancy-safe).
   defp with_lock(mutate_fn, collection \\ nil) do
     acquire_lock()
 
     try do
       data = read_data()
-      new_data = mutate_fn.(data)
-      write_data(new_data, collection)
+
+      case mutate_fn.(data) do
+        {new_data, result} when is_map(new_data) ->
+          write_data(new_data, collection)
+          result
+
+        new_data when is_map(new_data) ->
+          write_data(new_data, collection)
+          :ok
+      end
     after
       release_lock()
     end
