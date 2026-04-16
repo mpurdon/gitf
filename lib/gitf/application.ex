@@ -120,6 +120,12 @@ defmodule GiTF.Application do
               name: GiTF.Runtime.ProviderLimiter.Supervisor, strategy: :one_for_one},
              {DynamicSupervisor, name: GiTF.MissionSupervisor, strategy: :one_for_one},
              {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!())},
+             # Periodic recovery/stall/debrief timers — owned by a sibling so
+             # Janitor crashes don't disrupt Major's link routing. Positioned
+             # AFTER Major: under :rest_for_one a Janitor crash leaves Major
+             # untouched, while a Major restart will also restart Janitor so
+             # it re-acquires its read accessor cleanly.
+             {GiTF.Major.Janitor, []},
              {GiTF.SectorSupervisor, []},
              {GiTF.Budget.Watchdog, []},
              {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}

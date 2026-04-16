@@ -80,6 +80,21 @@ defmodule GiTF.Major do
     GenServer.call(@name, :await_session_end, :infinity)
   end
 
+  @doc """
+  Read-only snapshot of the stall-tracking subset of Major state.
+
+  Used by `GiTF.Major.Janitor` to run stall detection without holding a
+  reference to Major's full state. Returns `:error` if Major isn't
+  running (so the Janitor can no-op cleanly during startup or test).
+  """
+  @spec get_stall_state() ::
+          {:ok, %{stall_timeout: non_neg_integer(), last_checkpoint: map()}} | :error
+  def get_stall_state do
+    GenServer.call(@name, :get_stall_state, 5_000)
+  catch
+    :exit, _ -> :error
+  end
+
   # -- GenServer callbacks ---------------------------------------------------
 
   @impl true
@@ -119,30 +134,15 @@ defmodule GiTF.Major do
 
     Logger.info("Major initialized at #{gitf_root}")
 
-    # Recover stuck ops whose worker processes died
-    recover_stuck_jobs()
+    # Periodic recovery/stall/debrief/phase-advancement/idle-sweeper timers
+    # are owned by GiTF.Major.Janitor (sibling process under the same
+    # supervisor). It also handles startup recovery (stuck ops, missed
+    # links) once it boots.
 
-    # Recover any missed links from before we started
-    send(self(), :recover_missed_waggles)
-    schedule_waggle_recovery()
-
-    # Periodically check for pending ops that need ghosts
+    # Periodically check for pending ops that need ghosts (kept on Major
+    # because spawn cycles depend on Major-owned state — active_ghosts,
+    # effective_max_ghosts, retry_pending).
     schedule_job_spawner()
-
-    # Periodically check for stalled ghosts
-    schedule_stall_check()
-
-    # Periodically recover stuck ops (workers died without link_msg)
-    schedule_stuck_recovery()
-
-    # Periodically check post-review windows
-    schedule_debrief_check()
-
-    # Periodically advance stuck mission phases
-    schedule_phase_advancement()
-
-    # Periodically run janitor maintenance when idle
-    schedule_janitor()
 
     # Periodically re-evaluate ghost capacity against budget pressure
     schedule_autoscale()
@@ -189,6 +189,15 @@ defmodule GiTF.Major do
     {:noreply, Map.put(state, :awaiter, from)}
   end
 
+  def handle_call(:get_stall_state, _from, state) do
+    {:reply,
+     {:ok,
+      %{
+        stall_timeout: state.stall_timeout,
+        last_checkpoint: state.last_checkpoint
+      }}, state}
+  end
+
   @impl true
   def handle_cast({:phase_complete, _ghost_id, _op_id, _mission_id}, state) do
     # Deprecated: phase completion now uses Link.send exclusively (durable, deduplicated).
@@ -198,6 +207,41 @@ defmodule GiTF.Major do
 
   def handle_cast({:apply_autoscale, target, meta}, state) do
     {:noreply, apply_autoscale(state, target, meta)}
+  end
+
+  # Driven by `GiTF.Major.Janitor` after stall detection. The Janitor has
+  # already killed the worker; here we apply the state-touching side
+  # effects (Ops.fail, retry scheduling, archive update) under the same
+  # callback so retry_pending stays consistent.
+  def handle_cast({:hard_stall_recovery, ghost_id, op_id, seconds_since}, state) do
+    state =
+      if op_id do
+        GiTF.Ops.fail(op_id)
+        notify_run_job_failed(op_id)
+
+        link_msg = %{
+          from: ghost_id,
+          subject: "stall_timeout",
+          body: "Ghost stalled for #{seconds_since}s without backup. Auto-failed for retry."
+        }
+
+        maybe_retry_job(link_msg, state)
+      else
+        state
+      end
+
+    GiTF.Archive.update(:ghosts, ghost_id, fn g ->
+      %{g | status: GhostStatus.crashed()}
+    end)
+
+    {:noreply, state}
+  end
+
+  # Janitor periodically scans for unread inbound links that the live
+  # PubSub subscription missed (slow handler, restart, etc). It triggers
+  # processing here so all link state mutations stay on Major.
+  def handle_cast(:recover_missed_waggles, state) do
+    {:noreply, recover_missed_waggles(state)}
   end
 
   def handle_cast(_msg, state), do: {:noreply, state}
@@ -339,51 +383,9 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
-  def handle_info(:recover_missed_waggles, state) do
-    state = recover_missed_waggles(state)
-    {:noreply, state}
-  end
-
-  def handle_info(:schedule_waggle_recovery, state) do
-    state = recover_missed_waggles(state)
-    schedule_waggle_recovery()
-    {:noreply, state}
-  end
-
   def handle_info(:spawn_ready_jobs, state) do
     state = spawn_all_ready_jobs(state)
     schedule_job_spawner()
-    {:noreply, state}
-  end
-
-  def handle_info(:check_stalls, state) do
-    detect_stalled_bees(state)
-    schedule_stall_check()
-    {:noreply, state}
-  end
-
-  def handle_info(:recover_stuck, state) do
-    recover_stuck_jobs()
-    timeout_stale_jobs()
-    schedule_stuck_recovery()
-    {:noreply, state}
-  end
-
-  def handle_info(:check_debriefs, state) do
-    check_debriefs()
-    schedule_debrief_check()
-    {:noreply, state}
-  end
-
-  def handle_info(:advance_stuck_phases, state) do
-    advance_stuck_mission_phases()
-    schedule_phase_advancement()
-    {:noreply, state}
-  end
-
-  def handle_info(:janitor_run, state) do
-    GiTF.Major.Janitor.run_if_idle()
-    schedule_janitor()
     {:noreply, state}
   end
 
@@ -597,85 +599,10 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
-  # -- Private: stuck op recovery --------------------------------------------
-
-  defp recover_stuck_jobs do
-    stuck_jobs =
-      GiTF.Archive.by_index(:ops, :status, "running")
-
-    Enum.each(stuck_jobs, fn op ->
-      worker_alive? =
-        case op.ghost_id do
-          nil ->
-            false
-
-          ghost_id ->
-            case GiTF.Ghost.Worker.lookup(ghost_id) do
-              {:ok, pid} -> Process.alive?(pid)
-              :error -> false
-            end
-        end
-
-      if !worker_alive? do
-        Logger.warning("Recovering stuck op #{op.id} (worker dead)")
-        GiTF.Ops.fail(op.id)
-
-        # Trigger retry via delayed_retry (same path as waggle-based failures)
-        if !retry_exists?(op.id) do
-          send(self(), {:delayed_retry, op.id, "Worker process died unexpectedly"})
-        end
-      end
-    end)
-  rescue
-    e ->
-      Logger.warning("Stuck op recovery failed: #{Exception.message(e)}")
-  end
-
-  # -- Private: op state timeout detection ------------------------------------
-
   # Timeouts live in `config :gitf, :timeouts` (see config/config.exs).
+  # Stuck-op recovery and stale-op timeout sweeps now live in
+  # `GiTF.Major.Janitor`.
   defp timeout_cfg(key, default), do: Application.get_env(:gitf, :timeouts, [])[key] || default
-
-  defp timeout_stale_jobs do
-    now = DateTime.utc_now()
-    pending_timeout = timeout_cfg(:pending_timeout_seconds, 600)
-    assigned_timeout = timeout_cfg(:assigned_timeout_seconds, 600)
-
-    # Timeout ops stuck in "pending" for too long (>10 min)
-    GiTF.Archive.by_index(:ops, :status, "pending")
-    |> Enum.each(fn op ->
-      age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
-
-      if age > pending_timeout do
-        # Only fail if the op is supposed to be active (has a mission that's running)
-        quest_active? =
-          case GiTF.Archive.get(:missions, op.mission_id) do
-            %{status: s} when s in ["active", "implementation"] -> true
-            _ -> false
-          end
-
-        if quest_active? and GiTF.Ops.ready?(op.id) do
-          Logger.warning("Job #{op.id} stuck pending for #{age}s, resetting")
-          GiTF.Ops.fail(op.id)
-          GiTF.Ops.reset(op.id, "Timed out in pending state after #{age}s")
-        end
-      end
-    end)
-
-    # Timeout ops stuck in "assigned" (ghost never started working)
-    GiTF.Archive.by_index(:ops, :status, "assigned")
-    |> Enum.each(fn op ->
-      age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
-
-      if age > assigned_timeout do
-        Logger.warning("Job #{op.id} stuck assigned for #{age}s, failing for retry")
-        GiTF.Ops.fail(op.id)
-      end
-    end)
-  rescue
-    e ->
-      Logger.warning("Job timeout check failed: #{Exception.message(e)}")
-  end
 
   # -- Private: link_msg handling ----------------------------------------------
   # Business logic is deliberately minimal here. The Major GenServer
@@ -1600,63 +1527,10 @@ defmodule GiTF.Major do
     end
   end
 
-  # -- Private: post-review checks --------------------------------------------
-
-  defp schedule_debrief_check do
-    Process.send_after(self(), :check_debriefs, timeout_cfg(:debrief_interval_ms, 5 * 60 * 1_000))
-  end
-
-  defp check_debriefs do
-    # Each review check runs async so validation commands (up to 120s) and
-    # auto-revert (which acquires the sector lock) don't block Major's mailbox.
-    GiTF.Debrief.active_reviews()
-    |> Enum.each(fn review ->
-      Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
-        process_debrief_review(review)
-      end)
-    end)
-  rescue
-    e ->
-      Logger.warning("Post-review check failed: #{Exception.message(e)}")
-  end
-
-  defp process_debrief_review(review) do
-    if GiTF.Debrief.expired?(review) do
-      Logger.info("Post-review expired for mission #{review.mission_id}, closing")
-      GiTF.Debrief.close_review(review.mission_id)
-    else
-      case GiTF.Debrief.check_regressions(review.mission_id) do
-        {:ok, :regression, findings} ->
-          GiTF.Debrief.handle_regression(review.mission_id, findings)
-
-        _ ->
-          :ok
-      end
-    end
-  rescue
-    e ->
-      Logger.warning(
-        "Debrief review for mission #{review.mission_id} failed: #{Exception.message(e)}"
-      )
-  end
-
-  # -- Private: stall detection ------------------------------------------------
-
-  defp schedule_stall_check do
-    Process.send_after(self(), :check_stalls, timeout_cfg(:stall_check_interval_ms, 2 * 60 * 1_000))
-  end
-
-  defp schedule_stuck_recovery do
-    Process.send_after(self(), :recover_stuck, timeout_cfg(:stuck_recovery_interval_ms, 5 * 60 * 1_000))
-  end
-
-  defp schedule_phase_advancement do
-    Process.send_after(self(), :advance_stuck_phases, timeout_cfg(:phase_advancement_interval_ms, 3 * 60 * 1_000))
-  end
-
-  defp schedule_janitor do
-    Process.send_after(self(), :janitor_run, timeout_cfg(:janitor_interval_ms, 15 * 60 * 1_000))
-  end
+  # Periodic timers for stall detection, debrief checks, phase advancement,
+  # stuck-op recovery, and the idle code-quality sweeper now live in
+  # `GiTF.Major.Janitor`. Major keeps only the timers whose work touches
+  # Major's own state directly (job spawning, autoscaling).
 
   defp schedule_autoscale do
     Process.send_after(self(), :autoscale_check, timeout_cfg(:autoscale_interval_ms, 60_000))
@@ -1723,111 +1597,10 @@ defmodule GiTF.Major do
       Logger.warning("Quest resumption failed: #{Exception.message(e)}")
   end
 
-  defp advance_stuck_mission_phases do
-    # Periodically call advance_quest for missions in non-terminal phases.
-    # This catches cases where a phase ghost completed but the link_msg was lost.
-    phase_statuses = [
-      "research",
-      "requirements",
-      "design",
-      "review",
-      "planning",
-      "implementation",
-      "validation",
-      "awaiting_approval",
-      "sync",
-      "simplify",
-      "scoring"
-    ]
-
-    GiTF.Archive.all(:missions)
-    |> Enum.filter(fn q ->
-      q[:status] in phase_statuses or q[:current_phase] in phase_statuses
-    end)
-    |> Enum.each(fn mission ->
-      current_phase = mission[:current_phase]
-
-      case GiTF.Major.Orchestrator.advance_quest(mission.id) do
-        {:ok, new_phase} ->
-          if new_phase != current_phase do
-            Logger.info("Periodic phase check advanced mission #{mission.id} to #{new_phase}")
-          end
-
-        _ ->
-          :ok
-      end
-    end)
-  rescue
-    e ->
-      Logger.warning("Phase advancement check failed: #{Exception.message(e)}")
-  end
-
-  @doc false
-  def detect_stalled_bees(state) do
-    now = DateTime.utc_now()
-    base_stall_seconds = div(state.stall_timeout, 1000)
-
-    working_bees = GiTF.Ghosts.list(status: GhostStatus.working())
-
-    Enum.each(working_bees, fn ghost ->
-      last_cp = Map.get(state.last_checkpoint, ghost.id)
-
-      # Use backup time if available, otherwise use ghost's inserted_at
-      reference_time =
-        if last_cp, do: last_cp.at, else: ghost.inserted_at
-
-      seconds_since = DateTime.diff(now, reference_time, :second)
-
-      # Scale stall timeout with op complexity
-      stall_seconds = adaptive_stall_timeout(ghost, base_stall_seconds)
-
-      if seconds_since > stall_seconds * 2 do
-        # Double the stall threshold = hard-fail the ghost
-        Logger.warning(
-          "Hard-stall: ghost #{ghost.id} unresponsive for #{seconds_since}s, failing op"
-        )
-
-        # Kill the worker process if it exists
-        case GiTF.Ghost.Worker.lookup(ghost.id) do
-          {:ok, pid} -> Process.exit(pid, :kill)
-          :error -> :ok
-        end
-
-        # Fail the op so retry logic picks it up
-        if ghost.op_id do
-          GiTF.Ops.fail(ghost.op_id)
-          notify_run_job_failed(ghost.op_id)
-
-          link_msg = %{
-            from: ghost.id,
-            subject: "stall_timeout",
-            body: "Ghost stalled for #{seconds_since}s without backup. Auto-failed for retry."
-          }
-
-          maybe_retry_job(link_msg, state)
-        end
-
-        GiTF.Archive.update(:ghosts, ghost.id, fn g ->
-          %{g | status: GhostStatus.crashed()}
-        end)
-      else
-        if seconds_since > stall_seconds do
-          Logger.warning(
-            "Stall detected: ghost #{ghost.id} has not reported in #{seconds_since}s " <>
-              "(threshold: #{stall_seconds}s)"
-          )
-
-          Phoenix.PubSub.broadcast(
-            GiTF.PubSub,
-            "section:alerts",
-            {:stall_warning, ghost.id, seconds_since}
-          )
-        end
-      end
-    end)
-  rescue
-    _ -> :ok
-  end
+  # Stall detection itself lives in `GiTF.Major.Janitor`. Major exposes
+  # `get_stall_state/0` so the Janitor can read the snapshot it needs
+  # (stall_timeout, last_checkpoint) without coupling to Major's full
+  # state shape.
 
   # -- Private: periodic op spawning ------------------------------------------
 
@@ -2008,10 +1781,9 @@ defmodule GiTF.Major do
 
   # -- Private: link_msg recovery ------------------------------------------------
 
-  defp schedule_waggle_recovery do
-    Process.send_after(self(), :schedule_waggle_recovery, timeout_cfg(:waggle_recovery_interval_ms, 30_000))
-  end
-
+  # Triggered by `GiTF.Major.Janitor` via the `:recover_missed_waggles`
+  # cast — Major owns this because it mutates state through
+  # `handle_link_received/2`.
   defp recover_missed_waggles(state) do
     cutoff = DateTime.shift(DateTime.utc_now(), second: -timeout_cfg(:waggle_stale_seconds, 30))
 
@@ -2197,43 +1969,6 @@ defmodule GiTF.Major do
     e ->
       Logger.warning("Reimagine failed for shell #{inspect(shell_id)}: #{Exception.message(e)}")
       state
-  end
-
-  # Scale stall timeout based on op complexity:
-  # simple = 1x (10 min default), moderate = 2x (20 min), complex = 4x (40 min)
-  defp adaptive_stall_timeout(ghost, base_seconds) do
-    multiplier =
-      case ghost.op_id do
-        nil ->
-          1
-
-        op_id ->
-          case GiTF.Ops.get(op_id) do
-            {:ok, op} ->
-              case Map.get(op, :triage_result) do
-                %{complexity: :complex} ->
-                  4
-
-                %{complexity: :moderate} ->
-                  2
-
-                _ ->
-                  # Also check string complexity from classifier
-                  case Map.get(op, :complexity) do
-                    c when c in ["high", "critical"] -> 4
-                    "moderate" -> 2
-                    _ -> 1
-                  end
-              end
-
-            _ ->
-              1
-          end
-      end
-
-    base_seconds * multiplier
-  rescue
-    _ -> base_seconds
   end
 
   defp unblock_scout_parent(op_id) do

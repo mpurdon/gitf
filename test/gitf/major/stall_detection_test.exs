@@ -78,7 +78,7 @@ defmodule GiTF.Major.StallDetectionTest do
       }
 
       # Should not raise, just logs warnings
-      assert :ok == GiTF.Major.detect_stalled_bees(state)
+      assert :ok == GiTF.Major.Janitor.detect_stalled_bees(state)
     end
 
     test "does not flag ghosts with recent backups" do
@@ -102,7 +102,7 @@ defmodule GiTF.Major.StallDetectionTest do
         stall_timeout: :timer.minutes(10)
       }
 
-      assert :ok == GiTF.Major.detect_stalled_bees(state)
+      assert :ok == GiTF.Major.Janitor.detect_stalled_bees(state)
     end
   end
 
