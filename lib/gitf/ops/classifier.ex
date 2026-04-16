@@ -19,6 +19,10 @@ defmodule GiTF.Ops.Classifier do
   - `:complexity` - The complexity level
   - `:recommended_model` - The optimal model for this op
   - `:reason` - Explanation for the classification
+
+  When sufficient reputation data exists (≥5 samples), a model that has
+  historically failed >50% of the time on this op_type is escalated to
+  the next tier instead of being recommended again.
   """
   @spec classify_and_recommend(String.t(), String.t() | nil) :: map()
   def classify_and_recommend(title, description \\ nil) do
@@ -26,16 +30,55 @@ defmodule GiTF.Ops.Classifier do
 
     op_type = classify_type(text)
     complexity = classify_complexity(text, op_type)
-    model = ModelSelector.select_model_for_job(op_type, complexity)
+    static_model = ModelSelector.select_model_for_job(op_type, complexity)
+    {model, override_reason} = apply_reputation_override(static_model, op_type)
     risk_level = classify_risk(title, description)
+
+    base_reason = build_reason(op_type, complexity, text)
+    reason = if override_reason, do: base_reason <> ". " <> override_reason, else: base_reason
 
     %{
       op_type: op_type,
       complexity: complexity,
       recommended_model: model,
       risk_level: risk_level,
-      reason: build_reason(op_type, complexity, text)
+      reason: reason
     }
+  end
+
+  # If the statically-recommended model has poor reputation on this op_type
+  # (≥5 samples, success_rate <0.5), escalate to a more capable model.
+  defp apply_reputation_override(static_model, op_type) do
+    try do
+      rep = GiTF.Trust.model_reputation(static_model, op_type)
+
+      cond do
+        is_nil(rep) ->
+          {static_model, nil}
+
+        rep.total_jobs < 5 ->
+          {static_model, nil}
+
+        rep.success_rate < 0.5 ->
+          escalated = GiTF.Runtime.ModelResolver.escalate(static_model)
+
+          if escalated && escalated != static_model do
+            reason =
+              "Reputation override: #{static_model} has " <>
+                "#{Float.round(rep.success_rate * 100, 0)}% success on #{op_type} " <>
+                "(#{rep.total_jobs} jobs); escalating to #{escalated}"
+
+            {escalated, reason}
+          else
+            {static_model, nil}
+          end
+
+        true ->
+          {static_model, nil}
+      end
+    rescue
+      _ -> {static_model, nil}
+    end
   end
 
   @doc """

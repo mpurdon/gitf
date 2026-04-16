@@ -17,9 +17,15 @@ defmodule GiTF.Intel.FailureAnalysis do
       similar = find_similar_failures(op, failure_type)
       suggestions = generate_suggestions(failure_type, root_cause, similar)
 
+      # Capture the model so we can later answer "what does model X struggle
+      # with on op_type Y" via summaries_for_model/2.
+      model = GiTF.Runtime.ModelResolver.normalize_key(op[:assigned_model])
+
       analysis = %{
         id: generate_id("fa"),
         op_id: op_id,
+        op_type: op[:op_type],
+        model: model,
         failure_type: failure_type,
         root_cause: root_cause,
         similar_count: length(similar),
@@ -64,6 +70,39 @@ defmodule GiTF.Intel.FailureAnalysis do
   end
 
   @doc """
+  Returns recent failure summaries for a (model, op_type) pair, newest first.
+
+  Use this when escalating a retry to a different model — pass the prior
+  model's failures into the new prompt as "things to avoid" context.
+  """
+  @spec summaries_for_model(String.t(), atom() | String.t(), keyword()) :: [map()]
+  def summaries_for_model(model, op_type, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 5)
+    normalized = GiTF.Runtime.ModelResolver.normalize_key(model)
+    op_type_atom = if is_binary(op_type), do: String.to_existing_atom(op_type), else: op_type
+
+    Archive.all(:failure_analyses)
+    |> Enum.filter(fn fa ->
+      GiTF.Runtime.ModelResolver.normalize_key(fa[:model]) == normalized and
+        fa[:op_type] == op_type_atom
+    end)
+    |> Enum.sort_by(& &1.analyzed_at, {:desc, DateTime})
+    |> Enum.take(limit)
+    |> Enum.map(fn fa ->
+      %{
+        op_id: fa.op_id,
+        failure_type: fa.failure_type,
+        root_cause: fa.root_cause,
+        analyzed_at: fa.analyzed_at
+      }
+    end)
+  rescue
+    ArgumentError ->
+      # op_type atom not loaded — never seen, no failures recorded
+      []
+  end
+
+  @doc """
   Learn from failures and store patterns.
   """
   def learn_from_failures(sector_id) do
@@ -89,6 +128,10 @@ defmodule GiTF.Intel.FailureAnalysis do
     combined = Enum.join([error_msg, output, feedback || ""], " ")
 
     cond do
+      # Ghost claimed done with zero file changes — model didn't follow tool
+      # instructions. Distinct from generic :unknown so we can record it
+      # separately in reputation tracking.
+      String.contains?(combined, "0 file changes") -> :empty_completion
       String.contains?(combined, "timeout") -> :timeout
       String.contains?(combined, "compilation") -> :compilation_error
       String.contains?(combined, "test") && String.contains?(combined, "failed") -> :test_failure
@@ -111,6 +154,8 @@ defmodule GiTF.Intel.FailureAnalysis do
       :quality_gate_failure -> "Code quality below threshold"
       :security_gate_failure -> "Security issues detected"
       :merge_conflict -> "Git merge conflict"
+      :empty_completion ->
+        "Ghost reported success but produced 0 file changes — model failed to invoke edit tools"
       :unknown -> "Unknown failure cause"
     end
   end

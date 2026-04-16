@@ -86,8 +86,10 @@ defmodule GiTF.Ops.ClassifierTest do
     end
 
     test "recommends based on implementation complexity" do
+      # simple_fix at non-complex → general (was fast — code edits need
+      # tool-use-capable models)
       simple = Classifier.classify_and_recommend("Fix simple typo in config")
-      assert simple.recommended_model == "fast"
+      assert simple.recommended_model == "general"
 
       complex = Classifier.classify_and_recommend("Implement complex payment integration")
       assert complex.recommended_model == "thinking"

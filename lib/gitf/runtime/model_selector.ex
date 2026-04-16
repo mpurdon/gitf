@@ -81,13 +81,19 @@ defmodule GiTF.Runtime.ModelSelector do
   def select_model_for_job(:research, _complexity), do: "fast"
   def select_model_for_job(:summarization, _complexity), do: "fast"
   def select_model_for_job(:audit, _complexity), do: "fast"
-  def select_model_for_job(:simple_fix, _complexity), do: "fast"
+
+  # simple_fix still edits code — fast models (gemini-flash) often claim
+  # success without making any tool calls. Use general by default; reserve
+  # thinking for complex bug fixes.
+  def select_model_for_job(:simple_fix, :complex), do: "thinking"
+  def select_model_for_job(:simple_fix, _complexity), do: "general"
 
   def select_model_for_job(:refactoring, :complex), do: "thinking"
   def select_model_for_job(:refactoring, _complexity), do: "general"
 
-  # Default to fast for unknown types (cost-effective)
-  def select_model_for_job(_op_type, _complexity), do: "fast"
+  # Default to general for unknown types — safer than fast, since unknown
+  # types may involve tool use that fast models handle unreliably.
+  def select_model_for_job(_op_type, _complexity), do: "general"
 
   @doc """
   Get model information from the registry.

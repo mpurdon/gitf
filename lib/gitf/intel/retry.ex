@@ -42,6 +42,8 @@ defmodule GiTF.Intel.Retry do
       :quality_gate_failure -> :improve_quality
       :security_gate_failure -> :fix_security
       :merge_conflict -> :fresh_worktree
+      # Model didn't make edits — escalate to a more capable model
+      :empty_completion -> :different_model
       :unknown -> :different_model
     end
   end
@@ -113,11 +115,38 @@ defmodule GiTF.Intel.Retry do
   end
 
   defp retry_with_different_model(op, analysis) do
-    # Escalate to a more capable model using configured model tiers
-    current = Map.get(op, :model, "haiku")
-    new_model = ModelResolver.escalate(current) || ModelResolver.resolve("opus")
+    # Escalate to a more capable model. Ops persist the actual model under
+    # :assigned_model — the previous code read :model which never existed,
+    # so escalation always defaulted to "haiku" instead of escalating from
+    # the real prior model.
+    current = Map.get(op, :assigned_model) || Map.get(op, :recommended_model) || "general"
+    new_model = ModelResolver.escalate(current) || ModelResolver.resolve("thinking")
 
-    retry_job(op, :different_model, %{model: new_model, feedback: analysis[:feedback]})
+    # Pull recent failure summaries for the prior model + this op_type so the
+    # new prompt can warn the new model about known failure modes.
+    prior_failures =
+      FailureAnalysis.summaries_for_model(current, Map.get(op, :op_type, :unknown), limit: 3)
+
+    note =
+      if prior_failures == [] do
+        "Previous attempt with model #{current} failed (#{analysis.failure_type}). " <>
+          "You are a more capable model — make actual code edits using the file tools."
+      else
+        priors =
+          prior_failures
+          |> Enum.map(fn f -> "- #{f.failure_type}: #{f.root_cause}" end)
+          |> Enum.join("\n")
+
+        "Previous attempts with model #{current} on this kind of task failed:\n" <>
+          priors <>
+          "\nYou are a more capable model — make actual code edits using the file tools."
+      end
+
+    retry_job(op, :different_model, %{
+      model: new_model,
+      note: note,
+      feedback: analysis[:feedback]
+    })
   end
 
   defp retry_with_simplified_scope(op, analysis) do
@@ -158,11 +187,17 @@ defmodule GiTF.Intel.Retry do
   defp retry_job(op, strategy, metadata) do
     # Create a new op based on the failed one, carrying forward all required fields
     new_model = if is_map(metadata), do: metadata[:model], else: nil
+    retry_note = if is_map(metadata), do: metadata[:note], else: nil
 
     # If the failed ghost left a backup checkpoint, include it in the new op's
     # description so the retry ghost can pick up where the crashed attempt
-    # left off instead of starting from scratch.
-    enriched_description = enrich_description_with_backup(op)
+    # left off instead of starting from scratch. Then prepend the strategy
+    # note (e.g. "previous model failed because X — avoid Y") so the new
+    # ghost sees the guidance up front.
+    enriched_description =
+      op
+      |> enrich_description_with_backup()
+      |> prepend_retry_note(retry_note)
 
     new_job = %{
       id: generate_id("op"),
@@ -203,6 +238,13 @@ defmodule GiTF.Intel.Retry do
 
   defp generate_id(prefix) do
     "#{prefix}-#{:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)}"
+  end
+
+  defp prepend_retry_note(description, nil), do: description
+  defp prepend_retry_note(description, ""), do: description
+
+  defp prepend_retry_note(description, note) do
+    "## Retry Guidance\n\n" <> note <> "\n\n---\n\n" <> (description || "")
   end
 
   # Loads the failed op's ghost backup and appends its progress summary to
