@@ -142,18 +142,33 @@ defmodule GiTF.Togusa.FixContext do
 
   defp format_failures(failures) when is_map(failures) do
     lines =
-      Enum.map(failures, fn
-        {key, value} when is_list(value) ->
-          "- **#{key}**: #{Enum.join(value, ", ")}"
-
-        {key, value} ->
-          "- **#{key}**: #{value}"
+      Enum.map(failures, fn {key, value} ->
+        "- **#{key}**: #{format_value(value)}"
       end)
 
     if lines == [], do: "No specific failures recorded.", else: Enum.join(lines, "\n")
   end
 
   defp format_failures(_), do: "No specific failures recorded."
+
+  # Render a value for inline embedding in markdown. Lists may contain maps
+  # (e.g. validation `requirements_met` is a list of %{"req_id" => ..., "met"
+  # => ..., "evidence" => ...}); converting those to strings via interpolation
+  # raises String.Chars. Pretty-print maps inline; keep strings as-is.
+  defp format_value(value) when is_binary(value), do: value
+  defp format_value(value) when is_atom(value) or is_number(value), do: to_string(value)
+
+  defp format_value(value) when is_list(value) do
+    value |> Enum.map(&format_value/1) |> Enum.join(", ")
+  end
+
+  defp format_value(value) when is_map(value) do
+    value
+    |> Enum.map(fn {k, v} -> "#{k}=#{format_value(v)}" end)
+    |> Enum.join(" ")
+  end
+
+  defp format_value(value), do: inspect(value)
 
   defp parse_timestamp(%DateTime{} = dt), do: dt
 

@@ -1375,11 +1375,15 @@ defmodule GiTF.Major.Orchestrator do
     end
   rescue
     e ->
-      Logger.warning(
-        "Validation fix attempt failed for mission #{mission.id}: #{Exception.message(e)}"
+      Logger.error(
+        "Validation fix attempt failed for mission #{mission.id}: " <>
+          Exception.format(:error, e, __STACKTRACE__)
       )
 
-      fail_quest(mission.id, "Validation fix attempt crashed")
+      fail_quest(
+        mission.id,
+        "Validation fix attempt crashed: #{Exception.message(e)}"
+      )
   end
 
   # Build a comprehensive fix description from validation findings
