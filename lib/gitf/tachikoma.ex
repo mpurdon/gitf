@@ -574,12 +574,40 @@ defmodule GiTF.Tachikoma do
             end
           end)
 
-        all_failed = Enum.all?(impl_jobs, &(&1.status in ["failed", "rejected", "killed"]))
+        # An op is "really failed" if it's in a failure state AND it's not
+        # awaiting/has a successful retry. A retry that hasn't spawned yet
+        # (delayed_retry timer pending — typically 31s+ window) leaves the
+        # original :status as "failed" with retried_as nil and retry_count
+        # below max. We must wait, not auto-fail.
+        all_resolved_or_pending_retry =
+          Enum.all?(impl_jobs, fn op -> op_resolved_or_retry_pending?(op, impl_jobs) end)
 
-        if all_terminal and not any_working do
-          if all_failed do
+        all_failed_unresolved =
+          Enum.all?(impl_jobs, fn op ->
+            op.status in ["failed", "rejected", "killed"] and
+              not op_resolved_or_retry_pending?(op, impl_jobs)
+          end)
+
+        cond do
+          not all_terminal ->
+            :ok
+
+          any_working ->
+            :ok
+
+          all_resolved_or_pending_retry and not all_failed_unresolved ->
+            # Mix of done / retry-resolved / pending-retry — kick the
+            # orchestrator instead of auto-failing.
+            try do
+              GiTF.Major.Orchestrator.advance_quest(mission.id)
+            rescue
+              _ -> :ok
+            end
+
+          all_failed_unresolved ->
             Logger.warning(
-              "Tachikoma: mission #{mission.id} has all ops failed/rejected with no active ghosts — marking failed"
+              "Tachikoma: mission #{mission.id} has all ops failed/rejected " <>
+                "(retries exhausted, no in-flight retry, no successful sibling) — marking failed"
             )
 
             GiTF.Missions.transition_phase(
@@ -601,15 +629,14 @@ defmodule GiTF.Tachikoma do
               "mission_exhausted",
               "Mission #{mission.id} auto-failed by Tachikoma: all ops exhausted retries"
             )
-          else
-            # Mix of done + failed — let the orchestrator's check_implementation_complete handle it
-            # Just trigger an advance attempt
+
+          true ->
+            # Mix of done + failed-with-pending-or-resolved — let orchestrator handle
             try do
               GiTF.Major.Orchestrator.advance_quest(mission.id)
             rescue
               _ -> :ok
             end
-          end
         end
       end
     end)
@@ -617,6 +644,39 @@ defmodule GiTF.Tachikoma do
     e ->
       Logger.warning("Tachikoma: check_zombie_missions failed: #{Exception.message(e)}")
       :ok
+  end
+
+  # An op is "resolved or has a pending retry" if any of:
+  # - status is :done
+  # - status is failed/rejected/killed AND a sibling op has retry_of: this.id
+  #   with status :done (the retry succeeded, so the failure is resolved)
+  # - status is failed AND retry_count < @max_retries AND retried_as is nil
+  #   (the retry was scheduled but hasn't spawned yet — wait for it)
+  defp op_resolved_or_retry_pending?(op, all_ops) do
+    case op.status do
+      "done" ->
+        true
+
+      s when s in ["failed", "rejected", "killed"] ->
+        retry_succeeded?(op.id, all_ops) or retry_pending?(op)
+
+      _ ->
+        false
+    end
+  end
+
+  defp retry_succeeded?(op_id, all_ops) do
+    Enum.any?(all_ops, fn o ->
+      Map.get(o, :retry_of) == op_id and o.status == "done"
+    end)
+  end
+
+  defp retry_pending?(op) do
+    retry_count = Map.get(op, :retry_count, 0) || 0
+    retried_as = Map.get(op, :retried_as)
+    # Below max retries AND not yet retried — Major's delayed_retry timer
+    # is in flight, will spawn the next attempt within ~5 minutes.
+    retry_count < 3 and is_nil(retried_as)
   end
 
   defp check_deadlocks do
