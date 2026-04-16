@@ -24,6 +24,7 @@ defmodule GiTF.Intel.FailureAnalysis do
       analysis = %{
         id: GiTF.ID.generate(:fa),
         op_id: op_id,
+        sector_id: op[:sector_id],
         op_type: op[:op_type],
         model: model,
         failure_type: failure_type,
@@ -45,28 +46,20 @@ defmodule GiTF.Intel.FailureAnalysis do
   Get failure patterns for a sector.
   """
   def get_failure_patterns(sector_id) do
-    ops = Archive.filter(:ops, &(&1.sector_id == sector_id and &1.status == "failed"))
+    analyses = Archive.by_index(:failure_analyses, :sector_id, sector_id)
+    total = length(analyses)
 
-    analyses =
-      ops
-      |> Enum.map(&get_analysis(&1.id))
-      |> Enum.reject(&is_nil/1)
-
-    # Group by failure type
-    patterns =
-      analyses
-      |> Enum.group_by(& &1.failure_type)
-      |> Enum.map(fn {type, group} ->
-        %{
-          type: type,
-          count: length(group),
-          frequency: length(group) / max(length(ops), 1),
-          common_causes: extract_common_causes(group)
-        }
-      end)
-      |> Enum.sort_by(& &1.count, :desc)
-
-    patterns
+    analyses
+    |> Enum.group_by(& &1.failure_type)
+    |> Enum.map(fn {type, group} ->
+      %{
+        type: type,
+        count: length(group),
+        frequency: length(group) / max(total, 1),
+        common_causes: extract_common_causes(group)
+      }
+    end)
+    |> Enum.sort_by(& &1.count, :desc)
   end
 
   @doc """
@@ -81,25 +74,25 @@ defmodule GiTF.Intel.FailureAnalysis do
     normalized = GiTF.Runtime.ModelResolver.normalize_key(model)
     op_type_atom = if is_binary(op_type), do: String.to_existing_atom(op_type), else: op_type
 
-    Archive.all(:failure_analyses)
-    |> Enum.filter(fn fa ->
-      GiTF.Runtime.ModelResolver.normalize_key(fa[:model]) == normalized and
-        fa[:op_type] == op_type_atom
-    end)
+    :failure_analyses
+    |> Archive.by_index(:model, normalized)
+    |> Enum.filter(&(&1[:op_type] == op_type_atom))
     |> Enum.sort_by(& &1.analyzed_at, {:desc, DateTime})
     |> Enum.take(limit)
-    |> Enum.map(fn fa ->
-      %{
-        op_id: fa.op_id,
-        failure_type: fa.failure_type,
-        root_cause: fa.root_cause,
-        analyzed_at: fa.analyzed_at
-      }
-    end)
+    |> Enum.map(&summary_projection/1)
   rescue
     ArgumentError ->
       # op_type atom not loaded — never seen, no failures recorded
       []
+  end
+
+  defp summary_projection(fa) do
+    %{
+      op_id: fa.op_id,
+      failure_type: fa.failure_type,
+      root_cause: fa.root_cause,
+      analyzed_at: fa.analyzed_at
+    }
   end
 
   @doc """
@@ -227,14 +220,15 @@ defmodule GiTF.Intel.FailureAnalysis do
     end
   end
 
+  # Uses the :failure_analyses sector_id index — O(failures_in_sector)
+  # rather than O(all_ops + per-op classify_failure). Pulls the precomputed
+  # failure_type stored at analyze_failure time instead of re-deriving it
+  # from raw error/feedback strings.
   defp find_similar_failures(op, failure_type) do
-    Archive.filter(:ops, fn j ->
-      j.sector_id == op.sector_id and
-        j.status == "failed" and
-        j.id != op.id
-    end)
-    |> Enum.filter(fn j ->
-      classify_failure(j, nil) == failure_type
+    :failure_analyses
+    |> Archive.by_index(:sector_id, op.sector_id)
+    |> Enum.filter(fn fa ->
+      fa.failure_type == failure_type and fa.op_id != op.id
     end)
     |> Enum.take(5)
   end
@@ -259,11 +253,6 @@ defmodule GiTF.Intel.FailureAnalysis do
     |> Enum.sort_by(fn {_, count} -> count end, :desc)
     |> Enum.take(3)
     |> Enum.map(fn {cause, _} -> cause end)
-  end
-
-  defp get_analysis(op_id) do
-    Archive.all(:failure_analyses)
-    |> Enum.find(&(&1.op_id == op_id))
   end
 
 end

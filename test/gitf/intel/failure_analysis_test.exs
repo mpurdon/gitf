@@ -102,6 +102,77 @@ defmodule GiTF.Intel.FailureAnalysisTest do
     end
   end
 
+  describe "index-backed queries" do
+    test "find_similar_failures uses :sector_id index, not full :ops scan" do
+      sector_id = "sector-similar"
+
+      for i <- 1..3 do
+        op = %{
+          id: "op-sim-#{i}",
+          sector_id: sector_id,
+          status: "failed",
+          error_message: "compilation error: undefined function",
+          created_at: DateTime.utc_now(),
+          updated_at: DateTime.utc_now()
+        }
+
+        Archive.insert(:ops, op)
+        FailureAnalysis.analyze_failure(op.id)
+      end
+
+      other_op = %{
+        id: "op-other",
+        sector_id: "sector-other",
+        status: "failed",
+        error_message: "compilation error: undefined function",
+        created_at: DateTime.utc_now(),
+        updated_at: DateTime.utc_now()
+      }
+
+      Archive.insert(:ops, other_op)
+      FailureAnalysis.analyze_failure(other_op.id)
+
+      trigger_op = %{
+        id: "op-trigger",
+        sector_id: sector_id,
+        status: "failed",
+        error_message: "compilation error: trigger",
+        created_at: DateTime.utc_now(),
+        updated_at: DateTime.utc_now()
+      }
+
+      Archive.insert(:ops, trigger_op)
+      {:ok, analysis} = FailureAnalysis.analyze_failure(trigger_op.id)
+
+      assert analysis.similar_count == 3
+    end
+
+    test "summaries_for_model uses :model index" do
+      sector_id = "sector-sm"
+      model = "google:gemini-2.5-flash"
+
+      for i <- 1..2 do
+        op = %{
+          id: "op-sm-#{i}",
+          sector_id: sector_id,
+          status: "failed",
+          assigned_model: model,
+          op_type: :implementation,
+          error_message: "0 file changes",
+          created_at: DateTime.utc_now(),
+          updated_at: DateTime.utc_now()
+        }
+
+        Archive.insert(:ops, op)
+        FailureAnalysis.analyze_failure(op.id)
+      end
+
+      summaries = FailureAnalysis.summaries_for_model(model, :implementation, limit: 5)
+      assert length(summaries) == 2
+      assert Enum.all?(summaries, &(&1.failure_type == :empty_completion))
+    end
+  end
+
   describe "learn_from_failures/1" do
     test "creates learning from failure patterns" do
       sector_id = "sector-learn"
