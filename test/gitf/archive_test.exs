@@ -4,7 +4,9 @@ defmodule GiTF.ArchiveTest do
 
   Exercises the full CRUD surface, atomic update/3 contract,
   bulk operations, transact/1, lock serialization, backup recovery,
-  persistence across restarts, and collection isolation.
+  persistence across restarts, collection isolation, per-collection
+  file storage, migration from monolithic format, and per-collection
+  corruption recovery.
   """
 
   use ExUnit.Case, async: false
@@ -318,13 +320,13 @@ defmodule GiTF.ArchiveTest do
     test "recovers from corrupted primary via .bak", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-survive", name: "survivor"})
 
-      # Force a backup by writing the .bak file directly
-      data_path = Path.join(store_dir, "section.etf")
-      {:ok, good_binary} = File.read(data_path)
-      File.write!(data_path <> ".bak", good_binary)
+      # Force a backup by writing the .bak file for the missions collection
+      col_path = Path.join(store_dir, "missions.etf")
+      {:ok, good_binary} = File.read(col_path)
+      File.write!(col_path <> ".bak", good_binary)
 
-      # Corrupt the primary
-      File.write!(data_path, "corrupted-garbage")
+      # Corrupt the primary collection file
+      File.write!(col_path, "corrupted-garbage")
 
       # Restart Archive from same dir — should recover from backup
       GiTF.Test.StoreHelper.stop_store()
@@ -336,14 +338,14 @@ defmodule GiTF.ArchiveTest do
     test "recovers from .bak.2 when .bak is also corrupted", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-deep", name: "deep"})
 
-      data_path = Path.join(store_dir, "section.etf")
-      {:ok, good_binary} = File.read(data_path)
+      col_path = Path.join(store_dir, "missions.etf")
+      {:ok, good_binary} = File.read(col_path)
 
       # Place good data in .bak.2
-      File.write!(data_path <> ".bak.2", good_binary)
+      File.write!(col_path <> ".bak.2", good_binary)
       # Corrupt primary and .bak
-      File.write!(data_path, "corrupt1")
-      File.write!(data_path <> ".bak", "corrupt2")
+      File.write!(col_path, "corrupt1")
+      File.write!(col_path <> ".bak", "corrupt2")
 
       GiTF.Test.StoreHelper.stop_store()
       {:ok, _} = Archive.start_link(data_dir: store_dir)
@@ -354,13 +356,13 @@ defmodule GiTF.ArchiveTest do
     test "recovers from .bak.3 when .bak and .bak.2 are corrupted", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-deepest", name: "deepest"})
 
-      data_path = Path.join(store_dir, "section.etf")
-      {:ok, good_binary} = File.read(data_path)
+      col_path = Path.join(store_dir, "missions.etf")
+      {:ok, good_binary} = File.read(col_path)
 
-      File.write!(data_path <> ".bak.3", good_binary)
-      File.write!(data_path, "corrupt1")
-      File.write!(data_path <> ".bak", "corrupt2")
-      File.write!(data_path <> ".bak.2", "corrupt3")
+      File.write!(col_path <> ".bak.3", good_binary)
+      File.write!(col_path, "corrupt1")
+      File.write!(col_path <> ".bak", "corrupt2")
+      File.write!(col_path <> ".bak.2", "corrupt3")
 
       GiTF.Test.StoreHelper.stop_store()
       {:ok, _} = Archive.start_link(data_dir: store_dir)
@@ -403,6 +405,96 @@ defmodule GiTF.ArchiveTest do
       assert Archive.get(:missions, "op-iso") == nil
       assert Archive.count(:missions) == 1
       assert Archive.count(:ops) == 1
+    end
+  end
+
+  # ── Migration from monolithic format ───────────────────────────────────
+
+  describe "migration from monolithic section.etf" do
+    test "migrates old format to per-collection files", %{store_dir: store_dir} do
+      # Stop archive so we can set up the old-format fixture
+      GiTF.Test.StoreHelper.stop_store()
+
+      # Remove any per-collection files written by setup
+      for f <- File.ls!(store_dir), String.ends_with?(f, ".etf") do
+        File.rm!(Path.join(store_dir, f))
+      end
+
+      # Create a monolithic section.etf in the old format
+      old_data = %{
+        missions: %{
+          "msn-migr1" => %{id: "msn-migr1", name: "migrated_mission", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()},
+        },
+        ops: %{
+          "op-migr1" => %{id: "op-migr1", status: "pending", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()},
+          "op-migr2" => %{id: "op-migr2", status: "done", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()},
+        }
+      }
+
+      old_path = Path.join(store_dir, "section.etf")
+      File.write!(old_path, :erlang.term_to_binary(old_data))
+
+      # Start archive — should detect old format and migrate
+      {:ok, _} = Archive.start_link(data_dir: store_dir)
+
+      # Per-collection files should exist
+      assert File.exists?(Path.join(store_dir, "missions.etf"))
+      assert File.exists?(Path.join(store_dir, "ops.etf"))
+
+      # Manifest should exist
+      assert File.exists?(Path.join(store_dir, "manifest.etf"))
+
+      # Old file should be renamed
+      assert File.exists?(old_path <> ".pre_migration")
+      refute File.exists?(old_path)
+
+      # Data should be queryable
+      assert Archive.get(:missions, "msn-migr1").name == "migrated_mission"
+      assert Archive.get(:ops, "op-migr1").status == "pending"
+      assert Archive.get(:ops, "op-migr2").status == "done"
+    end
+  end
+
+  # ── Per-collection corruption isolation ────────────────────────────────
+
+  describe "per-collection corruption" do
+    test "corrupted collection recovers from backup, others intact", %{store_dir: store_dir} do
+      {:ok, _} = Archive.insert(:missions, %{id: "msn-safe", name: "safe"})
+      {:ok, _} = Archive.insert(:ops, %{id: "op-safe", status: "running"})
+
+      # Create a backup for ops collection
+      ops_path = Path.join(store_dir, "ops.etf")
+      {:ok, good_binary} = File.read(ops_path)
+      File.write!(ops_path <> ".bak", good_binary)
+
+      # Corrupt ops collection file only
+      File.write!(ops_path, "corrupted-garbage")
+
+      # Restart — missions should be fine, ops should recover from backup
+      GiTF.Test.StoreHelper.stop_store()
+      {:ok, _} = Archive.start_link(data_dir: store_dir)
+
+      assert Archive.get(:missions, "msn-safe").name == "safe"
+      assert Archive.get(:ops, "op-safe").status == "running"
+    end
+  end
+
+  # ── New format persistence ─────────────────────────────────────────────
+
+  describe "per-collection file persistence" do
+    test "per-collection files exist on disk after insert", %{store_dir: store_dir} do
+      {:ok, _} = Archive.insert(:missions, %{id: "msn-disk", name: "on_disk"})
+      {:ok, _} = Archive.insert(:ops, %{id: "op-disk", status: "saved"})
+
+      assert File.exists?(Path.join(store_dir, "missions.etf"))
+      assert File.exists?(Path.join(store_dir, "ops.etf"))
+      assert File.exists?(Path.join(store_dir, "manifest.etf"))
+
+      # Verify the content of each collection file is correct
+      {:ok, missions_bin} = File.read(Path.join(store_dir, "missions.etf"))
+      missions_data = :erlang.binary_to_term(missions_bin)
+      assert Map.has_key?(missions_data, "msn-disk")
+      assert missions_data["msn-disk"].name == "on_disk"
     end
   end
 end

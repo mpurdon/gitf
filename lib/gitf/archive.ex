@@ -1,9 +1,10 @@
 defmodule GiTF.Archive do
   @moduledoc """
-  Pure-Elixir key-value store backed by an ETF (Erlang Term Format) file.
+  Pure-Elixir key-value store backed by per-collection ETF files.
 
-  Provides a Repo-like CRUD interface for GiTF entities using plain maps.
-  Data is stored as a single `.gitf/store/section.etf` file.
+  Each collection is persisted as `<data_dir>/<collection>.etf` with a
+  `manifest.etf` tracking the known collection set. Only dirty (changed)
+  collections are re-serialized on write.
 
   Concurrent cross-process safety is achieved via:
   - `mkdir`-based advisory locking (POSIX `mkdir` is atomic)
@@ -12,6 +13,7 @@ defmodule GiTF.Archive do
   """
 
   use GenServer
+  require Logger
 
   @name __MODULE__
   @lock_stale_seconds 120
@@ -155,8 +157,6 @@ defmodule GiTF.Archive do
               end
             rescue
               e ->
-                require Logger
-
                 Logger.error(
                   "Archive.update closure for #{inspect(collection)}/#{id} raised: " <>
                     Exception.format(:error, e, __STACKTRACE__)
@@ -274,16 +274,18 @@ defmodule GiTF.Archive do
     data_dir = Keyword.fetch!(opts, :data_dir)
     File.mkdir_p!(data_dir)
 
+    # Legacy path kept for migration detection
     data_path = Path.join(data_dir, "section.etf")
     lock_path = Path.join(data_dir, ".lock")
 
     # Archive paths in persistent_term so API functions can access them
     # without going through the GenServer process
     :persistent_term.put({__MODULE__, :data_path}, data_path)
+    :persistent_term.put({__MODULE__, :data_dir}, data_dir)
     :persistent_term.put({__MODULE__, :lock_path}, lock_path)
 
     # Create per-collection ETS tables from disk data
-    init_tables()
+    init_store()
 
     # Run migrations after store is initialized
     GiTF.Migrations.migrate!()
@@ -291,17 +293,21 @@ defmodule GiTF.Archive do
     {:ok, %{data_dir: data_dir, data_path: data_path, lock_path: lock_path}}
   end
 
-  # -- File I/O (lock-free reads, mkdir-locked writes) -----------------------
+  # -- Path helpers -----------------------------------------------------------
 
   defp data_path, do: :persistent_term.get({__MODULE__, :data_path})
+  defp data_dir, do: :persistent_term.get({__MODULE__, :data_dir})
   defp lock_path, do: :persistent_term.get({__MODULE__, :lock_path})
+  defp collection_path(col), do: Path.join(data_dir(), "#{col}.etf")
+  defp manifest_path, do: Path.join(data_dir(), "manifest.etf")
+
+  # -- File I/O (lock-free reads, mkdir-locked writes) -----------------------
 
   defp read_data do
     cols = known_collections()
 
     if MapSet.size(cols) == 0 do
-      # Cold start — tables not yet populated, read from disk
-      read_data_from_disk()
+      %{}
     else
       for col <- cols, into: %{} do
         records = :ets.tab2list(table_name(col)) |> Map.new()
@@ -310,38 +316,57 @@ defmodule GiTF.Archive do
     end
   end
 
+  # Reads old monolithic section.etf — used only for migration
   defp read_data_from_disk do
     case File.read(data_path()) do
       {:ok, binary} ->
-        try do
-          :erlang.binary_to_term(binary, [:safe])
-        rescue
-          ArgumentError ->
-            try do
-              # Existing data may contain atoms not yet loaded — fall back to unsafe
-              :erlang.binary_to_term(binary)
-            rescue
-              _ ->
-                # Fully corrupted — try backup
-                recover_from_backup()
-            end
-        catch
-          _, _ ->
-            recover_from_backup()
-        end
+        deserialize(binary)
 
       {:error, :enoent} ->
         %{}
 
       {:error, reason} ->
-        require Logger
         Logger.error("Archive read failed: #{inspect(reason)}, trying backup")
         recover_from_backup()
     end
   end
 
+  defp deserialize(binary) do
+    try do
+      :erlang.binary_to_term(binary, [:safe])
+    rescue
+      ArgumentError ->
+        try do
+          # Existing data may contain atoms not yet loaded — fall back to unsafe
+          :erlang.binary_to_term(binary)
+        rescue
+          _ -> nil
+        end
+    catch
+      _, _ -> nil
+    end
+  end
+
+  defp read_collection_from_disk(col) do
+    path = collection_path(col)
+
+    case File.read(path) do
+      {:ok, binary} ->
+        case deserialize(binary) do
+          nil -> recover_collection_from_backup(col)
+          data -> data
+        end
+
+      {:error, :enoent} ->
+        %{}
+
+      {:error, _reason} ->
+        recover_collection_from_backup(col)
+    end
+  end
+
+  # Legacy monolithic backup recovery (for migration path only)
   defp recover_from_backup do
-    require Logger
     # Try each backup generation in order: .bak, .bak.2, .bak.3
     backup_paths =
       [data_path() <> ".bak"] ++
@@ -397,34 +422,37 @@ defmodule GiTF.Archive do
     end
   end
 
-  defp write_data(data, changed_collection) do
-    path = data_path()
-    tmp_path = path <> ".tmp"
-    binary = :erlang.term_to_binary(data)
+  # -- Per-collection write --------------------------------------------------
 
-    with :ok <- File.write(tmp_path, binary),
-         :ok <- File.rename(tmp_path, path) do
-      sync_ets(data, changed_collection)
-      maybe_backup(path, binary)
-    else
-      {:error, reason} ->
-        require Logger
-        Logger.error("Archive write failed: #{inspect(reason)}")
-        # Still update ETS so in-memory state is consistent.
-        # NOTE: This creates in-memory/disk divergence — the ETS tables now
-        # hold data that was not successfully persisted. We flag this in
-        # telemetry so health checks can detect the condition.
-        sync_ets(data, changed_collection)
+  defp write_dirty(data, dirty_collections) do
+    for col <- dirty_collections do
+      col_data = Map.get(data, col, %{})
+      binary = :erlang.term_to_binary(col_data)
+      path = collection_path(col)
+      tmp = path <> ".tmp"
 
-        GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{
-          reason: reason,
-          cache_disk_divergent: true
-        })
+      with :ok <- File.write(tmp, binary),
+           :ok <- File.rename(tmp, path) do
+        maybe_backup_collection(col, binary)
+      else
+        {:error, reason} ->
+          Logger.error("Archive write failed for #{col}: #{inspect(reason)}")
+
+          GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{
+            collection: col,
+            reason: reason,
+            cache_disk_divergent: true
+          })
+      end
     end
+
+    maybe_update_manifest()
   end
 
-  defp maybe_backup(path, binary) do
-    backup_path = path <> ".bak"
+  # -- Per-collection backups ------------------------------------------------
+
+  defp maybe_backup_collection(col, binary) do
+    backup_path = collection_path(col) <> ".bak"
 
     should_backup =
       case File.stat(backup_path) do
@@ -440,40 +468,118 @@ defmodule GiTF.Archive do
       end
 
     if should_backup do
-      rotate_backups(path)
-      # Atomic temp+rename (matches primary write at write_data/2).
+      rotate_collection_backups(col)
       backup_tmp = backup_path <> ".tmp"
+
       with :ok <- File.write(backup_tmp, binary),
            :ok <- File.rename(backup_tmp, backup_path) do
         :ok
       else
         {:error, reason} ->
-          require Logger
-          Logger.warning("Archive backup write failed: #{inspect(reason)}")
+          Logger.warning("Archive backup write failed for #{col}: #{inspect(reason)}")
           File.rm(backup_tmp)
           :ok
       end
     end
   rescue
     e ->
-      require Logger
-      Logger.warning("Archive maybe_backup failed for #{path}: #{Exception.message(e)}")
+      Logger.warning("Archive maybe_backup_collection failed for #{col}: #{Exception.message(e)}")
       :ok
   end
 
-  # Rotate backups: .bak -> .bak.2, .bak.2 -> .bak.3, etc.
-  defp rotate_backups(path) do
+  defp rotate_collection_backups(col) do
+    base = collection_path(col)
+
     (@backup_generations - 1)..1//-1
     |> Enum.each(fn gen ->
-      src = if gen == 1, do: path <> ".bak", else: path <> ".bak.#{gen}"
-      dst = path <> ".bak.#{gen + 1}"
+      src = if gen == 1, do: base <> ".bak", else: base <> ".bak.#{gen}"
+      dst = base <> ".bak.#{gen + 1}"
       if File.exists?(src), do: File.rename(src, dst)
     end)
   rescue
     e ->
-      require Logger
-      Logger.warning("Archive rotate_backups failed for #{path}: #{Exception.message(e)}")
+      Logger.warning("Archive rotate_collection_backups failed for #{col}: #{Exception.message(e)}")
       :ok
+  end
+
+  defp recover_collection_from_backup(col) do
+    base = collection_path(col)
+
+    backup_paths =
+      [base <> ".bak"] ++
+        Enum.map(2..@backup_generations, fn gen -> base <> ".bak.#{gen}" end)
+
+    Enum.reduce_while(backup_paths, %{}, fn backup, _acc ->
+      case File.read(backup) do
+        {:ok, binary} ->
+          case deserialize(binary) do
+            nil ->
+              Logger.warning("Backup #{Path.basename(backup)} for #{col} corrupted, trying next")
+              {:cont, %{}}
+
+            data ->
+              Logger.warning("Archive #{col} corrupted — recovered from #{Path.basename(backup)}")
+              # Restore the primary file
+              tmp = base <> ".tmp"
+              with :ok <- File.write(tmp, binary),
+                   :ok <- File.rename(tmp, base) do
+                :ok
+              else
+                _ -> :ok
+              end
+              {:halt, data}
+          end
+
+        {:error, _} ->
+          {:cont, %{}}
+      end
+    end)
+    |> case do
+      data when data == %{} ->
+        Logger.error("All backups for #{col} exhausted, starting empty")
+
+        GiTF.Telemetry.emit([:gitf, :store, :data_loss], %{}, %{
+          reason: "all_backups_exhausted",
+          collection: col
+        })
+
+        %{}
+
+      data ->
+        data
+    end
+  end
+
+  # -- Manifest management ---------------------------------------------------
+
+  defp maybe_update_manifest do
+    current = known_collections() |> MapSet.to_list() |> Enum.sort()
+    manifest = read_manifest()
+
+    if manifest == nil or manifest.collections != current do
+      write_manifest(%{schema_version: 1, collections: current, updated_at: DateTime.utc_now()})
+    end
+  end
+
+  defp read_manifest do
+    case File.read(manifest_path()) do
+      {:ok, binary} ->
+        try do
+          :erlang.binary_to_term(binary, [:safe])
+        rescue
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp write_manifest(manifest) do
+    binary = :erlang.term_to_binary(manifest)
+    tmp = manifest_path() <> ".tmp"
+    File.write!(tmp, binary)
+    File.rename!(tmp, manifest_path())
   end
 
   # -- Per-collection ETS tables ------------------------------------------------
@@ -491,11 +597,10 @@ defmodule GiTF.Archive do
     :persistent_term.put({__MODULE__, :collections}, MapSet.new())
   end
 
-  defp init_tables do
+  defp init_store do
     heir_pid = GiTF.Archive.TableHeir.pid()
 
-    # Clean up stale tables from a previous instance (e.g. heir-held tables
-    # from a prior data_dir that no longer apply).
+    # Clean up stale tables from a previous instance
     for old_col <- known_collections() do
       old_tab = table_name(old_col)
       case :ets.info(old_tab) do
@@ -506,10 +611,9 @@ defmodule GiTF.Archive do
       end
     end
 
-    # Clear registry — we'll re-register from disk data
     clear_collection_registry()
 
-    data = read_data_from_disk()
+    data = load_or_migrate()
 
     for {col, records} <- data, is_atom(col) do
       tab = table_name(col)
@@ -521,7 +625,6 @@ defmodule GiTF.Archive do
           :ets.new(tab, opts)
 
         _ ->
-          # Table survived via heir — reclaim it
           if is_pid(heir_pid), do: GiTF.Archive.TableHeir.claim(tab)
           :ets.delete_all_objects(tab)
       end
@@ -531,6 +634,69 @@ defmodule GiTF.Archive do
     end
   rescue
     ArgumentError -> :ok
+  end
+
+  # Decides which load path to use: new per-collection, migration, or fresh.
+  defp load_or_migrate do
+    cond do
+      File.exists?(manifest_path()) ->
+        load_from_per_collection_files()
+
+      File.exists?(data_path()) ->
+        migrate_from_monolithic()
+
+      true ->
+        %{}
+    end
+  end
+
+  defp load_from_per_collection_files do
+    manifest = read_manifest()
+
+    collections =
+      case manifest do
+        %{collections: cols} when is_list(cols) -> cols
+        _ -> []
+      end
+
+    for col <- collections, into: %{} do
+      {col, read_collection_from_disk(col)}
+    end
+  end
+
+  defp migrate_from_monolithic do
+    Logger.info("Archive: migrating from monolithic section.etf to per-collection files")
+    data = read_data_from_disk()
+
+    # Write each collection to its own file
+    for {col, records} <- data, is_atom(col) do
+      binary = :erlang.term_to_binary(records)
+      path = collection_path(col)
+      tmp = path <> ".tmp"
+
+      with :ok <- File.write(tmp, binary),
+           :ok <- File.rename(tmp, path) do
+        :ok
+      else
+        {:error, reason} ->
+          Logger.error("Archive migration write failed for #{col}: #{inspect(reason)}")
+      end
+    end
+
+    # Write manifest
+    collections = data |> Map.keys() |> Enum.filter(&is_atom/1) |> Enum.sort()
+    write_manifest(%{schema_version: 1, collections: collections, updated_at: DateTime.utc_now()})
+
+    # Preserve old file
+    File.rename(data_path(), data_path() <> ".pre_migration")
+
+    GiTF.Telemetry.emit([:gitf, :store, :migrated_v1], %{collection_count: length(collections)}, %{
+      collections: collections
+    })
+
+    Logger.info("Archive: migration complete — #{length(collections)} collections")
+
+    data
   end
 
   defp ensure_table(col) do
@@ -580,16 +746,28 @@ defmodule GiTF.Archive do
 
       case mutate_fn.(data) do
         {new_data, result} when is_map(new_data) ->
-          write_data(new_data, collection)
+          dirty = if collection, do: MapSet.new([collection]), else: diff_collections(data, new_data)
+          sync_ets(new_data, collection)
+          write_dirty(new_data, dirty)
           result
 
         new_data when is_map(new_data) ->
-          write_data(new_data, collection)
+          dirty = if collection, do: MapSet.new([collection]), else: diff_collections(data, new_data)
+          sync_ets(new_data, collection)
+          write_dirty(new_data, dirty)
           :ok
       end
     after
       release_lock()
     end
+  end
+
+  defp diff_collections(old, new) do
+    all_keys = MapSet.union(MapSet.new(Map.keys(old)), MapSet.new(Map.keys(new)))
+
+    all_keys
+    |> Enum.filter(fn k -> Map.get(old, k) != Map.get(new, k) end)
+    |> MapSet.new()
   end
 
   defp acquire_lock, do: acquire_lock(0)
