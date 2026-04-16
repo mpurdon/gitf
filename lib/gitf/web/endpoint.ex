@@ -1,25 +1,16 @@
 defmodule GiTF.Web.Endpoint do
   use Phoenix.Endpoint, otp_app: :gitf
 
-  @session_options [
-    store: :cookie,
-    key: "_gitf_key",
-    signing_salt:
-      System.get_env("SESSION_SIGNING_SALT") ||
-        (if Mix.env() == :prod,
-           do: raise("SESSION_SIGNING_SALT env var required in prod"),
-           else: "gitf_web_salt_dev"),
-    same_site: "Lax",
-    http_only: true,
-    secure: Mix.env() == :prod
-  ]
-
   socket("/socket", GiTF.Web.UserSocket,
     websocket: true,
     longpoll: false
   )
 
-  socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
+  socket("/live", Phoenix.LiveView.Socket,
+    websocket: [
+      connect_info: [session: {GiTF.Web.SessionOptions, :for_endpoint, [__MODULE__]}]
+    ]
+  )
 
   if code_reloading? do
     plug(Phoenix.CodeReloader)
@@ -55,6 +46,6 @@ defmodule GiTF.Web.Endpoint do
 
   plug(Plug.MethodOverride)
   plug(Plug.Head)
-  plug(Plug.Session, @session_options)
+  plug(GiTF.Web.RuntimeSessionPlug, endpoint: __MODULE__)
   plug(GiTF.Web.Router)
 end

@@ -9,21 +9,13 @@ defmodule GiTF.Dashboard.Endpoint do
 
   use Phoenix.Endpoint, otp_app: :gitf
 
-  @session_options [
-    store: :cookie,
-    key: "_hive_dashboard",
-    signing_salt:
-      System.get_env("LIVE_VIEW_SIGNING_SALT") ||
-        (if Mix.env() == :prod,
-           do: raise("LIVE_VIEW_SIGNING_SALT env var required in prod"),
-           else: "gitf_salt_dev"),
-    same_site: "Lax",
-    http_only: true,
-    secure: Mix.env() == :prod
-  ]
-
   socket("/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, session: @session_options]]
+    websocket: [
+      connect_info: [
+        :peer_data,
+        session: {GiTF.Web.SessionOptions, :for_endpoint, [__MODULE__]}
+      ]
+    ]
   )
 
   plug(Plug.Static,
@@ -46,7 +38,7 @@ defmodule GiTF.Dashboard.Endpoint do
   plug(Plug.MethodOverride)
   plug(Plug.Head)
 
-  plug(Plug.Session, @session_options)
+  plug(GiTF.Web.RuntimeSessionPlug, endpoint: __MODULE__)
 
   plug(GiTF.Dashboard.Router)
 end
