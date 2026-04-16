@@ -223,33 +223,59 @@ defmodule GiTF.Dashboard.Helpers do
   @doc """
   Converts a PubSub link message into a toast if it's notable.
   Returns `{:toast, socket}` or `:skip`.
+
+  De-duplicates by `link.id` — the same broadcast can hit the LV mailbox
+  twice (e.g. recovery sweeps re-fire unread-link delivery). Each link ID
+  is suppressed for 30s after first toast.
   """
   def maybe_toast_link(socket, %{subject: subject} = link) do
-    case subject do
-      "job_complete" ->
-        {:toast, push_toast(socket, :success, "Op completed: #{link[:body] || link.from}")}
+    if recently_toasted?(socket, link[:id]) do
+      :skip
+    else
+      socket = remember_toasted(socket, link[:id])
 
-      "job_failed" ->
-        {:toast, push_toast(socket, :error, "Op failed: #{link[:body] || link.from}")}
+      case subject do
+        "job_complete" ->
+          {:toast, push_toast(socket, :success, "Op completed: #{link[:body] || link.from}")}
 
-      "quest_advance" ->
-        {:toast, push_toast(socket, :info, "Mission advancing: #{link[:body] || ""}")}
+        "job_failed" ->
+          {:toast, push_toast(socket, :error, "Op failed: #{link[:body] || link.from}")}
 
-      "human_approval" ->
-        {:toast, push_toast(socket, :warning, "Approval needed")}
+        "quest_advance" ->
+          {:toast, push_toast(socket, :info, "Mission advancing: #{link[:body] || ""}")}
 
-      "merge_failed" ->
-        {:toast, push_toast(socket, :error, "Merge failed: #{link[:body] || link.from}")}
+        "human_approval" ->
+          {:toast, push_toast(socket, :warning, "Approval needed")}
 
-      "pr_created" ->
-        {:toast, push_toast(socket, :success, "PR created")}
+        "merge_failed" ->
+          {:toast, push_toast(socket, :error, "Merge failed: #{link[:body] || link.from}")}
 
-      _ ->
-        :skip
+        "pr_created" ->
+          {:toast, push_toast(socket, :success, "PR created")}
+
+        _ ->
+          :skip
+      end
     end
   end
 
   def maybe_toast_link(_socket, _), do: :skip
+
+  # Deduplication: keep last 50 toasted link IDs in socket assigns.
+  # nil id (link without id field) is never deduped — fall through.
+  defp recently_toasted?(_socket, nil), do: false
+
+  defp recently_toasted?(socket, id) do
+    seen = Map.get(socket.assigns, :_toasted_link_ids, [])
+    id in seen
+  end
+
+  defp remember_toasted(socket, nil), do: socket
+
+  defp remember_toasted(socket, id) do
+    seen = Map.get(socket.assigns, :_toasted_link_ids, [])
+    Phoenix.Component.assign(socket, :_toasted_link_ids, [id | seen] |> Enum.take(50))
+  end
 
   @doc "Formats a timestamp as relative time (e.g., '2m ago', '1h ago')."
   def relative_time(nil), do: "-"
