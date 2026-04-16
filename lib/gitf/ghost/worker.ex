@@ -634,7 +634,7 @@ defmodule GiTF.Ghost.Worker do
 
       case spawn_api_or_cli(state, shell) do
         {:ok, handle} ->
-          Process.send_after(self(), :verify_beacon, 10_000)
+          Process.send_after(self(), :verify_beacon, timeout_cfg(:verify_beacon_initial_ms, 10_000))
 
           # Split metadata into bounded-cardinality `labels` (safe for Prometheus
           # label sets) and high-cardinality `attributes` (op_id, ghost_id,
@@ -743,7 +743,7 @@ defmodule GiTF.Ghost.Worker do
 
           with :ok <- update_ghost_working(state, shell),
                {:ok, handle} <- spawn_api_or_cli(state, shell) do
-            Process.send_after(self(), :verify_beacon, 10_000)
+            Process.send_after(self(), :verify_beacon, timeout_cfg(:verify_beacon_initial_ms, 10_000))
             {:ok, attach_handle(state, shell, handle)}
           else
             error ->
@@ -1021,7 +1021,7 @@ defmodule GiTF.Ghost.Worker do
 
         now_seconds = System.os_time(:second)
         # Consider fresh if written within the last hour
-        now_seconds - mtime_seconds < 3600
+        now_seconds - mtime_seconds < timeout_cfg(:task_skill_freshness_seconds, 3600)
 
       {:error, _} ->
         false
@@ -1703,7 +1703,7 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp schedule_checkpoint do
-    Process.send_after(self(), :backup, 30_000)
+    Process.send_after(self(), :backup, timeout_cfg(:checkpoint_interval_ms, 30_000))
   end
 
   defp build_checkpoint_data(state) do

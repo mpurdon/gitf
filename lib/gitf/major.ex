@@ -28,8 +28,6 @@ defmodule GiTF.Major do
   require GiTF.Ghost.Status, as: GhostStatus
 
   @name GiTF.Major
-  @waggle_recovery_interval :timer.seconds(30)
-  @waggle_stale_seconds 30
 
   # -- Client API ------------------------------------------------------------
 
@@ -519,6 +517,79 @@ defmodule GiTF.Major do
 
         {:noreply, state}
     end
+  end
+
+  # Staggered spawn pipeline for :spawn_ready_jobs. Spawns one op per message,
+  # re-checks ghost slot capacity each tick, and self-schedules the next.
+  def handle_info({:spawn_next, :spawn_ready_jobs, ops, {run, stagger_delay}}, state) do
+    state =
+      case ops do
+        [] ->
+          state
+
+        [op | rest] ->
+          active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+          available_slots = max(state.effective_max_ghosts - active_count, 0)
+
+          if available_slots <= 0 do
+            Logger.info(
+              "Spawn pipeline: no slots available, dropping #{length(ops)} remaining staggered ops"
+            )
+
+            state
+          else
+            new_state = spawn_with_triage(op, state, run)
+
+            if rest != [] and stagger_delay > 0 do
+              Process.send_after(
+                self(),
+                {:spawn_next, :spawn_ready_jobs, rest, {run, stagger_delay}},
+                stagger_delay
+              )
+            end
+
+            new_state
+          end
+      end
+
+    {:noreply, state}
+  end
+
+  # Staggered spawn pipeline for :priority_spawn_cycle. Each tick recomputes the
+  # active run for the op's mission and re-checks slot capacity.
+  def handle_info({:spawn_next, :priority_spawn_cycle, ops, {stagger_delay}}, state) do
+    state =
+      case ops do
+        [] ->
+          state
+
+        [{op, mission} | rest] ->
+          active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+          available_slots = max(state.effective_max_ghosts - active_count, 0)
+
+          if available_slots <= 0 do
+            Logger.info(
+              "Priority spawn pipeline: no slots available, dropping #{length(ops)} remaining staggered ops"
+            )
+
+            state
+          else
+            run = ensure_active_run(mission.id, [op])
+            new_state = spawn_with_triage(op, state, run)
+
+            if rest != [] and stagger_delay > 0 do
+              Process.send_after(
+                self(),
+                {:spawn_next, :priority_spawn_cycle, rest, {stagger_delay}},
+                stagger_delay
+              )
+            end
+
+            new_state
+          end
+      end
+
+    {:noreply, state}
   end
 
   def handle_info(msg, state) do
@@ -1262,42 +1333,53 @@ defmodule GiTF.Major do
         # Ensure an active run exists for this mission when spawning ops
         run = ensure_active_run(mission.id, jobs_to_spawn)
 
-        jobs_to_spawn
-        |> Enum.with_index()
-        |> Enum.reduce(state, fn {op, idx}, acc ->
-          # Stagger: sleep before every spawn except the first
-          # TODO(harden): replace Process.sleep with send_after pattern so the
-          # Major mailbox isn't blocked while spawning a batch of jobs.
-          if idx > 0 and stagger_delay > 0, do: Process.sleep(stagger_delay)
+        case jobs_to_spawn do
+          [] ->
+            state
 
-          # Triage before spawning
-          {complexity, pipeline} = GiTF.Triage.triage(op)
-          triage_store_job(op, complexity, pipeline)
+          [first | rest] ->
+            new_state = spawn_with_triage(first, state, run)
 
-          # If complex and no recon exists yet, create one and skip spawning the parent.
-          # Skip recon for ops that are already recons or phase jobs (research, requirements, etc.)
-          already_recon? = Map.get(op, :recon, false)
-          phase_job? = Map.get(op, :phase_job, false)
+            if rest != [] and stagger_delay > 0 do
+              Process.send_after(
+                self(),
+                {:spawn_next, :spawn_ready_jobs, rest, {run, stagger_delay}},
+                stagger_delay
+              )
 
-          if complexity == :complex and not already_recon? and not phase_job? and
-               GiTF.Recon.should_scout?(op) and not scout_exists?(op.id) do
-            case GiTF.Recon.create_scout_job(op.id, op.sector_id) do
-              {:ok, scout_job} ->
-                Logger.info("Created recon for complex op #{op.id}, deferring spawn")
-                # Spawn the recon op instead
-                spawn_single_job(scout_job, acc, run)
-
-              {:error, reason} ->
-                Logger.warning(
-                  "Failed to create recon for op #{op.id}: #{inspect(reason)}, spawning directly"
-                )
-
-                spawn_single_job(op, acc, run)
+              new_state
+            else
+              Enum.reduce(rest, new_state, fn op, acc -> spawn_with_triage(op, acc, run) end)
             end
-          else
-            spawn_single_job(op, acc, run)
-          end
-        end)
+        end
+    end
+  end
+
+  # Spawn a single op with triage + recon logic. Extracted so both inline and
+  # send_after-driven spawn pipelines share identical behavior.
+  defp spawn_with_triage(op, state, run) do
+    {complexity, pipeline} = GiTF.Triage.triage(op)
+    triage_store_job(op, complexity, pipeline)
+
+    already_recon? = Map.get(op, :recon, false)
+    phase_job? = Map.get(op, :phase_job, false)
+
+    if complexity == :complex and not already_recon? and not phase_job? and
+         GiTF.Recon.should_scout?(op) and not scout_exists?(op.id) do
+      case GiTF.Recon.create_scout_job(op.id, op.sector_id) do
+        {:ok, scout_job} ->
+          Logger.info("Created recon for complex op #{op.id}, deferring spawn")
+          spawn_single_job(scout_job, state, run)
+
+        {:error, reason} ->
+          Logger.warning(
+            "Failed to create recon for op #{op.id}: #{inspect(reason)}, spawning directly"
+          )
+
+          spawn_single_job(op, state, run)
+      end
+    else
+      spawn_single_job(op, state, run)
     end
   end
 
@@ -1520,10 +1602,8 @@ defmodule GiTF.Major do
 
   # -- Private: post-review checks --------------------------------------------
 
-  @debrief_interval :timer.minutes(5)
-
   defp schedule_debrief_check do
-    Process.send_after(self(), :check_debriefs, @debrief_interval)
+    Process.send_after(self(), :check_debriefs, timeout_cfg(:debrief_interval_ms, 5 * 60 * 1_000))
   end
 
   defp check_debriefs do
@@ -1562,30 +1642,24 @@ defmodule GiTF.Major do
 
   # -- Private: stall detection ------------------------------------------------
 
-  @stall_check_interval :timer.minutes(2)
-  @stuck_recovery_interval :timer.minutes(5)
-  @phase_advancement_interval :timer.minutes(3)
-  @janitor_interval :timer.minutes(15)
-  @autoscale_interval :timer.seconds(60)
-
   defp schedule_stall_check do
-    Process.send_after(self(), :check_stalls, @stall_check_interval)
+    Process.send_after(self(), :check_stalls, timeout_cfg(:stall_check_interval_ms, 2 * 60 * 1_000))
   end
 
   defp schedule_stuck_recovery do
-    Process.send_after(self(), :recover_stuck, @stuck_recovery_interval)
+    Process.send_after(self(), :recover_stuck, timeout_cfg(:stuck_recovery_interval_ms, 5 * 60 * 1_000))
   end
 
   defp schedule_phase_advancement do
-    Process.send_after(self(), :advance_stuck_phases, @phase_advancement_interval)
+    Process.send_after(self(), :advance_stuck_phases, timeout_cfg(:phase_advancement_interval_ms, 3 * 60 * 1_000))
   end
 
   defp schedule_janitor do
-    Process.send_after(self(), :janitor_run, @janitor_interval)
+    Process.send_after(self(), :janitor_run, timeout_cfg(:janitor_interval_ms, 15 * 60 * 1_000))
   end
 
   defp schedule_autoscale do
-    Process.send_after(self(), :autoscale_check, @autoscale_interval)
+    Process.send_after(self(), :autoscale_check, timeout_cfg(:autoscale_interval_ms, 60_000))
   end
 
   # Computes the scaling decision off-GenServer so the Archive + costs scan
@@ -1758,10 +1832,8 @@ defmodule GiTF.Major do
 
   # -- Private: periodic op spawning ------------------------------------------
 
-  @job_spawn_interval :timer.seconds(15)
-
   defp schedule_job_spawner do
-    Process.send_after(self(), :spawn_ready_jobs, @job_spawn_interval)
+    Process.send_after(self(), :spawn_ready_jobs, timeout_cfg(:job_spawn_interval_ms, 15_000))
   end
 
   @actionable_statuses ~w(active pending planning research implementation awaiting_approval)
@@ -1897,38 +1969,29 @@ defmodule GiTF.Major do
       ops_to_spawn = Enum.reverse(ops_to_spawn)
 
       # Spawn each selected op with triage + recon logic
-      Enum.with_index(ops_to_spawn)
-      |> Enum.reduce(state, fn {{op, mission}, idx}, acc ->
-        # TODO(harden): replace Process.sleep with send_after pattern so the
-        # Major mailbox isn't blocked while spawning a batch of jobs.
-        if idx > 0 and stagger_delay > 0, do: Process.sleep(stagger_delay)
+      case ops_to_spawn do
+        [] ->
+          state
 
-        {complexity, pipeline} = GiTF.Triage.triage(op)
-        triage_store_job(op, complexity, pipeline)
+        [{first_op, first_mission} | rest] ->
+          first_run = ensure_active_run(first_mission.id, [first_op])
+          new_state = spawn_with_triage(first_op, state, first_run)
 
-        already_recon? = Map.get(op, :recon, false)
-        phase_job? = Map.get(op, :phase_job, false)
+          if rest != [] and stagger_delay > 0 do
+            Process.send_after(
+              self(),
+              {:spawn_next, :priority_spawn_cycle, rest, {stagger_delay}},
+              stagger_delay
+            )
 
-        run = ensure_active_run(mission.id, [op])
-
-        if complexity == :complex and not already_recon? and not phase_job? and
-             GiTF.Recon.should_scout?(op) and not scout_exists?(op.id) do
-          case GiTF.Recon.create_scout_job(op.id, op.sector_id) do
-            {:ok, scout_job} ->
-              Logger.info("Created recon for complex op #{op.id}, deferring spawn")
-              spawn_single_job(scout_job, acc, run)
-
-            {:error, reason} ->
-              Logger.warning(
-                "Failed to create recon for op #{op.id}: #{inspect(reason)}, spawning directly"
-              )
-
-              spawn_single_job(op, acc, run)
+            new_state
+          else
+            Enum.reduce(rest, new_state, fn {op, mission}, acc ->
+              run = ensure_active_run(mission.id, [op])
+              spawn_with_triage(op, acc, run)
+            end)
           end
-        else
-          spawn_single_job(op, acc, run)
-        end
-      end)
+      end
     end
   end
 
@@ -1947,11 +2010,11 @@ defmodule GiTF.Major do
   # -- Private: link_msg recovery ------------------------------------------------
 
   defp schedule_waggle_recovery do
-    Process.send_after(self(), :schedule_waggle_recovery, @waggle_recovery_interval)
+    Process.send_after(self(), :schedule_waggle_recovery, timeout_cfg(:waggle_recovery_interval_ms, 30_000))
   end
 
   defp recover_missed_waggles(state) do
-    cutoff = DateTime.shift(DateTime.utc_now(), second: -@waggle_stale_seconds)
+    cutoff = DateTime.shift(DateTime.utc_now(), second: -timeout_cfg(:waggle_stale_seconds, 30))
 
     unread =
       GiTF.Link.list(to: "major", read: false)

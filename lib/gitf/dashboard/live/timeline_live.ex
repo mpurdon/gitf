@@ -81,13 +81,18 @@ defmodule GiTF.Dashboard.TimelineLive do
      |> stream_events()}
   end
 
-  # TODO(harden): @events list is assigned wholesale; convert to stream/3 to avoid
-  # re-sending the full event list on every diff.
   defp stream_events(socket) do
     mission_id = socket.assigns.mission_id
     filter_type = socket.assigns.filter_type
 
     events = gather_events(mission_id, filter_type)
+
+    # Assign a stable dom id per event for stream tracking
+    indexed_events =
+      events
+      |> Enum.with_index()
+      |> Enum.map(fn {ev, idx} -> Map.put(ev, :__dom_id__, "event-#{idx}") end)
+
     missions = GiTF.Missions.list() |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
 
     mission_name =
@@ -102,13 +107,25 @@ defmodule GiTF.Dashboard.TimelineLive do
           end
       end
 
+    socket =
+      socket
+      |> assign(:page_title, "Timeline")
+      |> assign(:current_path, "/timeline")
+      |> assign(:missions, missions)
+      |> assign(:mission_name, mission_name)
+      |> assign(:event_count, length(events))
+      |> assign(:events_empty?, events == [])
+
+    socket =
+      if Map.has_key?(socket.assigns, :streams) and Map.has_key?(socket.assigns.streams, :events) do
+        stream(socket, :events, indexed_events, reset: true)
+      else
+        socket
+        |> stream_configure(:events, dom_id: & &1.__dom_id__)
+        |> stream(:events, indexed_events)
+      end
+
     socket
-    |> assign(:page_title, "Timeline")
-    |> assign(:current_path, "/timeline")
-    |> assign(:events, events)
-    |> assign(:missions, missions)
-    |> assign(:mission_name, mission_name)
-    |> assign(:event_count, length(events))
   end
 
   # Gathers events from multiple sources into a unified timeline
@@ -310,15 +327,16 @@ defmodule GiTF.Dashboard.TimelineLive do
 
       <%!-- Timeline --%>
       <div class="panel">
-        <%= if @events == [] do %>
+        <%= if @events_empty? do %>
           <div class="empty">No events to display. Events appear as missions run through phases, ops complete, and the factory operates. <a href="/dashboard/missions/new" style="color:#58a6ff">Create a mission</a> to get started.</div>
         <% else %>
           <div style="position:relative; padding-left:2rem">
             <%!-- Vertical line --%>
             <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:#21262d"></div>
 
-            <%= for event <- @events do %>
-              <div style="position:relative; padding-bottom:1rem; padding-left:1.5rem">
+            <div id="timeline-events" phx-update="stream">
+            <%= for {dom_id, event} <- @streams.events do %>
+              <div id={dom_id} style="position:relative; padding-bottom:1rem; padding-left:1.5rem">
                 <%!-- Dot on the timeline --%>
                 <div style={"position:absolute; left:-0.55rem; top:0.3rem; width:10px; height:10px; border-radius:50%; background:#{event.color}; border:2px solid #0d1117"}></div>
 
@@ -360,6 +378,7 @@ defmodule GiTF.Dashboard.TimelineLive do
                 </div>
               </div>
             <% end %>
+            </div>
           </div>
         <% end %>
       </div>

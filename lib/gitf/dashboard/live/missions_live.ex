@@ -32,7 +32,6 @@ defmodule GiTF.Dashboard.MissionsLive do
      |> assign(:page_title, "Missions")
      |> assign(:current_path, "/missions")
      |> assign(:all_missions, missions)
-     |> assign(:missions, missions)
      |> assign(:search, "")
      |> assign(:status_filter, "all")
      |> assign(:sort_by, :priority)
@@ -40,7 +39,10 @@ defmodule GiTF.Dashboard.MissionsLive do
      |> assign(:expanded, MapSet.new())
      |> assign(:refresh_scheduled, false)
      |> assign(:loading, false)
-     |> init_toasts()}
+     |> init_toasts()
+     |> stream_configure(:missions, dom_id: &"mission-#{&1.id}")
+     |> stream(:missions, missions)
+     |> assign(:missions_empty?, missions == [])}
   end
 
   @impl true
@@ -145,7 +147,6 @@ defmodule GiTF.Dashboard.MissionsLive do
     {:noreply, push_navigate(socket, to: "/dashboard/missions/#{id}")}
   end
 
-  # TODO(harden): convert @missions to stream/3 to avoid re-sending full list on diffs
   defp apply_filters(socket) do
     search = String.downcase(socket.assigns.search || "")
     status_filter = socket.assigns.status_filter
@@ -177,7 +178,9 @@ defmodule GiTF.Dashboard.MissionsLive do
       end)
       |> sort_missions(sort_by, sort_dir)
 
-    assign(socket, :missions, filtered)
+    socket
+    |> stream(:missions, filtered, reset: true)
+    |> assign(:missions_empty?, filtered == [])
   end
 
   defp sort_missions(missions, col, dir) do
@@ -297,14 +300,14 @@ defmodule GiTF.Dashboard.MissionsLive do
       </div>
 
       <div class="panel">
-        <%= if @missions == [] do %>
+        <%= if @missions_empty? do %>
           <div class="empty">
             No missions created yet.
             <a href="/dashboard/missions/new" style="color:#58a6ff">Create your first mission</a>
           </div>
         <% else %>
-          <table>
-            <thead>
+          <table id="missions-table" phx-update="stream">
+            <thead id="missions-thead">
               <tr>
                 <th></th>
                 <th>ID</th>
@@ -318,8 +321,8 @@ defmodule GiTF.Dashboard.MissionsLive do
                 <th></th>
               </tr>
             </thead>
-            <tbody>
-              <%= for mission <- @missions do %>
+            <%= for {dom_id, mission} <- @streams.missions do %>
+              <tbody id={dom_id}>
                 <tr class="detail-toggle" phx-click="toggle" phx-value-id={mission.id}>
                   <td style="width:1.5rem">{if MapSet.member?(@expanded, mission.id), do: "v", else: ">"}</td>
                   <td style="font-family:monospace; font-size:0.8rem">{mission.id}</td>
@@ -405,8 +408,8 @@ defmodule GiTF.Dashboard.MissionsLive do
                     </td>
                   </tr>
                 <% end %>
-              <% end %>
-            </tbody>
+              </tbody>
+            <% end %>
           </table>
         <% end %>
       </div>

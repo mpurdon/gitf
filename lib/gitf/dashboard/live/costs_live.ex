@@ -79,7 +79,9 @@ defmodule GiTF.Dashboard.CostsLive do
     assign(socket, :refresh_scheduled, true)
   end
 
-  # TODO(harden): @mission_costs and @trend can grow large — consider stream/3
+  # Note: @mission_costs is bounded by mission count (typically small) and filtered to spent>0;
+  # @trend is a fixed bucket count (12-30). Neither benefits meaningfully from stream/3 —
+  # diff cost is minor versus the aggregation work that produces them. Left as plain assigns.
   defp assign_data(socket) do
     all_costs_raw = GiTF.Archive.all(:costs)
     missions = GiTF.Missions.list()

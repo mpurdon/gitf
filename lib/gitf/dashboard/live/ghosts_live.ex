@@ -73,7 +73,6 @@ defmodule GiTF.Dashboard.GhostsLive do
     end
   end
 
-  # TODO(harden): convert @ghosts (enriched) to stream/3 to avoid re-sending full list on diffs
   defp assign_data(socket) do
     ghosts = GiTF.Ghosts.list()
 
@@ -105,12 +104,28 @@ defmodule GiTF.Dashboard.GhostsLive do
         })
       end)
 
-    socket
-    |> assign(:page_title, "Ghosts")
-    |> assign(:current_path, "/ghosts")
-    |> assign(:ghosts, enriched)
-    |> assign_new(:expanded, fn -> MapSet.new() end)
-    |> init_toasts()
+    working = Enum.count(enriched, &(Map.get(&1, :status) == "working"))
+    stopped = Enum.count(enriched, &(Map.get(&1, :status) in ["stopped", "crashed"]))
+    total = length(enriched)
+
+    socket =
+      socket
+      |> assign(:page_title, "Ghosts")
+      |> assign(:current_path, "/ghosts")
+      |> assign(:ghosts_empty?, enriched == [])
+      |> assign(:ghosts_working, working)
+      |> assign(:ghosts_stopped, stopped)
+      |> assign(:ghosts_total, total)
+      |> assign_new(:expanded, fn -> MapSet.new() end)
+      |> init_toasts()
+
+    if Map.has_key?(socket.assigns, :streams) and Map.has_key?(socket.assigns.streams, :ghosts) do
+      stream(socket, :ghosts, enriched, reset: true)
+    else
+      socket
+      |> stream_configure(:ghosts, dom_id: &"ghost-#{&1.id}")
+      |> stream(:ghosts, enriched)
+    end
   end
 
   @impl true
@@ -120,27 +135,24 @@ defmodule GiTF.Dashboard.GhostsLive do
       <h1 class="page-title">Ghost Agents</h1>
 
       <%!-- Summary counters --%>
-      <% working = Enum.count(@ghosts, &(Map.get(&1, :status) == "working")) %>
-      <% stopped = Enum.count(@ghosts, &(Map.get(&1, :status) in ["stopped", "crashed"])) %>
-      <% total = length(@ghosts) %>
       <div style="display:flex; gap:1rem; margin-bottom:1rem">
         <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="#3fb950" /><span style="color:#3fb950; font-weight:600">{working}</span><span style="color:#6b7280">working</span>
+          <.dot color="#3fb950" /><span style="color:#3fb950; font-weight:600">{@ghosts_working}</span><span style="color:#6b7280">working</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="#6b7280" /><span style="color:#8b949e">{total - working - stopped}</span><span style="color:#6b7280">idle</span>
+          <.dot color="#6b7280" /><span style="color:#8b949e">{@ghosts_total - @ghosts_working - @ghosts_stopped}</span><span style="color:#6b7280">idle</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="#f85149" /><span style="color:#f85149">{stopped}</span><span style="color:#6b7280">stopped</span>
+          <.dot color="#f85149" /><span style="color:#f85149">{@ghosts_stopped}</span><span style="color:#6b7280">stopped</span>
         </div>
       </div>
 
       <div class="panel">
-        <%= if @ghosts == [] do %>
+        <%= if @ghosts_empty? do %>
           <div class="empty">No ghosts deployed yet. Ghosts are created when the Major assigns ops.</div>
         <% else %>
-          <table>
-            <thead>
+          <table id="ghosts-table" phx-update="stream">
+            <thead id="ghosts-thead">
               <tr>
                 <th></th>
                 <th></th>
@@ -154,8 +166,8 @@ defmodule GiTF.Dashboard.GhostsLive do
                 <th></th>
               </tr>
             </thead>
-            <tbody>
-              <%= for ghost <- @ghosts do %>
+            <%= for {dom_id, ghost} <- @streams.ghosts do %>
+              <tbody id={dom_id}>
                 <tr class="detail-toggle" phx-click="toggle" phx-value-id={ghost.id}>
                   <td style="width:1.5rem">{if MapSet.member?(Map.get(assigns, :expanded, MapSet.new()), ghost.id), do: "v", else: ">"}</td>
                   <td style="width:1rem">
@@ -247,8 +259,8 @@ defmodule GiTF.Dashboard.GhostsLive do
                     </td>
                   </tr>
                 <% end %>
-              <% end %>
-            </tbody>
+              </tbody>
+            <% end %>
           </table>
         <% end %>
       </div>

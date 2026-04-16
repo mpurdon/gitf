@@ -33,10 +33,23 @@ config :gitf, :timeouts,
   # Ghost worker heartbeat / staleness
   heartbeat_interval_ms: 15_000,
   stale_threshold_seconds: 120,
+  verify_beacon_initial_ms: 10_000,
+  checkpoint_interval_ms: 30_000,
+  task_skill_freshness_seconds: 3600,
   # Major lifecycle
   pending_timeout_seconds: 600,
   assigned_timeout_seconds: 600,
-  clarification_timeout_ms: 15 * 60 * 1_000
+  clarification_timeout_ms: 15 * 60 * 1_000,
+  # Major periodic schedules
+  waggle_recovery_interval_ms: 30_000,
+  waggle_stale_seconds: 30,
+  debrief_interval_ms: 5 * 60 * 1_000,
+  stall_check_interval_ms: 2 * 60 * 1_000,
+  stuck_recovery_interval_ms: 5 * 60 * 1_000,
+  phase_advancement_interval_ms: 3 * 60 * 1_000,
+  janitor_interval_ms: 15 * 60 * 1_000,
+  autoscale_interval_ms: 60_000,
+  job_spawn_interval_ms: 15_000
 
 config :gitf, :llm,
   execution_mode: :api,
