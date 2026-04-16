@@ -311,9 +311,9 @@ defmodule GiTF.Ops do
         cleanup_ghost_and_shell(op[:ghost_id])
 
         # Remove dependencies in both directions
-        Archive.filter(:op_dependencies, fn d ->
-          d.op_id == op_id or d.depends_on_id == op_id
-        end)
+        (Archive.by_index(:op_dependencies, :op_id, op_id) ++
+           Archive.by_index(:op_dependencies, :depends_on_id, op_id))
+        |> Enum.uniq_by(& &1.id)
         |> Enum.each(fn d -> Archive.delete(:op_dependencies, d.id) end)
 
         Archive.delete(:ops, op_id)
@@ -507,7 +507,7 @@ defmodule GiTF.Ops do
   @spec dependencies(String.t()) :: [map()]
   def dependencies(op_id) do
     dep_ids =
-      Archive.filter(:op_dependencies, fn d -> d.op_id == op_id end)
+      Archive.by_index(:op_dependencies, :op_id, op_id)
       |> Enum.map(& &1.depends_on_id)
 
     Enum.flat_map(dep_ids, fn id ->
@@ -522,7 +522,7 @@ defmodule GiTF.Ops do
   @spec dependents(String.t()) :: [map()]
   def dependents(op_id) do
     dep_op_ids =
-      Archive.filter(:op_dependencies, fn d -> d.depends_on_id == op_id end)
+      Archive.by_index(:op_dependencies, :depends_on_id, op_id)
       |> Enum.map(& &1.op_id)
 
     Enum.flat_map(dep_op_ids, fn id ->
@@ -543,7 +543,7 @@ defmodule GiTF.Ops do
   """
   @spec ready?(String.t()) :: boolean()
   def ready?(op_id) do
-    deps = Archive.filter(:op_dependencies, fn d -> d.op_id == op_id end)
+    deps = Archive.by_index(:op_dependencies, :op_id, op_id)
 
     Enum.all?(deps, fn dep ->
       case Archive.get(:ops, dep.depends_on_id) do
@@ -657,7 +657,7 @@ defmodule GiTF.Ops do
 
   defp do_unblock_dependents(op_id) do
     dependent_ids =
-      Archive.filter(:op_dependencies, fn d -> d.depends_on_id == op_id end)
+      Archive.by_index(:op_dependencies, :depends_on_id, op_id)
       |> Enum.map(& &1.op_id)
 
     dep_failed? =
@@ -708,7 +708,7 @@ defmodule GiTF.Ops do
         visited = MapSet.put(visited, from_id)
 
         deps =
-          Archive.filter(:op_dependencies, fn d -> d.op_id == from_id end)
+          Archive.by_index(:op_dependencies, :op_id, from_id)
           |> Enum.map(& &1.depends_on_id)
 
         Enum.any?(deps, fn dep_id -> bfs_reachable?(dep_id, target_id, visited) end)
