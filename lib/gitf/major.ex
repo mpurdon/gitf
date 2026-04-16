@@ -601,7 +601,7 @@ defmodule GiTF.Major do
 
   defp recover_stuck_jobs do
     stuck_jobs =
-      GiTF.Archive.filter(:ops, fn j -> j.status == "running" end)
+      GiTF.Archive.by_index(:ops, :status, "running")
 
     Enum.each(stuck_jobs, fn op ->
       worker_alive? =
@@ -642,7 +642,7 @@ defmodule GiTF.Major do
     assigned_timeout = timeout_cfg(:assigned_timeout_seconds, 600)
 
     # Timeout ops stuck in "pending" for too long (>10 min)
-    GiTF.Archive.filter(:ops, fn j -> j.status == "pending" end)
+    GiTF.Archive.by_index(:ops, :status, "pending")
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
@@ -663,7 +663,7 @@ defmodule GiTF.Major do
     end)
 
     # Timeout ops stuck in "assigned" (ghost never started working)
-    GiTF.Archive.filter(:ops, fn j -> j.status == "assigned" end)
+    GiTF.Archive.by_index(:ops, :status, "assigned")
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
@@ -1707,9 +1707,8 @@ defmodule GiTF.Major do
 
     Enum.each(active_quests, fn mission ->
       quest_jobs =
-        GiTF.Archive.filter(:ops, fn j ->
-          j.mission_id == mission.id and j.status in ["running", "assigned", "pending"]
-        end)
+        GiTF.Archive.by_index(:ops, :mission_id, mission.id)
+        |> Enum.filter(&(&1.status in ["running", "assigned", "pending"]))
 
       if Enum.empty?(quest_jobs) do
         Logger.info(
