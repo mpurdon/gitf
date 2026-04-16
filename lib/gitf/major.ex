@@ -113,7 +113,7 @@ defmodule GiTF.Major do
       port: nil,
       max_ghosts: max_ghosts,
       effective_max_ghosts: max_ghosts,
-      max_retries: 3,
+      max_retries: GiTF.Ops.max_retries(),
       last_checkpoint: %{},
       stall_timeout: :timer.minutes(10),
       pending_verifications: %{},

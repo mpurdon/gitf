@@ -1092,16 +1092,17 @@ defmodule GiTF.Major.Orchestrator do
       Enum.any?(impl_jobs, &(&1.status in ["failed", "rejected"])) ->
         # A failed op is "resolved" if a retry sibling completed, or
         # exhausted if retry_count hit max with no retry spawned.
+        retried_ok = GiTF.Ops.retried_ok_set(impl_jobs)
         failed_ops = Enum.filter(impl_jobs, &(&1.status in ["failed", "rejected"]))
 
         unresolved =
           Enum.reject(failed_ops, fn op ->
             Map.get(op, :retry_count, 0) >= GiTF.Ops.max_retries() or
-              GiTF.Ops.retry_completed_in?(op.id, impl_jobs)
+              MapSet.member?(retried_ok, op.id)
           end)
 
         cond do
-          unresolved == [] and Enum.all?(impl_jobs, &GiTF.Ops.resolved?(&1, impl_jobs)) ->
+          unresolved == [] and Enum.all?(impl_jobs, &GiTF.Ops.resolved?(&1, retried_ok)) ->
             if Map.get(mission, :sector_id) do
               {:ok, mission} = GiTF.Missions.get(mission.id)
               start_validation(mission)

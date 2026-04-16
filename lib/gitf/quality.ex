@@ -17,7 +17,7 @@ defmodule GiTF.Quality do
       StaticAnalysis.analyze(shell_path, language)
 
     report = %{
-      id: generate_id("qr"),
+      id: GiTF.ID.generate(:qr),
       op_id: op_id,
       analysis_type: "static",
       score: score,
@@ -45,7 +45,7 @@ defmodule GiTF.Quality do
       Security.scan(shell_path, language)
 
     report = %{
-      id: generate_id("qr"),
+      id: GiTF.ID.generate(:qr),
       op_id: op_id,
       analysis_type: "security",
       score: score,
@@ -85,7 +85,7 @@ defmodule GiTF.Quality do
           end
 
         report = %{
-          id: generate_id("qr"),
+          id: GiTF.ID.generate(:qr),
           op_id: op_id,
           analysis_type: "performance",
           score: final_score,
@@ -110,7 +110,7 @@ defmodule GiTF.Quality do
   """
   def set_performance_baseline(sector_id, metrics) do
     baseline = %{
-      id: generate_id("pb"),
+      id: GiTF.ID.generate(:pb),
       sector_id: sector_id,
       metrics: metrics,
       score: 100,
@@ -336,7 +336,4 @@ defmodule GiTF.Quality do
     end)
   end
 
-  defp generate_id(prefix) do
-    "#{prefix}-#{:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)}"
-  end
 end

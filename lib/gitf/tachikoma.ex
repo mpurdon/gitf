@@ -561,11 +561,8 @@ defmodule GiTF.Tachikoma do
         |> Enum.reject(& &1[:phase_job])
 
       if impl_jobs != [] do
-        # Single pass — classify each op as resolved / pending-retry / unresolved-failure.
-        # Pre-build the set of original op IDs whose retry succeeded so the
-        # check is O(1) per op instead of O(n) via Enum.any? scan.
-        retried_ok =
-          for o <- impl_jobs, o.status == "done", id = Map.get(o, :retry_of), do: id, into: MapSet.new()
+        # Pre-build retried_ok once so the per-op resolved? check is O(1).
+        retried_ok = GiTF.Ops.retried_ok_set(impl_jobs)
 
         {all_terminal?, all_resolved?, all_failed_unresolved?} =
           Enum.reduce(impl_jobs, {true, true, true}, fn op, {term?, res?, ufail?} ->
@@ -642,19 +639,9 @@ defmodule GiTF.Tachikoma do
       :ok
   end
 
-  # `retried_ok` is the precomputed MapSet of op_ids whose retry sibling
-  # has status :done — pass once, query O(1) per op.
   defp op_resolved_or_retry_pending?(op, %MapSet{} = retried_ok) do
-    case op.status do
-      "done" ->
-        true
-
-      s when s in ["failed", "rejected", "killed"] ->
-        MapSet.member?(retried_ok, op.id) or GiTF.Ops.retry_pending?(op)
-
-      _ ->
-        false
-    end
+    GiTF.Ops.resolved?(op, retried_ok) or
+      (op.status in ["failed", "rejected", "killed"] and GiTF.Ops.retry_pending?(op))
   end
 
   defp check_deadlocks do
@@ -1056,18 +1043,18 @@ defmodule GiTF.Tachikoma do
       :ok
   end
 
-  @max_auto_retries 3
   @retry_cooldown_ms :timer.minutes(2)
 
   defp retry_failed_ops do
     active_ids = active_mission_ids()
+    max_retries = GiTF.Ops.max_retries()
 
     if active_ids != [] do
       GiTF.Archive.filter(:ops, fn op ->
         op.status == "failed" && op[:mission_id] in active_ids
       end)
       |> Enum.filter(fn op ->
-        (op[:retry_count] || 0) < @max_auto_retries && !op[:phase_job]
+        (op[:retry_count] || 0) < max_retries && !op[:phase_job]
       end)
       |> Enum.filter(fn op ->
         case op[:updated_at] do
@@ -1081,7 +1068,7 @@ defmodule GiTF.Tachikoma do
       |> Enum.reject(&retry_already_handled?/1)
       |> Enum.each(fn op ->
         Logger.info(
-          "Tachikoma: auto-retrying failed op #{op.id} (retry #{(op[:retry_count] || 0) + 1}/#{@max_auto_retries})"
+          "Tachikoma: auto-retrying failed op #{op.id} (retry #{(op[:retry_count] || 0) + 1}/#{max_retries})"
         )
 
         GiTF.Ops.reset(op.id, nil)

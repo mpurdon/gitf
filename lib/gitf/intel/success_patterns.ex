@@ -16,7 +16,7 @@ defmodule GiTF.Intel.SuccessPatterns do
       quality_score = get_quality_score(op_id)
 
       pattern = %{
-        id: generate_id("sp"),
+        id: GiTF.ID.generate(:sp),
         op_id: op_id,
         sector_id: op.sector_id,
         success_factors: factors,
@@ -233,7 +233,4 @@ defmodule GiTF.Intel.SuccessPatterns do
     suggestions
   end
 
-  defp generate_id(prefix) do
-    "#{prefix}-#{:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)}"
-  end
 end

@@ -18,6 +18,8 @@ defmodule GiTF.Ops do
   """
 
   alias GiTF.Archive
+
+  @max_retries 3
   require GiTF.Ghost.Status, as: GhostStatus
 
   # -- Valid transitions -------------------------------------------------------
@@ -171,7 +173,7 @@ defmodule GiTF.Ops do
   def create_retry(op_id, opts \\ []) do
     with {:ok, op} <- get(op_id) do
       retry_count = Map.get(op, :retry_count, 0) + 1
-      max_retries = Keyword.get(opts, :max_retries, 3)
+      max_retries = Keyword.get(opts, :max_retries, @max_retries)
 
       if retry_count > max_retries do
         {:error, :max_retries_exceeded}
@@ -591,8 +593,6 @@ defmodule GiTF.Ops do
     end)
   end
 
-  @max_retries 3
-
   @doc "Returns the max retry count an op may accumulate before exhausting."
   @spec max_retries() :: pos_integer()
   def max_retries, do: @max_retries
@@ -634,20 +634,38 @@ defmodule GiTF.Ops do
   Returns true if `op` is in a terminal-resolved state — either done, or
   failed but a sibling op with `retry_of: op.id` reached `\"done\"`.
 
-  Pass `all_ops` when checking many ops at once to avoid N Archive scans.
+  Hot loops should pre-build a MapSet of resolved-via-retry op IDs once
+  via `retried_ok_set/1` and pass it as `retried_ok`. Without it the
+  function falls back to a full Archive scan per failed op.
   """
-  @spec resolved?(map(), Enumerable.t() | nil) :: boolean()
-  def resolved?(op, all_ops \\ nil) do
-    case op.status do
-      "done" ->
-        true
+  @spec resolved?(map(), MapSet.t() | nil) :: boolean()
+  def resolved?(op, retried_ok \\ nil)
 
-      s when s in ["failed", "rejected", "killed"] ->
-        if all_ops, do: retry_completed_in?(op.id, all_ops), else: retry_completed?(op.id)
+  def resolved?(%{status: "done"}, _retried_ok), do: true
 
-      _ ->
-        false
-    end
+  def resolved?(%{status: s} = op, %MapSet{} = retried_ok)
+      when s in ["failed", "rejected", "killed"] do
+    MapSet.member?(retried_ok, op.id)
+  end
+
+  def resolved?(%{status: s} = op, nil) when s in ["failed", "rejected", "killed"] do
+    retry_completed?(op.id)
+  end
+
+  def resolved?(_op, _retried_ok), do: false
+
+  @doc """
+  Builds a MapSet of op IDs whose retry sibling has reached `\"done\"`.
+  Pass to `resolved?/2` to avoid O(n²) sibling scans in loops.
+  """
+  @spec retried_ok_set(Enumerable.t()) :: MapSet.t()
+  def retried_ok_set(ops) do
+    for o <- ops,
+        o.status == "done",
+        id = Map.get(o, :retry_of),
+        not is_nil(id),
+        do: id,
+        into: MapSet.new()
   end
 
   @doc """

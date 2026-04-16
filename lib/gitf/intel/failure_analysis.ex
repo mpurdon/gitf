@@ -147,12 +147,12 @@ defmodule GiTF.Intel.FailureAnalysis do
      }},
     {:compilation_error, %{
        keywords: ["compilation"],
-       root_cause: :extract_compilation_error,
+       root_cause: &__MODULE__.extract_compilation_error/1,
        suggestions: ["Review syntax errors", "Check dependencies", "Verify imports"]
      }},
     {:test_failure, %{
        keywords: ["test", "failed"],
-       root_cause: :extract_test_failure,
+       root_cause: &__MODULE__.extract_test_failure/1,
        suggestions: ["Review test expectations", "Check test data", "Verify logic"]
      }},
     {:context_overflow, %{
@@ -187,7 +187,8 @@ defmodule GiTF.Intel.FailureAnalysis do
      }}
   ]
 
-  defp failure_spec(type), do: Keyword.get(@failure_specs, type, Keyword.fetch!(@failure_specs, :unknown))
+  @unknown_spec Keyword.fetch!(@failure_specs, :unknown)
+  defp failure_spec(type), do: Keyword.get(@failure_specs, type, @unknown_spec)
 
   defp classify_failure(op, feedback) do
     combined =
@@ -200,26 +201,26 @@ defmodule GiTF.Intel.FailureAnalysis do
 
   defp identify_root_cause(op, failure_type) do
     case failure_spec(failure_type).root_cause do
-      :extract_compilation_error -> extract_compilation_error(op)
-      :extract_test_failure -> extract_test_failure(op)
+      fun when is_function(fun, 1) -> fun.(op)
       str when is_binary(str) -> str
     end
   end
 
-  defp extract_compilation_error(op) do
+  @doc false
+  # Public for capture in @failure_specs above. Not part of the API.
+  def extract_compilation_error(op) do
     error_msg = Map.get(op, :error_message, "")
 
-    # Try to extract specific error
     case Regex.run(~r/error: (.+)/, error_msg) do
       [_, error] -> String.slice(error, 0, 100)
       _ -> "Compilation failed"
     end
   end
 
-  defp extract_test_failure(op) do
+  @doc false
+  def extract_test_failure(op) do
     output = Map.get(op, :audit_result, "")
 
-    # Try to extract test name
     case Regex.run(~r/\d+\) test (.+)/, output) do
       [_, test] -> "Test failed: #{String.slice(test, 0, 50)}"
       _ -> "Tests failed"
