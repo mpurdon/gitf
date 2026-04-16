@@ -479,6 +479,72 @@ defmodule GiTF.ArchiveTest do
     end
   end
 
+  # ── Multi-table heir survival ──────────────────────────────────────────
+
+  describe "multi-table heir" do
+    test "all collection + index tables survive Archive crash and restart", %{store_dir: store_dir} do
+      # Ensure the heir is alive
+      heir_pid = GiTF.Archive.TableHeir.pid()
+      assert is_pid(heir_pid), "TableHeir must be running"
+
+      # Insert data — this writes to disk via the caller process
+      {:ok, op} = Archive.insert(:ops, %{status: "running", mission_id: "msn-x"})
+      {:ok, msn} = Archive.insert(:missions, %{name: "important"})
+
+      # Verify index works before crash
+      assert [op.id] == GiTF.Archive.Indexes.lookup(:ops, :status, "running")
+
+      # Stop and restart Archive so init_store creates tables owned by Archive
+      # (tables created via ensure_table in insert are owned by the test process)
+      GiTF.Test.StoreHelper.stop_store()
+
+      # Clean up ETS tables from the test process
+      for tab <- [:gitf_archive_ops, :gitf_archive_missions] do
+        if :ets.info(tab) != :undefined, do: :ets.delete(tab)
+      end
+
+      GiTF.Archive.Indexes.delete_tables()
+      {:ok, _} = Archive.start_link(data_dir: store_dir)
+
+      # Verify data survived the restart
+      assert Archive.get(:ops, op.id).status == "running"
+      assert Archive.get(:missions, msn.id).name == "important"
+
+      # Now tables are owned by the Archive GenServer — verify heir is set
+      assert :ets.info(:gitf_archive_ops, :heir) == heir_pid
+      assert :ets.info(:gitf_archive_missions, :heir) == heir_pid
+
+      # Kill the Archive process (simulates crash)
+      archive_pid = Process.whereis(GiTF.Archive)
+      assert is_pid(archive_pid)
+      Process.unlink(archive_pid)
+      ref = Process.monitor(archive_pid)
+      Process.exit(archive_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^archive_pid, _reason}, 1000
+
+      # Brief pause for ETS-TRANSFER messages to be processed
+      Process.sleep(50)
+
+      # Tables should still exist — held by the heir
+      assert :ets.info(:gitf_archive_ops) != :undefined
+      assert :ets.info(:gitf_archive_missions) != :undefined
+
+      # Index tables should also survive
+      idx_tab = GiTF.Archive.Indexes.index_table(:ops, :status)
+      assert :ets.info(idx_tab) != :undefined
+
+      # Restart Archive — it should reclaim tables from heir
+      {:ok, _} = Archive.start_link(data_dir: store_dir)
+
+      # Data accessible after restart
+      assert Archive.get(:ops, op.id).status == "running"
+      assert Archive.get(:missions, msn.id).name == "important"
+
+      # Indexes work after restart
+      assert GiTF.Archive.Indexes.lookup(:ops, :status, "running") != []
+    end
+  end
+
   # ── New format persistence ─────────────────────────────────────────────
 
   describe "per-collection file persistence" do

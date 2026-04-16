@@ -15,7 +15,10 @@ defmodule GiTF.Archive do
   use GenServer
   require Logger
 
+  alias GiTF.Archive.Indexes
+
   @name __MODULE__
+  @indexes_enabled true
   @lock_stale_seconds 120
   @lock_steal_attempts 500
   @backup_interval_seconds 300
@@ -215,6 +218,33 @@ defmodule GiTF.Archive do
   @spec count(atom(), (map() -> boolean())) :: non_neg_integer()
   def count(collection, fun) do
     filter(collection, fun) |> length()
+  end
+
+  @doc "Returns records matching a secondary index value. O(k) instead of O(n)."
+  @spec by_index(atom(), atom(), term()) :: [map()]
+  def by_index(collection, field, value) do
+    if @indexes_enabled do
+      ids = Indexes.lookup(collection, field, value)
+      tab = table_name(collection)
+
+      for id <- ids,
+          [{^id, record}] <- [:ets.lookup(tab, id)],
+          do: record
+    else
+      filter(collection, &(Map.get(&1, field) == value))
+    end
+  rescue
+    ArgumentError -> []
+  end
+
+  @doc "Counts records matching a secondary index value."
+  @spec count_by_index(atom(), atom(), term()) :: non_neg_integer()
+  def count_by_index(collection, field, value) do
+    if @indexes_enabled do
+      Indexes.count(collection, field, value)
+    else
+      count(collection, &(Map.get(&1, field) == value))
+    end
   end
 
   @doc """
@@ -615,6 +645,10 @@ defmodule GiTF.Archive do
 
     data = load_or_migrate()
 
+    # Initialize index tables before populating data
+    Indexes.delete_tables()
+    Indexes.init_tables()
+
     for {col, records} <- data, is_atom(col) do
       tab = table_name(col)
 
@@ -623,13 +657,18 @@ defmodule GiTF.Archive do
           opts = [:named_table, :public, :set, read_concurrency: true]
           opts = if is_pid(heir_pid), do: opts ++ [{:heir, heir_pid, :transfer}], else: opts
           :ets.new(tab, opts)
+          if is_pid(heir_pid), do: GiTF.Archive.TableHeir.register(tab)
 
         _ ->
           if is_pid(heir_pid), do: GiTF.Archive.TableHeir.claim(tab)
           :ets.delete_all_objects(tab)
       end
 
-      for {id, record} <- records, do: :ets.insert(tab, {id, record})
+      for {id, record} <- records do
+        :ets.insert(tab, {id, record})
+        Indexes.on_put(col, nil, record)
+      end
+
       register_collection(col)
     end
   rescue
@@ -708,6 +747,7 @@ defmodule GiTF.Archive do
         opts = [:named_table, :public, :set, read_concurrency: true]
         opts = if is_pid(heir_pid), do: opts ++ [{:heir, heir_pid, :transfer}], else: opts
         :ets.new(tab, opts)
+        if is_pid(heir_pid), do: GiTF.Archive.TableHeir.register(tab)
         register_collection(col)
 
       _ ->
@@ -722,13 +762,23 @@ defmodule GiTF.Archive do
       col_data = Map.get(data, changed_collection, %{})
       ensure_table(changed_collection)
       :ets.delete_all_objects(table_name(changed_collection))
-      for {id, record} <- col_data, do: :ets.insert(table_name(changed_collection), {id, record})
+      Indexes.clear_collection(changed_collection)
+
+      for {id, record} <- col_data do
+        :ets.insert(table_name(changed_collection), {id, record})
+        Indexes.on_put(changed_collection, nil, record)
+      end
     else
       # transact — may touch multiple collections
       for {col, records} <- data, is_atom(col) do
         ensure_table(col)
         :ets.delete_all_objects(table_name(col))
-        for {id, record} <- records, do: :ets.insert(table_name(col), {id, record})
+        Indexes.clear_collection(col)
+
+        for {id, record} <- records do
+          :ets.insert(table_name(col), {id, record})
+          Indexes.on_put(col, nil, record)
+        end
       end
     end
   end
