@@ -42,7 +42,15 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           |> assign(:report_loading, false)
           |> assign(:sectors, if(connected?(socket), do: load_sectors(), else: []))
           |> init_toasts()
-          |> assign(:budget_info, %{budget: 0, spent: 0, remaining: 0, pct: 0.0})
+          |> assign(:budget_info, %{
+            budget: 0,
+            spent: 0,
+            remaining: 0,
+            pct: 0.0,
+            estimated_remaining: 0,
+            pending_ops: 0,
+            done_ops: 0
+          })
           |> assign(:rollback_status, :unknown)
           |> assign(:priority, :normal)
           |> assign(:duration, nil)
