@@ -219,6 +219,13 @@ defmodule GiTF.Intel.FailureAnalysis do
         :merge_conflict ->
           ["Resolve conflicts manually", "Rebase on latest", "Retry with fresh worktree"]
 
+        :empty_completion ->
+          [
+            "Use a more capable model that reliably invokes file-edit tools",
+            "Verify the prompt explicitly requires file edits before claiming completion",
+            "Check that the model received the expected target files"
+          ]
+
         :unknown ->
           ["Review error logs", "Check ghost status", "Retry with different model"]
       end

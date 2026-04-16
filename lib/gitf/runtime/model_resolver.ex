@@ -357,16 +357,37 @@ defmodule GiTF.Runtime.ModelResolver do
 
   Escalates: fast → general → thinking. Returns nil if already at thinking.
   Used when retrying failed ops with a stronger model.
+
+  Skips tiers that resolve to the same model spec as the input — some
+  configs collapse fast and general onto the same provider model
+  (e.g. google maps both to gemini-2.5-flash); without skipping, the
+  "escalation" would return the same broken model.
   """
   @spec escalate(String.t()) :: String.t() | nil
   def escalate(model_spec) do
     resolved = resolve(model_spec)
     tier = reverse_lookup_tier(resolved)
 
-    case tier do
-      t when t in ["fast", "haiku"] -> resolve("general")
-      t when t in ["general", "sonnet"] -> resolve("thinking")
-      _ -> nil
+    next =
+      case tier do
+        t when t in ["fast", "haiku"] -> resolve("general")
+        t when t in ["general", "sonnet"] -> resolve("thinking")
+        _ -> nil
+      end
+
+    cond do
+      is_nil(next) ->
+        nil
+
+      next == resolved ->
+        # Tier collision: next tier maps to the same model. Jump again.
+        case tier do
+          t when t in ["fast", "haiku"] -> resolve("thinking")
+          _ -> nil
+        end
+
+      true ->
+        next
     end
   end
 
