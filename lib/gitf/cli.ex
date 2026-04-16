@@ -350,15 +350,18 @@ defmodule GiTF.CLI do
     IO.puts("Global config: #{GiTF.global_config_path()}")
     IO.puts("")
 
+    init_path =
+      System.get_env("GITF_PATH") ||
+        System.get_env("GITF_HOME") ||
+        System.user_home!()
+
     answer =
-      case IO.gets("No gitf project found. Initialize one here? [y/n] ") do
+      case IO.gets("No gitf project found. Initialize at #{init_path}? [y/n] ") do
         :eof -> "y"
         line when is_binary(line) -> line |> String.trim() |> String.downcase()
       end
 
     if answer in ["y", "yes"] do
-      init_path = System.get_env("GITF_PATH") || "."
-
       case GiTF.Init.init(init_path, force: false) do
         {:ok, expanded} ->
           Format.success("Project initialized at #{expanded}")

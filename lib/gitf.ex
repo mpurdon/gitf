@@ -51,15 +51,37 @@ defmodule GiTF do
   @doc """
   Locates the root directory of a GiTF project.
 
-  Checks the GITF_PATH environment variable first, then walks up from the
-  current working directory looking for a `.gitf/` directory marker.
+  Resolution order:
+    1. `GITF_PATH` environment variable (set by `-w` / `--workspace` flag)
+    2. Walk up from cwd looking for `.gitf/` (workspace-local, legacy)
+    3. `${GITF_HOME:-~/.gitf}` parent (single-user homedir mode, default)
+
+  In homedir mode the "root" is `$HOME` and `.gitf/` lives directly under it.
   """
   @spec gitf_dir() :: {:ok, String.t()} | {:error, :not_in_gitf}
   def gitf_dir do
     case System.get_env("GITF_PATH") do
-      nil -> find_gitf_dir(File.cwd!())
-      path -> validate_gitf_path(Path.expand(path))
+      nil ->
+        case find_gitf_dir(File.cwd!()) do
+          {:ok, path} -> {:ok, path}
+          {:error, :not_in_gitf} -> homedir_root()
+        end
+
+      path ->
+        validate_gitf_path(Path.expand(path))
     end
+  end
+
+  @doc """
+  Returns the parent directory whose `.gitf/` is the homedir-mode store.
+
+  Resolves `GITF_HOME` if set, else `$HOME`. Returns `{:ok, parent}` when
+  `<parent>/.gitf/config.toml` exists, else `{:error, :not_in_gitf}`.
+  """
+  @spec homedir_root() :: {:ok, String.t()} | {:error, :not_in_gitf}
+  def homedir_root do
+    parent = System.get_env("GITF_HOME") || System.user_home!()
+    validate_gitf_path(parent)
   end
 
   defp validate_gitf_path(expanded) do

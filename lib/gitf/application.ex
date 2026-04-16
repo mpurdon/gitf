@@ -31,12 +31,18 @@ defmodule GiTF.Application do
     GiTF.Init.init_global()
     File.mkdir_p!(Path.join(GiTF.global_config_dir(), "llm_db"))
 
-    # Determine project root for config overlay (nil if not in a project)
+    # Determine project root for config overlay.
+    # Resolution: GITF_PATH env → walk-up from cwd → homedir (~/.gitf)
+    # Homedir is the default for system-wide installs; walk-up is legacy
+    # workspace-local mode.
     gitf_root =
       case GiTF.gitf_dir() do
         {:ok, root} -> root
-        _ -> nil
+        _ -> System.get_env("GITF_HOME") || System.user_home!()
       end
+
+    # Derive store dir from gitf_root unless explicitly overridden (tests do this).
+    store_dir = Application.get_env(:gitf, :store_dir, Path.join(gitf_root, ".gitf/store"))
 
     setup_file_logging()
 
@@ -94,8 +100,7 @@ defmodule GiTF.Application do
       ),
       # ETS heir must start before Archive so Archive's cache can be made recoverable
       GiTF.Archive.TableHeir,
-      {GiTF.Archive,
-       data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!(), ".gitf/store"))},
+      {GiTF.Archive, data_dir: store_dir},
       {Registry, keys: :unique, name: GiTF.Registry},
       {Task.Supervisor, name: GiTF.TaskSupervisor},
       # Deferred init — non-critical one-shot work under supervision. Runs after
@@ -119,7 +124,7 @@ defmodule GiTF.Application do
              {DynamicSupervisor,
               name: GiTF.Runtime.ProviderLimiter.Supervisor, strategy: :one_for_one},
              {DynamicSupervisor, name: GiTF.MissionSupervisor, strategy: :one_for_one},
-             {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!())},
+             {GiTF.Major, gitf_root: gitf_root},
              # Periodic recovery/stall/debrief timers — owned by a sibling so
              # Janitor crashes don't disrupt Major's link routing. Positioned
              # AFTER Major: under :rest_for_one a Janitor crash leaves Major
