@@ -274,11 +274,37 @@ defmodule GiTF.GitHub do
   # -- Private -----------------------------------------------------------------
 
   defp github_token do
-    # Check env var first, then config
-    case System.get_env("GITHUB_TOKEN") do
-      nil -> read_token_from_config()
-      "" -> read_token_from_config()
-      token -> token
+    # Resolution order:
+    #   1. GITHUB_TOKEN env var
+    #   2. <gitf_root>/.gitf/config.toml [github] token
+    #   3. `gh auth token` — falls back to gh CLI's keyring if user is
+    #      already authenticated there (avoids duplicate token setup).
+    cond do
+      env = sanitize(System.get_env("GITHUB_TOKEN")) -> env
+      cfg = read_token_from_config() -> cfg
+      gh = read_token_from_gh_cli() -> gh
+      true -> nil
+    end
+  end
+
+  defp sanitize(nil), do: nil
+  defp sanitize(""), do: nil
+  defp sanitize(s) when is_binary(s), do: s
+
+  defp read_token_from_gh_cli do
+    case System.find_executable("gh") do
+      nil ->
+        nil
+
+      gh_path ->
+        try do
+          case System.cmd(gh_path, ["auth", "token"], stderr_to_stdout: true, env: [{"LC_ALL", "C"}]) do
+            {token, 0} -> token |> String.trim() |> sanitize()
+            _ -> nil
+          end
+        rescue
+          _ -> nil
+        end
     end
   end
 
