@@ -39,11 +39,12 @@ defmodule GiTF.Runtime.Keys do
   def load do
     keys = read_keys_from_toml()
 
-    # ReqLLM providers read their API keys from env vars via ReqLLM.Keys
-    # (the GiTF wrapper at reqllm_provider.ex passes only :max_tokens and
-    # :temperature through to ReqLLM.generate_text/3 — it does NOT inject
-    # the api_key as an opt). Set the standard env vars from config so
-    # every provider's lookup succeeds.
+    # ReqLLM.Keys.get!/2 resolution order:
+    #   1. :api_key opt passed to generate_text (per-call, none today)
+    #   2. Application.get_env(:req_llm, :<provider>_api_key)
+    #   3. <PROVIDER>_API_KEY env var
+    # We use #2 — Elixir-native, no env pollution, doesn't leak into
+    # spawned ghost subprocess env.
     api_loaded = load_provider_api_keys(keys)
 
     # AWS credentials still need env vars for SigV4 signing (BedrockDirect).
@@ -54,7 +55,7 @@ defmodule GiTF.Runtime.Keys do
     end
 
     if api_loaded > 0 do
-      Logger.info("Loaded #{api_loaded} provider API key(s) into env")
+      Logger.info("Loaded #{api_loaded} provider API key(s) into Application env")
     end
 
     aws_loaded + api_loaded
@@ -64,24 +65,25 @@ defmodule GiTF.Runtime.Keys do
       0
   end
 
-  # Standard env var name for each ReqLLM provider.
-  @provider_env_vars %{
-    "anthropic" => "ANTHROPIC_API_KEY",
-    "openai" => "OPENAI_API_KEY",
-    "google" => "GOOGLE_API_KEY",
-    "groq" => "GROQ_API_KEY",
-    "mistral" => "MISTRAL_API_KEY",
-    "cohere" => "COHERE_API_KEY",
-    "together" => "TOGETHER_API_KEY",
-    "fireworks" => "FIREWORKS_API_KEY"
+  # ReqLLM.Keys uses Application.get_env(:req_llm, :<provider>_api_key)
+  # as a lookup key. Atom-name per provider supported by ReqLLM.
+  @provider_app_keys %{
+    "anthropic" => :anthropic_api_key,
+    "openai" => :openai_api_key,
+    "google" => :google_api_key,
+    "groq" => :groq_api_key,
+    "mistral" => :mistral_api_key,
+    "cohere" => :cohere_api_key,
+    "together" => :together_api_key,
+    "fireworks" => :fireworks_api_key
   }
 
   defp load_provider_api_keys(keys) do
-    Enum.count(@provider_env_vars, fn {provider, env_var} ->
+    Enum.count(@provider_app_keys, fn {provider, app_key} ->
       with key when is_binary(key) and key != "" <- Map.get(keys, provider),
-           # Don't clobber an explicitly-set env var.
-           "" <- System.get_env(env_var, "") do
-        System.put_env(env_var, key)
+           # Don't clobber an explicitly-set value.
+           nil <- Application.get_env(:req_llm, app_key) do
+        Application.put_env(:req_llm, app_key, key)
         true
       else
         _ -> false
