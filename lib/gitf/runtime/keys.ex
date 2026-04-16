@@ -39,8 +39,12 @@ defmodule GiTF.Runtime.Keys do
   def load do
     keys = read_keys_from_toml()
 
-    # API keys are read directly from config by ProviderManager.api_key_for/1
-    # and injected into ReqLLM calls — no env vars needed.
+    # ReqLLM providers read their API keys from env vars via ReqLLM.Keys
+    # (the GiTF wrapper at reqllm_provider.ex passes only :max_tokens and
+    # :temperature through to ReqLLM.generate_text/3 — it does NOT inject
+    # the api_key as an opt). Set the standard env vars from config so
+    # every provider's lookup succeeds.
+    api_loaded = load_provider_api_keys(keys)
 
     # AWS credentials still need env vars for SigV4 signing (BedrockDirect).
     aws_loaded = load_aws_credentials(keys)
@@ -49,11 +53,40 @@ defmodule GiTF.Runtime.Keys do
       Logger.info("Loaded #{aws_loaded} AWS credential(s)")
     end
 
-    aws_loaded
+    if api_loaded > 0 do
+      Logger.info("Loaded #{api_loaded} provider API key(s) into env")
+    end
+
+    aws_loaded + api_loaded
   rescue
     e ->
       Logger.debug("Failed to load credentials: #{inspect(e)}")
       0
+  end
+
+  # Standard env var name for each ReqLLM provider.
+  @provider_env_vars %{
+    "anthropic" => "ANTHROPIC_API_KEY",
+    "openai" => "OPENAI_API_KEY",
+    "google" => "GOOGLE_API_KEY",
+    "groq" => "GROQ_API_KEY",
+    "mistral" => "MISTRAL_API_KEY",
+    "cohere" => "COHERE_API_KEY",
+    "together" => "TOGETHER_API_KEY",
+    "fireworks" => "FIREWORKS_API_KEY"
+  }
+
+  defp load_provider_api_keys(keys) do
+    Enum.count(@provider_env_vars, fn {provider, env_var} ->
+      with key when is_binary(key) and key != "" <- Map.get(keys, provider),
+           # Don't clobber an explicitly-set env var.
+           "" <- System.get_env(env_var, "") do
+        System.put_env(env_var, key)
+        true
+      else
+        _ -> false
+      end
+    end)
   end
 
   @doc """
