@@ -860,9 +860,7 @@ defmodule GiTF.Major.Orchestrator do
   @default_phase_timeout_seconds 900
 
   defp check_and_advance(mission, phase, next_fn) do
-    # Artifact may not be visible yet if Archive write is slightly delayed.
-    artifact = GiTF.Missions.get_artifact(mission.id, phase) ||
-      (Process.sleep(500) && GiTF.Missions.get_artifact(mission.id, phase))
+    artifact = GiTF.Missions.get_artifact(mission.id, phase)
 
     if artifact && !artifact_failed?(artifact) do
       # Refresh mission to get latest state
@@ -934,10 +932,7 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp check_research_and_advance(mission) do
-    # Artifact may not be visible yet if Archive write is slightly delayed.
-    # Retry once after a brief pause before falling through to the timeout path.
-    artifact = GiTF.Missions.get_artifact(mission.id, "research") ||
-      (Process.sleep(500) && GiTF.Missions.get_artifact(mission.id, "research"))
+    artifact = GiTF.Missions.get_artifact(mission.id, "research")
 
     if artifact && !artifact_failed?(artifact) do
       complexity = Map.get(artifact, "complexity") || "high"
