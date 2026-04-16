@@ -453,6 +453,32 @@ defmodule GiTF.ArchiveTest do
       assert Archive.get(:ops, "op-migr1").status == "pending"
       assert Archive.get(:ops, "op-migr2").status == "done"
     end
+
+    test "discovers per-collection files not listed in manifest", %{store_dir: store_dir} do
+      # Simulates a corrupted/stale manifest leaving collection files orphaned.
+      # Boot must scan the dir and load all *.etf files anyway.
+      GiTF.Test.StoreHelper.stop_store()
+
+      for f <- File.ls!(store_dir), String.ends_with?(f, ".etf"), do: File.rm!(Path.join(store_dir, f))
+
+      # Write per-collection files for sectors and missions
+      sector_data = %{"sec-1" => %{id: "sec-1", name: "test-sector", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}}
+      File.write!(Path.join(store_dir, "sectors.etf"), :erlang.term_to_binary(sector_data))
+
+      mission_data = %{"msn-1" => %{id: "msn-1", name: "test-mission", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}}
+      File.write!(Path.join(store_dir, "missions.etf"), :erlang.term_to_binary(mission_data))
+
+      # Write a stale manifest listing only :missions (sectors orphaned)
+      manifest = %{schema_version: 1, collections: [:missions], updated_at: DateTime.utc_now()}
+      File.write!(Path.join(store_dir, "manifest.etf"), :erlang.term_to_binary(manifest))
+
+      {:ok, _} = Archive.start_link(data_dir: store_dir)
+
+      # Both collections must be loaded despite manifest only listing missions
+      assert Archive.get(:sectors, "sec-1").name == "test-sector"
+      assert Archive.get(:missions, "msn-1").name == "test-mission"
+      assert length(Archive.all(:sectors)) == 1
+    end
   end
 
   # ── Per-collection corruption isolation ────────────────────────────────

@@ -690,16 +690,53 @@ defmodule GiTF.Archive do
   end
 
   defp load_from_per_collection_files do
-    manifest = read_manifest()
-
-    collections =
-      case manifest do
+    # Union of (a) collections declared in the manifest and (b) collections
+    # discovered by scanning the data directory for *.etf files. The
+    # discovery path defends against an incomplete/stale manifest leaving
+    # collection files orphaned on disk.
+    manifest_collections =
+      case read_manifest() do
         %{collections: cols} when is_list(cols) -> cols
         _ -> []
       end
 
+    discovered_collections = scan_collection_files()
+
+    collections =
+      MapSet.union(MapSet.new(manifest_collections), MapSet.new(discovered_collections))
+      |> MapSet.to_list()
+
+    if discovered_collections != [] and
+         MapSet.size(MapSet.difference(MapSet.new(discovered_collections), MapSet.new(manifest_collections))) > 0 do
+      missing = MapSet.difference(MapSet.new(discovered_collections), MapSet.new(manifest_collections))
+      Logger.warning(
+        "Archive: discovered #{MapSet.size(missing)} collections on disk not in manifest: " <>
+          inspect(MapSet.to_list(missing)) <>
+          " — manifest will be repaired on next write"
+      )
+    end
+
     for col <- collections, into: %{} do
       {col, read_collection_from_disk(col)}
+    end
+  end
+
+  # Returns list of collection atoms found by scanning the data directory
+  # for *.etf files. Excludes manifest, section.etf, *.bak/*.tmp/.pre_migration.
+  defp scan_collection_files do
+    case File.ls(data_dir()) do
+      {:ok, files} ->
+        for file <- files,
+            String.ends_with?(file, ".etf"),
+            not String.contains?(file, ".bak"),
+            not String.contains?(file, ".tmp"),
+            not String.contains?(file, ".pre_migration"),
+            file != "manifest.etf",
+            file != "section.etf",
+            do: file |> String.replace_suffix(".etf", "") |> String.to_atom()
+
+      {:error, _} ->
+        []
     end
   end
 
