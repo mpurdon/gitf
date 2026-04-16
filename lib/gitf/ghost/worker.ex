@@ -1145,14 +1145,35 @@ defmodule GiTF.Ghost.Worker do
     # NOW mark the ghost as stopped — after all shell-dependent work is done
     update_ghost_status(state.ghost_id, GhostStatus.stopped())
 
-    case GiTF.Ops.get(state.op_id) do
-      {:ok, %{status: "done"}} ->
-        :ok
+    # Fail-fast: implementation/fix ops that produced zero file changes did
+    # not actually do the work, even if the model claimed success. Marking
+    # such ops "done" causes the orchestrator to advance to validation, which
+    # then fails — wasting time and retry budget. Detect at completion time
+    # and delegate to mark_failed so the standard retry path takes over.
+    empty_completion? =
+      not is_phase_job and Map.get(metadata, :files_changed, 0) == 0
 
-      _ ->
-        GiTF.Ops.complete(state.op_id)
-        GiTF.Ops.unblock_dependents(state.op_id)
+    if empty_completion? do
+      Logger.warning(
+        "Op #{state.op_id}: ghost #{state.ghost_id} reported success with 0 file changes — marking failed"
+      )
+
+      mark_failed(state, "Ghost reported success but produced 0 file changes")
+    else
+      case GiTF.Ops.get(state.op_id) do
+        {:ok, %{status: "done"}} ->
+          :ok
+
+        _ ->
+          GiTF.Ops.complete(state.op_id)
+          GiTF.Ops.unblock_dependents(state.op_id)
+      end
+
+      finish_mark_success(state, op, is_phase_job)
     end
+  end
+
+  defp finish_mark_success(state, op, is_phase_job) do
 
     # See :spawned event above — same labels/attributes split for cardinality safety.
     GiTF.Telemetry.emit([:gitf, :ghost, :completed], %{}, %{

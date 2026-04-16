@@ -388,7 +388,7 @@ defmodule GiTF.Sync do
           {:error, reason} ->
             Logger.warning("Failed to sync #{shell.branch}: #{inspect(reason)}")
             # Abort the failed sync so subsequent merges can proceed
-            GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
+            GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
             {:error, shell.branch, reason}
         end
       end)
@@ -458,7 +458,7 @@ defmodule GiTF.Sync do
 
   defp rollback_merge(repo_path, original_head) do
     # First try to abort any in-progress sync
-    GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo_path, stderr_to_stdout: true)
+    GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
 
     # Then restore the original HEAD
     if original_head do

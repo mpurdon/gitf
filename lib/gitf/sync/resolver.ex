@@ -160,7 +160,7 @@ defmodule GiTF.Sync.Resolver do
 
       with :ok <- GiTF.Git.checkout(repo, target) do
         # Attempt sync, expecting conflicts
-        case GiTF.Git.safe_cmd(["sync", "--no-commit", "--no-ff", shell.branch],
+        case GiTF.Git.safe_cmd(["merge", "--no-commit", "--no-ff", "--no-edit", shell.branch],
                cd: repo,
                stderr_to_stdout: true
              ) do
@@ -209,7 +209,7 @@ defmodule GiTF.Sync.Resolver do
       original_head = get_head(repo)
 
       with :ok <- GiTF.Git.checkout(repo, target) do
-        case GiTF.Git.safe_cmd(["sync", "--no-commit", "--no-ff", shell.branch],
+        case GiTF.Git.safe_cmd(["merge", "--no-commit", "--no-ff", "--no-edit", shell.branch],
                cd: repo,
                stderr_to_stdout: true
              ) do
@@ -366,7 +366,7 @@ defmodule GiTF.Sync.Resolver do
 
   defp file_only_touched_by_branch?(repo, file, branch, target) do
     # Check if the file was modified on the target branch since the sync base
-    case GiTF.Git.safe_cmd(["sync-base", branch, target], cd: repo, stderr_to_stdout: true) do
+    case GiTF.Git.safe_cmd(["merge-base", branch, target], cd: repo, stderr_to_stdout: true) do
       {base, 0} ->
         base = String.trim(base)
 
@@ -510,7 +510,7 @@ defmodule GiTF.Sync.Resolver do
   end
 
   defp abort_merge(repo) do
-    GiTF.Git.safe_cmd(["sync", "--abort"], cd: repo, stderr_to_stdout: true)
+    GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo, stderr_to_stdout: true)
     :ok
   end
 

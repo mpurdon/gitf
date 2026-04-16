@@ -205,8 +205,8 @@ defmodule GiTF.Git do
   def sync(repo_path, branch, opts \\ []) do
     args =
       if Keyword.get(opts, :no_ff, false),
-        do: ["sync", "--no-ff", branch],
-        else: ["sync", branch]
+        do: ["merge", "--no-ff", "--no-edit", branch],
+        else: ["merge", "--no-edit", branch]
 
     case safe_cmd(args, cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> :ok

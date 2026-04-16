@@ -228,7 +228,7 @@ defmodule GiTF.Conflict do
   end
 
   defp get_merge_base(repo_path, main_branch) do
-    case GiTF.Git.safe_cmd(["sync-base", "HEAD", main_branch],
+    case GiTF.Git.safe_cmd(["merge-base", "HEAD", main_branch],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
