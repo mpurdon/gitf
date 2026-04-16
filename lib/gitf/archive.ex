@@ -16,7 +16,6 @@ defmodule GiTF.Archive do
   @name __MODULE__
   @lock_stale_seconds 120
   @lock_steal_attempts 500
-  @cache_table :gitf_store_cache
   @backup_interval_seconds 300
   @backup_generations 3
 
@@ -49,8 +48,12 @@ defmodule GiTF.Archive do
   @doc "Gets a record by ID. Returns the record or nil."
   @spec get(atom(), String.t()) :: map() | nil
   def get(collection, id) do
-    data = read_data()
-    get_in(data, [collection, id])
+    case :ets.lookup(table_name(collection), id) do
+      [{^id, record}] -> record
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
   end
 
   @doc "Fetches a record by ID. Returns `{:ok, record}` or `{:error, :not_found}`."
@@ -185,17 +188,9 @@ defmodule GiTF.Archive do
   @doc "Returns all records in a collection."
   @spec all(atom()) :: [map()]
   def all(collection) do
-    # Per-collection cache: avoids Map.values() conversion on every call
-    case collection_cache_get(collection) do
-      {:ok, list} ->
-        list
-
-      :miss ->
-        data = read_data()
-        list = data |> Map.get(collection, %{}) |> Map.values()
-        collection_cache_put(collection, list)
-        list
-    end
+    :ets.tab2list(table_name(collection)) |> Enum.map(&elem(&1, 1))
+  rescue
+    ArgumentError -> []
   end
 
   @doc "Returns records matching a filter function."
@@ -287,8 +282,8 @@ defmodule GiTF.Archive do
     :persistent_term.put({__MODULE__, :data_path}, data_path)
     :persistent_term.put({__MODULE__, :lock_path}, lock_path)
 
-    # Create ETS read cache
-    init_cache()
+    # Create per-collection ETS tables from disk data
+    init_tables()
 
     # Run migrations after store is initialized
     GiTF.Migrations.migrate!()
@@ -302,14 +297,16 @@ defmodule GiTF.Archive do
   defp lock_path, do: :persistent_term.get({__MODULE__, :lock_path})
 
   defp read_data do
-    case cache_get() do
-      {:ok, data} ->
-        data
+    cols = known_collections()
 
-      :miss ->
-        data = read_data_from_disk()
-        cache_put(data)
-        data
+    if MapSet.size(cols) == 0 do
+      # Cold start — tables not yet populated, read from disk
+      read_data_from_disk()
+    else
+      for col <- cols, into: %{} do
+        records = :ets.tab2list(table_name(col)) |> Map.new()
+        {col, records}
+      end
     end
   end
 
@@ -407,18 +404,17 @@ defmodule GiTF.Archive do
 
     with :ok <- File.write(tmp_path, binary),
          :ok <- File.rename(tmp_path, path) do
-      cache_put(data, changed_collection)
+      sync_ets(data, changed_collection)
       maybe_backup(path, binary)
     else
       {:error, reason} ->
         require Logger
         Logger.error("Archive write failed: #{inspect(reason)}")
-        # Still update cache so in-memory state is consistent.
-        # NOTE: This creates in-memory/disk divergence — the cache now holds
-        # data that was not successfully persisted. We flag this in telemetry
-        # so health checks can detect the condition; we do NOT invalidate the
-        # cache because that would cause callers to read stale pre-write data.
-        cache_put(data, changed_collection)
+        # Still update ETS so in-memory state is consistent.
+        # NOTE: This creates in-memory/disk divergence — the ETS tables now
+        # hold data that was not successfully persisted. We flag this in
+        # telemetry so health checks can detect the condition.
+        sync_ets(data, changed_collection)
 
         GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{
           reason: reason,
@@ -480,85 +476,95 @@ defmodule GiTF.Archive do
       :ok
   end
 
-  # -- ETS cache ---------------------------------------------------------------
+  # -- Per-collection ETS tables ------------------------------------------------
 
-  defp init_cache do
-    # If an heir is available, reclaim the table from it (in case we're
-    # restarting after a crash and the heir is currently the owner).
-    # Otherwise, create it fresh with the heir (if any) as the designated heir.
+  defp table_name(col), do: :"gitf_archive_#{col}"
+
+  defp known_collections, do: :persistent_term.get({__MODULE__, :collections}, MapSet.new())
+
+  defp register_collection(col) do
+    cols = known_collections()
+    unless MapSet.member?(cols, col), do: :persistent_term.put({__MODULE__, :collections}, MapSet.put(cols, col))
+  end
+
+  defp clear_collection_registry do
+    :persistent_term.put({__MODULE__, :collections}, MapSet.new())
+  end
+
+  defp init_tables do
     heir_pid = GiTF.Archive.TableHeir.pid()
 
-    case :ets.info(@cache_table, :owner) do
+    # Clean up stale tables from a previous instance (e.g. heir-held tables
+    # from a prior data_dir that no longer apply).
+    for old_col <- known_collections() do
+      old_tab = table_name(old_col)
+      case :ets.info(old_tab) do
+        :undefined -> :ok
+        _ ->
+          if is_pid(heir_pid), do: GiTF.Archive.TableHeir.claim(old_tab)
+          :ets.delete(old_tab)
+      end
+    end
+
+    # Clear registry — we'll re-register from disk data
+    clear_collection_registry()
+
+    data = read_data_from_disk()
+
+    for {col, records} <- data, is_atom(col) do
+      tab = table_name(col)
+
+      case :ets.info(tab) do
+        :undefined ->
+          opts = [:named_table, :public, :set, read_concurrency: true]
+          opts = if is_pid(heir_pid), do: opts ++ [{:heir, heir_pid, :transfer}], else: opts
+          :ets.new(tab, opts)
+
+        _ ->
+          # Table survived via heir — reclaim it
+          if is_pid(heir_pid), do: GiTF.Archive.TableHeir.claim(tab)
+          :ets.delete_all_objects(tab)
+      end
+
+      for {id, record} <- records, do: :ets.insert(tab, {id, record})
+      register_collection(col)
+    end
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp ensure_table(col) do
+    tab = table_name(col)
+
+    case :ets.info(tab) do
       :undefined ->
+        heir_pid = GiTF.Archive.TableHeir.pid()
         opts = [:named_table, :public, :set, read_concurrency: true]
+        opts = if is_pid(heir_pid), do: opts ++ [{:heir, heir_pid, :transfer}], else: opts
+        :ets.new(tab, opts)
+        register_collection(col)
 
-        opts =
-          if is_pid(heir_pid) do
-            opts ++ [{:heir, heir_pid, :transfer}]
-          else
-            opts
-          end
-
-        :ets.new(@cache_table, opts)
-        data = read_data_from_disk()
-        cache_put(data)
-
-      _owner ->
-        # Table already exists — heir likely owns it. Claim it back.
-        if is_pid(heir_pid), do: GiTF.Archive.TableHeir.claim(@cache_table)
+      _ ->
         :ok
     end
   rescue
     ArgumentError -> :ok
   end
 
-  defp cache_get do
-    case :ets.lookup(@cache_table, :data) do
-      [{:data, data}] -> {:ok, data}
-      [] -> :miss
+  defp sync_ets(data, changed_collection) do
+    if changed_collection do
+      col_data = Map.get(data, changed_collection, %{})
+      ensure_table(changed_collection)
+      :ets.delete_all_objects(table_name(changed_collection))
+      for {id, record} <- col_data, do: :ets.insert(table_name(changed_collection), {id, record})
+    else
+      # transact — may touch multiple collections
+      for {col, records} <- data, is_atom(col) do
+        ensure_table(col)
+        :ets.delete_all_objects(table_name(col))
+        for {id, record} <- records, do: :ets.insert(table_name(col), {id, record})
+      end
     end
-  rescue
-    ArgumentError -> :miss
-  end
-
-  defp cache_put(data, invalidate_collection \\ nil) do
-    :ets.insert(@cache_table, {:data, data})
-
-    case invalidate_collection do
-      nil -> invalidate_all_collection_caches()
-      col when is_atom(col) -> invalidate_collection_cache(col)
-    end
-  rescue
-    ArgumentError -> :ok
-  end
-
-  defp collection_cache_get(collection) do
-    case :ets.lookup(@cache_table, {:collection, collection}) do
-      [{{:collection, ^collection}, list}] -> {:ok, list}
-      [] -> :miss
-    end
-  rescue
-    ArgumentError -> :miss
-  end
-
-  defp collection_cache_put(collection, list) do
-    :ets.insert(@cache_table, {{:collection, collection}, list})
-  rescue
-    ArgumentError -> :ok
-  end
-
-  defp invalidate_all_collection_caches do
-    :ets.select_delete(@cache_table, [
-      {{{:collection, :_}, :_}, [], [true]}
-    ])
-  rescue
-    ArgumentError -> :ok
-  end
-
-  defp invalidate_collection_cache(collection) do
-    :ets.delete(@cache_table, {:collection, collection})
-  rescue
-    ArgumentError -> :ok
   end
 
   # `mutate_fn` may return either the new data map, or a `{new_data, result}`
