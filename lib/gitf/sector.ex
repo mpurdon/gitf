@@ -273,7 +273,7 @@ defmodule GiTF.Sector do
     if not File.dir?(Path.join(path, ".git")) do
       {:error, {:invalid_repo, "Not a git repository (no .git directory)"}}
     else
-      case System.cmd("git", ["rev-parse", "HEAD"], cd: path, stderr_to_stdout: true) do
+      case GiTF.Git.safe_cmd(["rev-parse", "HEAD"], cd: path, stderr_to_stdout: true) do
         {_, 0} ->
           :ok
 

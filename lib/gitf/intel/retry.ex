@@ -115,10 +115,6 @@ defmodule GiTF.Intel.Retry do
   end
 
   defp retry_with_different_model(op, analysis) do
-    # Escalate to a more capable model. Ops persist the actual model under
-    # :assigned_model — the previous code read :model which never existed,
-    # so escalation always defaulted to "haiku" instead of escalating from
-    # the real prior model.
     current = Map.get(op, :assigned_model) || Map.get(op, :recommended_model) || "general"
     new_model = ModelResolver.escalate(current) || ModelResolver.resolve("thinking")
 
@@ -200,7 +196,7 @@ defmodule GiTF.Intel.Retry do
       |> prepend_retry_note(retry_note)
 
     new_job = %{
-      id: generate_id("op"),
+      id: GiTF.ID.generate(:op),
       mission_id: op.mission_id,
       sector_id: op.sector_id,
       title: op.title,
@@ -234,10 +230,6 @@ defmodule GiTF.Intel.Retry do
     Archive.put(:ops, updated_original)
 
     {:ok, new_job}
-  end
-
-  defp generate_id(prefix) do
-    "#{prefix}-#{:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)}"
   end
 
   defp prepend_retry_note(description, nil), do: description

@@ -1090,22 +1090,18 @@ defmodule GiTF.Major.Orchestrator do
         attempt_fallback_plan(mission)
 
       Enum.any?(impl_jobs, &(&1.status in ["failed", "rejected"])) ->
-        # Check if all failed ops have either:
-        #   (a) exhausted retries (retry_count >= 3), or
-        #   (b) a successful retry sibling already completed.
-        # Without (b) we'd wait forever for a retry that already finished —
-        # the stall-recovery path creates a new op with retry_of: original_id
-        # but doesn't bump retry_count on the original.
+        # A failed op is "resolved" if a retry sibling completed, or
+        # exhausted if retry_count hit max with no retry spawned.
         failed_ops = Enum.filter(impl_jobs, &(&1.status in ["failed", "rejected"]))
 
         unresolved =
           Enum.reject(failed_ops, fn op ->
-            Map.get(op, :retry_count, 0) >= 3 or retry_succeeded?(op.id, impl_jobs)
+            Map.get(op, :retry_count, 0) >= GiTF.Ops.max_retries() or
+              GiTF.Ops.retry_completed_in?(op.id, impl_jobs)
           end)
 
         cond do
-          unresolved == [] and Enum.all?(impl_jobs, &op_resolved?(&1, impl_jobs)) ->
-            # All failures are resolved by retries — treat as complete
+          unresolved == [] and Enum.all?(impl_jobs, &GiTF.Ops.resolved?(&1, impl_jobs)) ->
             if Map.get(mission, :sector_id) do
               {:ok, mission} = GiTF.Missions.get(mission.id)
               start_validation(mission)
@@ -1114,10 +1110,9 @@ defmodule GiTF.Major.Orchestrator do
             end
 
           unresolved == [] ->
-            # No unresolved failures, but some ops still in flight (running, pending)
             {:ok, "implementation"}
 
-          Enum.all?(unresolved, &(Map.get(&1, :retry_count, 0) >= 3)) ->
+          Enum.all?(unresolved, &(Map.get(&1, :retry_count, 0) >= GiTF.Ops.max_retries())) ->
             Logger.warning(
               "Quest #{mission.id}: #{length(unresolved)} ops failed with retries exhausted, escalating"
             )
@@ -1125,30 +1120,12 @@ defmodule GiTF.Major.Orchestrator do
             attempt_fallback_plan(mission)
 
           true ->
-            # Retries still in flight — let retry logic handle it
             {:ok, "implementation"}
         end
 
       true ->
         {:ok, "implementation"}
     end
-  end
-
-  # Returns true if this op is in a terminal-resolved state:
-  # - status: done, OR
-  # - status: failed/rejected AND a sibling op has retry_of: this.id with status: done
-  defp op_resolved?(op, all_ops) do
-    case op.status do
-      "done" -> true
-      s when s in ["failed", "rejected"] -> retry_succeeded?(op.id, all_ops)
-      _ -> false
-    end
-  end
-
-  defp retry_succeeded?(op_id, all_ops) do
-    Enum.any?(all_ops, fn o ->
-      Map.get(o, :retry_of) == op_id and o.status == "done"
-    end)
   end
 
   defp majority_failed?(impl_jobs) do

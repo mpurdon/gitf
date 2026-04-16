@@ -591,16 +591,63 @@ defmodule GiTF.Ops do
     end)
   end
 
-  defp retry_completed?(op_id) do
+  @max_retries 3
+
+  @doc "Returns the max retry count an op may accumulate before exhausting."
+  @spec max_retries() :: pos_integer()
+  def max_retries, do: @max_retries
+
+  @doc """
+  Returns true if any sibling op has `retry_of: op_id` AND `status: \"done\"`.
+  Touches Archive — use `retry_completed_in?/2` when iterating in a loop.
+  """
+  @spec retry_completed?(String.t()) :: boolean()
+  def retry_completed?(op_id) do
     Archive.find_one(:ops, fn j ->
       Map.get(j, :retry_of) == op_id && j.status == "done"
     end) != nil
   end
 
-  defp retry_completed_in?(op_id, ops_by_id) do
-    Enum.any?(ops_by_id, fn {_id, op} ->
-      Map.get(op, :retry_of) == op_id and op.status == "done"
+  @doc """
+  In-memory variant of `retry_completed?/1` — accepts any enumerable of
+  ops (list or `{id, op}` map entries). Use when checking many ops in a
+  single pass to avoid N Archive scans.
+  """
+  @spec retry_completed_in?(String.t(), Enumerable.t()) :: boolean()
+  def retry_completed_in?(op_id, ops) do
+    Enum.any?(ops, fn
+      {_id, op} -> Map.get(op, :retry_of) == op_id and op.status == "done"
+      op when is_map(op) -> Map.get(op, :retry_of) == op_id and op.status == "done"
     end)
+  end
+
+  @doc """
+  Returns true if a failed op still has retry budget AND no retry has
+  spawned yet (delayed_retry timer pending).
+  """
+  @spec retry_pending?(map()) :: boolean()
+  def retry_pending?(op) do
+    (Map.get(op, :retry_count, 0) || 0) < @max_retries and is_nil(Map.get(op, :retried_as))
+  end
+
+  @doc """
+  Returns true if `op` is in a terminal-resolved state — either done, or
+  failed but a sibling op with `retry_of: op.id` reached `\"done\"`.
+
+  Pass `all_ops` when checking many ops at once to avoid N Archive scans.
+  """
+  @spec resolved?(map(), Enumerable.t() | nil) :: boolean()
+  def resolved?(op, all_ops \\ nil) do
+    case op.status do
+      "done" ->
+        true
+
+      s when s in ["failed", "rejected", "killed"] ->
+        if all_ops, do: retry_completed_in?(op.id, all_ops), else: retry_completed?(op.id)
+
+      _ ->
+        false
+    end
   end
 
   @doc """

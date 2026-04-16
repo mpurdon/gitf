@@ -561,8 +561,24 @@ defmodule GiTF.Tachikoma do
         |> Enum.reject(& &1[:phase_job])
 
       if impl_jobs != [] do
-        all_terminal =
-          Enum.all?(impl_jobs, &(&1.status in ["done", "failed", "rejected", "killed"]))
+        # Single pass — classify each op as resolved / pending-retry / unresolved-failure.
+        # Pre-build the set of original op IDs whose retry succeeded so the
+        # check is O(1) per op instead of O(n) via Enum.any? scan.
+        retried_ok =
+          for o <- impl_jobs, o.status == "done", id = Map.get(o, :retry_of), do: id, into: MapSet.new()
+
+        {all_terminal?, all_resolved?, all_failed_unresolved?} =
+          Enum.reduce(impl_jobs, {true, true, true}, fn op, {term?, res?, ufail?} ->
+            terminal? = op.status in ["done", "failed", "rejected", "killed"]
+            resolved_or_pending? = op_resolved_or_retry_pending?(op, retried_ok)
+            failed? = op.status in ["failed", "rejected", "killed"]
+
+            {
+              term? and terminal?,
+              res? and resolved_or_pending?,
+              ufail? and failed? and not resolved_or_pending?
+            }
+          end)
 
         any_working =
           impl_jobs
@@ -574,37 +590,18 @@ defmodule GiTF.Tachikoma do
             end
           end)
 
-        # An op is "really failed" if it's in a failure state AND it's not
-        # awaiting/has a successful retry. A retry that hasn't spawned yet
-        # (delayed_retry timer pending — typically 31s+ window) leaves the
-        # original :status as "failed" with retried_as nil and retry_count
-        # below max. We must wait, not auto-fail.
-        all_resolved_or_pending_retry =
-          Enum.all?(impl_jobs, fn op -> op_resolved_or_retry_pending?(op, impl_jobs) end)
-
-        all_failed_unresolved =
-          Enum.all?(impl_jobs, fn op ->
-            op.status in ["failed", "rejected", "killed"] and
-              not op_resolved_or_retry_pending?(op, impl_jobs)
-          end)
-
         cond do
-          not all_terminal ->
+          not all_terminal? or any_working ->
             :ok
 
-          any_working ->
-            :ok
-
-          all_resolved_or_pending_retry and not all_failed_unresolved ->
-            # Mix of done / retry-resolved / pending-retry — kick the
-            # orchestrator instead of auto-failing.
+          all_resolved? and not all_failed_unresolved? ->
             try do
               GiTF.Major.Orchestrator.advance_quest(mission.id)
             rescue
               _ -> :ok
             end
 
-          all_failed_unresolved ->
+          all_failed_unresolved? ->
             Logger.warning(
               "Tachikoma: mission #{mission.id} has all ops failed/rejected " <>
                 "(retries exhausted, no in-flight retry, no successful sibling) — marking failed"
@@ -631,7 +628,6 @@ defmodule GiTF.Tachikoma do
             )
 
           true ->
-            # Mix of done + failed-with-pending-or-resolved — let orchestrator handle
             try do
               GiTF.Major.Orchestrator.advance_quest(mission.id)
             rescue
@@ -646,37 +642,19 @@ defmodule GiTF.Tachikoma do
       :ok
   end
 
-  # An op is "resolved or has a pending retry" if any of:
-  # - status is :done
-  # - status is failed/rejected/killed AND a sibling op has retry_of: this.id
-  #   with status :done (the retry succeeded, so the failure is resolved)
-  # - status is failed AND retry_count < @max_retries AND retried_as is nil
-  #   (the retry was scheduled but hasn't spawned yet — wait for it)
-  defp op_resolved_or_retry_pending?(op, all_ops) do
+  # `retried_ok` is the precomputed MapSet of op_ids whose retry sibling
+  # has status :done — pass once, query O(1) per op.
+  defp op_resolved_or_retry_pending?(op, %MapSet{} = retried_ok) do
     case op.status do
       "done" ->
         true
 
       s when s in ["failed", "rejected", "killed"] ->
-        retry_succeeded?(op.id, all_ops) or retry_pending?(op)
+        MapSet.member?(retried_ok, op.id) or GiTF.Ops.retry_pending?(op)
 
       _ ->
         false
     end
-  end
-
-  defp retry_succeeded?(op_id, all_ops) do
-    Enum.any?(all_ops, fn o ->
-      Map.get(o, :retry_of) == op_id and o.status == "done"
-    end)
-  end
-
-  defp retry_pending?(op) do
-    retry_count = Map.get(op, :retry_count, 0) || 0
-    retried_as = Map.get(op, :retried_as)
-    # Below max retries AND not yet retried — Major's delayed_retry timer
-    # is in flight, will spawn the next attempt within ~5 minutes.
-    retry_count < 3 and is_nil(retried_as)
   end
 
   defp check_deadlocks do

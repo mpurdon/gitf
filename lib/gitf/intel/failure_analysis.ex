@@ -22,7 +22,7 @@ defmodule GiTF.Intel.FailureAnalysis do
       model = GiTF.Runtime.ModelResolver.normalize_key(op[:assigned_model])
 
       analysis = %{
-        id: generate_id("fa"),
+        id: GiTF.ID.generate(:fa),
         op_id: op_id,
         op_type: op[:op_type],
         model: model,
@@ -109,7 +109,7 @@ defmodule GiTF.Intel.FailureAnalysis do
     patterns = get_failure_patterns(sector_id)
 
     learning = %{
-      id: generate_id("fl"),
+      id: GiTF.ID.generate(:fl),
       sector_id: sector_id,
       patterns: patterns,
       total_failures: Enum.sum(Enum.map(patterns, & &1.count)),
@@ -122,41 +122,87 @@ defmodule GiTF.Intel.FailureAnalysis do
 
   # Private functions
 
-  defp classify_failure(op, feedback) do
-    error_msg = Map.get(op, :error_message, "")
-    output = Map.get(op, :audit_result, "")
-    combined = Enum.join([error_msg, output, feedback || ""], " ")
+  # Single source of truth for failure types. Adding a new type means
+  # adding ONE entry here — keywords for classification, root cause
+  # template, and suggestion list — instead of touching three parallel
+  # case blocks (which previously caused a no-match crash when one was
+  # missed).
+  #
+  # `:keywords` is a list of strings; classification matches the first
+  # type whose keywords ALL appear in the combined error/feedback text.
+  @failure_specs [
+    {:empty_completion, %{
+       keywords: ["0 file changes"],
+       root_cause: "Ghost reported success but produced 0 file changes — model failed to invoke edit tools",
+       suggestions: [
+         "Use a more capable model that reliably invokes file-edit tools",
+         "Verify the prompt explicitly requires file edits before claiming completion",
+         "Check that the model received the expected target files"
+       ]
+     }},
+    {:timeout, %{
+       keywords: ["timeout"],
+       root_cause: "Job exceeded time limit",
+       suggestions: ["Break op into smaller tasks", "Increase timeout limit", "Simplify requirements"]
+     }},
+    {:compilation_error, %{
+       keywords: ["compilation"],
+       root_cause: :extract_compilation_error,
+       suggestions: ["Review syntax errors", "Check dependencies", "Verify imports"]
+     }},
+    {:test_failure, %{
+       keywords: ["test", "failed"],
+       root_cause: :extract_test_failure,
+       suggestions: ["Review test expectations", "Check test data", "Verify logic"]
+     }},
+    {:context_overflow, %{
+       keywords: ["context"],
+       root_cause: "Context usage exceeded limit",
+       suggestions: ["Create transfer", "Simplify op scope", "Use more focused context"]
+     }},
+    {:validation_failure, %{
+       keywords: ["validation"],
+       root_cause: "Validation command failed",
+       suggestions: ["Fix validation errors", "Update validation command", "Review changes"]
+     }},
+    {:quality_gate_failure, %{
+       keywords: ["quality"],
+       root_cause: "Code quality below threshold",
+       suggestions: ["Improve code quality", "Fix linting issues", "Refactor complex code"]
+     }},
+    {:security_gate_failure, %{
+       keywords: ["security"],
+       root_cause: "Security issues detected",
+       suggestions: ["Remove secrets", "Update dependencies", "Fix vulnerabilities"]
+     }},
+    {:merge_conflict, %{
+       keywords: ["sync"],
+       root_cause: "Git merge conflict",
+       suggestions: ["Resolve conflicts manually", "Rebase on latest", "Retry with fresh worktree"]
+     }},
+    {:unknown, %{
+       keywords: [],
+       root_cause: "Unknown failure cause",
+       suggestions: ["Review error logs", "Check ghost status", "Retry with different model"]
+     }}
+  ]
 
-    cond do
-      # Ghost claimed done with zero file changes — model didn't follow tool
-      # instructions. Distinct from generic :unknown so we can record it
-      # separately in reputation tracking.
-      String.contains?(combined, "0 file changes") -> :empty_completion
-      String.contains?(combined, "timeout") -> :timeout
-      String.contains?(combined, "compilation") -> :compilation_error
-      String.contains?(combined, "test") && String.contains?(combined, "failed") -> :test_failure
-      String.contains?(combined, "context") -> :context_overflow
-      String.contains?(combined, "validation") -> :validation_failure
-      String.contains?(combined, "quality") -> :quality_gate_failure
-      String.contains?(combined, "security") -> :security_gate_failure
-      String.contains?(combined, "sync") -> :merge_conflict
-      true -> :unknown
-    end
+  defp failure_spec(type), do: Keyword.get(@failure_specs, type, Keyword.fetch!(@failure_specs, :unknown))
+
+  defp classify_failure(op, feedback) do
+    combined =
+      Enum.join([Map.get(op, :error_message, ""), Map.get(op, :audit_result, ""), feedback || ""], " ")
+
+    Enum.find_value(@failure_specs, :unknown, fn {type, %{keywords: kws}} ->
+      if kws != [] and Enum.all?(kws, &String.contains?(combined, &1)), do: type
+    end)
   end
 
   defp identify_root_cause(op, failure_type) do
-    case failure_type do
-      :timeout -> "Job exceeded time limit"
-      :compilation_error -> extract_compilation_error(op)
-      :test_failure -> extract_test_failure(op)
-      :context_overflow -> "Context usage exceeded limit"
-      :validation_failure -> "Validation command failed"
-      :quality_gate_failure -> "Code quality below threshold"
-      :security_gate_failure -> "Security issues detected"
-      :merge_conflict -> "Git merge conflict"
-      :empty_completion ->
-        "Ghost reported success but produced 0 file changes — model failed to invoke edit tools"
-      :unknown -> "Unknown failure cause"
+    case failure_spec(failure_type).root_cause do
+      :extract_compilation_error -> extract_compilation_error(op)
+      :extract_test_failure -> extract_test_failure(op)
+      str when is_binary(str) -> str
     end
   end
 
@@ -193,44 +239,8 @@ defmodule GiTF.Intel.FailureAnalysis do
   end
 
   defp generate_suggestions(failure_type, _root_cause, similar) do
-    base_suggestions =
-      case failure_type do
-        :timeout ->
-          ["Break op into smaller tasks", "Increase timeout limit", "Simplify requirements"]
+    base_suggestions = failure_spec(failure_type).suggestions
 
-        :compilation_error ->
-          ["Review syntax errors", "Check dependencies", "Verify imports"]
-
-        :test_failure ->
-          ["Review test expectations", "Check test data", "Verify logic"]
-
-        :context_overflow ->
-          ["Create transfer", "Simplify op scope", "Use more focused context"]
-
-        :validation_failure ->
-          ["Fix validation errors", "Update validation command", "Review changes"]
-
-        :quality_gate_failure ->
-          ["Improve code quality", "Fix linting issues", "Refactor complex code"]
-
-        :security_gate_failure ->
-          ["Remove secrets", "Update dependencies", "Fix vulnerabilities"]
-
-        :merge_conflict ->
-          ["Resolve conflicts manually", "Rebase on latest", "Retry with fresh worktree"]
-
-        :empty_completion ->
-          [
-            "Use a more capable model that reliably invokes file-edit tools",
-            "Verify the prompt explicitly requires file edits before claiming completion",
-            "Check that the model received the expected target files"
-          ]
-
-        :unknown ->
-          ["Review error logs", "Check ghost status", "Retry with different model"]
-      end
-
-    # Add pattern-based suggestions
     pattern_suggestions =
       if length(similar) > 2 do
         ["This is a recurring issue (#{length(similar)} similar failures)"]
@@ -255,7 +265,4 @@ defmodule GiTF.Intel.FailureAnalysis do
     |> Enum.find(&(&1.op_id == op_id))
   end
 
-  defp generate_id(prefix) do
-    "#{prefix}-#{:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)}"
-  end
 end
