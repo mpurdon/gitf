@@ -39,6 +39,7 @@ git clone git@github.com:mpurdon/gitf.git
 cd gitf
 mix deps.get
 mix escript.build
+mv hive.escript hive
 ```
 
 This produces a `./gitf` binary. Optionally move it to your PATH:
