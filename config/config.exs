@@ -27,6 +27,12 @@ config :llm_db,
   # containers don't freeze in the build user's home directory.
   compile_embed: true
 
+# Routes start_quest through a pre-research triage phase that classifies
+# complexity and sets skip_flags to collapse the pipeline. Override with
+# GITF_TRIAGE_ENABLED=false to force the legacy `pending → research → ...`
+# path (see config/runtime.exs).
+config :gitf, :triage_enabled, true
+
 # Timeouts — consolidated so ops can tune without editing module attributes.
 # Values in milliseconds unless suffixed with `_seconds`.
 config :gitf, :timeouts,
@@ -62,6 +68,16 @@ config :gitf, :llm,
 
 # Allow ReqLLM to load API keys from .env files when present
 config :req_llm, load_dotenv: true
+
+# Self-improving skill library (Milestone 1). When enabled, ghost
+# provisioning embeds the op goal, retrieves top-K matching skills from
+# the Archive, and installs them into the worktree's .claude/skills/
+# directory for Claude Code to discover. Defaults to disabled —
+# opt in per environment (see config/runtime.exs or override here).
+config :gitf, :skills_enabled, false
+config :gitf, :skill_embedding_model, "openai:text-embedding-3-small"
+config :gitf, :skill_top_k, 5
+config :gitf, :skill_min_similarity, 0.45
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",

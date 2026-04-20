@@ -52,7 +52,18 @@ defmodule GiTF.Runtime.AgentLoop do
 
   @default_max_iterations 50
   @default_max_tokens 16_384
+  # Thinking-capable models (gemini-2.5-pro, claude opus) include reasoning
+  # tokens in the output budget. At 16k, dynamic thinking can eat the whole
+  # budget and leave no room for the final text, producing an "empty response"
+  # failure. Pro supports up to 65k output tokens; 32k comfortably accommodates
+  # thinking + a substantial response.
+  @thinking_model_max_tokens 32_768
   @default_receive_timeout 60_000
+  # Heartbeat interval while blocked on the LLM HTTP call. The ghost worker
+  # kills idle ghosts at `stale_threshold_seconds` (default 120s); without
+  # heartbeats, pro-class models with extended thinking can silently exceed
+  # that threshold and be misdiagnosed as hung. Must be well under 120s.
+  @default_heartbeat_interval_ms 30_000
 
   # -- Public API --------------------------------------------------------------
 
@@ -85,10 +96,18 @@ defmodule GiTF.Runtime.AgentLoop do
 
     system_prompt = build_system_prompt(Keyword.get(opts, :system_prompt), working_dir, nil)
     max_iterations = Keyword.get(opts, :max_iterations, @default_max_iterations)
-    max_tokens = Keyword.get(opts, :max_tokens, @default_max_tokens)
-    receive_timeout = Keyword.get(opts, :receive_timeout, configured_receive_timeout())
+    max_tokens =
+      Keyword.get(opts, :max_tokens, default_max_tokens_for(model))
+    receive_timeout =
+      Keyword.get(opts, :receive_timeout, configured_receive_timeout(model))
     on_progress = Keyword.get(opts, :on_progress)
     temperature = Keyword.get(opts, :temperature)
+    heartbeat_interval_ms =
+      Keyword.get(opts, :heartbeat_interval_ms, @default_heartbeat_interval_ms)
+
+    # Provider-specific options (e.g. `:google_thinking_budget`) — passed
+    # verbatim to `LLMClient.generate_text/3`.
+    provider_opts = Keyword.get(opts, :provider_opts, [])
 
     # Build initial context and cache options
     {messages, cache_opts} = prepare_context_and_cache(system_prompt, prompt, model)
@@ -112,7 +131,9 @@ defmodule GiTF.Runtime.AgentLoop do
       session_id: session_id,
       last_text: "",
       receive_timeout: receive_timeout,
-      cache_opts: cache_opts
+      cache_opts: cache_opts,
+      heartbeat_interval_ms: heartbeat_interval_ms,
+      provider_opts: provider_opts
     })
   rescue
     e ->
@@ -147,13 +168,66 @@ defmodule GiTF.Runtime.AgentLoop do
 
     generate_opts = build_generate_opts(tools, state)
 
-    case LLMClient.generate_text(model, messages, generate_opts) do
+    case call_llm_with_heartbeat(model, messages, generate_opts, state) do
       {:ok, response} ->
         handle_response(response, messages, model, tools, state)
 
       {:error, reason} ->
         Logger.error("LLM API error on iteration #{state.iteration}: #{inspect(reason)}")
         {:error, {:api_error, reason}}
+    end
+  end
+
+  # Runs the blocking LLM call under a Task so `wait_for_llm/3` can emit
+  # `:heartbeat` progress events every `heartbeat_interval_ms` — the ghost
+  # worker uses these to distinguish "LLM still working" from "worker stuck."
+  defp call_llm_with_heartbeat(model, messages, generate_opts, state) do
+    start_ms = System.monotonic_time(:millisecond)
+    model_str = to_string(model)
+
+    Logger.debug(
+      "AgentLoop: calling LLM #{model_str} (iteration #{state.iteration}, " <>
+        "heartbeat #{state.heartbeat_interval_ms}ms)"
+    )
+
+    GiTF.Telemetry.emit(
+      [:gitf, :agent_loop, :llm_call_started],
+      %{iteration: state.iteration},
+      %{model: model_str}
+    )
+
+    task = Task.async(fn -> LLMClient.generate_text(model, messages, generate_opts) end)
+    result = wait_for_llm(task, state.on_progress, state.heartbeat_interval_ms)
+
+    outcome =
+      case result do
+        {:ok, _} -> :ok
+        _ -> :error
+      end
+
+    GiTF.Telemetry.emit(
+      [:gitf, :agent_loop, :llm_call_finished],
+      %{elapsed_ms: System.monotonic_time(:millisecond) - start_ms, iteration: state.iteration},
+      %{model: model_str, outcome: outcome}
+    )
+
+    result
+  end
+
+  @doc false
+  @spec wait_for_llm(Task.t(), (map() -> any()) | nil, pos_integer()) ::
+          {:ok, term()} | {:error, term()}
+  def wait_for_llm(task, on_progress, interval_ms) do
+    case Task.yield(task, interval_ms) do
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        {:error, {:task_exit, reason}}
+
+      nil ->
+        emit_progress(on_progress, %{type: :heartbeat})
+        wait_for_llm(task, on_progress, interval_ms)
     end
   end
 
@@ -177,19 +251,35 @@ defmodule GiTF.Runtime.AgentLoop do
     case classified.type do
       :final_answer ->
         text = classified.text || ""
+        thinking = classified.thinking || ""
 
-        # Guard: if the very first response has no tokens and no text, the LLM
-        # call didn't actually produce anything — treat as an error rather than
-        # a legitimate empty final answer.
-        total_input = state.total_usage[:input_tokens] || 0
-        total_output = state.total_usage[:output_tokens] || 0
+        # Guard: an empty final answer is always a failure — callers expect text
+        # (JSON payload, prose, etc.). Two shapes show up:
+        #
+        #   1. Zero tokens + empty text: the HTTP call silently failed.
+        #   2. Non-zero tokens + empty text: the model spent its budget on
+        #      thinking/reasoning and emitted no user-visible content. Gemini
+        #      flash exhibits this when `google_thinking_budget` isn't honored
+        #      or the model decides to produce thinking-only output.
+        #
+        # Both are unusable downstream; the worker's error path will trigger
+        # fallback retry instead of storing an empty artifact.
+        if text == "" do
+          if thinking != "" do
+            Logger.error(
+              "AgentLoop: empty text with #{byte_size(thinking)} bytes of thinking — " <>
+                "model returned thinking-only response (iteration #{state.iteration})"
+            )
 
-        if state.iteration == 0 and total_input == 0 and total_output == 0 and text == "" do
-          Logger.error(
-            "AgentLoop: empty response with 0 tokens on first iteration — LLM call likely failed silently"
-          )
+            {:error, {:api_error, :thinking_only_response}}
+          else
+            Logger.error(
+              "AgentLoop: empty response on iteration #{state.iteration} " <>
+                "(usage: #{inspect(state.total_usage)})"
+            )
 
-          {:error, {:api_error, :empty_response}}
+            {:error, {:api_error, :empty_response}}
+          end
         else
           result_event = build_result_event(state, :completed)
 
@@ -285,16 +375,43 @@ defmodule GiTF.Runtime.AgentLoop do
       if state.temperature, do: Keyword.put(opts, :temperature, state.temperature), else: opts
 
     opts = Keyword.merge(opts, Map.get(state, :cache_opts, []))
+    opts = Keyword.merge(opts, Map.get(state, :provider_opts, []))
     opts
   end
 
-  defp configured_receive_timeout do
+  # Thinking-capable models (gemini-2.5-pro, claude opus, etc.) routinely
+  # spend more than the flash-sized 90s default on a single response when
+  # extended thinking is enabled. 180s is the minimum floor for these models.
+  @thinking_model_receive_timeout 180_000
+
+  defp configured_receive_timeout(model) do
+    configured = configured_receive_timeout_raw()
+
+    if thinking_tier_model?(model) do
+      max(configured, @thinking_model_receive_timeout)
+    else
+      configured
+    end
+  end
+
+  defp configured_receive_timeout_raw do
     case GiTF.Config.Provider.get([:llm, :receive_timeout_ms]) do
       val when is_integer(val) and val > 0 -> val
       _ -> @default_receive_timeout
     end
   rescue
     _ -> @default_receive_timeout
+  end
+
+  defp thinking_tier_model?(model) when is_binary(model) do
+    String.contains?(model, "gemini-2.5-pro") or
+      String.contains?(model, "claude-opus")
+  end
+
+  defp thinking_tier_model?(_), do: false
+
+  defp default_max_tokens_for(model) do
+    if thinking_tier_model?(model), do: @thinking_model_max_tokens, else: @default_max_tokens
   end
 
   # -- Usage Tracking ----------------------------------------------------------
@@ -366,12 +483,31 @@ defmodule GiTF.Runtime.AgentLoop do
 
   # -- System Prompt -----------------------------------------------------------
 
+  # Default system prompt for agent runs. Strong "stop when done" signal
+  # because models (especially pro-tier with extended thinking) tend to keep
+  # iterating past completion — exploring, re-reading, verifying — which
+  # burns wall-clock on trivial edits that were already committed minutes ago.
+  @default_system_prompt """
+  You are a coding agent with file and shell tools. Complete the task concisely:
+
+  1. Make only the edits the task requires — no speculative refactors.
+  2. Commit your changes with `git_commit` when the edit is done.
+  3. After committing, reply with ONE SHORT sentence summarizing what you did, then STOP.
+
+  Do not continue exploring, verifying, or polishing after the commit lands. \
+  The downstream validation phase will catch real issues — your job ends at commit.
+  """
+
   defp build_system_prompt(base_prompt, _working_dir, _tool_set) do
     # Agent profiles are NOT loaded into the system prompt. Each op already has
     # focused task context (title, description, acceptance criteria) and a
     # generated task-skill file. Loading all .claude/agents/*.md caused massive
     # system prompts that triggered API timeouts on first call.
-    base_prompt
+    case base_prompt do
+      nil -> @default_system_prompt
+      "" -> @default_system_prompt
+      other -> other
+    end
   end
 
   # -- Helpers -----------------------------------------------------------------

@@ -104,16 +104,18 @@ defmodule GiTF.Git do
   @doc """
   Creates a new git worktree at `worktree_path` on a new branch.
 
-  Runs `git worktree add <worktree_path> -b <branch>` from the given
-  `repo_path`. Returns `{:ok, worktree_path}` on success.
+  Runs `git worktree add <worktree_path> -b <branch> [start_point]` from
+  the given `repo_path`. When `start_point` is nil, git branches from HEAD;
+  otherwise it branches from the given ref (e.g. another ghost's branch).
+  Returns `{:ok, worktree_path}` on success.
   """
-  @spec worktree_add(String.t(), String.t(), String.t()) ::
+  @spec worktree_add(String.t(), String.t(), String.t(), String.t() | nil) ::
           {:ok, String.t()} | {:error, String.t()}
-  def worktree_add(repo_path, worktree_path, branch) do
-    case safe_cmd(["worktree", "add", worktree_path, "-b", branch],
-           cd: repo_path,
-           stderr_to_stdout: true
-         ) do
+  def worktree_add(repo_path, worktree_path, branch, start_point \\ nil) do
+    args = ["worktree", "add", worktree_path, "-b", branch]
+    args = if start_point, do: args ++ [start_point], else: args
+
+    case safe_cmd(args, cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> {:ok, worktree_path}
       {output, _code} -> {:error, String.trim(output)}
     end

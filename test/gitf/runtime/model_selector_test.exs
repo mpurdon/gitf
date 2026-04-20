@@ -22,9 +22,11 @@ defmodule GiTF.Runtime.ModelSelectorTest do
       assert ModelSelector.select_model_for_job(:summarization, :simple) == "fast"
     end
 
-    test "selects model based on implementation complexity" do
-      assert ModelSelector.select_model_for_job(:implementation, :simple) == "general"
-      assert ModelSelector.select_model_for_job(:implementation, :moderate) == "general"
+    test "implementation always goes to thinking regardless of complexity" do
+      # Fast models (gemini-flash) loop on Read/Grep without emitting edits.
+      # Routing straight to thinking avoids the flash-fails-then-retry cycle.
+      assert ModelSelector.select_model_for_job(:implementation, :simple) == "thinking"
+      assert ModelSelector.select_model_for_job(:implementation, :moderate) == "thinking"
       assert ModelSelector.select_model_for_job(:implementation, :complex) == "thinking"
     end
 

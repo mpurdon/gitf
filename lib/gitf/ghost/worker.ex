@@ -39,6 +39,13 @@ defmodule GiTF.Ghost.Worker do
 
   @registry GiTF.Registry
 
+  # Transient LLM failures (empty response, thinking-only response, network
+  # blips) often succeed on immediate retry with the same model. We retry in
+  # place before falling back to a different provider — a fallback switch is
+  # expensive (cold context, different capability profile) and often lands on
+  # a less-available provider.
+  @max_same_model_retries 2
+
   # -- Types -------------------------------------------------------------------
 
   @type handle :: {:task, Task.t()} | {:port, port()} | nil
@@ -146,6 +153,8 @@ defmodule GiTF.Ghost.Worker do
       opts: opts,
       backup_timer: schedule_checkpoint(),
       fallback_attempted: false,
+      first_error: nil,
+      same_model_retries: 0,
       last_activity_at: System.monotonic_time(:second)
     }
 
@@ -263,14 +272,20 @@ defmodule GiTF.Ghost.Worker do
     result_status = Map.get(result, :status)
 
     cond do
-      # Guard: if the agent loop "succeeded" but consumed 0 tokens and produced
-      # no text, the LLM never actually ran — treat as failure.
-      input_tokens == 0 and output_tokens == 0 and String.trim(text) == "" ->
+      # Guard: AgentLoop should catch this before it gets here, but defend
+      # anyway — any success-path with empty text is unusable downstream
+      # (phase artifacts need JSON; implementation needs tool output).
+      String.trim(text) == "" ->
         Logger.warning(
-          "Ghost #{state.ghost_id} completed with 0 tokens and empty output — treating as failure"
+          "Ghost #{state.ghost_id} completed with empty output " <>
+            "(tokens: in=#{input_tokens} out=#{output_tokens}) — treating as failure"
         )
 
-        mark_failed(state, "Empty response: 0 tokens consumed, no output produced")
+        mark_failed(
+          state,
+          "Empty response: tokens in=#{input_tokens} out=#{output_tokens}, no text produced"
+        )
+
         {:stop, :normal, %{state | status: :failed, handle: nil}}
 
       # Guard: agent hit max iterations without finishing — work is incomplete
@@ -306,13 +321,48 @@ defmodule GiTF.Ghost.Worker do
     Process.demonitor(ref, [:flush])
     Logger.warning("Ghost #{state.ghost_id} API task failed: #{inspect(reason)}")
 
+    cond do
+      retry_same_model?(reason, state) ->
+        case respawn_current_model(state) do
+          {:ok, new_task} ->
+            Logger.info(
+              "Ghost #{state.ghost_id} retrying same model " <>
+                "(retry #{state.same_model_retries + 1}/#{@max_same_model_retries}) after #{inspect(reason)}"
+            )
+
+            {:noreply,
+             %{
+               state
+               | handle: {:task, new_task},
+                 same_model_retries: state.same_model_retries + 1,
+                 first_error: state.first_error || reason
+             }}
+
+          :error ->
+            # Couldn't respawn — fall through to fallback path
+            fallback_or_fail(reason, state)
+        end
+
+      true ->
+        fallback_or_fail(reason, state)
+    end
+  end
+
+  defp fallback_or_fail(reason, state) do
     case maybe_fallback_model(state) do
       {:ok, new_task, fallback_model} ->
         Logger.info("Ghost #{state.ghost_id} falling back to model #{fallback_model}")
-        {:noreply, %{state | handle: {:task, new_task}, fallback_attempted: true}}
+
+        {:noreply,
+         %{
+           state
+           | handle: {:task, new_task},
+             fallback_attempted: true,
+             first_error: state.first_error || reason
+         }}
 
       :no_fallback ->
-        mark_failed(state, "API error: #{inspect(reason)}")
+        mark_failed(state, format_api_error(reason, state.first_error))
         {:stop, :normal, %{state | status: :failed, handle: nil}}
     end
   end
@@ -324,6 +374,13 @@ defmodule GiTF.Ghost.Worker do
     Logger.error("Ghost #{state.ghost_id} API task crashed: #{inspect(reason)}")
     mark_failed(state, "Task crash: #{inspect(reason)}")
     {:stop, :normal, %{state | status: :failed, handle: nil}}
+  end
+
+  # Heartbeats refresh liveness only; skipping Progress.update avoids fanning
+  # out to ProgressLive, which rebuilds its assign (O(N) Ops.get) per broadcast.
+  def handle_info({:agent_progress, ghost_id, %{type: :heartbeat}}, state)
+      when ghost_id == state.ghost_id do
+    {:noreply, %{state | last_activity_at: System.monotonic_time(:second)}}
   end
 
   def handle_info({:agent_progress, ghost_id, event}, state) when ghost_id == state.ghost_id do
@@ -441,6 +498,11 @@ defmodule GiTF.Ghost.Worker do
         # Unexpected crash (code reload, linked Task death, etc.)
         # Supervisor will restart us with :transient — save context for auto-resume
         if state.status in [:provisioning, :running] do
+          # Record any tokens consumed BEFORE the crash so the budget
+          # cap sees them. Without this, mark_success/mark_failed are
+          # the only paths that bill — a thrashing ghost can spend $$
+          # in restart loops while the cap sits at $0.
+          record_partial_costs(state)
           save_crash_context(state)
           update_ghost_status(state.ghost_id, GhostStatus.restarting())
 
@@ -454,6 +516,7 @@ defmodule GiTF.Ghost.Worker do
         if state.status in [:provisioning, :running] do
           GiTF.Telemetry.set_span_error("shutdown")
           GiTF.Telemetry.end_current_span()
+          record_partial_costs(state)
           save_crash_context(state)
           update_ghost_status(state.ghost_id, GhostStatus.crashed())
           GiTF.Ops.fail(state.op_id)
@@ -828,7 +891,15 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp create_shell(state) do
-    GiTF.Shell.create(state.sector_id, state.ghost_id, gitf_root: state.gitf_root)
+    shell_opts = [gitf_root: state.gitf_root]
+
+    shell_opts =
+      case Keyword.get(state.opts, :base_branch) do
+        nil -> shell_opts
+        base when is_binary(base) -> Keyword.put(shell_opts, :base_branch, base)
+      end
+
+    GiTF.Shell.create(state.sector_id, state.ghost_id, shell_opts)
   end
 
   defp role_for_job(op_id) do
@@ -943,6 +1014,85 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
+  # Builds provider-specific LLM options based on the op's context.
+  # Currently derives `:google_thinking_budget` from the mission's triage
+  # complexity: trivial/simple get budget=0 (disable extended thinking,
+  # since they don't benefit from reasoning loops and pay wall-clock for
+  # them). Moderate gets a low budget. Complex/unknown omit the option
+  # and let the provider use its dynamic default.
+  #
+  # Takes effect only for gemini-family models; other providers ignore
+  # the option harmlessly.
+  defp provider_opts_for_op(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        complexity = triage_complexity_for_mission(Map.get(op, :mission_id))
+        model = Map.get(op, :assigned_model, "") || ""
+        is_phase = Map.get(op, :phase_job, false)
+        phase = Map.get(op, :phase)
+
+        case thinking_budget_for(complexity, is_phase, phase, model) do
+          nil -> []
+          budget -> [google_thinking_budget: budget]
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp triage_complexity_for_mission(nil), do: nil
+
+  defp triage_complexity_for_mission(mission_id) do
+    case GiTF.Missions.get_artifact(mission_id, "triage") do
+      %{} = triage ->
+        triage
+        |> Map.get("complexity")
+        |> GiTF.Triage.complexity_from_string()
+
+      _ ->
+        nil
+    end
+  end
+
+  # Determines the `:google_thinking_budget` to pass to gemini for an op.
+  # Returns nil when the option should be omitted (let provider use default).
+  #
+  # The trick: budget=0 disables thinking entirely on flash, which is great
+  # for fast read-only phases (triage, research). But Google REJECTS
+  # budget=0 on gemini-2.5-pro ("Budget 0 is invalid. This model only works
+  # in thinking mode."), and small positive budgets (≤1024) on pro impl
+  # prompts cause pro to burn budget on thinking and return empty text.
+  #
+  # So: budget=0 only applies when the model can accept it. For pro on
+  # any op, omit the option — pro decides. We accept that pro is slower;
+  # an empty response would be worse.
+  defp thinking_budget_for(complexity, is_phase, phase, model) do
+    case raw_thinking_budget(complexity, is_phase, phase) do
+      0 -> if thinking_only_model?(model), do: nil, else: 0
+      other -> other
+    end
+  end
+
+  # phase_job: true with read-only phases (research, triage, etc.) doesn't
+  # need thinking — these are fast scans, not reasoning-heavy.
+  defp raw_thinking_budget(_complexity, true, phase)
+       when phase in ["triage", "research", "requirements", "validation", "simplify", "scoring"],
+       do: 0
+
+  defp raw_thinking_budget(complexity, _is_phase, _phase) when complexity in [:trivial, :simple],
+    do: 0
+
+  defp raw_thinking_budget(:moderate, _is_phase, _phase), do: 2048
+  defp raw_thinking_budget(_, _, _), do: nil
+
+  # Models that Google rejects budget=0 on — extended-thinking-only variants.
+  defp thinking_only_model?(model) when is_binary(model) do
+    String.contains?(model, "gemini-2.5-pro")
+  end
+
+  defp thinking_only_model?(_), do: false
+
   defp spawn_api_task(prompt, working_dir, spawn_opts, state) do
     ghost_id = state.ghost_id
 
@@ -959,10 +1109,13 @@ defmodule GiTF.Ghost.Worker do
 
     worker_pid = self()
 
+    provider_opts = provider_opts_for_op(state.op_id)
+
     agent_opts =
       spawn_opts
       |> Keyword.put(:tool_set, tool_set)
       |> Keyword.put(:include_dynamic, true)
+      |> Keyword.put(:provider_opts, provider_opts)
       |> Keyword.put(:on_progress, fn event ->
         send(worker_pid, {:agent_progress, ghost_id, event})
       end)
@@ -1534,6 +1687,12 @@ defmodule GiTF.Ghost.Worker do
     end)
   end
 
+  defp format_api_error(final_reason, nil), do: "API error: #{inspect(final_reason)}"
+
+  defp format_api_error(final_reason, first_reason) do
+    "API error: #{inspect(final_reason)} (initial: #{inspect(first_reason)})"
+  end
+
   defp mark_failed(state, reason) do
     # Record costs before marking ghost as terminal — shell may be cleaned up after
     record_costs_from_events(state)
@@ -1579,6 +1738,26 @@ defmodule GiTF.Ghost.Worker do
     end)
   end
 
+  # Crash/shutdown variant: best-effort record of any token usage
+  # captured before the crash. Wrapped in try/rescue because the
+  # terminate handler must never crash itself — and shielded against
+  # missing state fields (some restart paths terminate before
+  # parsed_events is populated).
+  defp record_partial_costs(state) do
+    if Map.get(state, :parsed_events, []) != [] do
+      record_costs_from_events(state)
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Ghost #{state.ghost_id} record_partial_costs failed: #{Exception.message(e)}",
+        ghost_id: state.ghost_id,
+        op_id: state.op_id
+      )
+
+      :ok
+  end
+
   defp maybe_ensure_agent(state, shell) do
     case GiTF.Ops.get(state.op_id) do
       {:ok, op} ->
@@ -1593,7 +1772,15 @@ defmodule GiTF.Ghost.Worker do
               description: op.description
             })
 
-            GiTF.AgentProfile.install_agents(sector.path, shell.worktree_path)
+            installed_skills =
+              GiTF.AgentProfile.install_agents_and_skills(
+                sector.path,
+                shell.worktree_path,
+                %{title: op.title, description: op.description},
+                shell.sector_id
+              )
+
+            track_applied_skills(state.op_id, installed_skills)
             :ok
 
           _sector ->
@@ -1603,6 +1790,23 @@ defmodule GiTF.Ghost.Worker do
       {:error, _} ->
         :ok
     end
+  end
+
+  # Stashes the list of applied skill IDs on the op record so Milestone 2
+  # refinement can attribute validation outcomes to specific skills.
+  defp track_applied_skills(_op_id, []), do: :ok
+
+  defp track_applied_skills(op_id, skill_ids) do
+    GiTF.Archive.update(:ops, op_id, fn op ->
+      existing = Map.get(op, :applied_skill_ids, [])
+      Map.put(op, :applied_skill_ids, Enum.uniq(existing ++ skill_ids))
+    end)
+
+    :ok
+  rescue
+    e ->
+      Logger.debug("track_applied_skills failed for op #{op_id}: #{Exception.message(e)}")
+      :ok
   end
 
   defp update_progress(ghost_id, events) do
@@ -1649,6 +1853,33 @@ defmodule GiTF.Ghost.Worker do
     error ->
       Logger.debug("Failed to track context usage for ghost #{ghost_id}: #{inspect(error)}")
       :ok
+  end
+
+  # Transient error shapes where an immediate retry of the same model is
+  # more likely to succeed than a fallback switch. Narrowly scoped — real
+  # auth/billing/model-not-found errors fall through to fallback.
+  defp retry_same_model?(_reason, %{same_model_retries: n}) when n >= @max_same_model_retries,
+    do: false
+
+  defp retry_same_model?({:api_error, :empty_response}, _state), do: true
+  defp retry_same_model?({:api_error, :thinking_only_response}, _state), do: true
+  defp retry_same_model?({:api_error, {:agent_loop_crash, _}}, _state), do: true
+  defp retry_same_model?({:api_error, %{reason: "timeout"}}, _state), do: true
+  defp retry_same_model?({:api_error, %{reason: :timeout}}, _state), do: true
+  defp retry_same_model?({:api_error, %{cause: %{reason: :timeout}}}, _state), do: true
+  defp retry_same_model?(_reason, _state), do: false
+
+  defp respawn_current_model(state) do
+    with %{worktree_path: path} <- Archive.get(:shells, state.shell_id) do
+      prompt = build_prompt(state)
+      spawn_api_task(prompt, path, [], state)
+    else
+      _ -> :error
+    end
+  rescue
+    e ->
+      Logger.debug("respawn_current_model failed: #{inspect(e)}")
+      :error
   end
 
   defp maybe_fallback_model(state) do

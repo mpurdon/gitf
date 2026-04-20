@@ -11,7 +11,7 @@ defmodule GiTF.Triage do
 
   alias GiTF.Ops
 
-  @type complexity :: :simple | :moderate | :complex
+  @type complexity :: :trivial | :simple | :moderate | :complex
 
   @type pipeline :: %{
           skip_drone: boolean(),
@@ -67,6 +67,10 @@ defmodule GiTF.Triage do
   Returns the pipeline config for a given complexity atom.
   """
   @spec pipeline_for(complexity()) :: pipeline()
+  def pipeline_for(:trivial) do
+    %{skip_drone: true, skip_scout: true, recommended_model: "haiku"}
+  end
+
   def pipeline_for(:simple) do
     %{skip_drone: true, skip_scout: true, recommended_model: "haiku"}
   end
@@ -78,6 +82,49 @@ defmodule GiTF.Triage do
   def pipeline_for(:complex) do
     %{skip_drone: false, skip_scout: false, recommended_model: "opus"}
   end
+
+  @doc """
+  Converts a complexity value from any known representation to the canonical
+  atom. Returns `nil` for unrecognized input so callers can fall back to a
+  safe default. Input accepted: the canonical atoms themselves (idempotent),
+  the M1 triage-phase JSON strings (`"trivial"` / `"simple"` / `"moderate"` /
+  `"complex"`), and the op-level classifier strings (`"low"` / `"high"` /
+  `"critical"` collapsed to the nearest atom).
+  """
+  @spec complexity_from_string(term()) :: complexity() | nil
+  def complexity_from_string(c) when c in [:trivial, :simple, :moderate, :complex], do: c
+  def complexity_from_string("trivial"), do: :trivial
+  def complexity_from_string("simple"), do: :simple
+  def complexity_from_string("moderate"), do: :moderate
+  def complexity_from_string("complex"), do: :complex
+  def complexity_from_string("low"), do: :simple
+  def complexity_from_string("high"), do: :complex
+  def complexity_from_string("critical"), do: :complex
+  def complexity_from_string(_), do: nil
+
+  @doc """
+  Returns true when the given bug_evidence text contains a concrete signal
+  that the issue is already fixed: a commit SHA, a file:line citation, or
+  a named test/spec reference. A prose claim is not enough — that's exactly
+  what a misfiring triage prompt produces when it's wrong, and we'd rather
+  run the full pipeline than short-circuit on a hunch.
+  """
+  @spec strong_no_work_evidence?(String.t() | nil) :: boolean()
+  def strong_no_work_evidence?(nil), do: false
+  def strong_no_work_evidence?(""), do: false
+
+  def strong_no_work_evidence?(evidence) when is_binary(evidence) do
+    trimmed = String.trim(evidence)
+
+    cond do
+      Regex.match?(~r/\b[0-9a-f]{7,40}\b/, trimmed) -> true
+      Regex.match?(~r/[\w\/.\-]+\.\w+:\d+/, trimmed) -> true
+      Regex.match?(~r/(test\s+"|it\(|describe\(|#\w+\b)/, trimmed) -> true
+      true -> false
+    end
+  end
+
+  def strong_no_work_evidence?(_), do: false
 
   @doc """
   Returns triage accuracy stats for a sector based on historical feedback.

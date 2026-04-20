@@ -15,9 +15,18 @@ defmodule GiTF.Major.Orchestrator do
 
   alias GiTF.Archive
   alias GiTF.Major.{FastPath, PhasePrompts, Planner}
+  alias GiTF.Major.Orchestrator.Decisions
 
-  @phases ~w(research requirements design review planning implementation validation awaiting_approval sync simplify scoring)
+  # Scoring is async post-processing that runs after publish. The mission is
+  # user-visibly `status: "completed"` once publish lands; scoring + learning
+  # (`ingest_mission_outcome`) continue in the background while
+  # `post_processing_status` reflects their state. See `after_publish/1`.
+  @phases ~w(triage research requirements design review planning implementation validation awaiting_approval sync simplify publish scoring)
   @default_max_redesign 2
+
+  # Post-processing scoring gives up after this many failed scoring ops —
+  # user already sees "completed", so endless retries waste budget.
+  @scoring_post_processing_max_failures 3
 
   alias GiTF.Config.Provider, as: Config
 
@@ -38,7 +47,11 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          :ok <- validate_quest_ready(mission),
          :ok <- budget_preflight(mission_id),
-         :ok <- provider_preflight() do
+         :ok <- provider_preflight(),
+         # `validate_quest_ready` may have auto-assigned a sector (writing
+         # directly to Archive). Reload so the struct we hand to start_triage /
+         # start_research has the updated sector_id.
+         {:ok, mission} <- GiTF.Missions.get(mission_id) do
       GiTF.Telemetry.start_mission_span(mission_id, mission.goal)
       force = Keyword.get(opts, :force_fast_path, false)
       force_full = Keyword.get(opts, :force_full_pipeline, false)
@@ -87,7 +100,11 @@ defmodule GiTF.Major.Orchestrator do
           start_implementation(mission)
 
         true ->
-          start_research(mission)
+          if triage_enabled?() do
+            start_triage(mission)
+          else
+            start_research(mission)
+          end
       end
     else
       {:error, :no_sector_assigned} ->
@@ -211,20 +228,62 @@ defmodule GiTF.Major.Orchestrator do
 
   defp do_advance_quest(mission_id) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
-      if quest_timed_out?(mission) do
-        timeout_h = max_quest_age_hours()
-        Logger.warning("Quest #{mission_id} exceeded #{timeout_h}h max age, force-completing")
+      cond do
+        quest_timed_out?(mission) ->
+          timeout_h = max_quest_age_hours()
+          Logger.warning("Quest #{mission_id} exceeded #{timeout_h}h max age, force-completing")
 
-        GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-          type: :quest_timeout,
-          message: "Quest #{mission_id} force-completed after #{timeout_h}h timeout"
-        })
+          GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+            type: :quest_timeout,
+            message: "Quest #{mission_id} force-completed after #{timeout_h}h timeout"
+          })
 
-        fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
-      else
-        advance_mission_phase(mission)
+          fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
+
+        over_budget?(mission) ->
+          {cap, spent} = mission_budget_snapshot(mission)
+
+          Logger.warning(
+            "Quest #{mission_id} exceeded budget cap ($#{Float.round(cap, 2)}): spent $#{Float.round(spent, 4)} — failing"
+          )
+
+          GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+            type: :budget_exceeded,
+            message:
+              "Quest #{mission_id} spent $#{Float.round(spent, 4)} (cap $#{Float.round(cap, 2)})"
+          })
+
+          fail_quest(mission_id, "Budget exceeded: spent $#{Float.round(spent, 4)} of $#{Float.round(cap, 2)} cap")
+
+        true ->
+          advance_mission_phase(mission)
       end
     end
+  end
+
+  defp over_budget?(mission) do
+    status = Map.get(mission, :status, "pending")
+    phase = Map.get(mission, :current_phase, "pending")
+
+    # Skip the check once the mission is user-visibly done — post-processing
+    # cost is bounded by the scoring-failure cap, not the mission budget.
+    if status == "completed" or phase in ["completed", "awaiting_approval", "pending"] do
+      false
+    else
+      {cap, spent} = mission_budget_snapshot(mission)
+      spent > cap
+    end
+  end
+
+  defp mission_budget_snapshot(mission) do
+    cap =
+      Map.get(mission, :cost_cap_usd) ||
+        Config.get([:major, :mission_cost_cap_usd], 20.0)
+
+    spent = GiTF.Costs.for_quest(mission.id) |> GiTF.Costs.total()
+    {cap * 1.0, spent}
+  rescue
+    _ -> {20.0, 0.0}
   end
 
   defp quest_timed_out?(mission) do
@@ -232,8 +291,13 @@ defmodule GiTF.Major.Orchestrator do
       %DateTime{} = started ->
         hours = DateTime.diff(DateTime.utc_now(), started, :second) / 3600
         phase = Map.get(mission, :current_phase, "pending")
-        # Don't timeout missions that are completed or awaiting approval
-        phase not in ["completed", "awaiting_approval", "pending"] and
+        status = Map.get(mission, :status, "pending")
+        # Don't timeout missions that are completed or awaiting approval.
+        # Also skip missions that are user-visibly completed but still running
+        # async post-processing (status="completed" with phase="scoring") —
+        # post-processing has its own failure path that doesn't regress status.
+        status != "completed" and
+          phase not in ["completed", "awaiting_approval", "pending"] and
           hours > max_quest_age_hours()
 
       _ ->
@@ -249,10 +313,17 @@ defmodule GiTF.Major.Orchestrator do
       "pending" ->
         # Only start research if mission has a sector_id (new-style missions)
         if Map.get(mission, :sector_id) do
-          start_research(mission)
+          if triage_enabled?() do
+            start_triage(mission)
+          else
+            start_research(mission)
+          end
         else
           {:ok, phase}
         end
+
+      "triage" ->
+        check_triage_and_advance(mission)
 
       "research" ->
         check_research_and_advance(mission)
@@ -284,8 +355,22 @@ defmodule GiTF.Major.Orchestrator do
       "simplify" ->
         check_simplify_complete(mission)
 
+      "publish" ->
+        check_and_advance(mission, "publish", &after_publish/1)
+
       "scoring" ->
-        check_and_advance(mission, "scoring", &finish_scored/1)
+        # Scoring runs as async post-processing; user-visible status is
+        # already "completed". If scoring fails repeatedly, give up on
+        # post-processing rather than leaving the phase stuck forever.
+        if scoring_post_processing_exhausted?(mission) do
+          Logger.warning(
+            "Quest #{mission.id}: scoring exhausted retries — marking post_processing_status=failed"
+          )
+
+          GiTF.Missions.mark_post_processing_failed(mission.id, "scoring exhausted retries")
+        else
+          check_and_advance(mission, "scoring", &finish_scored/1)
+        end
 
       other ->
         {:ok, other}
@@ -300,6 +385,97 @@ defmodule GiTF.Major.Orchestrator do
 
   # -- Phase Starters ----------------------------------------------------------
 
+  defp triage_enabled? do
+    Application.get_env(:gitf, :triage_enabled, false) == true
+  end
+
+  # Returns the canonical atom representation of the triage artifact's
+  # `"complexity"` field, or nil if no triage artifact exists or the value
+  # is unrecognized. The wire/JSON format is always a string; `GiTF.Triage`
+  # owns the string↔atom mapping.
+  defp triage_complexity(mission) do
+    case GiTF.Missions.get_artifact(mission.id, "triage") do
+      %{} = triage ->
+        triage |> Map.get("complexity") |> GiTF.Triage.complexity_from_string()
+
+      _ ->
+        nil
+    end
+  end
+
+  defp start_triage(mission) do
+    sector_id = Map.get(mission, :sector_id)
+
+    if is_nil(sector_id) do
+      {:error, :no_sector_assigned}
+    else
+      with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "triage", "Quest started") do
+        sector = Archive.get(:sectors, sector_id)
+        prompt = PhasePrompts.triage_prompt(mission, sector)
+        spawn_phase_ghost(mission, "triage", prompt, model: "general")
+        {:ok, "triage"}
+      end
+    end
+  end
+
+  defp check_triage_and_advance(mission) do
+    artifact = GiTF.Missions.get_artifact(mission.id, "triage")
+
+    if artifact && !artifact_failed?(artifact) do
+      complexity = GiTF.Triage.complexity_from_string(Map.get(artifact, "complexity")) || :complex
+      skip_flags = Map.get(artifact, "skip_flags", %{}) || %{}
+
+      GiTF.Missions.update(mission.id, %{
+        pipeline_mode: Decisions.pipeline_mode_for_complexity(complexity)
+      })
+
+      Logger.info(
+        "Triage complete for #{mission.id}: complexity=#{complexity}, skip_flags=#{inspect(skip_flags)}"
+      )
+
+      # Preflight — if triage verified the bug isn't reproducible, short-
+      # circuit the entire pipeline.
+      bug_reproducible = Map.get(artifact, "bug_reproducible")
+      bug_evidence = Map.get(artifact, "bug_evidence", "")
+
+      if bug_reproducible == true and bug_evidence in [nil, ""] do
+        Logger.warning(
+          "Quest #{mission.id}: triage emitted bug_reproducible=true with empty evidence — prompt compliance issue, proceeding cautiously"
+        )
+      end
+
+      if bug_reproducible == false and GiTF.Triage.strong_no_work_evidence?(bug_evidence) do
+        complete_quest_no_work_needed(mission, bug_evidence)
+      else
+        if bug_reproducible == false do
+          Logger.warning(
+            "Quest #{mission.id}: triage said bug_reproducible=false but evidence is weak " <>
+              "(no SHA/file-line/test-name cite) — running the full pipeline instead"
+          )
+        end
+
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        route_to_first_unskipped_phase(mission, skip_flags)
+      end
+    else
+      # No artifact yet — wait or re-spawn via the generic check.
+      check_and_advance(mission, "triage", fn m ->
+        route_to_first_unskipped_phase(m, %{})
+      end)
+    end
+  end
+
+  defp route_to_first_unskipped_phase(mission, skip_flags) do
+    case Decisions.next_phase_after_triage(skip_flags) do
+      :research -> start_research(mission)
+      :requirements -> start_requirements(mission)
+      :design -> start_design(mission)
+      :review -> start_review(mission)
+      :planning -> start_planning(mission)
+      :implementation -> start_implementation(mission)
+    end
+  end
+
   defp start_research(mission) do
     sector_id = Map.get(mission, :sector_id)
 
@@ -309,7 +485,7 @@ defmodule GiTF.Major.Orchestrator do
       with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
         sector = Archive.get(:sectors, sector_id)
         ctx = GiTF.Intel.get_prompt_context(sector_id, "research")
-        prompt = PhasePrompts.research_prompt(mission, sector, ctx)
+        prompt = PhasePrompts.research_prompt(mission, sector, ctx, complexity: triage_complexity(mission))
         spawn_phase_ghost(mission, "research", prompt, model: "general")
         {:ok, "research"}
       end
@@ -412,7 +588,7 @@ defmodule GiTF.Major.Orchestrator do
         prompt = base_prompt <> "\n" <> strategy_section <> "\n"
 
         spawn_phase_ghost(mission, "design", prompt,
-          model: "thinking",
+          model: phase_model_for_complexity("design", mission),
           strategy: strategy_name
         )
       end)
@@ -430,8 +606,24 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "review", "Design complete") do
       prompt = PhasePrompts.review_prompt(mission, designs, requirements, research)
-      spawn_phase_ghost(mission, "review", prompt, model: "thinking")
+      spawn_phase_ghost(mission, "review", prompt, model: phase_model_for_complexity("review", mission))
       {:ok, "review"}
+    end
+  end
+
+  # Routes design/planning/review to `general` (cheaper/faster) when triage
+  # said trivial/simple/moderate. Complex and unknown keep `thinking` so we
+  # don't regress on hard work.
+  defp phase_model_for_complexity(phase, mission) do
+    case {phase, triage_complexity(mission)} do
+      {p, c} when p in ["design", "planning", "review"] and c in [:trivial, :simple, :moderate] ->
+        "general"
+
+      {p, _} when p in ["design", "planning", "review"] ->
+        "thinking"
+
+      _ ->
+        "general"
     end
   end
 
@@ -465,7 +657,7 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning", "Review approved") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "planning")
       prompt = PhasePrompts.planning_prompt(mission, design, requirements, review, ctx)
-      spawn_phase_ghost(mission, "planning", prompt, model: "thinking")
+      spawn_phase_ghost(mission, "planning", prompt, model: phase_model_for_complexity("planning", mission))
       {:ok, "planning"}
     end
   end
@@ -502,9 +694,62 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation")
-      prompt = PhasePrompts.validation_prompt(mission, requirements, planning, ctx)
-      spawn_phase_ghost(mission, "validation", prompt, model: "general")
+
+      diff_base = detect_diff_base(mission)
+      changed_files = changed_files_from_impl(mission)
+
+      prompt =
+        PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
+          diff_base: diff_base,
+          changed_files: changed_files
+        )
+
+      # Branch the validation worktree from the impl ghost's tip so `git diff`
+      # against the sector main shows the actual implementation changes.
+      opts = [model: "general"] ++ impl_base_branch_opts(mission)
+      spawn_phase_ghost(mission, "validation", prompt, opts)
       {:ok, "validation"}
+    end
+  end
+
+  # Best-guess diff base: the sector's main branch. Falls back to "main".
+  defp detect_diff_base(mission) do
+    with sector_id when is_binary(sector_id) <- mission.sector_id,
+         %{path: path} when is_binary(path) <- Archive.get(:sectors, sector_id),
+         {:ok, branch} <- GiTF.Sync.detect_main_branch(path) do
+      branch
+    else
+      _ -> "main"
+    end
+  end
+
+  # Collects the changed file list reported by every completed implementation
+  # op. Used as ground truth in the validation prompt — if this list is
+  # non-empty, the implementation ghost definitely committed work.
+  defp changed_files_from_impl(mission) do
+    mission.ops
+    |> Enum.filter(fn op ->
+      op[:phase_job] in [nil, false] and op.status == "done"
+    end)
+    |> Enum.flat_map(fn op ->
+      case op[:changed_files] do
+        files when is_list(files) -> files
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  # Returns [base_branch: "ghost/<id>"] when a completed impl op exists for
+  # the mission, or [] if none — in which case worktrees branch from sector
+  # HEAD (the current default).
+  defp impl_base_branch_opts(mission) do
+    case latest_completed_impl_op(mission) do
+      %{ghost_id: ghost_id} when is_binary(ghost_id) ->
+        [base_branch: "ghost/#{ghost_id}"]
+
+      _ ->
+        []
     end
   end
 
@@ -591,90 +836,33 @@ defmodule GiTF.Major.Orchestrator do
 
   defp finalize_merge_as_pr(mission, nil), do: finalize_merge_to_main(mission)
 
-  defp finalize_merge_as_pr(mission, sector) do
-    with {:ok, quest_branch} <- GiTF.Sync.merge_quest(mission.id),
-         repo_path = sector.path,
-         {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path) do
-      title = "gitf: #{mission.name || mission.goal}"
+  # pr_branch sync: just create the local mission branch with all impl
+  # ghost branches merged in. The push + `gh pr create` happens later in
+  # the publish phase, after simplify and scoring have run, so any cleanup
+  # commits are included in the PR.
+  defp finalize_merge_as_pr(mission, _sector) do
+    case GiTF.Sync.merge_quest(mission.id) do
+      {:ok, quest_branch} ->
+        GiTF.Missions.store_artifact(mission.id, "sync", %{
+          "status" => "branched",
+          "branch" => quest_branch
+        })
 
-      body =
-        """
-        Mission #{mission.id}
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_simplify(mission)
 
-        **Goal:** #{mission.goal}
-        """
-        |> GiTF.Signature.sign()
-
-      # Push mission branch and create PR
-      GiTF.Git.safe_cmd(["push", "-u", "origin", quest_branch],
-        cd: repo_path,
-        stderr_to_stdout: true
-      )
-
-      # Wrap in Task with timeout — a hung `gh` would hold the MissionLock forever
-      pr_task =
-        Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
-          System.cmd(
-            "gh",
-            [
-              "pr",
-              "create",
-              "--head",
-              quest_branch,
-              "--base",
-              main_branch,
-              "--title",
-              String.slice(title, 0, 200),
-              "--body",
-              String.slice(body, 0, 4000)
-            ],
-            cd: repo_path,
-            stderr_to_stdout: true
-          )
-        end)
-
-      pr_result =
-        case Task.yield(pr_task, 30_000) || Task.shutdown(pr_task, :brutal_kill) do
-          {:ok, {output, 0}} -> {:ok, String.trim(output)}
-          {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
-          nil -> {:error, "gh pr create timed out after 30s"}
-        end
-
-      case pr_result do
-        {:ok, url} ->
-          GiTF.Missions.store_artifact(mission.id, "sync", %{
-            "status" => "pr_created",
-            "branch" => quest_branch,
-            "pr_url" => url
-          })
-
-        {:error, reason} ->
-          Logger.warning("Quest #{mission.id} PR creation failed: #{inspect(reason)}")
-
-          GiTF.Missions.store_artifact(mission.id, "sync", %{
-            "status" => "pr_failed",
-            "branch" => quest_branch,
-            "error" => inspect(reason)
-          })
-      end
-
-      {:ok, mission} = GiTF.Missions.get(mission.id)
-      start_simplify(mission)
-    else
       {:error, reason} ->
         GiTF.Missions.store_artifact(mission.id, "sync", %{
           "status" => "failed",
           "error" => inspect(reason)
         })
 
-        Logger.warning("Quest #{mission.id} PR merge failed: #{inspect(reason)}")
-        GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
-        GiTF.Missions.update_status!(mission.id)
-        {:ok, "completed"}
+        Logger.warning("Quest #{mission.id} pr_branch merge failed: #{inspect(reason)}")
+        fail_quest(mission.id, "Sync failed: #{inspect(reason)}")
     end
   rescue
     e ->
-      Logger.warning("Quest #{mission.id} PR finalization failed: #{Exception.message(e)}")
+      Logger.warning("Quest #{mission.id} pr_branch finalization failed: #{Exception.message(e)}")
 
       GiTF.Missions.store_artifact(mission.id, "sync", %{
         "status" => "failed",
@@ -726,9 +914,13 @@ defmodule GiTF.Major.Orchestrator do
         else
           {:ok, mission} = GiTF.Missions.get(mission.id)
 
-          # Fast mode: single design, skip review → go straight to planning
-          if FastPath.fast_mode?(mission) do
-            promote_selected_design(mission.id, %{"selected_design" => "minimal"})
+          # Review exists to cross-validate multiple design proposals; a
+          # single-variant design has nothing to pick among.
+          done_variants = Enum.map(done_ops, &op_strategy/1) |> Enum.uniq()
+
+          if length(done_variants) <= 1 do
+            selected = List.first(done_variants) || "minimal"
+            promote_selected_design(mission.id, %{"selected_design" => selected})
             {:ok, mission} = GiTF.Missions.get(mission.id)
             start_planning(mission)
           else
@@ -741,10 +933,20 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp extract_strategy_from_title(title) do
-    case Regex.run(~r/\[([^\]]+)\]/, title) do
-      [_, strategy] -> strategy
-      _ -> "normal"
+  # Reads the op's stored strategy; falls back to a title parse for records
+  # written before the `strategy` field existed, and finally to "normal" for
+  # ops that have no strategy concept. Prefer `op[:strategy]` for new writes
+  # via `spawn_phase_ghost_inner`.
+  defp op_strategy(op) do
+    case op[:strategy] do
+      s when is_binary(s) and s != "" ->
+        s
+
+      _ ->
+        case Regex.run(~r/\[([^\]]+)\]/, op.title || "") do
+          [_, strategy] -> strategy
+          _ -> "normal"
+        end
     end
   end
 
@@ -964,7 +1166,10 @@ defmodule GiTF.Major.Orchestrator do
 
     case phase do
       "research" ->
-        {PhasePrompts.research_prompt(mission, sector, ctx), "general"}
+        {PhasePrompts.research_prompt(mission, sector, ctx, complexity: triage_complexity(mission)), "general"}
+
+      "triage" ->
+        {PhasePrompts.triage_prompt(mission, sector), "general"}
 
       "requirements" ->
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
@@ -990,7 +1195,14 @@ defmodule GiTF.Major.Orchestrator do
       "validation" ->
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         planning = GiTF.Missions.get_artifact(mission.id, "planning") || %{}
-        {PhasePrompts.validation_prompt(mission, requirements, planning, ctx), "general"}
+
+        prompt =
+          PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
+            diff_base: detect_diff_base(mission),
+            changed_files: changed_files_from_impl(mission)
+          )
+
+        {prompt, "general"}
 
       phase when phase in ["implementation", "sync", "awaiting_approval"] ->
         # These phases don't use phase ghosts — handled by op spawning,
@@ -1085,7 +1297,7 @@ defmodule GiTF.Major.Orchestrator do
           complete_quest(mission.id)
         end
 
-      majority_failed?(impl_jobs) ->
+      Decisions.majority_failed?(impl_jobs) ->
         # >50% failed: attempt fallback plan
         attempt_fallback_plan(mission)
 
@@ -1127,14 +1339,6 @@ defmodule GiTF.Major.Orchestrator do
       true ->
         {:ok, "implementation"}
     end
-  end
-
-  defp majority_failed?(impl_jobs) do
-    terminal_jobs = for op <- impl_jobs, op.status in ["done", "failed"], do: op
-    failed = Enum.count(terminal_jobs, &(&1.status == "failed"))
-    total = length(terminal_jobs)
-
-    total > 0 and failed / total > 0.5
   end
 
   defp attempt_fallback_plan(mission) do
@@ -1254,11 +1458,44 @@ defmodule GiTF.Major.Orchestrator do
         {:ok, "validation"}
 
       validation["overall_verdict"] == "pass" ->
-        # Check if human approval is required before sync
-        if GiTF.Override.requires_approval?(mission) do
-          start_awaiting_approval(mission)
-        else
-          start_merge(mission)
+        emit_validation_confidence(mission)
+
+        # Sanity cross-check: validator says pass, but did the impl ops
+        # actually commit anything? A "pass" with zero meaningful files
+        # changed almost certainly means the validator hallucinated and
+        # we'd ship an empty PR. Override to fail with a clear reason.
+        case validate_pass_against_diff(mission) do
+          :ok ->
+            if GiTF.Override.requires_approval?(mission) do
+              start_awaiting_approval(mission)
+            else
+              start_merge(mission)
+            end
+
+          {:error, reason} ->
+            Logger.warning(
+              "Quest #{mission.id}: validator said PASS but cross-check failed (#{reason}); " <>
+                "treating as fail and re-routing to fix loop"
+            )
+
+            GiTF.Telemetry.emit([:gitf, :validation, :pass_overridden], %{}, %{
+              mission_id: mission.id,
+              reason: reason
+            })
+
+            # Stash an overridden validation artifact so the fix loop
+            # gets the correct verdict + a description of why.
+            overridden =
+              validation
+              |> Map.put("overall_verdict", "fail")
+              |> Map.put(
+                "gaps",
+                ["Validator returned pass but no impl commits found: #{reason}"]
+              )
+              |> Map.put("cross_check_override", reason)
+
+            GiTF.Missions.store_artifact(mission.id, "validation", overridden)
+            handle_validation_result(mission)
         end
 
       true ->
@@ -1293,6 +1530,80 @@ defmodule GiTF.Major.Orchestrator do
             attempt_validation_fixes(mission, validation, fix_ctx)
         end
     end
+  end
+
+  # Returns `:ok` when at least one impl op committed at least one file
+  # outside `.claude/` (which the auto-commit step always adds). Otherwise
+  # returns `{:error, reason}` so the orchestrator can override a
+  # hallucinated "pass" verdict.
+  defp validate_pass_against_diff(mission) do
+    impl_ops =
+      mission.ops
+      |> Enum.filter(fn op ->
+        op.status == "done" and (op[:phase_job] in [nil, false])
+      end)
+
+    cond do
+      impl_ops == [] ->
+        {:error, "no completed impl ops"}
+
+      true ->
+        meaningful_files =
+          impl_ops
+          |> Enum.flat_map(fn op ->
+            (op[:changed_files] || [])
+            |> Enum.reject(&claude_settings_path?/1)
+          end)
+          |> Enum.uniq()
+
+        if meaningful_files == [] do
+          total_changed =
+            impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
+
+          {:error,
+           "impl ops total #{total_changed} files changed but all are " <>
+             "`.claude/` settings — no real code changes"}
+        else
+          :ok
+        end
+    end
+  end
+
+  defp claude_settings_path?(path) when is_binary(path) do
+    String.starts_with?(path, ".claude/") or String.contains?(path, "/.claude/")
+  end
+
+  defp claude_settings_path?(_), do: false
+
+  # Counts the completed validation ops and emits a telemetry signal. When
+  # validation passed on the first run, we're confident. When it took 3+
+  # validation runs interspersed with fix-ops, validation was likely
+  # flip-flopping — log at warning so operators notice the drift.
+  defp emit_validation_confidence(mission) do
+    validation_runs =
+      Enum.count(mission.ops, fn op ->
+        op[:phase_job] && Map.get(op, :phase) == "validation" and op.status == "done"
+      end)
+
+    GiTF.Telemetry.emit([:gitf, :validation, :passed], %{runs: validation_runs}, %{
+      mission_id: mission.id,
+      sector_id: mission.sector_id,
+      first_try: validation_runs <= 1
+    })
+
+    if validation_runs >= 3 do
+      Logger.warning(
+        "Quest #{mission.id}: validation passed after #{validation_runs} runs — " <>
+          "likely indecisive validator or fix-ops chasing its tail"
+      )
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "emit_validation_confidence failed for #{mission.id}: #{Exception.message(e)}"
+      )
+
+      :ok
   end
 
   defp latest_completed_impl_op(mission) do
@@ -1542,7 +1853,12 @@ defmodule GiTF.Major.Orchestrator do
       GiTF.Togusa.learn_from_failure(impl_op.id, validation)
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning(
+        "learn_from_validation_failure failed for #{mission.id}: #{Exception.message(e)}"
+      )
+
+      :ok
   end
 
   # Extract file paths from text (looks for common patterns like path/to/file.ext)
@@ -1559,20 +1875,57 @@ defmodule GiTF.Major.Orchestrator do
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
 
   defp start_simplify(mission) do
-    with {:ok, _} <-
-           GiTF.Missions.transition_phase(mission.id, "simplify", "Sync complete, simplifying") do
-      sector = Archive.get(:sectors, mission.sector_id)
-      repo_path = if sector, do: sector.path, else: nil
+    if Decisions.simplify_skippable?(triage_complexity(mission)) do
+      Logger.info(
+        "Quest #{mission.id}: skipping simplify (triage complexity is low) — going straight to scoring"
+      )
 
-      # Get changed files from all implementation ops
-      changed_files = get_mission_changed_files(mission)
+      with {:ok, _} <-
+             GiTF.Missions.transition_phase(mission.id, "simplify", "Skipped (low complexity)") do
+        GiTF.Missions.store_artifact(mission.id, "simplify", %{
+          "agents" => [],
+          "skipped" => true,
+          "skipped_reason" => "triage_complexity_low",
+          "completed_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+        })
 
-      # Spawn 3 parallel review ghosts
-      for {focus, prompt} <- PhasePrompts.simplify_prompts(mission, repo_path, changed_files) do
-        spawn_phase_ghost(mission, "simplify", prompt, model: "general", strategy: focus)
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_publish(mission)
       end
+    else
+      with {:ok, _} <-
+             GiTF.Missions.transition_phase(mission.id, "simplify", "Sync complete, simplifying") do
+        sector = Archive.get(:sectors, mission.sector_id)
+        repo_path = if sector, do: sector.path, else: nil
 
-      {:ok, "simplify"}
+        # Get changed files from all implementation ops
+        changed_files = get_mission_changed_files(mission)
+
+        # Branch simplify worktrees from the quest branch (the one sync just
+        # merged impl ghosts into) so cleanup commits land on that branch
+        # and get picked up by publish's push/PR. Without this, worktrees
+        # branch from sector HEAD and simplify commits are orphaned.
+        opts = [model: "general"] ++ quest_branch_base_opts(mission)
+
+        for {focus, prompt} <- PhasePrompts.simplify_prompts(mission, repo_path, changed_files) do
+          spawn_phase_ghost(mission, "simplify", prompt, opts ++ [strategy: focus])
+        end
+
+        {:ok, "simplify"}
+      end
+    end
+  end
+
+  # Returns [base_branch: <quest-branch>] when sync recorded a branch for
+  # the mission, or [] if not available. Used by simplify so its cleanup
+  # commits land on the quest branch instead of orphaning from main.
+  defp quest_branch_base_opts(mission) do
+    case GiTF.Missions.get_artifact(mission.id, "sync") do
+      %{"branch" => branch} when is_binary(branch) and branch != "" ->
+        [base_branch: branch]
+
+      _ ->
+        []
     end
   end
 
@@ -1594,7 +1947,7 @@ defmodule GiTF.Major.Orchestrator do
           simplify_ops
           |> Enum.filter(&(&1.status == "done"))
           |> Enum.map(fn op ->
-            strategy = extract_strategy_from_title(op.title)
+            strategy = op_strategy(op)
             artifact = GiTF.Missions.get_artifact(mission.id, "simplify_#{strategy}")
             %{focus: strategy, result: artifact}
           end)
@@ -1606,7 +1959,7 @@ defmodule GiTF.Major.Orchestrator do
         })
 
         {:ok, mission} = GiTF.Missions.get(mission.id)
-        start_scoring(mission)
+        start_publish(mission)
       else
         {:ok, "simplify"}
       end
@@ -1639,6 +1992,65 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  # Runs after `publish`:
+  #
+  #   * When publish delivered the output (PR opened, or push-to-main
+  #     succeeded, or explicitly skipped because there's no remote to
+  #     push to), marks the mission user-visibly completed and kicks off
+  #     async post-processing (scoring + learning).
+  #
+  #   * When publish FAILED to deliver (pr_failed / push_failed), fails
+  #     the mission loudly. The pipeline's sole user-facing output is
+  #     the PR — claiming "completed" without one is the worst kind of
+  #     silent failure.
+  defp after_publish(mission) do
+    publish = GiTF.Missions.get_artifact(mission.id, "publish") || %{}
+    publish_status = Map.get(publish, "status")
+
+    if publish_status in ["pr_failed", "push_failed"] do
+      reason =
+        "Publish failed: status=#{publish_status} error=#{inspect(Map.get(publish, "error"))}"
+
+      Logger.warning("Quest #{mission.id}: #{reason} — marking mission failed")
+
+      GiTF.Telemetry.emit([:gitf, :mission, :publish_failed], %{}, %{
+        mission_id: mission.id,
+        status: publish_status
+      })
+
+      fail_quest(mission.id, reason)
+    else
+      GiTF.Missions.mark_user_visible_completed(mission.id)
+
+      Logger.info(
+        "Quest #{mission.id}: publish done (status=#{publish_status || "unknown"}) — " <>
+          "user-visible completed, starting async post-processing"
+      )
+
+      GiTF.Telemetry.emit([:gitf, :mission, :user_visible_completed], %{}, %{
+        mission_id: mission.id,
+        name: mission[:name],
+        publish_status: publish_status
+      })
+
+      # Reload via Missions.get to populate `ops` — Archive.update returns
+      # the raw record, but spawn_phase_ghost iterates mission.ops.
+      {:ok, mission} = GiTF.Missions.get(mission.id)
+      start_scoring(mission)
+    end
+  end
+
+  defp scoring_post_processing_exhausted?(mission) do
+    has_artifact? = not is_nil(GiTF.Missions.get_artifact(mission.id, "scoring"))
+
+    failed_scoring_ops =
+      Enum.count(mission.ops, fn op ->
+        op[:phase_job] && Map.get(op, :phase) == "scoring" && op.status == "failed"
+      end)
+
+    not has_artifact? and failed_scoring_ops >= @scoring_post_processing_max_failures
+  end
+
   defp finish_scored(mission) do
     scoring = GiTF.Missions.get_artifact(mission.id, "scoring")
 
@@ -1651,7 +2063,292 @@ defmodule GiTF.Major.Orchestrator do
     # Feed the learning loop — analyze each op's outcome
     ingest_mission_outcome(mission)
 
-    complete_quest(mission.id)
+    # Final transition: post-processing done. User-visible status was already
+    # "completed" since after_publish/1; this just advances current_phase to
+    # "completed" and flips post_processing_status to "done".
+    result = GiTF.Missions.mark_post_processing_done(mission.id)
+
+    # Reap ghost worktrees + branches now that the mission is fully done.
+    cleanup_mission_branch(mission)
+
+    result
+  end
+
+  defp start_publish(mission) do
+    with {:ok, _} <-
+           GiTF.Missions.transition_phase(mission.id, "publish", "Simplify complete, publishing") do
+      sync = GiTF.Missions.get_artifact(mission.id, "sync") || %{}
+      sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
+
+      result = do_publish(mission, sector, sync)
+
+      GiTF.Missions.store_artifact(mission.id, "publish", result)
+
+      # Publish runs synchronously (no ghost), so we drive into the next
+      # phase ourselves rather than waiting for an advance event.
+      after_publish(mission)
+    end
+  end
+
+  # Publish outcomes:
+  #   * pr_branch strategy + branch present → push branch + open PR
+  #   * auto_merge + repo has a configured remote → push the main branch
+  #   * otherwise → skipped (local-only work is already in place)
+  defp do_publish(mission, nil, _sync) do
+    %{"status" => "skipped", "reason" => "no sector"}
+  end
+
+  defp do_publish(mission, sector, sync) do
+    strategy = Map.get(sector, :sync_strategy) || "auto_merge"
+    branch = Map.get(sync, "branch")
+
+    cond do
+      strategy == "pr_branch" and is_binary(branch) and branch != "" ->
+        publish_pr(mission, sector, branch)
+
+      strategy == "auto_merge" and has_origin?(sector.path) ->
+        publish_push_main(mission, sector, sync)
+
+      true ->
+        %{
+          "status" => "skipped",
+          "reason" => "strategy=#{strategy}, branch=#{inspect(branch)}, remote=#{has_origin?(sector.path)}"
+        }
+    end
+  end
+
+  defp publish_pr(mission, sector, branch) do
+    repo_path = sector.path
+
+    case GiTF.Sync.detect_main_branch(repo_path) do
+      {:ok, main_branch} ->
+        GiTF.Git.safe_cmd(["push", "-u", "origin", branch],
+          cd: repo_path,
+          stderr_to_stdout: true
+        )
+
+        # Idempotent check — if a PR already exists for this branch, reuse
+        # its URL instead of hitting the duplicate-PR error on recreate.
+        result =
+          case find_existing_pr(repo_path, branch) do
+            {:ok, url} ->
+              Logger.info("Quest #{mission.id} reusing existing PR: #{url}")
+              %{"status" => "pr_exists", "branch" => branch, "pr_url" => url}
+
+            :none ->
+              title = "gitf: #{mission.name || mission.goal}" |> String.slice(0, 200)
+              body = build_pr_body(mission) |> String.slice(0, 4000)
+
+              case run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body) do
+                {:ok, url} ->
+                  %{"status" => "pr_created", "branch" => branch, "pr_url" => url}
+
+                {:error, reason} ->
+                  Logger.warning("Quest #{mission.id} publish PR failed: #{inspect(reason)}")
+                  %{"status" => "pr_failed", "branch" => branch, "error" => inspect(reason)}
+              end
+          end
+
+        # Verify the URL we got back actually points at an OPEN PR.
+        # `gh pr view <url> --json state` will fail if the URL is bogus
+        # or the PR was closed/merged in the meantime — better to catch
+        # it here than ship a publish artifact whose pr_url is dead.
+        verify_pr_url(result, repo_path, mission.id)
+
+      {:error, reason} ->
+        %{"status" => "pr_failed", "branch" => branch, "error" => inspect(reason)}
+    end
+  end
+
+  defp verify_pr_url(%{"status" => status} = result, _repo_path, _mission_id)
+       when status in ["pr_failed", "skipped"],
+       do: result
+
+  defp verify_pr_url(%{"pr_url" => url} = result, repo_path, mission_id) when is_binary(url) do
+    task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        System.cmd("gh", ["pr", "view", url, "--json", "state", "--jq", ".state"],
+          cd: repo_path,
+          stderr_to_stdout: true
+        )
+      end)
+
+    case Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {output, 0}} ->
+        state = String.trim(output)
+
+        if state == "OPEN" do
+          Map.put(result, "pr_state", "OPEN")
+        else
+          Logger.warning(
+            "Quest #{mission_id}: PR #{url} verify returned state=#{inspect(state)} " <>
+              "(expected OPEN); marking publish failed"
+          )
+
+          %{
+            "status" => "pr_failed",
+            "branch" => Map.get(result, "branch"),
+            "error" => "PR exists but state is #{state} (expected OPEN)",
+            "pr_url" => url
+          }
+        end
+
+      {:ok, {output, _}} ->
+        Logger.warning(
+          "Quest #{mission_id}: PR verify command failed for #{url}: " <>
+            String.slice(output, 0, 200)
+        )
+
+        %{
+          "status" => "pr_failed",
+          "branch" => Map.get(result, "branch"),
+          "error" => "PR verify failed: #{String.slice(output, 0, 200)}",
+          "pr_url" => url
+        }
+
+      nil ->
+        Logger.warning("Quest #{mission_id}: PR verify timed out for #{url}")
+
+        %{
+          "status" => "pr_failed",
+          "branch" => Map.get(result, "branch"),
+          "error" => "PR verify timed out after 15s",
+          "pr_url" => url
+        }
+    end
+  end
+
+  defp verify_pr_url(result, _repo_path, _mission_id), do: result
+
+  # `gh pr view --head <branch> --json url` returns the URL if a PR exists
+  # for that head branch in the current repo. Exit code 1 when none exists.
+  defp find_existing_pr(repo_path, branch) do
+    task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        System.cmd(
+          "gh",
+          ["pr", "view", branch, "--json", "url", "--jq", ".url"],
+          cd: repo_path,
+          stderr_to_stdout: true
+        )
+      end)
+
+    case Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {output, 0}} ->
+        url = String.trim(output)
+        if valid_pr_url?(url), do: {:ok, url}, else: :none
+
+      _ ->
+        :none
+    end
+  end
+
+  defp valid_pr_url?(url) do
+    is_binary(url) and String.starts_with?(url, "https://") and
+      String.contains?(url, "/pull/")
+  end
+
+  # Retries `gh pr create` up to 3 times on transient failures (rate-limit,
+  # 5xx) with exponential backoff. Gives up on persistent errors like
+  # branch protection, auth failure, or an already-merged base.
+  defp run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body, attempt \\ 1) do
+    case run_gh_pr_create(repo_path, branch, main_branch, title, body) do
+      {:ok, url} ->
+        if valid_pr_url?(url), do: {:ok, url}, else: {:error, {:invalid_pr_url, url}}
+
+      {:error, reason} = err ->
+        if attempt < 3 and transient_gh_error?(reason) do
+          backoff_ms = :math.pow(2, attempt) |> round() |> Kernel.*(1_000)
+          Logger.info("gh pr create attempt #{attempt} transient fail, retrying in #{backoff_ms}ms")
+          Process.sleep(backoff_ms)
+          run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body, attempt + 1)
+        else
+          err
+        end
+    end
+  end
+
+  defp transient_gh_error?(reason) when is_binary(reason) do
+    r = String.downcase(reason)
+
+    String.contains?(r, "rate limit") or String.contains?(r, "503") or
+      String.contains?(r, "502") or String.contains?(r, "504") or
+      String.contains?(r, "timed out") or String.contains?(r, "connection")
+  end
+
+  defp transient_gh_error?(_), do: false
+
+  defp publish_push_main(mission, sector, _sync) do
+    repo_path = sector.path
+
+    case GiTF.Sync.detect_main_branch(repo_path) do
+      {:ok, main_branch} ->
+        case GiTF.Git.safe_cmd(["push", "origin", main_branch],
+               cd: repo_path,
+               stderr_to_stdout: true
+             ) do
+          {_out, 0} ->
+            %{"status" => "pushed", "branch" => main_branch}
+
+          {out, _} ->
+            Logger.warning(
+              "Quest #{mission.id} publish push failed: #{String.slice(out, 0, 200)}"
+            )
+
+            %{"status" => "push_failed", "branch" => main_branch, "error" => String.slice(out, 0, 200)}
+        end
+
+      {:error, reason} ->
+        %{"status" => "skipped", "error" => inspect(reason)}
+    end
+  end
+
+  defp has_origin?(repo_path) do
+    case GiTF.Git.safe_cmd(["remote", "get-url", "origin"],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {_out, 0} -> true
+      _ -> false
+    end
+  end
+
+  defp build_pr_body(mission) do
+    """
+    Mission #{mission.id}
+
+    **Goal:** #{mission.goal}
+    """
+    |> GiTF.Signature.sign()
+  end
+
+  defp run_gh_pr_create(repo_path, branch, main_branch, title, body) do
+    task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        System.cmd(
+          "gh",
+          [
+            "pr",
+            "create",
+            "--head",
+            branch,
+            "--base",
+            main_branch,
+            "--title",
+            title,
+            "--body",
+            body
+          ],
+          cd: repo_path,
+          stderr_to_stdout: true
+        )
+      end)
+
+    case Task.yield(task, 30_000) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {output, 0}} -> {:ok, String.trim(output)}
+      {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
+      nil -> {:error, "gh pr create timed out after 30s"}
+    end
   end
 
   # Store triage-vs-outcome data for future accuracy analysis.
@@ -1687,14 +2384,25 @@ defmodule GiTF.Major.Orchestrator do
             _ -> :ok
           end
         rescue
-          _ -> :ok
+          e ->
+            Logger.warning(
+              "ingest_mission_outcome: per-op analysis failed for #{op.id}: " <>
+                Exception.message(e)
+            )
+
+            :ok
         end
       end)
 
       GiTF.Intel.SectorProfile.invalidate(mission.sector_id)
     end)
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning(
+        "ingest_mission_outcome failed for #{mission.id}: #{Exception.message(e)}"
+      )
+
+      :ok
   end
 
   defp ingest_failure_outcome(mission_id) do
@@ -1707,7 +2415,13 @@ defmodule GiTF.Major.Orchestrator do
             try do
               GiTF.Intel.FailureAnalysis.analyze_failure(op.id)
             rescue
-              _ -> :ok
+              e ->
+                Logger.warning(
+                  "ingest_failure_outcome: per-op analysis failed for #{op.id}: " <>
+                    Exception.message(e)
+                )
+
+                :ok
             end
           end)
 
@@ -1881,12 +2595,69 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  # Triage short-circuit: bug not reproducible in current code. Mission is
+  # user-visible completed with an explanatory artifact. No impl/validation/
+  # sync/simplify/scoring runs — there's literally nothing to do.
+  defp complete_quest_no_work_needed(mission, evidence) do
+    Logger.info(
+      "Quest #{mission.id}: triage verified bug not reproducible — #{inspect(evidence)}"
+    )
+
+    GiTF.Missions.store_artifact(mission.id, "preflight", %{
+      "bug_reproducible" => false,
+      "evidence" => evidence,
+      "completed_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "resolution" => "no_work_needed"
+    })
+
+    GiTF.Telemetry.emit([:gitf, :mission, :no_work_needed], %{}, %{
+      mission_id: mission.id,
+      evidence: evidence
+    })
+
+    GiTF.Telemetry.end_current_span()
+
+    # Use Missions.complete_quest so status is set unconditionally — the
+    # transition_phase + update_status! pair won't promote a mission with
+    # only a completed phase op (no impl ops) past its initial "pending"
+    # status, leaving it stuck.
+    with {:ok, _} <-
+           GiTF.Missions.complete_quest(
+             mission.id,
+             "Triage verified bug not reproducible"
+           ) do
+
+      GiTF.Observability.Alerts.dispatch_webhook(
+        :quest_completed,
+        "Quest #{mission.id} completed — no work needed (#{evidence})"
+      )
+
+      case GiTF.Missions.get(mission.id) do
+        {:ok, updated} -> GiTF.Ledger.record(updated)
+        _ -> :ok
+      end
+
+      {:ok, "completed"}
+    end
+  end
+
   defp do_complete_quest(mission) do
     GiTF.Telemetry.end_current_span()
 
+    # Use Missions.complete_quest rather than transition_phase + update_status!
+    # so we can recover from an intermediate `fail_quest` (e.g. a transient
+    # fix-op crash that fired fail_quest before a later fix attempt succeeded).
+    # transition_phase + update_status! both respect terminal "failed" and
+    # would leave the mission stuck in that state even though the work landed.
+    if mission.status == "failed" do
+      Logger.info(
+        "Quest #{mission.id}: recovering status from 'failed' to 'completed' — " <>
+          "intermediate failure was resolved by subsequent ops"
+      )
+    end
+
     with {:ok, _} <-
-           GiTF.Missions.transition_phase(mission.id, "completed", "All phases complete") do
-      GiTF.Missions.update_status!(mission.id)
+           GiTF.Missions.complete_quest(mission.id, "All phases complete") do
 
       GiTF.Observability.Alerts.dispatch_webhook(
         :quest_completed,
@@ -1915,18 +2686,61 @@ defmodule GiTF.Major.Orchestrator do
 
     Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
       try do
-        with sync_art when is_map(sync_art) <- GiTF.Missions.get_artifact(mission_id, "sync"),
-             branch when is_binary(branch) <- sync_art["branch"],
-             {:ok, sector} <- GiTF.Sector.get(sector_id) do
-          GiTF.Git.branch_delete(sector.path, branch)
-          GiTF.Git.safe_cmd(["push", "origin", "--delete", branch], cd: sector.path, stderr_to_stdout: true)
-          Logger.info("Cleaned up mission branch #{branch}")
+        with {:ok, sector} <- GiTF.Sector.get(sector_id) do
+          cleanup_mission_shells(mission_id, sector)
+          maybe_delete_mission_branch(mission_id, sector)
         end
       rescue
         e ->
-          Logger.warning("Failed to cleanup mission branch for #{mission_id}: #{Exception.message(e)}")
+          Logger.warning("Failed to cleanup mission for #{mission_id}: #{Exception.message(e)}")
       end
     end)
+  end
+
+  # Removes ghost worktrees + branches for every shell created by this
+  # mission. Runs on mission completion regardless of sync strategy —
+  # ghost worktrees are single-use and always safe to reap.
+  defp cleanup_mission_shells(mission_id, _sector) do
+    ops = GiTF.Ops.list(mission_id: mission_id)
+
+    shell_ids =
+      ops
+      |> Enum.map(& &1[:shell_id])
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    Enum.each(shell_ids, fn shell_id ->
+      case GiTF.Shell.remove(shell_id, force: true) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Logger.debug("Shell #{shell_id} cleanup skipped: #{inspect(reason)}")
+      end
+    end)
+
+    if shell_ids != [] do
+      Logger.info("Quest #{mission_id}: reaped #{length(shell_ids)} ghost shells")
+    end
+  end
+
+  # Deletes the mission branch ONLY when sync strategy is auto_merge (the
+  # branch has been merged into main and has no open PR pointing at it).
+  # For pr_branch strategy, the branch must stay until the PR is
+  # merged/closed — deleting it would orphan or close the PR.
+  defp maybe_delete_mission_branch(mission_id, sector) do
+    strategy = Map.get(sector, :sync_strategy) || "auto_merge"
+
+    with true <- strategy == "auto_merge",
+         sync_art when is_map(sync_art) <- GiTF.Missions.get_artifact(mission_id, "sync"),
+         branch when is_binary(branch) <- sync_art["branch"] do
+      GiTF.Git.branch_delete(sector.path, branch)
+      GiTF.Git.safe_cmd(["push", "origin", "--delete", branch],
+        cd: sector.path,
+        stderr_to_stdout: true
+      )
+
+      Logger.info("Cleaned up mission branch #{branch} (auto_merge completed)")
+    else
+      _ -> :ok
+    end
   end
 
   # -- Ghost Spawning ----------------------------------------------------------
@@ -1983,14 +2797,17 @@ defmodule GiTF.Major.Orchestrator do
       sector_id: mission.sector_id,
       phase_job: true,
       phase: phase,
+      strategy: strategy,
       assigned_model: model_id(model)
     }
+
+    spawn_opts = [prompt: prompt] ++ Keyword.take(opts, [:base_branch])
 
     with {:ok, op} <- GiTF.Ops.create(job_attrs),
          _ = GiTF.Missions.record_phase_job(mission.id, phase, op.id),
          {:ok, gitf_root} <- GiTF.gitf_dir(),
          {:ok, ghost} <-
-           GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root, prompt: prompt) do
+           GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root, spawn_opts) do
       Logger.info("Phase ghost #{ghost.id} spawned for #{phase} phase of mission #{mission.id}")
 
       {:ok, ghost}
@@ -2145,11 +2962,16 @@ defmodule GiTF.Major.Orchestrator do
           end)
 
         true ->
-          # Last resort: single op from mission goal
+          # Last resort: single op from mission goal. For triage-direct-to-
+          # impl paths (trivial/simple complexity, all pre-phases skipped),
+          # propagate triage's target_files + goal_restatement + external
+          # context into the op so the impl ghost has navigation scaffolding.
+          triage = GiTF.Missions.get_artifact(mission.id, "triage") || %{}
           [
             %{
               "title" => "Implement: #{String.slice(mission.goal, 0, 80)}",
-              "description" => mission.goal,
+              "description" => synthetic_impl_description(mission, triage),
+              "target_files" => Map.get(triage, "target_files") || [],
               "op_type" => "implementation"
             }
           ]
@@ -2168,6 +2990,36 @@ defmodule GiTF.Major.Orchestrator do
       )
 
       {:ok, []}
+  end
+
+  # Builds an impl op's description by folding in whatever triage already
+  # figured out. Without this, a trivial-triaged impl ghost gets only the
+  # raw mission goal and has to search the repo blindly — which fast models
+  # like gemini-2.5-flash handle poorly (they loop on Read/Grep).
+  defp synthetic_impl_description(mission, triage) do
+    sections = [
+      mission.goal,
+      case Map.get(triage, "goal_restatement") do
+        nil -> nil
+        "" -> nil
+        txt -> "\n\n## Triage restatement\n#{txt}"
+      end,
+      case Map.get(triage, "target_files") do
+        [_ | _] = files ->
+          "\n\n## Target files (identified by triage)\n" <>
+            Enum.map_join(files, "\n", &"- #{&1}")
+
+        _ ->
+          nil
+      end,
+      case Map.get(triage, "external_context") do
+        nil -> nil
+        "" -> nil
+        txt -> "\n\n## External context\n#{txt}"
+      end
+    ]
+
+    sections |> Enum.reject(&is_nil/1) |> Enum.join("")
   end
 
   defp is_client_facing?(mission) do

@@ -325,6 +325,34 @@ defmodule GiTF.AgentProfile do
   end
 
   @doc """
+  Installs sector agents AND retrieves + installs self-improving skills.
+
+  This is the ghost-provisioning entry point. It combines:
+
+    1. `install_agents/2` — copies static sector agent files.
+    2. `GiTF.Skills.Retrieval.retrieve/3` — embeds the op goal, scores
+       global+sector skills, takes top-K.
+    3. `GiTF.Skills.Install.install_into_worktree/2` — writes the
+       retrieved skills into `<worktree>/.claude/skills/`.
+
+  Skills are only retrieved/installed when the `:skills_enabled` config
+  is true. When disabled, behavior is identical to `install_agents/2`.
+
+  Returns the list of installed skill IDs (empty when skills disabled).
+  """
+  @spec install_agents_and_skills(String.t(), String.t(), map(), String.t() | nil) :: [String.t()]
+  def install_agents_and_skills(sector_path, worktree_path, op, sector_id) do
+    install_agents(sector_path, worktree_path)
+
+    if Application.get_env(:gitf, :skills_enabled, false) do
+      {:ok, skills} = GiTF.Skills.Retrieval.retrieve(op, sector_id)
+      GiTF.Skills.Install.install_into_worktree(skills, worktree_path)
+    else
+      []
+    end
+  end
+
+  @doc """
   Lists all agent profiles available in a sector's agents directory.
   """
   @spec list_agents(String.t()) :: [String.t()]

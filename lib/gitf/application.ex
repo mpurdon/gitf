@@ -184,7 +184,36 @@ defmodule GiTF.Application do
     children = foundation ++ [core, interface, plugins] ++ background_children()
 
     opts = [strategy: :one_for_one, name: GiTF.Supervisor]
-    Supervisor.start_link(children, opts)
+    result = Supervisor.start_link(children, opts)
+    log_feature_flags()
+    result
+  end
+
+  # Logs every known feature flag's effective value on startup so operators
+  # can immediately confirm overrides (env vars, config) took effect. Will
+  # be replaced by GiTF.Flags.Registry once the flag registry lands (see
+  # plans/flag-registry.md).
+  defp log_feature_flags do
+    flags = [
+      {:triage_enabled, "GITF_TRIAGE_ENABLED", false},
+      {:skills_enabled, "GITF_SKILLS_ENABLED", false}
+    ]
+
+    lines =
+      Enum.map(flags, fn {key, env_var, default} ->
+        value = Application.get_env(:gitf, key, default)
+
+        source =
+          cond do
+            env_var && System.get_env(env_var) not in [nil, ""] -> "env #{env_var}"
+            value != default -> "config"
+            true -> "default"
+          end
+
+        "  #{key}: #{inspect(value)} (#{source})"
+      end)
+
+    Logger.info("Factory feature flags:\n" <> Enum.join(lines, "\n"))
   end
 
   # Start the web endpoint, retrying briefly if the port is still releasing
@@ -295,6 +324,13 @@ defmodule GiTF.Application do
       validate_config()
     rescue
       e -> Logger.warning("deferred_init: validate_config failed: #{inspect(e)}")
+    end
+
+    # Seed bootstrap skills (idempotent — skips entries already in Archive).
+    try do
+      GiTF.Skills.Bootstrap.seed_global_skills()
+    rescue
+      e -> Logger.warning("deferred_init: skill bootstrap failed: #{inspect(e)}")
     end
 
     :ok

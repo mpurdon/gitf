@@ -62,6 +62,9 @@ defmodule GiTF.Missions do
             GiTF.Priority.infer_from_goal(goal)
         end
 
+      explicit_issue_ref = attrs[:issue_ref] || attrs["issue_ref"]
+      issue_ref = explicit_issue_ref || parse_issue_ref(goal)
+
       record = %{
         name: name,
         goal: goal,
@@ -76,7 +79,9 @@ defmodule GiTF.Missions do
         research_summary: nil,
         implementation_plan: nil,
         artifacts: %{},
-        phase_jobs: %{}
+        phase_jobs: %{},
+        issue_ref: issue_ref,
+        cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"]
       }
 
       case Archive.insert(:missions, record) do
@@ -95,6 +100,81 @@ defmodule GiTF.Missions do
       end
     end
   end
+
+  @doc """
+  Extracts a structured GitHub issue reference from free-form text.
+
+  Recognised formats (first match wins):
+
+    * `owner/repo#123` → `%{owner: "owner", repo: "repo", number: 123}`
+    * `GH-123` or `gh-123` → `%{number: 123}` (bare, repo unknown)
+    * `#123` → `%{number: 123}` (bare)
+    * `https://github.com/<owner>/<repo>/issues/<n>` → fully qualified
+
+  Returns `nil` when no recognised reference is present.
+  """
+  @spec parse_issue_ref(String.t() | nil) :: map() | nil
+  def parse_issue_ref(nil), do: nil
+
+  def parse_issue_ref(text) when is_binary(text) do
+    cond do
+      match = Regex.run(~r{https?://github\.com/([\w.-]+)/([\w.-]+)/(?:issues|pull)/(\d+)}, text) ->
+        [_, owner, repo, n] = match
+        %{"owner" => owner, "repo" => repo, "number" => String.to_integer(n)}
+
+      match = Regex.run(~r/\b([\w.-]+)\/([\w.-]+)#(\d+)\b/, text) ->
+        [_, owner, repo, n] = match
+        %{"owner" => owner, "repo" => repo, "number" => String.to_integer(n)}
+
+      match = Regex.run(~r/\b(?:GH|gh)-(\d+)\b/, text) ->
+        [_, n] = match
+        %{"number" => String.to_integer(n)}
+
+      match = Regex.run(~r/(?:^|\s)#(\d+)\b/, text) ->
+        [_, n] = match
+        %{"number" => String.to_integer(n)}
+
+      true ->
+        nil
+    end
+  end
+
+  def parse_issue_ref(_), do: nil
+
+  @doc """
+  Finds missions already tracking the same issue reference (same sector
+  and same issue number). Used to guard against duplicate missions when
+  an issue triggers a fresh mission via webhook or repeated CLI.
+
+  Excludes missions in terminal `"failed"` / `"closed"` status by default.
+  """
+  @spec find_by_issue_ref(String.t() | nil, map()) :: [map()]
+  def find_by_issue_ref(_sector_id, nil), do: []
+  def find_by_issue_ref(_sector_id, ref) when not is_map(ref), do: []
+
+  def find_by_issue_ref(sector_id, %{"number" => n} = ref) do
+    Archive.filter(:missions, fn m ->
+      m[:sector_id] == sector_id and
+        match?(%{"number" => ^n}, m[:issue_ref]) and
+        match_issue_owner_repo?(m[:issue_ref], ref) and
+        m[:status] not in ["failed", "closed"]
+    end)
+  end
+
+  def find_by_issue_ref(_sector_id, _), do: []
+
+  defp match_issue_owner_repo?(
+         %{"owner" => o1, "repo" => r1},
+         %{"owner" => o2, "repo" => r2}
+       ) do
+    o1 == o2 and r1 == r2
+  end
+
+  # When either side lacks owner/repo, match by number alone — the bare
+  # "GH-123" / "#123" form can't be disambiguated across repos, so treat
+  # it as a match within the same sector.
+  defp match_issue_owner_repo?(existing, _ref) when is_map(existing), do: true
+  defp match_issue_owner_repo?(_, _), do: false
 
   defp generate_name(goal) do
     goal
@@ -152,6 +232,150 @@ defmodule GiTF.Missions do
   Returns `{:ok, mission}` or `{:error, :not_found}`.
   """
   @spec fail_quest(String.t(), String.t() | nil) :: {:ok, map()} | {:error, :not_found}
+  @doc """
+  Unconditionally marks a mission as completed.
+
+  Unlike `transition_phase/3` and `update_status!/1`, this bypasses the
+  "terminal failed" guard — the orchestrator calls this only after
+  confirming real completion (validation passed + sync merged), so
+  recovering from a transient `fail_quest` is both safe and desirable.
+
+  Without this recovery path, an intermediate fix-op crash that fired
+  `fail_quest` would leave the mission permanently "failed" even when
+  subsequent fix attempts succeeded and the work was merged to sector
+  main.
+  """
+  @spec complete_quest(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def complete_quest(mission_id, reason \\ nil) do
+    case Archive.get(:missions, mission_id) do
+      nil ->
+        {:error, :not_found}
+
+      mission ->
+        from_phase = Map.get(mission, :current_phase, "pending")
+
+        if !recent_duplicate_transition?(mission_id, from_phase, "completed") do
+          Archive.insert(:mission_phase_transitions, %{
+            mission_id: mission_id,
+            from_phase: from_phase,
+            to_phase: "completed",
+            reason: reason,
+            seq: System.monotonic_time(:microsecond)
+          })
+
+          GiTF.EventStore.record(:phase_transition, mission_id, %{
+            from: from_phase,
+            to: "completed",
+            reason: reason,
+            outcome: "completed"
+          })
+        end
+
+        Archive.update(:missions, mission_id, fn m ->
+          m
+          |> Map.put(:current_phase, "completed")
+          |> Map.put(:status, "completed")
+          |> Map.delete(:failure_reason)
+        end)
+    end
+  end
+
+  @doc """
+  Marks a mission user-visibly complete while post-processing (scoring +
+  learning) continues in the background.
+
+  Sets `status = "completed"` (terminal, user-facing) and
+  `post_processing_status = "pending"`. `current_phase` is NOT advanced —
+  the orchestrator keeps driving scoring via the normal phase pipeline
+  until `mark_post_processing_done/1` flips the phase to "completed".
+
+  The terminal-state guard in `update_status!/1` protects the completed
+  status from regression while scoring runs.
+  """
+  @spec mark_user_visible_completed(String.t()) :: {:ok, map()} | {:error, term()}
+  def mark_user_visible_completed(mission_id) do
+    Archive.update(:missions, mission_id, fn m ->
+      m
+      |> Map.put(:status, "completed")
+      |> Map.put(:post_processing_status, "pending")
+      |> Map.delete(:failure_reason)
+    end)
+  end
+
+  @doc """
+  Marks post-processing (async scoring + learning) as finished.
+
+  Advances `current_phase` to "completed" and sets
+  `post_processing_status = "done"`. The user-visible `status` field is
+  already "completed" at this point (set by `mark_user_visible_completed/1`).
+  """
+  @spec mark_post_processing_done(String.t()) :: {:ok, map()} | {:error, term()}
+  def mark_post_processing_done(mission_id) do
+    with_post_processing_transition(mission_id, "post-processing complete", "completed", fn m ->
+      m
+      |> Map.put(:current_phase, "completed")
+      |> Map.put(:status, "completed")
+      |> Map.put(:post_processing_status, "done")
+      |> Map.delete(:failure_reason)
+    end)
+  end
+
+  @doc """
+  Marks post-processing as failed without regressing the user-visible
+  "completed" status. `current_phase` advances to "completed" so the
+  mission isn't stuck in scoring forever.
+  """
+  @spec mark_post_processing_failed(String.t(), String.t() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def mark_post_processing_failed(mission_id, reason \\ nil) do
+    with_post_processing_transition(
+      mission_id,
+      reason || "post-processing failed",
+      "failed",
+      fn m ->
+        m
+        |> Map.put(:current_phase, "completed")
+        |> Map.put(:status, "completed")
+        |> Map.put(:post_processing_status, "failed")
+      end
+    )
+  end
+
+  # Records the "→ completed" phase transition (best-effort, append-only,
+  # deduped if an identical transition landed recently) and then applies
+  # `updater` to the mission record. The phase_transitions log is outside
+  # the Archive.update closure by design: it's an append-only event feed,
+  # not part of the mission's canonical state.
+  defp with_post_processing_transition(mission_id, reason, outcome, updater) do
+    case Archive.get(:missions, mission_id) do
+      nil ->
+        {:error, :not_found}
+
+      mission ->
+        from_phase = Map.get(mission, :current_phase, "pending")
+
+        if from_phase != "completed" and
+             !recent_duplicate_transition?(mission_id, from_phase, "completed") do
+          Archive.insert(:mission_phase_transitions, %{
+            mission_id: mission_id,
+            from_phase: from_phase,
+            to_phase: "completed",
+            reason: reason,
+            seq: System.monotonic_time(:microsecond)
+          })
+
+          GiTF.EventStore.record(:phase_transition, mission_id, %{
+            from: from_phase,
+            to: "completed",
+            reason: reason,
+            outcome: outcome
+          })
+        end
+
+        Archive.update(:missions, mission_id, updater)
+    end
+  end
+
   def fail_quest(mission_id, reason \\ nil) do
     # Best-effort append-only event log for the phase transition.
     case Archive.get(:missions, mission_id) do
@@ -379,7 +603,11 @@ defmodule GiTF.Missions do
   # Only `complete_quest` (via `transition_phase`) should mark "completed".
   # Include "implementation" — ops finishing doesn't mean the mission is done;
   # validation, sync, simplify, and scoring still need to run.
-  @pipeline_phases ["implementation", "validation", "awaiting_approval", "sync", "simplify", "scoring"]
+  # "scoring" is intentionally NOT in this list: by the time the mission is
+  # in the scoring phase, publish has already run and the user-visible status
+  # is "completed" (set by `mark_user_visible_completed/1`). Suppressing the
+  # computed "completed" there would regress an already-finalized state.
+  @pipeline_phases ["implementation", "validation", "awaiting_approval", "sync", "simplify", "publish"]
 
   @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(mission_id) do

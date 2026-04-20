@@ -81,8 +81,16 @@ defmodule GiTF.MCPServer.Handlers do
         missions
       else
         case args["status"] do
-          nil -> Enum.reject(missions, &(&1[:status] in ["completed", "closed"]))
-          _ -> missions
+          nil ->
+            Enum.reject(missions, fn mission ->
+              # "completed" with async post-processing still running is NOT idle —
+              # keep it in the default view until scoring finishes.
+              mission[:status] in ["completed", "closed"] and
+                mission[:post_processing_status] != "pending"
+            end)
+
+          _ ->
+            missions
         end
       end
 
@@ -549,6 +557,69 @@ defmodule GiTF.MCPServer.Handlers do
     {:error, "Provide either 'provider' name or 'all: true'"}
   end
 
+  def call("circuit_status", _args) do
+    {configured, _unconfigured} = GiTF.Runtime.ProviderManager.list_providers()
+
+    providers =
+      Enum.map(configured, fn p ->
+        name = p.name
+        key = GiTF.Runtime.ProviderCircuit.circuit_key(name)
+        state = GiTF.Runtime.ProviderCircuit.provider_state(name)
+
+        base = %{
+          provider: name,
+          state: to_string(state),
+          failure_count: GiTF.CircuitBreaker.failure_count(key),
+          last_failure: summarize_failure(GiTF.CircuitBreaker.last_failure_reason(key))
+        }
+
+        if state == :open do
+          Map.merge(base, %{
+            failure_mode: to_string(GiTF.Runtime.ProviderCircuit.failure_mode(name)),
+            probe_interval_s: GiTF.Runtime.ProviderCircuit.probe_interval(name),
+            seconds_until_probe: GiTF.Runtime.ProviderCircuit.seconds_until_probe(name),
+            probe_due: GiTF.Runtime.ProviderCircuit.probe_due?(name)
+          })
+        else
+          base
+        end
+      end)
+
+    open = GiTF.Runtime.ProviderCircuit.open_providers()
+
+    {:ok, json_text(%{open: open, providers: providers})}
+  end
+
+  def call("circuit_reset", %{"provider" => name} = args) do
+    with :ok <- require_confirm(args) do
+      :ok = GiTF.Runtime.ProviderCircuit.reset_provider(name)
+      {:ok, json_text(%{provider: name, state: "closed"})}
+    end
+  end
+
+  def call("circuit_reset", _), do: {:error, "Missing required parameter: provider"}
+
+  def call("set_sync_strategy", %{"sector_id" => sector_id, "strategy" => strategy} = args)
+      when strategy in ["auto_merge", "pr_branch", "manual"] do
+    with :ok <- require_confirm(args) do
+      case GiTF.Archive.update(:sectors, sector_id, fn s ->
+             Map.put(s, :sync_strategy, strategy)
+           end) do
+        {:ok, _} ->
+          {:ok, json_text(%{sector_id: sector_id, sync_strategy: strategy})}
+
+        {:error, reason} ->
+          {:error, "Failed to update sector: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("set_sync_strategy", %{"strategy" => strategy}) do
+    {:error, "Invalid strategy '#{strategy}' — must be auto_merge, pr_branch, or manual"}
+  end
+
+  def call("set_sync_strategy", _), do: {:error, "Missing required parameters: sector_id, strategy, confirm"}
+
   def call(tool_name, _args), do: {:error, "Unknown tool: #{tool_name}"}
 
   defp require_confirm(%{"confirm" => true}), do: :ok
@@ -634,6 +705,10 @@ defmodule GiTF.MCPServer.Handlers do
     %{id: m[:id], name: m[:name], status: m[:status] || "pending", goal: m[:goal]}
   end
 
+  defp summarize_failure(nil), do: nil
+  defp summarize_failure(reason) when is_binary(reason), do: String.slice(reason, 0, 300)
+  defp summarize_failure(reason), do: reason |> inspect(limit: 10, printable_limit: 300)
+
   defp summarize_ghost(g) do
     %{id: g.id, name: g.name, status: g.status, op_id: g[:op_id]}
   end
@@ -653,6 +728,9 @@ defmodule GiTF.MCPServer.Handlers do
       sector_id: m[:sector_id],
       current_phase: m[:current_phase],
       pipeline_mode: m[:pipeline_mode],
+      post_processing_status: m[:post_processing_status],
+      issue_ref: m[:issue_ref],
+      cost_cap_usd: m[:cost_cap_usd],
       inserted_at: to_string(m[:inserted_at]),
       ops: Enum.map(ops, &serialize_op/1)
     }

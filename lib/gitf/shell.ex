@@ -20,12 +20,13 @@ defmodule GiTF.Shell do
   @spec create(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def create(sector_id, ghost_id, opts \\ []) do
     branch = Keyword.get(opts, :branch, "ghost/#{ghost_id}")
+    base_branch = Keyword.get(opts, :base_branch)
     gitf_root = Keyword.get(opts, :gitf_root)
 
     with {:ok, sector} <- GiTF.Sector.get(sector_id),
          :ok <- validate_sector_path(sector),
          worktree_path = build_worktree_path(sector.path, ghost_id),
-         {:ok, _path} <- Git.worktree_add(sector.path, worktree_path, branch),
+         {:ok, _path} <- Git.worktree_add(sector.path, worktree_path, branch, base_branch),
          :ok <- maybe_generate_settings(ghost_id, gitf_root, worktree_path),
          base_commit_sha = capture_base_sha(worktree_path),
          base_ref = detect_base_ref(sector.path),

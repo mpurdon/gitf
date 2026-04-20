@@ -87,6 +87,7 @@ defmodule GiTF.Ops do
         # Phase op fields
         phase_job: attrs[:phase_job] || false,
         phase: attrs[:phase],
+        strategy: attrs[:strategy],
         acceptance_criteria: attrs[:acceptance_criteria] || [],
         target_files: attrs[:target_files] || [],
         # Audit fields

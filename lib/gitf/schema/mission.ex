@@ -5,6 +5,15 @@ defmodule GiTF.Schema.Mission do
   A mission captures a user goal, tracks its lifecycle through phases
   (pending -> research -> planning -> implementation -> completed),
   and owns the ops that carry out the work.
+
+  ## Status vs. current_phase
+
+  `status` and `current_phase` deliberately diverge during async
+  post-processing: once `publish` lands, `status` flips to `"completed"`
+  (user-visible done) while `current_phase` continues through `"scoring"`
+  and then to `"completed"`. The `post_processing_status` field
+  (`nil | "pending" | "done" | "failed"`) tracks the background scoring +
+  learning loop independently of the user-facing status.
   """
 
   @type t :: %__MODULE__{
@@ -23,6 +32,9 @@ defmodule GiTF.Schema.Mission do
           implementation_plan: map() | nil,
           artifacts: map(),
           phase_jobs: map(),
+          post_processing_status: String.t() | nil,
+          cost_cap_usd: float() | nil,
+          issue_ref: map() | nil,
           inserted_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
@@ -46,7 +58,10 @@ defmodule GiTF.Schema.Mission do
     priority: :normal,
     review_plan: false,
     artifacts: %{},
-    phase_jobs: %{}
+    phase_jobs: %{},
+    post_processing_status: nil,
+    cost_cap_usd: nil,
+    issue_ref: nil
   ]
 
   @required_keys [:goal]
@@ -80,7 +95,10 @@ defmodule GiTF.Schema.Mission do
          research_summary: attrs[:research_summary] || attrs["research_summary"],
          implementation_plan: attrs[:implementation_plan] || attrs["implementation_plan"],
          artifacts: attrs[:artifacts] || attrs["artifacts"] || %{},
-         phase_jobs: attrs[:phase_jobs] || attrs["phase_jobs"] || %{}
+         phase_jobs: attrs[:phase_jobs] || attrs["phase_jobs"] || %{},
+         post_processing_status: attrs[:post_processing_status] || attrs["post_processing_status"],
+         cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"],
+         issue_ref: attrs[:issue_ref] || attrs["issue_ref"]
        }}
     end
   end
@@ -106,6 +124,9 @@ defmodule GiTF.Schema.Mission do
       implementation_plan: raw[:implementation_plan] || raw["implementation_plan"],
       artifacts: raw[:artifacts] || raw["artifacts"] || %{},
       phase_jobs: raw[:phase_jobs] || raw["phase_jobs"] || %{},
+      post_processing_status: raw[:post_processing_status] || raw["post_processing_status"],
+      cost_cap_usd: raw[:cost_cap_usd] || raw["cost_cap_usd"],
+      issue_ref: raw[:issue_ref] || raw["issue_ref"],
       inserted_at: raw[:inserted_at] || raw["inserted_at"],
       updated_at: raw[:updated_at] || raw["updated_at"]
     }

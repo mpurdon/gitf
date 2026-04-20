@@ -224,7 +224,7 @@ defmodule GiTF.CircuitBreaker do
           Process.sleep(delay)
           do_retry(service_key, fun, attempt + 1, max, fallback)
         else
-          if fallback and attempt >= max do
+          if fallback && attempt >= max do
             Logger.info("Non-retryable error after #{attempt} attempts, trying fallback")
             fallback.()
           else

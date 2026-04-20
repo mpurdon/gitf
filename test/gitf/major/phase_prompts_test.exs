@@ -5,6 +5,82 @@ defmodule GiTF.Major.PhasePromptsTest do
 
   @mission %{id: "q-1", goal: "Add user authentication", sector_id: "sec-1"}
 
+  describe "triage_prompt/2" do
+    test "includes mission goal and sector path" do
+      prompt = PhasePrompts.triage_prompt(@mission, %{path: "/code"})
+      assert prompt =~ "Add user authentication"
+      assert prompt =~ "/code"
+      assert prompt =~ "Triage Phase"
+    end
+
+    test "handles nil sector with sentinel path" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ "Add user authentication"
+    end
+
+    test "declares the complexity buckets" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ "trivial"
+      assert prompt =~ "simple"
+      assert prompt =~ "moderate"
+      assert prompt =~ "complex"
+    end
+
+    test "declares the skip_flags schema" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ "skip_research"
+      assert prompt =~ "skip_requirements"
+      assert prompt =~ "skip_design"
+      assert prompt =~ "skip_review"
+      assert prompt =~ "skip_planning"
+    end
+
+    test "includes time budget and JSON output fence" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ ~r/90 seconds/
+      assert prompt =~ "```json"
+    end
+
+    test "notes that validation is never skipped" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ ~r/[Vv]alidation.*(?:always|safety)/s
+    end
+
+    test "declares the bug_reproducible preflight output field" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ "bug_reproducible"
+      assert prompt =~ "bug_evidence"
+      assert prompt =~ ~r/[Pp]reflight/
+    end
+
+    test "preflight enforces evidence-first ordering (write evidence before flag)" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ ~r/evidence first|evidence.*then flag|IN ORDER/i
+      assert prompt =~ ~r/Do NOT set `?bug_reproducible`? before/i
+    end
+
+    test "preflight forbids empty bug_evidence" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ ~r/empty.*forbidden|forbidden.*empty|DO NOT emit/i
+    end
+
+    test "prompts for case-insensitive grep to catch typo'd casing in bug titles" do
+      prompt = PhasePrompts.triage_prompt(@mission, nil)
+      assert prompt =~ ~r/case-insensitive|grep -i/
+    end
+
+    test "extracts GitHub issue URL into fetch instructions" do
+      mission = %{
+        id: "q-2",
+        goal: "Fix bug at https://github.com/owner/repo/issues/42",
+        sector_id: "sec-1"
+      }
+
+      prompt = PhasePrompts.triage_prompt(mission, nil)
+      assert prompt =~ "gh issue view 42 --repo owner/repo"
+    end
+  end
+
   describe "research_prompt/2" do
     test "includes mission goal" do
       prompt = PhasePrompts.research_prompt(@mission, %{path: "/code"})
@@ -18,11 +94,39 @@ defmodule GiTF.Major.PhasePromptsTest do
       assert prompt =~ "."
     end
 
-    test "includes JSON output format instructions" do
+    test "no complexity hint emits the comprehensive prompt" do
       prompt = PhasePrompts.research_prompt(@mission, nil)
       assert prompt =~ "```json"
       assert prompt =~ "architecture"
       assert prompt =~ "key_files"
+      assert prompt =~ "tech_stack"
+      refute prompt =~ "lightweight"
+    end
+
+    test "complex complexity hint emits the comprehensive prompt" do
+      prompt = PhasePrompts.research_prompt(@mission, nil, "", complexity: "complex")
+      assert prompt =~ "architecture"
+      assert prompt =~ "tech_stack"
+      refute prompt =~ "lightweight"
+    end
+
+    test "simple complexity hint emits the lightweight prompt" do
+      prompt = PhasePrompts.research_prompt(@mission, nil, "", complexity: "simple")
+      assert prompt =~ "lightweight"
+      assert prompt =~ ~r/60 seconds/
+      assert prompt =~ "key_files"
+      refute prompt =~ "tech_stack"
+      refute prompt =~ "architecture"
+    end
+
+    test "trivial complexity hint emits the lightweight prompt" do
+      prompt = PhasePrompts.research_prompt(@mission, nil, "", complexity: "trivial")
+      assert prompt =~ "lightweight"
+    end
+
+    test "moderate complexity hint emits the lightweight prompt" do
+      prompt = PhasePrompts.research_prompt(@mission, nil, "", complexity: "moderate")
+      assert prompt =~ "lightweight"
     end
   end
 

@@ -970,6 +970,7 @@ defmodule GiTF.Archive do
   defp collection_prefix(:events), do: :evt
   defp collection_prefix(:agent_identities), do: :agi
   defp collection_prefix(:runs), do: :run
+  defp collection_prefix(:skills), do: :skill
   defp collection_prefix(_), do: :gtf
 
   defp ensure_timestamps(record) do

@@ -420,6 +420,13 @@ defmodule GiTF.Major.Planner do
       job_specs
       |> Enum.with_index()
       |> Enum.reduce({[], %{}}, fn {spec, idx}, {acc, id_map} ->
+        # Implementation ops always route to `"thinking"` per
+        # `ModelSelector.select_model_for_job/2`. Planning's LLM output
+        # defaults `model_recommendation` to `"general"` (flash), which
+        # triggers the known flash-loops-on-impl failure mode. The
+        # ModelSelector policy is the source of truth; planning's
+        # suggestion is only honored when it escalates above the policy
+        # default.
         job_attrs = %{
           title: spec["title"] || "Job #{idx + 1}",
           description: spec["description"],
@@ -428,7 +435,7 @@ defmodule GiTF.Major.Planner do
           acceptance_criteria: spec["acceptance_criteria"] || [],
           target_files: spec["target_files"] || [],
           phase_job: false,
-          assigned_model: resolve_model(spec["model_recommendation"]),
+          assigned_model: impl_op_model(spec["model_recommendation"]),
           verification_contract: spec["verification_contract"]
         }
 
@@ -489,9 +496,14 @@ defmodule GiTF.Major.Planner do
     end)
   end
 
-  defp resolve_model(nil), do: nil
   defp resolve_model(tier) when is_binary(tier), do: GiTF.Runtime.ModelResolver.resolve(tier)
   defp resolve_model(other), do: other
+
+  # Impl ops always resolve to `thinking` regardless of planning's
+  # recommendation. Planning's LLM output defaults `model_recommendation`
+  # to `"general"` (flash), which triggers flash's known tool-use loop
+  # failure mode on implementation work.
+  defp impl_op_model(_), do: resolve_model("thinking")
 
   # -- Multi-Plan Evaluation ---------------------------------------------------
 

@@ -72,6 +72,7 @@ defmodule GiTF.Report do
     %{
       mission_name: report.mission[:name] || report.mission.id,
       mission_status: report.mission.status,
+      post_processing_status: report.mission[:post_processing_status],
       goal: report.mission[:goal],
       timing: %{
         wall_clock: format_duration(report.timing.wall_clock_seconds),
@@ -197,7 +198,13 @@ defmodule GiTF.Report do
 
   defp format_header(report) do
     q = report.mission
-    status = String.upcase(q.status)
+
+    status =
+      case q[:post_processing_status] do
+        "pending" -> "#{String.upcase(q.status)} (scoring…)"
+        "failed" -> "#{String.upcase(q.status)} (scoring failed)"
+        _ -> String.upcase(q.status)
+      end
 
     lines = ["Quest Report: #{q.name} [#{status}]"]
     lines = if q[:goal], do: lines ++ ["Goal: #{q.goal}"], else: lines

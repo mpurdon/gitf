@@ -1,7 +1,7 @@
 defmodule GiTF.ID do
   @moduledoc "Generates short, human-friendly identifiers for GiTF entities."
 
-  @prefixes ~w(ghost op msn sec cel lnk cst dep cnl mpt src rfi vrf mrp crp erp apr prv ckp msc evt agi run gtf fa fl rj qr sp pb)a
+  @prefixes ~w(ghost op msn sec cel lnk cst dep cnl mpt src rfi vrf mrp crp erp apr prv ckp msc evt agi run gtf fa fl rj qr sp pb skill)a
 
   @doc """
   Generates a prefixed identifier like `"ghost-a1b2c3"`.

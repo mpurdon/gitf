@@ -8,13 +8,185 @@ defmodule GiTF.Major.PhasePrompts do
   """
 
   @doc """
+  Builds the triage phase prompt.
+
+  Deliberately short — goal is ~30s execution, not a deep analysis. Later
+  phases (when not skipped) do the deep work.
+  """
+  @spec triage_prompt(map(), map() | nil) :: String.t()
+  def triage_prompt(mission, sector) do
+    external_resources = extract_external_resources(mission.goal)
+
+    """
+    # Triage Phase
+
+    Classify this mission's complexity and decide which pipeline phases are
+    needed. Do NOT fully implement or deeply analyze.
+
+    **Goal**: #{mission.goal}
+
+    **Codebase location**: #{sector_path(sector)}
+
+    ## Instructions
+
+    1. Fetch any external resources in the goal FIRST:#{external_resources}
+    2. Briefly scan for: goal scope, files likely affected, cross-cutting
+       concerns (auth, migrations, schemas, infrastructure).
+    3. Classify complexity:
+       - `trivial`: single-file string/config change; no logic change
+       - `simple`: single-file logic change OR focused ≤3-file refactor
+       - `moderate`: multi-file logic change, new feature in existing
+         architecture, no cross-cutting concerns
+       - `complex`: architectural work, schema changes, cross-cutting
+         concerns, new subsystem, or unclear requirements
+    4. **You MUST find `target_files` before emitting the JSON.** For
+       `trivial` or `simple` missions, this is your single most important
+       task in this phase — do it before anything else after step 1.
+       How to do it:
+         a. Use `Glob` / `Grep` / `Read` tools NOW to search the repo
+            for literal strings from the goal (labels, function names,
+            error messages). Try case-insensitive (`grep -i`) and
+            multiple variants — bug report titles often have typo'd
+            casing that doesn't match the code.
+         b. Follow any path hints in screenshots, stack traces, or issue
+            bodies.
+         c. Emit sector-relative paths (e.g. `src/components/Foo.tsx`)
+            in `target_files`.
+       `target_files` MUST be a non-empty list for `trivial`/`simple`
+       classifications. If you cannot find any file, downgrade the
+       classification to `moderate` so research runs — do NOT emit an
+       empty `target_files` with a trivial/simple classification.
+       For `moderate`/`complex`, `target_files` may be empty or partial —
+       research will fill it in.
+    5. **Preflight — evidence first, then flag.** Do these steps IN
+       ORDER. Do NOT set `bug_reproducible` before you have written
+       `bug_evidence`.
+
+         a. Read the identified `target_files`.
+
+         b. Write `bug_evidence` — ONE sentence describing WHAT YOU SAW
+            in the file, in literal terms. Required for every mission,
+            including feature requests.
+
+            Good examples:
+              - "DiffViewer.tsx:1665 has `<button onClick={collapseAllLow}>Collapse low</button>` — the reported bad state IS present."
+              - "Searched DiffViewer.tsx for 'Collapse Low' (case-insensitive) and 'collapseAllLow' — both absent. Line 1664 reads `Collapse All` with `onClick={collapseAll}`. The reported bad state is NOT present."
+              - "N/A — feature request, nothing to reproduce."
+
+            Bad examples (DO NOT emit):
+              - "" (empty — forbidden)
+              - "Bug appears to be present" (no evidence cited)
+              - "Contradictory" (no decision)
+
+         c. Derive `bug_reproducible` from the evidence you just wrote:
+              - Evidence describes bad state IS present → `true`
+              - Evidence describes bad state is NOT present → `false`
+                (mission will complete as no-work-needed)
+              - Evidence is "N/A — feature request" → `true`
+
+       If your evidence says the bug isn't present but you're inclined
+       to set `true` anyway "just in case," STOP. The mission pipeline
+       has its own safety nets. Your job here is to state what's
+       literally in the file. Trust your own observation.
+
+    Budget: spend no more than 90 seconds on this phase.
+
+    ## Skip policy
+
+    Skip every phase BEFORE the tier your classification starts at:
+    `trivial` starts at implementation, `simple` at planning, `moderate` at
+    research, `complex` at the full pipeline. Deviate only with explicit
+    reasoning. **Validation always runs** regardless of skip flags.
+
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "complexity": "trivial" | "simple" | "moderate" | "complex",
+      "goal_restatement": "One-sentence canonical restatement of the goal",
+      "external_context": "Summary of any fetched external resources, or empty string",
+      "target_files": ["list of 1-3 sector-relative paths for trivial/simple"],
+      "bug_reproducible": true | false,
+      "bug_evidence": "Brief observation of the file's current state relative to the goal — required when bug_reproducible is false",
+      "skip_flags": {
+        "skip_research": true | false,
+        "skip_requirements": true | false,
+        "skip_design": true | false,
+        "skip_review": true | false,
+        "skip_planning": true | false
+      },
+      "reasoning": "Brief explanation of the complexity and skip decisions"
+    }
+    ```
+    """
+  end
+
+  defp sector_path(nil), do: "."
+  defp sector_path(sector), do: sector.path
+
+  @doc """
   Builds the research phase prompt.
 
-  Instructs the ghost to analyze the codebase and output structured findings.
+  When `opts[:complexity]` is `"trivial"`, `"simple"`, or `"moderate"`,
+  emits a slim prompt with a 60s budget and a minimal schema. Otherwise
+  emits the comprehensive audit used for `"complex"` or unhinted missions.
+
+  The complexity hint normally comes from the triage phase's artifact.
   """
-  @spec research_prompt(map(), map() | nil, String.t()) :: String.t()
-  def research_prompt(mission, sector, historical_context \\ "") do
-    sector_path = if sector, do: sector.path, else: "."
+  @spec research_prompt(map(), map() | nil, String.t(), keyword()) :: String.t()
+  def research_prompt(mission, sector, historical_context \\ "", opts \\ []) do
+    complexity = opts |> Keyword.get(:complexity) |> GiTF.Triage.complexity_from_string()
+
+    case complexity do
+      c when c in [:trivial, :simple, :moderate] ->
+        lightweight_research_prompt(mission, sector, historical_context)
+
+      _ ->
+        comprehensive_research_prompt(mission, sector, historical_context)
+    end
+  end
+
+  defp lightweight_research_prompt(mission, sector, historical_context) do
+    external_resources = extract_external_resources(mission.goal)
+
+    """
+    # Research Phase (lightweight)
+
+    Triage has already classified this mission as low-to-moderate complexity.
+    Produce just enough codebase context for downstream phases to work.
+    Do NOT do a comprehensive audit.
+
+    **Goal**: #{mission.goal}
+
+    **Codebase location**: #{sector_path(sector)}
+
+    ## Instructions
+
+    1. Fetch any external resources referenced in the goal:#{external_resources}
+    2. Identify the 2-5 files most relevant to the goal. Do NOT enumerate the
+       whole repo.
+    3. Note any external context (issue/PR body) that changes the requirements.
+
+    Budget: spend no more than 60 seconds on this phase.
+    #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "key_files": ["list of 2-5 relevant files"],
+      "external_context": "Summary of external resources, or empty string",
+      "complexity": "low",
+      "triage_reasoning": "Brief note confirming or revising triage's classification"
+    }
+    ```
+    """
+  end
+
+  defp comprehensive_research_prompt(mission, sector, historical_context) do
     external_resources = extract_external_resources(mission.goal)
 
     """
@@ -25,7 +197,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     **Goal**: #{mission.goal}
 
-    **Codebase location**: #{sector_path}
+    **Codebase location**: #{sector_path(sector)}
 
     ## Instructions
 
@@ -485,9 +657,31 @@ defmodule GiTF.Major.PhasePrompts do
   Reviews all implementation against original requirements.
   """
   @spec validation_prompt(map(), map() | nil, map() | nil, String.t()) :: String.t()
-  def validation_prompt(mission, requirements, planning, historical_context \\ "") do
+  def validation_prompt(mission, requirements, planning, historical_context \\ "", opts \\ []) do
     requirements_json = encode_or(requirements, "{}")
     planning_json = encode_or(planning, "[]")
+    diff_base = Keyword.get(opts, :diff_base, "main")
+    changed_files = Keyword.get(opts, :changed_files, [])
+
+    changed_files_block =
+      case changed_files do
+        [] ->
+          ""
+
+        files ->
+          """
+
+          ## Files the implementation ghost reported changing
+
+          The implementation ghost committed changes to these files on the branch
+          your worktree is currently on. Use this as ground truth — if `git diff`
+          against `#{diff_base}` shows these files, the implementation landed.
+
+          ```
+          #{Enum.join(files, "\n")}
+          ```
+          """
+      end
 
     """
     # Validation Phase
@@ -508,14 +702,27 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-
+    #{changed_files_block}
     ## Instructions
 
-    1. Check each functional requirement was implemented
-    2. Review code changes for correctness
-    3. Verify acceptance criteria are met
-    4. Run tests if available
-    5. Identify any gaps between requirements and implementation
+    Your worktree is on the implementation branch. The implementation's
+    commits are already in HEAD — a plain `git diff` with no ref will show
+    NOTHING because there are no uncommitted changes. To see what the
+    implementation actually did, diff against the base branch:
+
+        git_diff(ref: "#{diff_base}")
+
+    Steps:
+
+    1. Run `git_diff(ref: "#{diff_base}")` to inspect the implementation's changes.
+    2. Check each functional requirement was implemented.
+    3. Review the code changes for correctness.
+    4. Verify acceptance criteria are met.
+    5. Run tests if available.
+    6. Identify any gaps between requirements and implementation.
+
+    **You are NOT here to modify code.** If a requirement is missing, report
+    it in `gaps`; a fix ghost will handle the repair in a later step.
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 

@@ -374,7 +374,7 @@ defmodule GiTF.Ghosts do
         op_id: op_id,
         sector_id: sector_id,
         gitf_root: gitf_root
-      ] ++ Keyword.take(opts, [:prompt, :claude_executable])
+      ] ++ Keyword.take(opts, [:prompt, :claude_executable, :base_branch])
 
     GiTF.SectorSupervisor.start_child({GiTF.Ghost.Worker, child_opts})
   end
@@ -440,7 +440,15 @@ defmodule GiTF.Ghosts do
                 description: op.description
               })
 
-              GiTF.AgentProfile.install_agents(sector.path, shell.worktree_path)
+              installed_skills =
+                GiTF.AgentProfile.install_agents_and_skills(
+                  sector.path,
+                  shell.worktree_path,
+                  %{title: op.title, description: op.description},
+                  shell.sector_id
+                )
+
+              track_applied_skills(op_id, installed_skills)
               :ok
 
             _sector ->
@@ -461,6 +469,24 @@ defmodule GiTF.Ghosts do
         Logger.debug("Agent setup error for op #{op_id}: #{inspect(reason)}")
         :ok
     end
+  end
+
+  # Stashes the list of applied skill IDs on the op record so Milestone 2
+  # refinement can attribute validation outcomes to specific skills.
+  defp track_applied_skills(_op_id, []), do: :ok
+
+  defp track_applied_skills(op_id, skill_ids) do
+    GiTF.Archive.update(:ops, op_id, fn op ->
+      existing = Map.get(op, :applied_skill_ids, [])
+      Map.put(op, :applied_skill_ids, Enum.uniq(existing ++ skill_ids))
+    end)
+
+    :ok
+  rescue
+    e ->
+      require Logger
+      Logger.debug("track_applied_skills failed for op #{op_id}: #{Exception.message(e)}")
+      :ok
   end
 
   defp spawn_model_detached(ghost_id, op_id, shell, gitf_root) do

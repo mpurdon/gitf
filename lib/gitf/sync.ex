@@ -54,7 +54,7 @@ defmodule GiTF.Sync do
          {:ok, sector} <- fetch_sector_for_cells(shells) do
       with_sector_lock(sector.id, fn ->
         with {:ok, main_branch} <- detect_main_branch(sector.path),
-             quest_branch = "mission/#{mission.name}",
+             quest_branch = "mission/#{sanitize_branch_segment(mission.name)}",
              :ok <- create_quest_branch(sector.path, quest_branch, main_branch) do
           merge_cells_into_quest_branch(sector.path, quest_branch, shells)
         end
@@ -104,6 +104,31 @@ defmodule GiTF.Sync do
       Logger.warning("create_local_pr failed: #{Exception.message(e)}")
       {:error, {:pr_creation_failed, Exception.message(e)}}
   end
+
+  # Reduces a mission name (which may contain spaces, colons, slashes, and
+  # other arbitrary characters) into a single branch-name segment that git
+  # will accept. Strips git's forbidden characters per `git check-ref-format`,
+  # collapses repeats of the replacement char, trims leading/trailing dashes
+  # and dots, and caps length to keep filesystem paths manageable.
+  defp sanitize_branch_segment(name) when is_binary(name) do
+    name
+    |> String.trim()
+    |> String.replace(~r/[\s:~^?*\[\]\\]+/, "-")
+    |> String.replace(~r/\/+/, "-")
+    |> String.replace(~r/\.{2,}/, ".")
+    |> String.replace(~r/-+/, "-")
+    |> String.trim_leading("-")
+    |> String.trim_leading(".")
+    |> String.trim_trailing("-")
+    |> String.trim_trailing(".")
+    |> String.slice(0, 80)
+    |> case do
+      "" -> "untitled"
+      sanitized -> sanitized
+    end
+  end
+
+  defp sanitize_branch_segment(_), do: "untitled"
 
   defp create_pr_via_gh(repo_path, branch, title, body) do
     # Push the branch to origin
@@ -380,14 +405,20 @@ defmodule GiTF.Sync do
 
     results =
       Enum.map(shells, fn shell ->
-        case GiTF.Git.sync(repo_path, shell.branch, no_ff: true) do
-          :ok ->
-            Logger.info("Syncd #{shell.branch} into #{quest_branch}")
+        case merge_branch_with_fallback(repo_path, shell.branch) do
+          {:ok, strategy} ->
+            if strategy != :plain do
+              Logger.warning(
+                "Resolved conflict on #{shell.branch} via strategy=#{strategy} (auto-resolved)"
+              )
+            else
+              Logger.info("Syncd #{shell.branch} into #{quest_branch}")
+            end
+
             {:ok, shell.branch}
 
           {:error, reason} ->
             Logger.warning("Failed to sync #{shell.branch}: #{inspect(reason)}")
-            # Abort the failed sync so subsequent merges can proceed
             GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
             {:error, shell.branch, reason}
         end
@@ -407,6 +438,30 @@ defmodule GiTF.Sync do
       GiTF.Git.safe_cmd(["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
       failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
       {:error, {:merge_conflicts, quest_branch, failed_branches}}
+    end
+  end
+
+  # Attempts a plain three-way merge first. On conflict, aborts and retries
+  # with `-X theirs` (prefer the ghost's version). Covers the common case of
+  # parallel impl ghosts and fix ghosts editing the same file — the later
+  # work usually subsumes the earlier and `theirs` gives the right answer.
+  # Irreconcilable conflicts still fall through to the caller for rollback.
+  defp merge_branch_with_fallback(repo_path, branch) do
+    case GiTF.Git.sync(repo_path, branch, no_ff: true) do
+      :ok ->
+        {:ok, :plain}
+
+      {:error, _reason} ->
+        GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+
+        case GiTF.Git.safe_cmd(
+               ["merge", "--no-ff", "--no-edit", "-X", "theirs", branch],
+               cd: repo_path,
+               stderr_to_stdout: true
+             ) do
+          {_out, 0} -> {:ok, :theirs}
+          {out, _} -> {:error, String.trim(out)}
+        end
     end
   end
 

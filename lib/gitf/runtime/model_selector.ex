@@ -75,8 +75,14 @@ defmodule GiTF.Runtime.ModelSelector do
   def select_model_for_job(:planning, _complexity), do: "thinking"
   def select_model_for_job(:architecture, _complexity), do: "thinking"
 
-  def select_model_for_job(:implementation, :complex), do: "thinking"
-  def select_model_for_job(:implementation, _complexity), do: "general"
+  # Implementation always gets `thinking`. Fast models (gemini-flash) have a
+  # documented failure mode of looping on Read/Grep tool calls without ever
+  # emitting an Edit/Write. Even for trivial ops, the false-start rate was
+  # high enough that the retry path (flash → escalate to thinking) became
+  # the common case — paying 3-5 min of flash looping before every retry.
+  # Routing straight to thinking eliminates that overhead. See
+  # `project_flash_implementation_policy.md` for the full history.
+  def select_model_for_job(:implementation, _complexity), do: "thinking"
 
   def select_model_for_job(:research, _complexity), do: "fast"
   def select_model_for_job(:summarization, _complexity), do: "fast"

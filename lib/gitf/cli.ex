@@ -2553,6 +2553,7 @@ defmodule GiTF.CLI do
     Format.info("  Dashboard: #{url}")
     Format.info("  API:       #{url}/api/v1/health")
     Format.info("  MCP:       #{sock}")
+    print_feature_flags_banner()
     Format.info("Press Ctrl+C to stop.")
 
     # Block the main process. The BEAM's exit handler (Ctrl+C -> 'a')
@@ -4609,5 +4610,32 @@ defmodule GiTF.CLI do
       {:error, reason} ->
         Format.error("Revert failed: #{reason}")
     end
+  end
+
+  # Prints effective feature flag values on stdout at daemon startup.
+  # Logger output is bound to `section.log` via setup_file_logging/0, so
+  # Logger.info would not reach the terminal. Stopgap until the flag
+  # registry lands — see plans/flag-registry.md.
+  defp print_feature_flags_banner do
+    flags = [
+      {:triage_enabled, "GITF_TRIAGE_ENABLED", false}
+    ]
+
+    lines =
+      Enum.map(flags, fn {key, env_var, default} ->
+        value = Application.get_env(:gitf, key, default)
+
+        source =
+          cond do
+            env_var && System.get_env(env_var) not in [nil, ""] -> "env #{env_var}"
+            value != default -> "config"
+            true -> "default"
+          end
+
+        "  #{key}: #{inspect(value)} (#{source})"
+      end)
+
+    Format.info("Feature flags:")
+    Enum.each(lines, &Format.info/1)
   end
 end

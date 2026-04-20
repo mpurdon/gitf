@@ -321,6 +321,48 @@ defmodule GiTF.MCPServer.Tools do
             all: %{type: "boolean", description: "Test ALL configured providers", default: false}
           }
         }
+      },
+      %{
+        name: "circuit_status",
+        description:
+          "Return per-provider circuit breaker state (closed/open/half_open), failure count, " <>
+            "last failure reason, and (for open circuits) failure mode + seconds until next probe. " <>
+            "Unlike test_provider, this reflects what ghosts actually experience via ProviderCircuit.",
+        inputSchema: %{type: "object", properties: %{}}
+      },
+      %{
+        name: "circuit_reset",
+        description:
+          "[WRITE] Manually reset a provider's circuit breaker to closed. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            provider: %{type: "string", description: "Provider name (e.g. 'google', 'bedrock')"},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["provider", "confirm"]
+        }
+      },
+      %{
+        name: "set_sync_strategy",
+        description:
+          "[WRITE] Set a sector's sync strategy. " <>
+            "auto_merge: merge ghost branches directly into main (no PR). " <>
+            "pr_branch: merge into a mission branch + open a PR in the publish phase. " <>
+            "manual: leave branches alone for the human to merge.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            strategy: %{
+              type: "string",
+              enum: ["auto_merge", "pr_branch", "manual"],
+              description: "Sync strategy"
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["sector_id", "strategy", "confirm"]
+        }
       }
     ]
   end

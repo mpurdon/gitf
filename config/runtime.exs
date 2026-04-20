@@ -14,6 +14,15 @@ config :logger, level: log_level
 gitf_home = System.get_env("GITF_HOME") || Path.join(System.user_home!(), ".gitf")
 config :llm_db, data_dir: Path.join(gitf_home, "llm_db")
 
+# Feature flags. Env var names match the Application key with a GITF_ prefix.
+# TODO: replace with the Flag Registry (see plans/flag-registry.md) once it
+# lands; this is the stopgap until the registry + CLI exist.
+case System.get_env("GITF_TRIAGE_ENABLED") do
+  v when v in ["false", "0"] -> config :gitf, :triage_enabled, false
+  v when v in ["true", "1"] -> config :gitf, :triage_enabled, true
+  _ -> :ok
+end
+
 if config_env() == :prod do
   port = String.to_integer(System.get_env("GITF_PORT") || "4000")
   # Default to loopback. Operators must explicitly set GITF_HOST=0.0.0.0
