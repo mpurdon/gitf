@@ -1,10 +1,13 @@
 defmodule GiTF.Skills.InstallTest do
-  use GiTF.StoreCase
+  use ExUnit.Case, async: false
 
   alias GiTF.Skills
   alias GiTF.Skills.Install
 
   setup do
+    GiTF.Archive.all(:skills)
+    |> Enum.each(fn s -> GiTF.Archive.delete(:skills, s.id) end)
+
     worktree = Path.join(System.tmp_dir!(), "gitf_skills_install_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(worktree)
     on_exit(fn -> File.rm_rf!(worktree) end)

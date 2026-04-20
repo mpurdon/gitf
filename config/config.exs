@@ -79,6 +79,18 @@ config :gitf, :skill_embedding_model, "openai:text-embedding-3-small"
 config :gitf, :skill_top_k, 5
 config :gitf, :skill_min_similarity, 0.45
 
+# Milestone 2: validator-driven refinement. When `:skill_refinement_enabled`
+# is true, the orchestrator spawns an async task after each validation
+# phase that attributes outcomes to applied skills and may propose
+# new/refined skills. `:skill_auto_commit_enabled` gates whether
+# critic-approved drafts actually land in the Archive — keep it false
+# during shadow-mode rollout and flip once draft quality has been
+# reviewed by an operator.
+config :gitf, :skill_refinement_enabled, false
+config :gitf, :skill_auto_commit_enabled, false
+config :gitf, :skill_refinement_model, "google:gemini-2.5-flash"
+config :gitf, :skill_critic_model, "google:gemini-2.5-flash"
+
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:remission_id]

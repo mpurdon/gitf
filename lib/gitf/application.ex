@@ -196,7 +196,9 @@ defmodule GiTF.Application do
   defp log_feature_flags do
     flags = [
       {:triage_enabled, "GITF_TRIAGE_ENABLED", false},
-      {:skills_enabled, "GITF_SKILLS_ENABLED", false}
+      {:skills_enabled, "GITF_SKILLS_ENABLED", false},
+      {:skill_refinement_enabled, "GITF_SKILL_REFINEMENT_ENABLED", false},
+      {:skill_auto_commit_enabled, "GITF_SKILL_AUTO_COMMIT_ENABLED", false}
     ]
 
     lines =

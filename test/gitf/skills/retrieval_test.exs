@@ -1,5 +1,5 @@
 defmodule GiTF.Skills.RetrievalTest do
-  use GiTF.StoreCase
+  use ExUnit.Case, async: false
 
   alias GiTF.Skills
   alias GiTF.Skills.Retrieval
@@ -20,6 +20,9 @@ defmodule GiTF.Skills.RetrievalTest do
   end
 
   setup do
+    GiTF.Archive.all(:skills)
+    |> Enum.each(fn s -> GiTF.Archive.delete(:skills, s.id) end)
+
     prev = Application.get_env(:gitf, :embedding_client)
     Application.put_env(:gitf, :embedding_client, MockClient)
     on_exit(fn ->

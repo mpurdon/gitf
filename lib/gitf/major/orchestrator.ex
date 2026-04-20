@@ -1466,6 +1466,8 @@ defmodule GiTF.Major.Orchestrator do
         # we'd ship an empty PR. Override to fail with a clear reason.
         case validate_pass_against_diff(mission) do
           :ok ->
+            maybe_spawn_skill_refinement(mission, validation)
+
             if GiTF.Override.requires_approval?(mission) do
               start_awaiting_approval(mission)
             else
@@ -1520,6 +1522,7 @@ defmodule GiTF.Major.Orchestrator do
               "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
             )
 
+            maybe_spawn_skill_refinement(mission, validation)
             fail_quest(mission.id, "Ghost lost in the net — validation failed after #{fix_ctx.attempt} attempts")
 
           true ->
@@ -1527,9 +1530,38 @@ defmodule GiTF.Major.Orchestrator do
               "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
             )
 
+            maybe_spawn_skill_refinement(mission, validation)
             attempt_validation_fixes(mission, validation, fix_ctx)
         end
     end
+  end
+
+  # Spawns an async skill-refinement task under TaskSupervisor when the
+  # :skill_refinement_enabled flag is on. Non-blocking — refinement
+  # runs independently of the main pipeline, so a slow refiner LLM call
+  # or critic rejection never delays the orchestrator's next tick.
+  defp maybe_spawn_skill_refinement(mission, validation) do
+    if Application.get_env(:gitf, :skill_refinement_enabled, false) do
+      applied = collect_applied_skill_ids(mission)
+
+      Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+        GiTF.Skills.Refinement.refine_after_validation(mission, validation, applied)
+      end)
+
+      :ok
+    else
+      :ok
+    end
+  rescue
+    e ->
+      Logger.debug("maybe_spawn_skill_refinement failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp collect_applied_skill_ids(mission) do
+    (mission.ops || [])
+    |> Enum.flat_map(fn op -> Map.get(op, :applied_skill_ids, []) || [] end)
+    |> Enum.uniq()
   end
 
   # Returns `:ok` when at least one impl op committed at least one file

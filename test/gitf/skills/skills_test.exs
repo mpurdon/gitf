@@ -1,7 +1,17 @@
 defmodule GiTF.SkillsTest do
-  use GiTF.StoreCase
+  use ExUnit.Case, async: false
 
   alias GiTF.Skills
+
+  setup do
+    # Clean :skills collection between tests without touching Archive
+    # lifecycle — simulator tests share the app's Archive and break if
+    # StoreCase tears it down.
+    GiTF.Archive.all(:skills)
+    |> Enum.each(fn s -> GiTF.Archive.delete(:skills, s.id) end)
+
+    :ok
+  end
 
   describe "create/1" do
     test "creates a global skill with defaults" do
