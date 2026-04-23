@@ -363,6 +363,73 @@ defmodule GiTF.MCPServer.Tools do
           },
           required: ["sector_id", "strategy", "confirm"]
         }
+      },
+      %{
+        name: "list_skills",
+        description:
+          "List skills in the self-improving skill library. Filter by scope (global/sector) or sector_id.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            scope: %{type: "string", enum: ["global", "sector"], description: "Filter by scope"},
+            sector_id: %{type: "string", description: "Filter by sector (only meaningful with scope=sector)"},
+            include_archived: %{
+              type: "boolean",
+              description: "Include archived skills",
+              default: false
+            }
+          }
+        }
+      },
+      %{
+        name: "show_skill",
+        description: "Get the full body + stats for a single skill.",
+        inputSchema: %{
+          type: "object",
+          properties: %{id: %{type: "string", description: "Skill ID"}},
+          required: ["id"]
+        }
+      },
+      %{
+        name: "update_skill",
+        description:
+          "[WRITE] Manually edit a skill's description, body, or status. Use to operator-override auto-drafted skills or archive/unarchive.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Skill ID"},
+            name: %{type: "string", description: "New name (optional)"},
+            description: %{type: "string", description: "New description (optional)"},
+            body: %{type: "string", description: "New body (optional)"},
+            status: %{type: "string", enum: ["active", "archived"], description: "New status (optional)"},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
+        name: "delete_skill",
+        description:
+          "[WRITE] Permanently delete a skill. Prefer archive (via update_skill status=archived) over delete; delete is for low-quality auto-drafts.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Skill ID"},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
+        name: "skills_stats",
+        description:
+          "Aggregate stats for the skill library: counts by scope/source, top-applied skills, flagged low-utility skills.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Scope stats to a specific sector (optional)"}
+          }
+        }
       }
     ]
   end

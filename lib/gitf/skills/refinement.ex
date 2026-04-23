@@ -256,7 +256,7 @@ defmodule GiTF.Skills.Refinement do
     critic_then_commit(:draft, draft, proposal, mission)
   end
 
-  defp critic_then_commit(kind, draft, proposal, mission) do
+  defp critic_then_commit(kind, draft, _proposal, mission) do
     if invalid_draft?(draft) do
       Logger.warning(
         "Skills.Refinement: rejecting #{kind} draft — invalid shape: #{inspect(Map.take(draft, [:name, :description, :scope]))}"

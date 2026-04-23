@@ -620,7 +620,181 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("set_sync_strategy", _), do: {:error, "Missing required parameters: sector_id, strategy, confirm"}
 
+  # -- Skills ----------------------------------------------------------------
+
+  def call("list_skills", args) do
+    safe_handler("list_skills", args, fn ->
+      include_archived = Map.get(args, "include_archived", false)
+      scope_filter = Map.get(args, "scope")
+      sector_filter = Map.get(args, "sector_id")
+
+      all =
+        GiTF.Skills.all()
+        |> Enum.filter(fn s -> include_archived or s.status == :active end)
+        |> Enum.filter(fn s ->
+          cond do
+            scope_filter == "global" -> s.scope == :global
+            scope_filter == "sector" -> s.scope == :sector
+            true -> true
+          end
+        end)
+        |> Enum.filter(fn s ->
+          if sector_filter, do: s.sector_id == sector_filter, else: true
+        end)
+        |> Enum.map(&summarize/1)
+        |> Enum.sort_by(& &1.applied_count, :desc)
+
+      {:ok, json_text(%{count: length(all), skills: all})}
+    end)
+  end
+
+  def call("show_skill", %{"id" => id}) do
+    safe_handler("show_skill", %{"id" => id}, fn ->
+      case GiTF.Skills.get(id) do
+        nil ->
+          {:error, "Skill not found: #{id}"}
+
+        skill ->
+          {:ok, json_text(detail(skill))}
+      end
+    end)
+  end
+
+  def call("show_skill", _), do: {:error, "Missing required parameter: id"}
+
+  def call("update_skill", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Skills.get(id) do
+        nil ->
+          {:error, "Skill not found: #{id}"}
+
+        _ ->
+          updates =
+            %{}
+            |> maybe_put(:name, Map.get(args, "name"))
+            |> maybe_put(:description, Map.get(args, "description"))
+            |> maybe_put(:body, Map.get(args, "body"))
+            |> maybe_put(:status, parse_status(Map.get(args, "status")))
+
+          if updates == %{} do
+            {:error, "No update fields provided (name, description, body, status)"}
+          else
+            case GiTF.Skills.update(id, fn s ->
+                   # Clear embedding when body/description/name changes so
+                   # retrieval re-embeds with the updated content.
+                   needs_reembed =
+                     Map.has_key?(updates, :name) or
+                       Map.has_key?(updates, :description) or
+                       Map.has_key?(updates, :body)
+
+                   s
+                   |> Map.merge(updates)
+                   |> then(fn s ->
+                     if needs_reembed,
+                       do: Map.merge(s, %{embedding: nil, embedding_model: nil}),
+                       else: s
+                   end)
+                 end) do
+              {:ok, updated} -> {:ok, json_text(detail(updated))}
+              {:error, reason} -> {:error, "Update failed: #{inspect(reason)}"}
+            end
+          end
+      end
+    end
+  end
+
+  def call("update_skill", _), do: {:error, "Missing required parameters: id, confirm"}
+
+  def call("delete_skill", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Skills.get(id) do
+        nil ->
+          {:error, "Skill not found: #{id}"}
+
+        _ ->
+          GiTF.Skills.delete(id)
+          {:ok, json_text(%{id: id, deleted: true})}
+      end
+    end
+  end
+
+  def call("delete_skill", _), do: {:error, "Missing required parameters: id, confirm"}
+
+  def call("skills_stats", args) do
+    safe_handler("skills_stats", args, fn ->
+      sector_filter = Map.get(args, "sector_id")
+
+      pool =
+        GiTF.Skills.all()
+        |> Enum.filter(fn s ->
+          if sector_filter,
+            do: s.scope == :sector and s.sector_id == sector_filter,
+            else: true
+        end)
+
+      active = Enum.filter(pool, &(&1.status == :active))
+
+      by_scope = Enum.frequencies_by(active, & &1.scope)
+      by_source = Enum.frequencies_by(active, & &1.source)
+
+      top_applied =
+        active
+        |> Enum.sort_by(& &1.applied_count, :desc)
+        |> Enum.take(10)
+        |> Enum.map(&summarize/1)
+
+      low_utility =
+        active
+        |> Enum.filter(fn s ->
+          total = s.success_count + s.failure_count
+          total >= 10 and s.success_count / max(total, 1) < 0.3
+        end)
+        |> Enum.map(&summarize/1)
+
+      {:ok,
+       json_text(%{
+         total: length(pool),
+         active: length(active),
+         archived: length(pool) - length(active),
+         by_scope: by_scope,
+         by_source: by_source,
+         top_applied: top_applied,
+         low_utility_flagged: low_utility
+       })}
+    end)
+  end
+
   def call(tool_name, _args), do: {:error, "Unknown tool: #{tool_name}"}
+
+  # -- Skills helpers ----------------------------------------------------------
+
+  defp summarize(skill) do
+    %{
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      scope: skill.scope,
+      sector_id: skill.sector_id,
+      source: skill.source,
+      status: skill.status,
+      applied_count: skill.applied_count,
+      success_count: skill.success_count,
+      failure_count: skill.failure_count,
+      updated_at: skill.updated_at
+    }
+  end
+
+  defp detail(skill) do
+    Map.merge(summarize(skill), %{body: skill.body})
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp parse_status("active"), do: :active
+  defp parse_status("archived"), do: :archived
+  defp parse_status(nil), do: nil
+  defp parse_status(_), do: nil
 
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}
