@@ -27,11 +27,14 @@ defmodule GiTF.Skills.Bootstrap do
 
     case File.ls(skills_dir) do
       {:ok, files} ->
+        # Snapshot existing names ONCE so we don't re-scan Skills.all/0 per file.
+        existing_names = MapSet.new(Skills.all(), & &1.name)
+
         files
         |> Enum.filter(&String.ends_with?(&1, ".md"))
         |> Enum.map(&Path.join(skills_dir, &1))
         |> Enum.reduce({0, 0}, fn path, {loaded, skipped} ->
-          case load_one(path) do
+          case load_one(path, existing_names) do
             :loaded -> {loaded + 1, skipped}
             :skipped -> {loaded, skipped + 1}
             :error -> {loaded, skipped + 1}
@@ -60,10 +63,10 @@ defmodule GiTF.Skills.Bootstrap do
 
   # -- Private -----------------------------------------------------------------
 
-  defp load_one(path) do
+  defp load_one(path, existing_names) do
     with {:ok, raw} <- File.read(path),
          {:ok, attrs} <- parse_skill_file(raw) do
-      if skill_with_name_exists?(attrs.name) do
+      if MapSet.member?(existing_names, attrs.name) do
         :skipped
       else
         case Skills.create(attrs) do
@@ -123,10 +126,6 @@ defmodule GiTF.Skills.Bootstrap do
       _ ->
         {:error, {:missing_field, field}}
     end
-  end
-
-  defp skill_with_name_exists?(name) do
-    Enum.any?(Skills.all(), fn s -> s.name == name end)
   end
 
   defp priv_skills_dir do

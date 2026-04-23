@@ -1,32 +1,15 @@
 defmodule GiTF.Skills.Critic do
   @moduledoc """
-  Second-pass critic for auto-drafted or auto-refined skills.
-
-  `GiTF.Skills.Refinement` proposes a skill (new draft or patch to an
-  existing skill). Before that proposal lands in the Archive, the critic
-  reviews it against three questions:
-
-    1. **Generalizable** — is this a lesson future missions can reuse, or
-       is it specific to the one failed mission (e.g., a bug name only
-       that project would ever see)?
-    2. **Actionable** — is the rule specific enough for a ghost to follow?
-       "Write better code" is not; "always commit the lockfile when
-       package.json changes" is.
-    3. **Non-conflicting** — does this skill contradict an existing skill
-       in the pool without explaining why?
+  Second-pass critic for auto-drafted/refined skills.
 
   Returns `{:ok, :approve | :needs_revision | :reject, reason}` or
-  `{:error, term}` on LLM failure. Callers treat `:needs_revision` and
-  `:reject` as "don't commit"; the distinction is for telemetry and
-  future auto-revision (out of scope for M2).
-
-  Mockable via the existing `GiTF.Runtime.LLMClient` behaviour — the
-  simulator's scripted mock supplies deterministic critic responses.
+  `{:error, term}`. Callers treat anything but `:approve` as "don't commit".
+  Mockable via the `GiTF.Runtime.LLMClient` behaviour.
   """
 
   require Logger
 
-  alias GiTF.Runtime.LLMClient
+  alias GiTF.Skills.LLM
 
   @type verdict :: :approve | :needs_revision | :reject
 
@@ -44,11 +27,9 @@ defmodule GiTF.Skills.Critic do
           {:ok, verdict(), String.t()} | {:error, term()}
   def review(proposal, existing_skills \\ []) do
     prompt = build_prompt(proposal, existing_skills)
-    model = model()
 
-    case LLMClient.generate_text(model, prompt, []) do
-      {:ok, response} ->
-        text = extract_text(response)
+    case LLM.generate_and_extract(model(), prompt) do
+      {:ok, text} ->
         parse_verdict(text)
 
       {:error, reason} ->
@@ -73,7 +54,7 @@ defmodule GiTF.Skills.Critic do
     existing_summaries =
       existing_skills
       |> Enum.take(10)
-      |> Enum.map(fn s -> "- #{s.name}: #{truncate(s.description, 200)}" end)
+      |> Enum.map(fn s -> "- #{s.name}: #{LLM.truncate(s.description, 200)}" end)
       |> Enum.join("\n")
 
     existing_block =
@@ -113,7 +94,7 @@ defmodule GiTF.Skills.Critic do
 
     Body:
     ```
-    #{truncate(proposal.body, 4000)}
+    #{LLM.truncate(proposal.body, 4000)}
     ```
 
     ## Existing skills in this pool
@@ -126,24 +107,6 @@ defmodule GiTF.Skills.Critic do
     do: " (sector=#{id})"
 
   defp sector_line(_), do: ""
-
-  defp truncate(nil, _), do: ""
-  defp truncate(str, max) when byte_size(str) <= max, do: str
-  defp truncate(str, max), do: binary_part(str, 0, max) <> "..."
-
-  defp extract_text(%{message: %{content: content}}) when is_list(content) do
-    content
-    |> Enum.flat_map(fn
-      %{text: t} when is_binary(t) -> [t]
-      %{"text" => t} when is_binary(t) -> [t]
-      _ -> []
-    end)
-    |> Enum.join("\n")
-  end
-
-  defp extract_text(%{text: text}) when is_binary(text), do: text
-  defp extract_text(text) when is_binary(text), do: text
-  defp extract_text(_), do: ""
 
   @verdict_pattern ~r/VERDICT:\s*(approve|needs_revision|reject)\s*\|\s*REASON:\s*(.+)/i
 

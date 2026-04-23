@@ -1,31 +1,19 @@
 defmodule GiTF.Skills.Refinement do
   @moduledoc """
-  Validator-driven skill refinement. Runs async after each validation
-  phase and attributes outcomes to the applied skills, then optionally
-  drafts new or refined skills from observed failure modes.
+  Validator-driven skill refinement, spawned async post-validation.
 
-  On validation **pass**:
-    - Increment `success_count` on every skill applied to the mission's
-      impl ops. Cheap, no LLM call.
-
-  On validation **fail** (or cross-check override):
-    - Increment `failure_count` on applied skills.
-    - Run a refiner LLM call: given the validation gaps, applied skills,
-      and changed-files summary, produce a structured proposal
-      (`:refine_existing`, `:draft_new`, or `:no_op`).
-    - Run the critic (`GiTF.Skills.Critic`). Commit on `:approve`.
-    - Respect the `:skill_auto_commit_enabled` flag — in shadow mode,
-      log the proposal without writing.
-
-  All LLM calls go through `GiTF.Runtime.LLMClient`, so the simulator
-  can supply scripted responses without touching a real provider.
+  On pass: bumps `success_count` on applied skills.
+  On fail: bumps `failure_count`, runs a refiner LLM, routes its
+  proposal through `Skills.Critic`, and commits if approved AND
+  `:skill_auto_commit_enabled` is true.
   """
 
   require Logger
 
-  alias GiTF.Runtime.LLMClient
+  alias GiTF.Major.PhaseCollector
   alias GiTF.Skills
   alias GiTF.Skills.Critic
+  alias GiTF.Skills.LLM
   alias GiTF.Skills.Telemetry
 
   @doc """
@@ -67,7 +55,7 @@ defmodule GiTF.Skills.Refinement do
   defp handle_pass(_mission, []), do: :ok
 
   defp handle_pass(mission, skill_ids) do
-    Enum.each(skill_ids, &Skills.bump_success/1)
+    Enum.each(skill_ids, &Skills.bump(&1, :success_count))
     Telemetry.emit_applied_success(skill_ids, mission.id)
     :ok
   end
@@ -75,9 +63,9 @@ defmodule GiTF.Skills.Refinement do
   # -- Fail path ---------------------------------------------------------------
 
   defp handle_fail(mission, validation, skill_ids) do
-    # Always bump failure counters first so stats stay honest even if the
-    # LLM refiner itself fails.
-    Enum.each(skill_ids, &Skills.bump_failure/1)
+    # Bump failure counters first — stats stay honest even if the refiner
+    # LLM call fails downstream.
+    Enum.each(skill_ids, &Skills.bump(&1, :failure_count))
     Telemetry.emit_applied_failure(skill_ids, mission.id)
 
     case run_refiner(mission, validation, skill_ids) do
@@ -106,15 +94,10 @@ defmodule GiTF.Skills.Refinement do
   defp run_refiner(mission, validation, skill_ids) do
     applied_skills = Enum.map(skill_ids, &Skills.get/1) |> Enum.reject(&is_nil/1)
     prompt = build_refiner_prompt(mission, validation, applied_skills)
-    model = refiner_model()
 
-    case LLMClient.generate_text(model, prompt, []) do
-      {:ok, response} ->
-        text = extract_text(response)
-        parse_refiner_response(text)
-
-      {:error, _} = err ->
-        err
+    case LLM.generate_and_extract(refiner_model(), prompt) do
+      {:ok, text} -> PhaseCollector.extract_json(text)
+      {:error, _} = err -> err
     end
   end
 
@@ -142,7 +125,7 @@ defmodule GiTF.Skills.Refinement do
         skills ->
           skills
           |> Enum.map_join("\n\n", fn s ->
-            "### Skill: #{s.name} (id=#{s.id}, scope=#{s.scope})\n#{s.description}\n\n```\n#{truncate(s.body, 2000)}\n```"
+            "### Skill: #{s.name} (id=#{s.id}, scope=#{s.scope})\n#{s.description}\n\n```\n#{LLM.truncate(s.body, 2000)}\n```"
           end)
       end
 
@@ -193,23 +176,6 @@ defmodule GiTF.Skills.Refinement do
 
     #{applied_block}
     """
-  end
-
-  defp parse_refiner_response(text) do
-    trimmed = strip_json_fence(text)
-
-    case Jason.decode(trimmed) do
-      {:ok, %{} = parsed} -> {:ok, parsed}
-      {:error, reason} -> {:error, {:json_decode, reason, trimmed}}
-    end
-  end
-
-  defp strip_json_fence(text) do
-    text
-    |> String.trim()
-    |> String.replace(~r/^```(?:json)?\s*/m, "")
-    |> String.replace(~r/\s*```$/m, "")
-    |> String.trim()
   end
 
   # -- Commit path (critic-gated) ----------------------------------------------
@@ -354,21 +320,4 @@ defmodule GiTF.Skills.Refinement do
     Application.get_env(:gitf, :skill_auto_commit_enabled, false)
   end
 
-  defp truncate(nil, _), do: ""
-  defp truncate(str, max) when byte_size(str) <= max, do: str
-  defp truncate(str, max), do: binary_part(str, 0, max) <> "..."
-
-  defp extract_text(%{message: %{content: content}}) when is_list(content) do
-    content
-    |> Enum.flat_map(fn
-      %{text: t} when is_binary(t) -> [t]
-      %{"text" => t} when is_binary(t) -> [t]
-      _ -> []
-    end)
-    |> Enum.join("\n")
-  end
-
-  defp extract_text(%{text: text}) when is_binary(text), do: text
-  defp extract_text(text) when is_binary(text), do: text
-  defp extract_text(_), do: ""
 end

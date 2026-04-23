@@ -345,8 +345,14 @@ defmodule GiTF.AgentProfile do
     install_agents(sector_path, worktree_path)
 
     if Application.get_env(:gitf, :skills_enabled, false) do
-      {:ok, skills} = GiTF.Skills.Retrieval.retrieve(op, sector_id)
-      GiTF.Skills.Install.install_into_worktree(skills, worktree_path)
+      case GiTF.Skills.Retrieval.retrieve(op, sector_id) do
+        {:ok, skills} ->
+          GiTF.Skills.Install.install_into_worktree(skills, worktree_path)
+
+        {:error, reason} ->
+          Logger.warning("Skills retrieval failed: #{inspect(reason)}")
+          []
+      end
     else
       []
     end

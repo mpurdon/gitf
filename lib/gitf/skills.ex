@@ -1,24 +1,10 @@
 defmodule GiTF.Skills do
   @moduledoc """
-  Storage and lifecycle for the self-improving skill library.
+  Storage layer for the self-improving skill library.
 
-  A **skill** is a markdown+YAML-frontmatter artifact (matching Claude Code's
-  `.claude/skills/` format) that captures one specific, testable piece of
-  expertise. Skills are scoped:
-
-    * `:global` — cross-sector lessons (e.g., "always re-run lockfiles after
-      package.json edits"). `sector_id` is `nil`.
-    * `:sector` — project-specific patterns (e.g., "this Phoenix app is on
-      LiveView 1.0, use `phx-hook` not `data-hook`"). `sector_id` is set.
-
-  Before a ghost spawns, `GiTF.Skills.Retrieval` embeds the op's goal and
-  retrieves the top-K matching skills, which `GiTF.Skills.Install` writes
-  into the worktree's `.claude/skills/` directory so Claude Code discovers
-  them. After validation runs, `GiTF.Skills.Refinement` (M2) attributes
-  outcomes and proposes updates.
-
-  This module is the storage layer only. Embedding, retrieval, install,
-  and refinement live in submodules.
+  A skill is a markdown+YAML-frontmatter artifact (Claude Code
+  `.claude/skills/` format) scoped either `:global` or `{:sector, id}`.
+  Embedding, retrieval, install, and refinement live in submodules.
   """
 
   alias GiTF.Archive
@@ -105,17 +91,15 @@ defmodule GiTF.Skills do
   @doc "Returns all active global skills."
   @spec list_global() :: [t()]
   def list_global do
-    Archive.filter(@collection, fn s ->
-      s.scope == :global and s.status == :active
-    end)
+    Archive.by_index(@collection, :scope, :global)
+    |> Enum.filter(&(&1.status == :active))
   end
 
   @doc "Returns all active skills scoped to the given sector."
   @spec list_for_sector(String.t()) :: [t()]
   def list_for_sector(sector_id) when is_binary(sector_id) do
-    Archive.filter(@collection, fn s ->
-      s.scope == :sector and s.sector_id == sector_id and s.status == :active
-    end)
+    Archive.by_index(@collection, :sector_id, sector_id)
+    |> Enum.filter(&(&1.scope == :sector and &1.status == :active))
   end
 
   @doc """
@@ -134,30 +118,13 @@ defmodule GiTF.Skills do
   def all, do: Archive.all(@collection)
 
   @doc """
-  Atomically increments `applied_count` on a skill. Used by `Skills.Install`
-  when a skill is written into a worktree.
+  Atomically increments a counter field on a skill.
+
+  `field` is one of `:applied_count`, `:success_count`, `:failure_count`.
   """
-  @spec bump_applied(String.t()) :: {:ok, t()} | {:error, term()}
-  def bump_applied(id) do
-    update(id, fn s ->
-      Map.update(s, :applied_count, 1, &(&1 + 1))
-    end)
-  end
-
-  @doc "Atomically increments `success_count` on a skill."
-  @spec bump_success(String.t()) :: {:ok, t()} | {:error, term()}
-  def bump_success(id) do
-    update(id, fn s ->
-      Map.update(s, :success_count, 1, &(&1 + 1))
-    end)
-  end
-
-  @doc "Atomically increments `failure_count` on a skill."
-  @spec bump_failure(String.t()) :: {:ok, t()} | {:error, term()}
-  def bump_failure(id) do
-    update(id, fn s ->
-      Map.update(s, :failure_count, 1, &(&1 + 1))
-    end)
+  @spec bump(String.t(), atom()) :: {:ok, t()} | {:error, term()}
+  def bump(id, field) when field in [:applied_count, :success_count, :failure_count] do
+    update(id, fn s -> Map.update(s, field, 1, &(&1 + 1)) end)
   end
 
   # -- Private: validation -----------------------------------------------------

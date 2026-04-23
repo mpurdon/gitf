@@ -14,6 +14,7 @@ defmodule GiTF.Skills.Install do
   require Logger
 
   alias GiTF.Skills
+  alias GiTF.Skills.Telemetry
 
   @skills_dir ".claude/skills"
 
@@ -33,9 +34,12 @@ defmodule GiTF.Skills.Install do
 
     case File.mkdir_p(dst_dir) do
       :ok ->
-        skills
-        |> Enum.flat_map(fn skill -> install_one(skill, dst_dir) end)
-        |> tap(&maybe_emit_telemetry(&1, worktree_path))
+        installed_ids =
+          skills
+          |> Enum.flat_map(fn skill -> install_one(skill, dst_dir) end)
+
+        if installed_ids != [], do: Telemetry.emit_installed(installed_ids, worktree_path)
+        installed_ids
 
       {:error, reason} ->
         Logger.warning(
@@ -58,7 +62,7 @@ defmodule GiTF.Skills.Install do
 
     case write_if_changed(file_path, body) do
       :written ->
-        Skills.bump_applied(id)
+        Skills.bump(id, :applied_count)
         [id]
 
       :unchanged ->
@@ -99,17 +103,4 @@ defmodule GiTF.Skills.Install do
     end
   end
 
-  defp maybe_emit_telemetry([], _worktree_path), do: :ok
-
-  defp maybe_emit_telemetry(ids, worktree_path) do
-    GiTF.Telemetry.emit(
-      [:gitf, :skills, :installed],
-      %{count: length(ids)},
-      %{worktree: worktree_path, skill_ids: ids}
-    )
-  rescue
-    e ->
-      Logger.debug("Skills.Install telemetry emit failed: #{Exception.message(e)}")
-      :ok
-  end
 end

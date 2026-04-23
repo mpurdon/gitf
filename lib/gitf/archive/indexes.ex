@@ -4,7 +4,8 @@ defmodule GiTF.Archive.Indexes do
   @specs %{
     ops: [:status, :mission_id],
     op_dependencies: [:op_id, :depends_on_id],
-    failure_analyses: [:sector_id, :failure_type, :model]
+    failure_analyses: [:sector_id, :failure_type, :model],
+    skills: [:scope, :sector_id, :status]
   }
 
   @doc "Returns the index specification map."

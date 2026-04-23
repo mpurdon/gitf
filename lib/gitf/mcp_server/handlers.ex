@@ -641,7 +641,7 @@ defmodule GiTF.MCPServer.Handlers do
         |> Enum.filter(fn s ->
           if sector_filter, do: s.sector_id == sector_filter, else: true
         end)
-        |> Enum.map(&summarize/1)
+        |> Enum.map(&summarize_skill/1)
         |> Enum.sort_by(& &1.applied_count, :desc)
 
       {:ok, json_text(%{count: length(all), skills: all})}
@@ -655,7 +655,7 @@ defmodule GiTF.MCPServer.Handlers do
           {:error, "Skill not found: #{id}"}
 
         skill ->
-          {:ok, json_text(detail(skill))}
+          {:ok, json_text(detail_skill(skill))}
       end
     end)
   end
@@ -674,7 +674,7 @@ defmodule GiTF.MCPServer.Handlers do
             |> maybe_put(:name, Map.get(args, "name"))
             |> maybe_put(:description, Map.get(args, "description"))
             |> maybe_put(:body, Map.get(args, "body"))
-            |> maybe_put(:status, parse_status(Map.get(args, "status")))
+            |> maybe_put(:status, parse_skill_status(Map.get(args, "status")))
 
           if updates == %{} do
             {:error, "No update fields provided (name, description, body, status)"}
@@ -695,7 +695,7 @@ defmodule GiTF.MCPServer.Handlers do
                        else: s
                    end)
                  end) do
-              {:ok, updated} -> {:ok, json_text(detail(updated))}
+              {:ok, updated} -> {:ok, json_text(detail_skill(updated))}
               {:error, reason} -> {:error, "Update failed: #{inspect(reason)}"}
             end
           end
@@ -741,7 +741,7 @@ defmodule GiTF.MCPServer.Handlers do
         active
         |> Enum.sort_by(& &1.applied_count, :desc)
         |> Enum.take(10)
-        |> Enum.map(&summarize/1)
+        |> Enum.map(&summarize_skill/1)
 
       low_utility =
         active
@@ -749,7 +749,7 @@ defmodule GiTF.MCPServer.Handlers do
           total = s.success_count + s.failure_count
           total >= 10 and s.success_count / max(total, 1) < 0.3
         end)
-        |> Enum.map(&summarize/1)
+        |> Enum.map(&summarize_skill/1)
 
       {:ok,
        json_text(%{
@@ -768,7 +768,7 @@ defmodule GiTF.MCPServer.Handlers do
 
   # -- Skills helpers ----------------------------------------------------------
 
-  defp summarize(skill) do
+  defp summarize_skill(skill) do
     %{
       id: skill.id,
       name: skill.name,
@@ -784,17 +784,17 @@ defmodule GiTF.MCPServer.Handlers do
     }
   end
 
-  defp detail(skill) do
-    Map.merge(summarize(skill), %{body: skill.body})
+  defp detail_skill(skill) do
+    Map.merge(summarize_skill(skill), %{body: skill.body})
   end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
-  defp parse_status("active"), do: :active
-  defp parse_status("archived"), do: :archived
-  defp parse_status(nil), do: nil
-  defp parse_status(_), do: nil
+  defp parse_skill_status("active"), do: :active
+  defp parse_skill_status("archived"), do: :archived
+  defp parse_skill_status(nil), do: nil
+  defp parse_skill_status(_), do: nil
 
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}

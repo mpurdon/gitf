@@ -132,14 +132,14 @@ defmodule GiTF.SkillsTest do
     end
   end
 
-  describe "bump_applied / bump_success / bump_failure" do
+  describe "bump/2" do
     test "increments counters atomically" do
       {:ok, s} = Skills.create(%{name: "n", description: "d", body: "b", scope: :global})
 
-      {:ok, _} = Skills.bump_applied(s.id)
-      {:ok, _} = Skills.bump_applied(s.id)
-      {:ok, _} = Skills.bump_success(s.id)
-      {:ok, _} = Skills.bump_failure(s.id)
+      {:ok, _} = Skills.bump(s.id, :applied_count)
+      {:ok, _} = Skills.bump(s.id, :applied_count)
+      {:ok, _} = Skills.bump(s.id, :success_count)
+      {:ok, _} = Skills.bump(s.id, :failure_count)
 
       reloaded = Skills.get(s.id)
       assert reloaded.applied_count == 2
