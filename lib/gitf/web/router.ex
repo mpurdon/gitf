@@ -20,6 +20,18 @@ defmodule GiTF.Web.Router do
     )
   end
 
+  # Webhook receivers — HMAC-authenticated by the controller, so no API
+  # key gate. Generous rate limit to absorb event bursts (deploy storms,
+  # multi-PR merges).
+  pipeline :webhooks do
+    plug(:accepts, ["json"])
+    plug(GiTF.Web.RateLimitPlug,
+      max_requests: 1_000,
+      window_seconds: 60,
+      bucket: :webhooks
+    )
+  end
+
   pipeline :api do
     plug(:accepts, ["json"])
     plug(GiTF.Web.RateLimitPlug,
@@ -89,6 +101,12 @@ defmodule GiTF.Web.Router do
     pipe_through(:api_public)
     get("/health", ApiController, :health)
     get("/ready", ApiController, :ready)
+  end
+
+  # Inbound webhooks — HMAC-verified by controller.
+  scope "/api/v1/webhooks", GiTF.Web do
+    pipe_through(:webhooks)
+    post("/github", WebhookController, :github)
   end
 
   # Metrics — auth required (local bypass gated by config + optional

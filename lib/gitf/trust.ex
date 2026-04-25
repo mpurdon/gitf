@@ -187,4 +187,139 @@ defmodule GiTF.Trust do
   end
 
   defp normalize_model(model), do: GiTF.Runtime.ModelResolver.normalize_key(model)
+
+  # -- Merge-outcome reputation ----------------------------------------------
+
+  @merge_window_days 30
+
+  @doc """
+  Rolling merge-success rate for a sector, computed from
+  `:mission_outcomes`. Returns `nil` when there are no terminal outcomes
+  in the window. Cached under the existing `:model_reputation` collection
+  to reuse the stale/invalidate plumbing.
+
+  Window: last 30 days. Terminal categories are `:merged_clean`,
+  `:merged_reverted`, `:closed_unmerged`, `:merged_broke_main`. Rate is
+  `merged_clean / terminal`.
+  """
+  @spec sector_merge_rate(String.t()) :: map() | nil
+  def sector_merge_rate(sector_id) when is_binary(sector_id) do
+    key = "sector:#{sector_id}:merge"
+
+    case get_cached(:model_reputation, key) do
+      {:ok, rep} -> rep
+      :stale -> compute_sector_merge_rate(sector_id, key)
+    end
+  end
+
+  @doc """
+  Rolling merge-success rate for a given model across all sectors. Uses
+  the ops table to attribute outcomes to the model that implemented the
+  mission's ops. Nil when there are no terminal outcomes.
+  """
+  @spec model_merge_rate(String.t()) :: map() | nil
+  def model_merge_rate(model) when is_binary(model) do
+    key = "model:#{normalize_model(model)}:merge"
+
+    case get_cached(:model_reputation, key) do
+      {:ok, rep} -> rep
+      :stale -> compute_model_merge_rate(model, key)
+    end
+  end
+
+  @doc """
+  Invalidates the merge-rate caches for a given mission's sector
+  (and the set of models that implemented its ops). Called by
+  `Outcomes.Tracker` when an outcome reaches a terminal category.
+  """
+  @spec invalidate_merge_cache(map()) :: :ok
+  def invalidate_merge_cache(mission) when is_map(mission) do
+    case Map.get(mission, :sector_id) do
+      sid when is_binary(sid) -> invalidate(:model_reputation, "sector:#{sid}:merge")
+      _ -> :ok
+    end
+
+    for op <- Map.get(mission, :ops, []) || [] do
+      case normalize_model(op[:assigned_model]) do
+        nil -> :ok
+        model -> invalidate(:model_reputation, "model:#{model}:merge")
+      end
+    end
+
+    :ok
+  end
+
+  defp compute_sector_merge_rate(sector_id, key) do
+    outcomes = terminal_outcomes_for_sector(sector_id)
+
+    if outcomes == [] do
+      nil
+    else
+      merged = Enum.count(outcomes, &(&1.outcome_category == :merged_clean))
+      reverted = Enum.count(outcomes, &(&1.outcome_category == :merged_reverted))
+      total = length(outcomes)
+
+      rep = %{
+        sector_id: sector_id,
+        rate: merged / total,
+        sample_count: total,
+        reverted_count: reverted,
+        window_days: @merge_window_days,
+        computed_at: DateTime.utc_now()
+      }
+
+      cache_put(:model_reputation, key, rep)
+      rep
+    end
+  end
+
+  defp compute_model_merge_rate(model, key) do
+    normalized = normalize_model(model)
+
+    mission_ids_for_model =
+      Archive.filter(:ops, fn op ->
+        normalize_model(op[:assigned_model]) == normalized and
+          Map.get(op, :phase_job, false) == false
+      end)
+      |> MapSet.new(& &1.mission_id)
+
+    outcomes =
+      GiTF.Outcomes.terminal_outcomes()
+      |> Enum.filter(fn o ->
+        MapSet.member?(mission_ids_for_model, o.mission_id) and within_window?(o)
+      end)
+
+    if outcomes == [] do
+      nil
+    else
+      merged = Enum.count(outcomes, &(&1.outcome_category == :merged_clean))
+      total = length(outcomes)
+
+      rep = %{
+        model: normalized,
+        rate: merged / total,
+        sample_count: total,
+        window_days: @merge_window_days,
+        computed_at: DateTime.utc_now()
+      }
+
+      cache_put(:model_reputation, key, rep)
+      rep
+    end
+  end
+
+  defp terminal_outcomes_for_sector(sector_id) do
+    GiTF.Outcomes.terminal_outcomes(sector_id)
+    |> Enum.filter(&within_window?/1)
+  end
+
+  defp within_window?(outcome) do
+    case Map.get(outcome, :updated_at) do
+      %DateTime{} = t ->
+        DateTime.diff(DateTime.utc_now(), t, :second) <= @merge_window_days * 24 * 3600
+
+      _ ->
+        true
+    end
+  end
 end

@@ -41,7 +41,8 @@ defmodule GiTF.Web.Endpoint do
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library(),
-    length: 1_000_000
+    length: 1_000_000,
+    body_reader: {GiTF.Web.CacheBodyReader, :read_body, []}
   )
 
   plug(Plug.MethodOverride)

@@ -55,7 +55,11 @@ config :gitf, :timeouts,
   phase_advancement_interval_ms: 3 * 60 * 1_000,
   janitor_interval_ms: 15 * 60 * 1_000,
   autoscale_interval_ms: 60_000,
-  job_spawn_interval_ms: 15_000
+  job_spawn_interval_ms: 15_000,
+  # Post-completion outcome tracking — how often the Tracker wakes to
+  # poll open PRs. Per-record next_poll_at already decays (5m→4h), so this
+  # is just the polling floor.
+  outcome_tracking_interval_ms: 5 * 60 * 1_000
 
 config :gitf, :llm,
   execution_mode: :api,
@@ -90,6 +94,48 @@ config :gitf, :skill_refinement_enabled, false
 config :gitf, :skill_auto_commit_enabled, false
 config :gitf, :skill_refinement_model, "google:gemini-2.5-flash"
 config :gitf, :skill_critic_model, "google:gemini-2.5-flash"
+
+# Post-completion outcome tracking. When enabled, the orchestrator
+# records a mission_outcomes row each time a mission publishes a PR, and
+# the Outcomes.Tracker polls GitHub for state transitions + reviews until
+# the PR reaches a terminal category. Feeding those signals back into the
+# skill library / Trust / sector profile is gated separately via
+# :outcome_refinement_enabled.
+config :gitf, :outcomes_enabled, false
+config :gitf, :outcome_refinement_enabled, false
+
+# Inbound webhook ingestion. When enabled, /api/v1/webhooks/github
+# accepts HMAC-SHA256-signed events. Pull-request events for tracked
+# PRs short-circuit the outcome polling cycle. Secret comes from
+# config or GITF_GITHUB_WEBHOOK_SECRET env var.
+config :gitf, :webhooks_enabled, true
+config :gitf, :github_webhook_secret, nil
+
+# Visual capture (screenshots via headless browser). When enabled,
+# GiTF.Visual.Capture.screenshot/3 wraps `npx playwright screenshot`.
+# Requires `npm install -g playwright` and `npx playwright install
+# chromium`. Without these, screenshot/3 returns {:error,
+# :driver_unavailable}.
+config :gitf, :visual_capture_enabled, true
+
+# Language Server Protocol client. When enabled, GiTF.LSP.Client wraps
+# a long-running language server (default: ElixirLS via `language_server.sh`
+# on PATH) for symbol-aware navigation. Without a driver on PATH,
+# Client.start_link returns {:error, :driver_unavailable}. Override the
+# binary via :lsp_executable config or LSP_EXECUTABLE env var.
+config :gitf, :lsp_enabled, true
+config :gitf, :lsp_executable, nil
+
+# Graduated autonomy from accumulated outcomes. Thresholds are the
+# "how confident are we this sector is earning the right to skip
+# approval / needs more scrutiny" knobs. Kept off by default — flip on
+# only after a sector has 50+ outcomes with refinement enabled.
+config :gitf, :outcome_autonomy_tiers_enabled, false
+config :gitf, :autonomy_trusted_min_rate, 0.9
+config :gitf, :autonomy_trusted_min_samples, 20
+config :gitf, :autonomy_require_approval_max_rate, 0.5
+config :gitf, :autonomy_require_approval_min_samples, 10
+config :gitf, :autonomy_alert_threshold_stddev, 2
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",

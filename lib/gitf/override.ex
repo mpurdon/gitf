@@ -19,11 +19,26 @@ defmodule GiTF.Override do
   """
   @spec requires_approval?(map()) :: boolean()
   def requires_approval?(mission) do
-    # In Dark Factory mode, we auto-approve unless it's critical risk
-    if GiTF.Config.dark_factory?() do
-      is_critical?(mission)
-    else
-      requires_approval_standard?(mission)
+    sector_tier = GiTF.Outcomes.Autonomy.effective_tier(Map.get(mission, :sector_id))
+
+    cond do
+      # Operator or derived "require_approval" — forces approval regardless
+      # of dark-factory mode. The tier is the strongest signal we have
+      # about a sector's risk profile (from real merge outcomes).
+      sector_tier == :require_approval ->
+        true
+
+      # Trusted sectors skip approval except for critical-risk ops.
+      sector_tier == :trusted ->
+        is_critical?(mission)
+
+      # Normal path — preserved for backwards compatibility and for
+      # sectors with insufficient outcome data.
+      GiTF.Config.dark_factory?() ->
+        is_critical?(mission)
+
+      true ->
+        requires_approval_standard?(mission)
     end
   end
 

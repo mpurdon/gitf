@@ -320,4 +320,110 @@ defmodule GiTF.Skills.Refinement do
     Application.get_env(:gitf, :skill_auto_commit_enabled, false)
   end
 
+  # -- Post-completion outcome refinement -------------------------------------
+
+  @doc """
+  Called by `GiTF.Outcomes.Tracker` the first time a mission's outcome
+  becomes terminal. Mirrors `refine_after_validation/3` but takes the
+  real-world signal instead of validator confidence:
+
+    * `:merged_clean` → bump `:success_count` on applied skills.
+    * `:merged_reverted`/`:merged_broke_main`/`:closed_unmerged` → bump
+      `:failure_count`, run the refiner with real-world failure context
+      (revert SHA or reviewer comment body) instead of validator gaps.
+
+  Feature-gated by `:outcome_refinement_enabled`.
+  """
+  @spec refine_after_merge(map(), map()) :: :ok
+  def refine_after_merge(mission, outcome) when is_map(mission) and is_map(outcome) do
+    if outcome_refinement_enabled?() do
+      skill_ids = applied_skill_ids(mission)
+      category = outcome.outcome_category
+
+      cond do
+        category == :merged_clean ->
+          handle_pass(mission, skill_ids)
+
+        category in GiTF.Outcomes.negative_terminal_categories() ->
+          handle_fail(mission, synthetic_validation(outcome, category), skill_ids)
+
+        true ->
+          :ok
+      end
+    else
+      :ok
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Skills.Refinement.refine_after_merge for mission #{inspect(Map.get(mission, :id))} " <>
+          "raised: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  # Shapes a terminal outcome as a validation artifact so handle_fail's
+  # refiner prompt builder applies unchanged.
+  defp synthetic_validation(outcome, category) do
+    %{
+      "overall_verdict" => "fail",
+      "cross_check_override" => "post-merge outcome: #{category}",
+      "gaps" => outcome_gaps(outcome, category)
+    }
+  end
+
+  defp outcome_gaps(outcome, :closed_unmerged) do
+    case latest_changes_requested(outcome.reviews || []) do
+      nil ->
+        ["PR was closed without merging; no reviewer comments recorded."]
+
+      review ->
+        body = Map.get(review, :body) || Map.get(review, "body") || ""
+        author = Map.get(review, :author) || Map.get(review, "author") || "reviewer"
+
+        [
+          "PR closed without merging.",
+          "Most recent CHANGES_REQUESTED review (#{author}): #{truncate(body, 2000)}"
+        ]
+    end
+  end
+
+  defp outcome_gaps(_outcome, cat) when cat in [:merged_reverted, :merged_broke_main] do
+    ["PR was merged but the change was reverted (#{cat})."]
+  end
+
+  defp latest_changes_requested(reviews) do
+    reviews
+    |> Enum.filter(fn r ->
+      (Map.get(r, :state) || Map.get(r, "state")) == "CHANGES_REQUESTED"
+    end)
+    |> Enum.sort_by(
+      fn r -> Map.get(r, :submitted_at) || Map.get(r, "submittedAt") || "" end,
+      :desc
+    )
+    |> List.first()
+  end
+
+  defp truncate(nil, _), do: ""
+
+  defp truncate(str, max) when is_binary(str) do
+    if String.length(str) > max, do: String.slice(str, 0, max) <> "…", else: str
+  end
+
+  @doc """
+  Extracts applied skill IDs from a mission's ops. Public so callers who
+  already have the list (e.g. orchestrator) can match the merge-path
+  derivation.
+  """
+  @spec applied_skill_ids(map()) :: [String.t()]
+  def applied_skill_ids(mission) do
+    (Map.get(mission, :ops, []) || [])
+    |> Enum.flat_map(fn op -> Map.get(op, :applied_skill_ids, []) || [] end)
+    |> Enum.uniq()
+  end
+
+  defp outcome_refinement_enabled? do
+    Application.get_env(:gitf, :outcome_refinement_enabled, false) == true
+  end
 end

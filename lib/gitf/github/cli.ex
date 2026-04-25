@@ -1,0 +1,160 @@
+defmodule GiTF.GitHub.CLI do
+  @moduledoc """
+  Typed wrapper around the `gh` CLI for outcome tracking.
+
+  Every call runs inside `Task.Supervisor.async_nolink` with a 15s timeout
+  and a `:brutal_kill` shutdown, mirroring the orchestrator's existing
+  `verify_pr_url/3` pattern (`lib/gitf/major/orchestrator.ex:2199`).
+
+  Errors are classified so the tracker can decide whether to retry:
+
+    * `{:error, :transient}` — network glitch or 5xx; retry on next tick.
+    * `{:error, :permanent}` — 404/auth; stop tracking.
+    * `{:error, :timeout}` — gh itself hung; treated as transient.
+  """
+
+  require Logger
+
+  @timeout_ms 15_000
+
+  @type pr_details :: %{
+          state: String.t(),
+          merged: boolean(),
+          merged_at: String.t() | nil,
+          closed_at: String.t() | nil,
+          title: String.t() | nil,
+          reviews: [map()],
+          status_check_rollup: [map()]
+        }
+
+  @type review :: %{
+          author: String.t() | nil,
+          state: String.t(),
+          submitted_at: String.t() | nil,
+          body: String.t() | nil
+        }
+
+  @type error_class :: :transient | :permanent | :timeout
+
+  @doc """
+  Fetches the core PR fields via `gh pr view --json ...`.
+
+  `repo_path` is used as the cwd so `gh` picks up the correct remote.
+  """
+  @spec pr_details(String.t(), String.t()) :: {:ok, pr_details()} | {:error, error_class()}
+  def pr_details(repo_path, pr_url) when is_binary(repo_path) and is_binary(pr_url) do
+    fields = "state,merged,mergedAt,closedAt,title,reviews,statusCheckRollup"
+
+    case run_gh(["pr", "view", pr_url, "--json", fields], repo_path) do
+      {:ok, output} ->
+        case Jason.decode(output) do
+          {:ok, data} ->
+            {:ok,
+             %{
+               state: Map.get(data, "state"),
+               merged: Map.get(data, "merged", false),
+               merged_at: Map.get(data, "mergedAt"),
+               closed_at: Map.get(data, "closedAt"),
+               title: Map.get(data, "title"),
+               reviews: normalize_reviews(Map.get(data, "reviews", [])),
+               status_check_rollup: Map.get(data, "statusCheckRollup") || []
+             }}
+
+          {:error, _} ->
+            {:error, :transient}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
+  Lists recent workflow runs on the main branch. Used by post-merge CI
+  status polling. Returns the raw decoded list from `gh run list --json`.
+  """
+  @spec main_branch_runs(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, error_class()}
+  def main_branch_runs(repo_path, limit \\ 5) when is_binary(repo_path) and is_integer(limit) do
+    args = [
+      "run",
+      "list",
+      "--branch",
+      "main",
+      "--limit",
+      Integer.to_string(limit),
+      "--json",
+      "conclusion,status,createdAt"
+    ]
+
+    case run_gh(args, repo_path) do
+      {:ok, output} ->
+        case Jason.decode(output) do
+          {:ok, runs} when is_list(runs) -> {:ok, runs}
+          _ -> {:error, :transient}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # -- Internal --------------------------------------------------------------
+
+  defp run_gh(args, repo_path) do
+    task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        System.cmd("gh", args, cd: repo_path, stderr_to_stdout: true)
+      end)
+
+    case Task.yield(task, @timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {output, 0}} ->
+        {:ok, output}
+
+      {:ok, {output, _nonzero}} ->
+        {:error, classify_output(output)}
+
+      {:exit, reason} ->
+        Logger.debug("GitHub.CLI exited: #{inspect(reason)}")
+        {:error, :transient}
+
+      nil ->
+        {:error, :timeout}
+    end
+  end
+
+  # Heuristic classification: hard 404/auth errors are permanent; anything
+  # else (rate limit, transient network, ambiguous failure) is retried.
+  defp classify_output(output) when is_binary(output) do
+    lower = String.downcase(output)
+
+    cond do
+      String.contains?(lower, "not found") -> :permanent
+      String.contains?(lower, "no pull requests") -> :permanent
+      String.contains?(lower, "could not resolve to") -> :permanent
+      String.contains?(lower, "authentication") -> :permanent
+      String.contains?(lower, "authorization") -> :permanent
+      String.contains?(lower, "http 404") -> :permanent
+      true -> :transient
+    end
+  end
+
+  defp classify_output(_), do: :transient
+
+  defp normalize_reviews(reviews) when is_list(reviews) do
+    Enum.map(reviews, fn r ->
+      %{
+        author:
+          case Map.get(r, "author") do
+            %{"login" => login} -> login
+            login when is_binary(login) -> login
+            _ -> nil
+          end,
+        state: Map.get(r, "state") || "COMMENTED",
+        submitted_at: Map.get(r, "submittedAt"),
+        body: Map.get(r, "body")
+      }
+    end)
+  end
+
+  defp normalize_reviews(_), do: []
+end

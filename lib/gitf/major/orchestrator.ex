@@ -1542,7 +1542,7 @@ defmodule GiTF.Major.Orchestrator do
   # or critic rejection never delays the orchestrator's next tick.
   defp maybe_spawn_skill_refinement(mission, validation) do
     if Application.get_env(:gitf, :skill_refinement_enabled, false) do
-      applied = collect_applied_skill_ids(mission)
+      applied = GiTF.Skills.Refinement.applied_skill_ids(mission)
 
       Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
         GiTF.Skills.Refinement.refine_after_validation(mission, validation, applied)
@@ -1556,12 +1556,6 @@ defmodule GiTF.Major.Orchestrator do
     e ->
       Logger.debug("maybe_spawn_skill_refinement failed: #{Exception.message(e)}")
       :ok
-  end
-
-  defp collect_applied_skill_ids(mission) do
-    (mission.ops || [])
-    |> Enum.flat_map(fn op -> Map.get(op, :applied_skill_ids, []) || [] end)
-    |> Enum.uniq()
   end
 
   # Returns `:ok` when at least one impl op committed at least one file
@@ -2116,11 +2110,38 @@ defmodule GiTF.Major.Orchestrator do
 
       GiTF.Missions.store_artifact(mission.id, "publish", result)
 
+      # Post-completion outcome tracking (gated on :outcomes_enabled).
+      # Fired async under TaskSupervisor so a slow/failing Archive write
+      # cannot stall the orchestrator's transition into post-processing.
+      maybe_start_outcome_tracking(mission, result)
+
       # Publish runs synchronously (no ghost), so we drive into the next
       # phase ourselves rather than waiting for an advance event.
       after_publish(mission)
     end
   end
+
+  defp maybe_start_outcome_tracking(mission, %{"pr_url" => pr_url} = result)
+       when is_binary(pr_url) and pr_url != "" do
+    status = Map.get(result, "status")
+
+    # Only track when the PR is genuinely live. pr_failed / skipped have
+    # no PR to watch.
+    if status in ["pr_created", "pr_exists"] do
+      Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+        try do
+          GiTF.Outcomes.start_tracking(mission, pr_url)
+        rescue
+          e ->
+            Logger.warning(
+              "Quest #{mission.id}: outcome tracking start failed: #{Exception.message(e)}"
+            )
+        end
+      end)
+    end
+  end
+
+  defp maybe_start_outcome_tracking(_mission, _result), do: :ok
 
   # Publish outcomes:
   #   * pr_branch strategy + branch present → push branch + open PR

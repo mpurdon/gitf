@@ -430,6 +430,105 @@ defmodule GiTF.MCPServer.Tools do
             sector_id: %{type: "string", description: "Scope stats to a specific sector (optional)"}
           }
         }
+      },
+      %{
+        name: "list_outcomes",
+        description:
+          "List post-completion outcome records for missions whose PRs are being (or were) tracked. Filter by mission_id, category, or include stopped.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            mission_id: %{type: "string", description: "Filter to one mission"},
+            category: %{
+              type: "string",
+              enum: [
+                "pending",
+                "merged_clean",
+                "merged_reverted",
+                "closed_unmerged",
+                "changes_requested",
+                "stale",
+                "merged_broke_main"
+              ],
+              description: "Filter by outcome category"
+            },
+            include_stopped: %{
+              type: "boolean",
+              description: "Include records where tracking has been stopped",
+              default: true
+            }
+          }
+        }
+      },
+      %{
+        name: "show_outcome",
+        description:
+          "Full detail for a single outcome record — PR state, review history, poll timeline, category.",
+        inputSchema: %{
+          type: "object",
+          properties: %{id: %{type: "string", description: "Outcome ID"}},
+          required: ["id"]
+        }
+      },
+      %{
+        name: "outcomes_stats",
+        description:
+          "Aggregate outcome stats: merge-success rate per sector, category distribution, PRs currently tracking, validator calibration.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Scope stats to a specific sector (optional)"}
+          }
+        }
+      },
+      %{
+        name: "autonomy_tier",
+        description:
+          "Read the current autonomy tier (trusted/normal/require_approval) derived from merge outcomes for a sector.",
+        inputSchema: %{
+          type: "object",
+          properties: %{sector_id: %{type: "string", description: "Sector ID"}},
+          required: ["sector_id"]
+        }
+      },
+      %{
+        name: "capture_screenshot",
+        description:
+          "Take a screenshot of a URL using headless Chromium (Playwright). Returns the absolute path of the saved PNG. Requires :visual_capture_enabled and `npx playwright` on PATH.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            url: %{type: "string", description: "Page URL to capture"},
+            output_path: %{
+              type: "string",
+              description: "Absolute path where the PNG will be written"
+            },
+            full_page: %{type: "boolean", description: "Capture full page (default true)"},
+            wait_ms: %{
+              type: "integer",
+              description: "Delay after navigation before capturing (default 0)"
+            }
+          },
+          required: ["url", "output_path"]
+        }
+      },
+      %{
+        name: "set_autonomy_tier",
+        description:
+          "[WRITE] Operator override of a sector's autonomy tier. Takes precedence over the derived tier until cleared (tier=normal).",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            tier: %{
+              type: "string",
+              enum: ["trusted", "normal", "require_approval"],
+              description: "Override tier"
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["sector_id", "tier", "confirm"]
+        }
       }
     ]
   end

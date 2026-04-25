@@ -73,6 +73,9 @@ defmodule GiTF.Intel.PromptContext do
     # Model trends (declining models)
     sections = add_model_warnings(sections, model_data)
 
+    # Post-merge outcomes (real-world signal)
+    sections = add_merge_success(sections, Map.get(lessons, :merge_success_rate))
+
     if Enum.empty?(sections) do
       ""
     else
@@ -126,6 +129,25 @@ defmodule GiTF.Intel.PromptContext do
   end
 
   defp add_risky_patterns(sections, _), do: sections
+
+  defp add_merge_success(sections, %{rate: rate, sample_count: n, reverted_count: rev, trend: trend})
+       when is_number(rate) and n > 0 do
+    trend_part =
+      case trend do
+        :improving -> " (improving)"
+        :declining -> " (declining)"
+        _ -> ""
+      end
+
+    rev_part = if rev > 0, do: " — #{rev} reverted", else: ""
+
+    [
+      "- **Merge-success rate**: #{round(rate * 100)}% across #{n} shipped missions#{rev_part}#{trend_part}"
+      | sections
+    ]
+  end
+
+  defp add_merge_success(sections, _), do: sections
 
   defp add_success_factors(sections, factors) when length(factors) > 0 do
     top =

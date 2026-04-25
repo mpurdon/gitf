@@ -75,6 +75,7 @@ defmodule GiTF.Intel.SectorProfile do
     risky_patterns = extract_risky_patterns(common_failures, triage_accuracy)
     avg_phase_durations = compute_phase_durations(sector_id)
     retry_effectiveness = compute_retry_effectiveness(ops)
+    merge_success_rate = compute_merge_success_rate(sector_id)
 
     lessons = %{
       triage_accuracy: triage_accuracy,
@@ -83,7 +84,8 @@ defmodule GiTF.Intel.SectorProfile do
       quality_baseline: quality_baseline,
       risky_patterns: risky_patterns,
       avg_phase_durations: avg_phase_durations,
-      retry_effectiveness: retry_effectiveness
+      retry_effectiveness: retry_effectiveness,
+      merge_success_rate: merge_success_rate
     }
 
     # Model-specific data
@@ -342,6 +344,46 @@ defmodule GiTF.Intel.SectorProfile do
     end
   end
 
+  # -- Private: Merge Success (from mission_outcomes) --------------------------
+
+  defp compute_merge_success_rate(sector_id) do
+    outcomes = GiTF.Outcomes.terminal_outcomes(sector_id)
+
+    if outcomes == [] do
+      %{rate: nil, sample_count: 0, reverted_count: 0, trend: :unknown}
+    else
+      sorted = Enum.sort_by(outcomes, &(&1.updated_at || &1.inserted_at), {:desc, DateTime})
+      total = length(sorted)
+      merged = Enum.count(sorted, &(&1.outcome_category == :merged_clean))
+      reverted = Enum.count(sorted, &(&1.outcome_category == :merged_reverted))
+
+      recent_n = min(10, max(div(total, 3), 3))
+      recent = Enum.take(sorted, recent_n)
+      recent_merged = Enum.count(recent, &(&1.outcome_category == :merged_clean))
+      recent_rate = if recent_n > 0, do: recent_merged / recent_n, else: nil
+      baseline_rate = merged / total
+
+      trend =
+        cond do
+          total < 8 or recent_n < 3 -> :unknown
+          recent_rate && recent_rate - baseline_rate > 0.10 -> :improving
+          recent_rate && recent_rate - baseline_rate < -0.15 -> :declining
+          true -> :stable
+        end
+
+      %{
+        rate: Float.round(baseline_rate, 3),
+        sample_count: total,
+        reverted_count: reverted,
+        trend: trend
+      }
+    end
+  rescue
+    e ->
+      Logger.debug("SectorProfile.compute_merge_success_rate failed: #{Exception.message(e)}")
+      %{rate: nil, sample_count: 0, reverted_count: 0, trend: :unknown}
+  end
+
   # -- Private: Model Data -----------------------------------------------------
 
   defp compute_model_data(ops, sector_id) do
@@ -535,7 +577,8 @@ defmodule GiTF.Intel.SectorProfile do
         quality_baseline: %{avg: nil, p25: nil, median: nil, p75: nil},
         risky_patterns: [],
         avg_phase_durations: %{},
-        retry_effectiveness: %{}
+        retry_effectiveness: %{},
+        merge_success_rate: %{rate: nil, sample_count: 0, reverted_count: 0, trend: :unknown}
       },
       model_data: %{},
       recommendations: %{

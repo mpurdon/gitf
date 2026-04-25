@@ -131,6 +131,7 @@ defmodule GiTF.Application do
              # untouched, while a Major restart will also restart Janitor so
              # it re-acquires its read accessor cleanly.
              {GiTF.Major.Janitor, []},
+             {GiTF.Outcomes.Tracker, []},
              {GiTF.SectorSupervisor, []},
              {GiTF.Budget.Watchdog, []},
              {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}
@@ -198,7 +199,9 @@ defmodule GiTF.Application do
       {:triage_enabled, "GITF_TRIAGE_ENABLED", false},
       {:skills_enabled, "GITF_SKILLS_ENABLED", false},
       {:skill_refinement_enabled, "GITF_SKILL_REFINEMENT_ENABLED", false},
-      {:skill_auto_commit_enabled, "GITF_SKILL_AUTO_COMMIT_ENABLED", false}
+      {:skill_auto_commit_enabled, "GITF_SKILL_AUTO_COMMIT_ENABLED", false},
+      {:outcomes_enabled, "GITF_OUTCOMES_ENABLED", false},
+      {:outcome_refinement_enabled, "GITF_OUTCOME_REFINEMENT_ENABLED", false}
     ]
 
     lines =

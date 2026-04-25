@@ -764,7 +764,189 @@ defmodule GiTF.MCPServer.Handlers do
     end)
   end
 
+  # -- Outcomes --------------------------------------------------------------
+
+  def call("list_outcomes", args) do
+    safe_handler("list_outcomes", args, fn ->
+      include_stopped = Map.get(args, "include_stopped", true)
+      mission_filter = Map.get(args, "mission_id")
+      category_filter = GiTF.Outcomes.parse_category(Map.get(args, "category"))
+
+      {pool, category_applied?} =
+        cond do
+          is_binary(mission_filter) ->
+            {GiTF.Archive.by_index(:mission_outcomes, :mission_id, mission_filter), false}
+
+          not is_nil(category_filter) ->
+            {GiTF.Archive.by_index(:mission_outcomes, :outcome_category, category_filter), true}
+
+          true ->
+            {GiTF.Outcomes.all(), false}
+        end
+
+      all =
+        pool
+        |> Enum.filter(fn o -> include_stopped or not o.tracking_stopped end)
+        |> Enum.filter(fn o ->
+          category_applied? or is_nil(category_filter) or o.outcome_category == category_filter
+        end)
+        |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
+        |> Enum.map(&summarize_outcome/1)
+
+      {:ok, json_text(%{count: length(all), outcomes: all})}
+    end)
+  end
+
+  def call("show_outcome", %{"id" => id}) do
+    safe_handler("show_outcome", %{"id" => id}, fn ->
+      case GiTF.Outcomes.get(id) do
+        nil -> {:error, "Outcome not found: #{id}"}
+        outcome -> {:ok, json_text(detail_outcome(outcome))}
+      end
+    end)
+  end
+
+  def call("show_outcome", _), do: {:error, "Missing required parameter: id"}
+
+  def call("outcomes_stats", args) do
+    safe_handler("outcomes_stats", args, fn ->
+      sector_filter = Map.get(args, "sector_id")
+
+      pool =
+        case sector_filter do
+          sid when is_binary(sid) -> GiTF.Archive.by_index(:mission_outcomes, :sector_id, sid)
+          _ -> GiTF.Outcomes.all()
+        end
+
+      by_category = Enum.frequencies_by(pool, & &1.outcome_category)
+      tracking = Enum.count(pool, &(not &1.tracking_stopped))
+
+      terminal_cats = GiTF.Outcomes.terminal_categories()
+      merged_clean = Map.get(by_category, :merged_clean, 0)
+      terminal = Enum.sum(Enum.map(terminal_cats, &Map.get(by_category, &1, 0)))
+
+      merge_rate = if terminal > 0, do: Float.round(merged_clean / terminal, 3), else: nil
+
+      by_sector =
+        pool
+        |> Enum.group_by(&Map.get(&1, :sector_id))
+        |> Enum.map(fn {sector_id, rows} ->
+          t = Enum.count(rows, &(&1.outcome_category in terminal_cats))
+          mc = Enum.count(rows, &(&1.outcome_category == :merged_clean))
+
+          %{
+            sector_id: sector_id,
+            sample_count: t,
+            merge_rate: if(t > 0, do: Float.round(mc / t, 3), else: nil)
+          }
+        end)
+
+      calibration = GiTF.Outcomes.Alerts.calibration(sector_filter)
+
+      {:ok,
+       json_text(%{
+         total: length(pool),
+         tracking: tracking,
+         by_category: by_category,
+         merge_rate: merge_rate,
+         by_sector: by_sector,
+         calibration: calibration
+       })}
+    end)
+  end
+
+  # -- Visual capture --------------------------------------------------------
+
+  def call("capture_screenshot", %{"url" => url, "output_path" => output} = args) do
+    safe_handler("capture_screenshot", args, fn ->
+      opts =
+        for {k, v} <- [full_page: Map.get(args, "full_page"), wait_ms: Map.get(args, "wait_ms")],
+            not is_nil(v),
+            do: {k, v}
+
+      case GiTF.Visual.Capture.screenshot(url, output, opts) do
+        {:ok, path} -> {:ok, json_text(%{ok: true, path: path})}
+        {:error, reason} -> {:error, "Screenshot failed: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  def call("capture_screenshot", _),
+    do: {:error, "Missing required parameters: url, output_path"}
+
+  # -- Autonomy tiers --------------------------------------------------------
+
+  def call("autonomy_tier", %{"sector_id" => sector_id}) do
+    safe_handler("autonomy_tier", %{"sector_id" => sector_id}, fn ->
+      detail = GiTF.Outcomes.Autonomy.tier_for(sector_id)
+      override = GiTF.Outcomes.Autonomy.override_for(sector_id)
+      effective = GiTF.Outcomes.Autonomy.effective_tier(sector_id)
+
+      {:ok,
+       json_text(%{
+         sector_id: sector_id,
+         derived_tier: detail.tier,
+         rate: detail.rate,
+         sample_count: detail.sample_count,
+         reason: detail.reason,
+         operator_override: override,
+         effective_tier: effective
+       })}
+    end)
+  end
+
+  def call("autonomy_tier", _), do: {:error, "Missing required parameter: sector_id"}
+
+  def call("set_autonomy_tier", %{"sector_id" => sector_id, "tier" => tier_str} = args) do
+    with :ok <- require_confirm(args),
+         {:ok, tier} <- parse_autonomy_tier(tier_str) do
+      case GiTF.Archive.update(:sectors, sector_id, &Map.put(&1, :autonomy_level, tier)) do
+        {:ok, _updated} -> {:ok, json_text(%{sector_id: sector_id, autonomy_level: tier})}
+        {:error, :not_found} -> {:error, "Sector not found: #{sector_id}"}
+        {:error, reason} -> {:error, "Update failed: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("set_autonomy_tier", _),
+    do: {:error, "Missing required parameters: sector_id, tier, confirm"}
+
   def call(tool_name, _args), do: {:error, "Unknown tool: #{tool_name}"}
+
+  defp parse_autonomy_tier("trusted"), do: {:ok, :trusted}
+  defp parse_autonomy_tier("normal"), do: {:ok, :normal}
+  defp parse_autonomy_tier("require_approval"), do: {:ok, :require_approval}
+  defp parse_autonomy_tier(other), do: {:error, "Invalid tier: #{inspect(other)}"}
+
+  # -- Outcomes helpers -------------------------------------------------------
+
+  defp summarize_outcome(o) do
+    %{
+      id: o.id,
+      mission_id: o.mission_id,
+      sector_id: Map.get(o, :sector_id),
+      pr_url: o.pr_url,
+      pr_state: o.pr_state,
+      outcome_category: o.outcome_category,
+      changes_requested_count: o.changes_requested_count,
+      revert_detected: o.revert_detected,
+      tracking_stopped: o.tracking_stopped,
+      stopped_reason: o.stopped_reason,
+      poll_count: o.poll_count,
+      first_tracked_at: o.first_tracked_at,
+      last_polled_at: o.last_polled_at,
+      next_poll_at: o.next_poll_at,
+      updated_at: o.updated_at
+    }
+  end
+
+  defp detail_outcome(o) do
+    Map.merge(summarize_outcome(o), %{
+      reviews: o.reviews,
+      pr_merged_at: o.pr_merged_at,
+      pr_closed_at: o.pr_closed_at
+    })
+  end
 
   # -- Skills helpers ----------------------------------------------------------
 

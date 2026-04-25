@@ -23,6 +23,44 @@ case System.get_env("GITF_TRIAGE_ENABLED") do
   _ -> :ok
 end
 
+case System.get_env("GITF_OUTCOMES_ENABLED") do
+  v when v in ["false", "0"] -> config :gitf, :outcomes_enabled, false
+  v when v in ["true", "1"] -> config :gitf, :outcomes_enabled, true
+  _ -> :ok
+end
+
+case System.get_env("GITF_OUTCOME_REFINEMENT_ENABLED") do
+  v when v in ["false", "0"] -> config :gitf, :outcome_refinement_enabled, false
+  v when v in ["true", "1"] -> config :gitf, :outcome_refinement_enabled, true
+  _ -> :ok
+end
+
+case System.get_env("GITF_WEBHOOKS_ENABLED") do
+  v when v in ["false", "0"] -> config :gitf, :webhooks_enabled, false
+  v when v in ["true", "1"] -> config :gitf, :webhooks_enabled, true
+  _ -> :ok
+end
+
+if secret = System.get_env("GITF_GITHUB_WEBHOOK_SECRET") do
+  config :gitf, :github_webhook_secret, secret
+end
+
+case System.get_env("GITF_VISUAL_CAPTURE_ENABLED") do
+  v when v in ["false", "0"] -> config :gitf, :visual_capture_enabled, false
+  v when v in ["true", "1"] -> config :gitf, :visual_capture_enabled, true
+  _ -> :ok
+end
+
+case System.get_env("GITF_LSP_ENABLED") do
+  v when v in ["false", "0"] -> config :gitf, :lsp_enabled, false
+  v when v in ["true", "1"] -> config :gitf, :lsp_enabled, true
+  _ -> :ok
+end
+
+if exe = System.get_env("LSP_EXECUTABLE") do
+  config :gitf, :lsp_executable, exe
+end
+
 if config_env() == :prod do
   port = String.to_integer(System.get_env("GITF_PORT") || "4000")
   # Default to loopback. Operators must explicitly set GITF_HOST=0.0.0.0
