@@ -69,6 +69,52 @@ defmodule GiTF.LSP.Client do
     )
   end
 
+  @doc """
+  Returns the locations that reference the symbol at the given
+  position. `include_declaration` (default false) controls whether the
+  declaration itself appears in the result list.
+  """
+  @spec references(t(), String.t(), non_neg_integer(), non_neg_integer(), boolean()) ::
+          {:ok, [map()]} | {:error, term()}
+  def references(server, file_path, line, character, include_declaration \\ false)
+      when is_binary(file_path) and is_integer(line) and is_integer(character) do
+    GenServer.call(
+      server,
+      {:request, "textDocument/references",
+       %{
+         textDocument: %{uri: file_uri(file_path)},
+         position: %{line: line, character: character},
+         context: %{includeDeclaration: include_declaration}
+       }},
+      @request_timeout_ms + 1_000
+    )
+  end
+
+  @doc """
+  Returns the hover information for the symbol at the given position
+  (typically a type signature + docstring). Returns
+  `{:ok, %{contents: ..., range: ...}}` or `{:ok, nil}` if no hover.
+  """
+  @spec hover(t(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, map() | nil} | {:error, term()}
+  def hover(server, file_path, line, character)
+      when is_binary(file_path) and is_integer(line) and is_integer(character) do
+    case GenServer.call(
+           server,
+           {:request, "textDocument/hover",
+            %{
+              textDocument: %{uri: file_uri(file_path)},
+              position: %{line: line, character: character}
+            }},
+           @request_timeout_ms + 1_000
+         ) do
+      {:ok, [single]} -> {:ok, single}
+      {:ok, []} -> {:ok, nil}
+      {:ok, list} when is_list(list) -> {:ok, List.first(list)}
+      other -> other
+    end
+  end
+
   @doc "Stops the client, sending the LSP shutdown + exit handshake."
   @spec stop(t()) :: :ok
   def stop(server), do: GenServer.stop(server, :normal, 5_000)
@@ -99,16 +145,42 @@ defmodule GiTF.LSP.Client do
       buffer: <<>>,
       pending: %{},
       next_id: 1,
-      root_path: root_path
+      root_path: root_path,
+      status: :initializing,
+      queued: []
     }
 
+    # Return immediately so DynamicSupervisor.start_child unblocks the
+    # MCP caller. Initialize handshake runs in handle_continue, requests
+    # arriving meanwhile queue up in the GenServer mailbox.
+    {:ok, state, {:continue, :initialize}}
+  end
+
+  @impl true
+  def handle_continue(:initialize, state) do
     case do_initialize(state) do
-      {:ok, new_state} -> {:ok, new_state}
-      {:error, reason} -> {:stop, {:initialize_failed, reason}}
+      {:ok, ready_state} ->
+        ready_state = %{ready_state | status: :ready}
+        Enum.each(Enum.reverse(ready_state.queued), fn {from, method, params} ->
+          send(self(), {:flush_queued, from, method, params})
+        end)
+
+        {:noreply, %{ready_state | queued: []}}
+
+      {:error, reason} ->
+        Enum.each(state.queued, fn {from, _, _} ->
+          GenServer.reply(from, {:error, {:initialize_failed, reason}})
+        end)
+
+        {:stop, {:initialize_failed, reason}, state}
     end
   end
 
   @impl true
+  def handle_call({:request, method, params}, from, %{status: :initializing} = state) do
+    {:noreply, %{state | queued: [{from, method, params} | state.queued]}}
+  end
+
   def handle_call({:request, method, params}, from, state) do
     {id, state} = next_id(state)
     payload = %{jsonrpc: "2.0", id: id, method: method, params: params}
@@ -121,6 +193,17 @@ defmodule GiTF.LSP.Client do
   end
 
   @impl true
+  def handle_info({:flush_queued, from, method, params}, state) do
+    {id, state} = next_id(state)
+    payload = %{jsonrpc: "2.0", id: id, method: method, params: params}
+    Port.command(state.port, Framing.encode(payload))
+    state = %{state | pending: Map.put(state.pending, id, from)}
+
+    Process.send_after(self(), {:request_timeout, id}, @request_timeout_ms)
+
+    {:noreply, state}
+  end
+
   def handle_info({port, {:data, chunk}}, %{port: port} = state) do
     {messages, buffer} = Framing.parse(state.buffer <> chunk)
     state = %{state | buffer: buffer}

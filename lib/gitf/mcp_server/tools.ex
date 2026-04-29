@@ -492,6 +492,55 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "lsp_definition",
+        description:
+          "Find the definition(s) of the symbol at file:line:character within a sector. Returns LSP Location list. Lazily starts the language server for the sector on first call.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID (workspace)"},
+            file_path: %{type: "string", description: "Absolute path to the source file"},
+            line: %{type: "integer", description: "0-indexed line"},
+            character: %{type: "integer", description: "0-indexed column"}
+          },
+          required: ["sector_id", "file_path", "line", "character"]
+        }
+      },
+      %{
+        name: "lsp_references",
+        description:
+          "Find references to the symbol at file:line:character within a sector. include_declaration controls whether the declaration itself is included.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            file_path: %{type: "string", description: "Absolute path to the source file"},
+            line: %{type: "integer", description: "0-indexed line"},
+            character: %{type: "integer", description: "0-indexed column"},
+            include_declaration: %{
+              type: "boolean",
+              description: "Include the declaration (default false)"
+            }
+          },
+          required: ["sector_id", "file_path", "line", "character"]
+        }
+      },
+      %{
+        name: "lsp_hover",
+        description:
+          "Hover info (signature/docstring) for the symbol at file:line:character within a sector.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            file_path: %{type: "string", description: "Absolute path to the source file"},
+            line: %{type: "integer", description: "0-indexed line"},
+            character: %{type: "integer", description: "0-indexed column"}
+          },
+          required: ["sector_id", "file_path", "line", "character"]
+        }
+      },
+      %{
         name: "capture_screenshot",
         description:
           "Take a screenshot of a URL using headless Chromium (Playwright). Returns the absolute path of the saved PNG. Requires :visual_capture_enabled and `npx playwright` on PATH.",

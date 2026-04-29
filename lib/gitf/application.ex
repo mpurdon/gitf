@@ -132,6 +132,7 @@ defmodule GiTF.Application do
              # it re-acquires its read accessor cleanly.
              {GiTF.Major.Janitor, []},
              {GiTF.Outcomes.Tracker, []},
+             {GiTF.LSP.Supervisor, []},
              {GiTF.SectorSupervisor, []},
              {GiTF.Budget.Watchdog, []},
              {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}
