@@ -51,7 +51,78 @@ defmodule GiTF.Visual.Capture do
     cond do
       not enabled?() -> {:error, :disabled}
       not available?() -> {:error, :driver_unavailable}
-      true -> do_screenshot(url, output_path, opts)
+      not allowed_url?(url) -> {:error, {:url_not_allowed, url}}
+      true ->
+        case allowed_output_path(output_path) do
+          {:ok, expanded} -> do_screenshot(url, expanded, opts)
+          {:error, _} = err -> err
+        end
+    end
+  end
+
+  # Reject anything that isn't http(s); that closes off file://, ftp://,
+  # and the kind of URLs an attacker would supply for SSRF or local file
+  # exfiltration through the headless browser.
+  defp allowed_url?(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
+        not internal_host?(host)
+
+      _ ->
+        false
+    end
+  end
+
+  # IMDS, loopback, and RFC1918 ranges are common SSRF targets. Operators
+  # who need them can flip :visual_capture_allow_internal.
+  defp internal_host?(host) do
+    if Application.get_env(:gitf, :visual_capture_allow_internal, false) do
+      false
+    else
+      cond do
+        host in ["localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"] -> true
+        String.starts_with?(host, "10.") -> true
+        String.starts_with?(host, "192.168.") -> true
+        Regex.match?(~r/^172\.(1[6-9]|2[0-9]|3[0-1])\./, host) -> true
+        String.ends_with?(host, ".internal") -> true
+        true -> false
+      end
+    end
+  end
+
+  # Output path must land in a configured screenshots directory so a
+  # caller can't drop files into ~/.ssh, LaunchAgents, or arbitrary
+  # workspace paths. Default: <gitf_dir>/.gitf/screenshots/.
+  defp allowed_output_path(path) do
+    expanded = Path.expand(path)
+
+    case screenshots_root() do
+      {:ok, root} ->
+        if String.starts_with?(expanded, root <> "/") and
+             String.ends_with?(expanded, ".png") do
+          {:ok, expanded}
+        else
+          {:error, {:output_path_not_allowed, path}}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp screenshots_root do
+    case Application.get_env(:gitf, :visual_screenshots_root) do
+      path when is_binary(path) ->
+        {:ok, Path.expand(path)}
+
+      _ ->
+        case GiTF.gitf_dir() do
+          {:ok, gitf_root} ->
+            {:ok, Path.expand(Path.join([gitf_root, ".gitf", "screenshots"]))}
+
+          {:error, _} = err ->
+            err
+        end
     end
   end
 

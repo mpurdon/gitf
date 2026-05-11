@@ -19,6 +19,7 @@ defmodule GiTF.Web.WebhookController do
   require Logger
 
   alias GiTF.Outcomes
+  alias GiTF.Sentry.Inbound, as: SentryInbound
 
   @doc """
   GitHub webhook receiver. Handles `pull_request` and `ping` events.
@@ -34,7 +35,7 @@ defmodule GiTF.Web.WebhookController do
       not enabled?() ->
         conn |> put_status(503) |> json(%{error: "webhook ingestion disabled"})
 
-      not signature_valid?(conn) ->
+      not github_signature_valid?(conn) ->
         Logger.warning("GitHub webhook: signature verification failed")
         conn |> put_status(401) |> json(%{error: "invalid signature"})
 
@@ -42,6 +43,41 @@ defmodule GiTF.Web.WebhookController do
         event = get_req_header(conn, "x-github-event") |> List.first() || "unknown"
         handle_github_event(event, conn.body_params)
         json(conn, %{ok: true, event: event})
+    end
+  end
+
+  @doc """
+  Sentry webhook receiver. Verified payloads are handed to
+  `GiTF.Sentry.Inbound.dispatch/1`, which creates or dedupes a mission.
+
+  Returns 200 with `{"ok": true, "result": ...}` on every accepted payload
+  (including ignored ones — we do not leak which projects/issues we
+  track), 401 on bad signature, 503 when disabled.
+  """
+  def sentry(conn, _params) do
+    cond do
+      not enabled?() ->
+        conn |> put_status(503) |> json(%{error: "webhook ingestion disabled"})
+
+      not sentry_signature_valid?(conn) ->
+        Logger.warning("Sentry webhook: signature verification failed")
+        conn |> put_status(401) |> json(%{error: "invalid signature"})
+
+      true ->
+        result =
+          case SentryInbound.dispatch(conn.body_params) do
+            {:ok, :ignored, reason} ->
+              reason
+
+            {:ok, kind, _} ->
+              kind
+
+            {:error, reason} ->
+              Logger.warning("Sentry webhook: dispatch failed: #{inspect(reason)}")
+              :error
+          end
+
+        json(conn, %{ok: true, result: to_string(result)})
     end
   end
 
@@ -84,21 +120,33 @@ defmodule GiTF.Web.WebhookController do
 
   # -- HMAC-SHA256 signature verification ------------------------------------
 
-  defp signature_valid?(conn) do
-    with secret when is_binary(secret) and secret != "" <- webhook_secret(),
-         [signature_header] <- get_req_header(conn, "x-hub-signature-256"),
-         "sha256=" <> provided <- signature_header,
-         body when is_binary(body) <- conn.assigns[:raw_body] do
-      expected = :crypto.mac(:hmac, :sha256, secret, body) |> Base.encode16(case: :lower)
-      Plug.Crypto.secure_compare(provided, expected)
-    else
-      _ -> false
-    end
+  # GitHub: `X-Hub-Signature-256: sha256=<hex>` over the raw body.
+  defp github_signature_valid?(conn) do
+    GiTF.Web.Signature.verify(
+      github_secret(),
+      get_req_header(conn, "x-hub-signature-256") |> List.first(),
+      conn.assigns[:raw_body]
+    )
   end
 
-  defp webhook_secret do
+  # Sentry: `Sentry-Hook-Signature: <hex>` (no `sha256=` prefix) over
+  # the raw body using the integration's client secret.
+  defp sentry_signature_valid?(conn) do
+    GiTF.Web.Signature.verify(
+      sentry_secret(),
+      get_req_header(conn, "sentry-hook-signature") |> List.first(),
+      conn.assigns[:raw_body]
+    )
+  end
+
+  defp github_secret do
     Application.get_env(:gitf, :github_webhook_secret) ||
       System.get_env("GITF_GITHUB_WEBHOOK_SECRET")
+  end
+
+  defp sentry_secret do
+    Application.get_env(:gitf, :sentry_webhook_secret) ||
+      System.get_env("GITF_SENTRY_WEBHOOK_SECRET")
   end
 
   defp enabled? do

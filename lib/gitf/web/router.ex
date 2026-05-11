@@ -107,6 +107,7 @@ defmodule GiTF.Web.Router do
   scope "/api/v1/webhooks", GiTF.Web do
     pipe_through(:webhooks)
     post("/github", WebhookController, :github)
+    post("/sentry", WebhookController, :sentry)
   end
 
   # Metrics — auth required (local bypass gated by config + optional

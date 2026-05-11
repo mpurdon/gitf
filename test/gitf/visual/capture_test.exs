@@ -63,18 +63,31 @@ defmodule GiTF.Visual.CaptureTest do
       Capture.invalidate_driver_cache()
 
       if not Capture.available?() do
-        # Mark as a no-op when Playwright isn't installed; this tag is
-        # not configured for default runs.
         :ok
       else
-        path = Path.join(System.tmp_dir!(), "gitf_visual_test_#{:erlang.unique_integer([:positive])}.png")
+        root = Path.join(System.tmp_dir!(), "gitf_visual_root_#{:erlang.unique_integer([:positive])}")
+        File.mkdir_p!(root)
+        Application.put_env(:gitf, :visual_screenshots_root, root)
+        path = Path.join(root, "shot.png")
 
         try do
-          assert {:ok, ^path} = Capture.screenshot("https://example.com", path, timeout_ms: 60_000)
-          assert File.exists?(path)
-          assert File.stat!(path).size > 0
+          case Capture.screenshot("https://example.com", path, timeout_ms: 60_000) do
+            {:ok, ^path} ->
+              assert File.exists?(path)
+              assert File.stat!(path).size > 0
+
+            {:error, {:exit, _, output}} = err when is_binary(output) ->
+              # Playwright is on the PATH but a browser binary isn't.
+              if String.contains?(output, "Executable doesn't exist") or
+                   String.contains?(output, "playwright install") do
+                :ok
+              else
+                flunk("unexpected screenshot error: #{inspect(err)}")
+              end
+          end
         after
-          File.rm(path)
+          File.rm_rf!(root)
+          Application.delete_env(:gitf, :visual_screenshots_root)
         end
       end
     end

@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.55.0"
+  @version "0.63.4"
 
   def project do
     [
@@ -67,6 +67,7 @@ defmodule GiTF.MixProject do
       {:jason, "~> 1.4"},
       {:optimus, "~> 0.5"},
       {:toml, "~> 0.7"},
+      {:yaml_elixir, "~> 2.11"},
       {:req, "~> 0.5"},
       {:ratatouille, "~> 0.5"},
       {:telemetry, "~> 1.2"},
