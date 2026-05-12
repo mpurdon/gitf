@@ -317,7 +317,7 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp workflow_dispatch_active?(mission) do
-    Application.get_env(:gitf, :workflow_dsl_enabled, false) == true and
+    Application.get_env(:gitf, :workflow_dsl_enabled, true) == true and
       Map.get(mission, :workflow_id) not in [nil, "", "standard"]
   end
 

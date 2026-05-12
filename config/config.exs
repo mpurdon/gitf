@@ -137,6 +137,18 @@ config :gitf, :autonomy_require_approval_max_rate, 0.5
 config :gitf, :autonomy_require_approval_min_samples, 10
 config :gitf, :autonomy_alert_threshold_stddev, 2
 
+# Workflow DSL dispatch. On by default: a mission whose `workflow_id` is
+# a non-"standard" workflow (operator-chosen, or AI-inferred when
+# :workflow_inference_enabled) advances via GiTF.Workflow.Advancer instead
+# of the orchestrator's hardcoded phase order. Workflow load / Advancer
+# errors fall back to the legacy path, so this is safe to leave on. The
+# "standard" workflow itself still uses the legacy path — see
+# GiTF.Phases.{Triage,Scoring} for the data-dependent-routing and
+# post-processing semantics that aren't yet expressible in the schema.
+# AI inference (:workflow_inference_enabled) stays off by default.
+config :gitf, :workflow_dsl_enabled, true
+config :gitf, :workflow_inference_enabled, false
+
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:remission_id]
