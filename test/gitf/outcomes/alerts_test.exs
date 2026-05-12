@@ -1,5 +1,5 @@
 defmodule GiTF.Outcomes.AlertsTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Archive
   alias GiTF.Outcomes.Alerts

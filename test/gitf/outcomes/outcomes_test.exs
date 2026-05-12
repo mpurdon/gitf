@@ -1,5 +1,5 @@
 defmodule GiTF.OutcomesTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Outcomes
 

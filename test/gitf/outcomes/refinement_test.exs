@@ -3,7 +3,7 @@ defmodule GiTF.Outcomes.RefinementTest do
   # the real Archive, mocking out the refiner LLM. The key assertion: each
   # outcome category drives the correct counter bumps on applied skills.
 
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Skills
   alias GiTF.Skills.Refinement
