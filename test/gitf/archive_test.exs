@@ -40,6 +40,7 @@ defmodule GiTF.ArchiveTest do
       end
 
       File.rm_rf!(store_dir)
+      GiTF.Test.StoreHelper.restore_app_store()
     end)
 
     %{store_dir: store_dir}

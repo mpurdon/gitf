@@ -46,13 +46,25 @@ defmodule GiTF.Test.StoreHelper do
   """
   def restore_app_store do
     stop_store()
+    # stop_store/0 swallows a GenServer.stop timeout, so a wedged Archive may
+    # still be registered — kill it hard before we try to take its name.
+    case Process.whereis(GiTF.Archive) do
+      nil -> :ok
+      pid -> Process.exit(pid, :kill); Process.sleep(20)
+    end
 
     dir = Path.join(System.tmp_dir!(), "gitf_test_app_store")
     File.mkdir_p!(dir)
 
     case GiTF.Archive.start_link(data_dir: dir) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, pid}} ->
+        Process.exit(pid, :kill)
+        Process.sleep(20)
+        {:ok, _pid} = GiTF.Archive.start_link(data_dir: dir)
+        :ok
     end
   end
 
