@@ -3,35 +3,55 @@ defmodule GiTF.Phases.Triage do
   Triage phase handler.
 
   Triage classifies a mission's complexity and emits `skip_flags`. As a
-  workflow phase it advances unconditionally to its `next:` target once
-  the `triage` artifact is present (a `{"status": "failed"}` artifact
-  routes to `:fail` so a workflow can branch on it).
+  workflow phase it advances on completion (a `{"status": "failed"}`
+  artifact routes to `:fail` so a workflow can branch on it); a
+  conditional `next:` then routes on the artifact:
 
-  ## Not yet captured — data-dependent routing
+      - id: triage
+        handler: GiTF.Phases.Triage
+        next:
+          - when: "artifact.no_work_needed == true"
+            then: end
+          - when: "artifact.skip_flags.skip_research != true"
+            then: research
+          - when: "artifact.skip_flags.skip_requirements != true"
+            then: requirements
+          - when: "artifact.skip_flags.skip_design != true"
+            then: design
+          - when: "artifact.skip_flags.skip_review != true"
+            then: review
+          - when: "artifact.skip_flags.skip_planning != true"
+            then: planning
+          - else: implementation
 
-  The legacy `Major.Orchestrator` triage handler does two things this
-  module deliberately does **not** replicate, because the workflow DSL's
-  `next:` / `on_pass:` / `on_fail:` model cannot express them:
+  `before_advance/3` does the two artifact-driven side effects the
+  legacy orchestrator triage handler does:
 
-    * **skip-flag routing** — `route_to_first_unskipped_phase/2` jumps
-      straight to research / requirements / design / review / planning /
-      implementation depending on which `skip_flags` triage set. The
-      DSL would need a conditional `next:` (an expression over the
-      artifact) to model this.
-    * **`bug_reproducible == false` short-circuit** — when triage proves
-      the bug isn't reproducible with strong evidence, the legacy path
-      completes the mission immediately ("no work needed"). Again, that
-      is an artifact-conditional terminal transition the current schema
-      can't express.
+    * sets `mission.pipeline_mode` from the triaged complexity
+      (`GiTF.Major.Orchestrator.Decisions.pipeline_mode_for_complexity/1`);
+    * when the artifact says the bug isn't reproducible *and* the
+      evidence is strong (`GiTF.Triage.strong_no_work_evidence?/1` — a
+      regex check that can't live in a `next:` expression), writes
+      `no_work_needed: true` back onto the triage artifact so the first
+      conditional rule above can short-circuit the mission to `end`.
 
-  The legacy path also writes `pipeline_mode` from the triaged
-  complexity. Until conditional transitions exist in the workflow
-  schema, the `standard` workflow keeps using the legacy path; this
-  handler is here for non-standard workflows whose triage step is a
-  plain "classify, then proceed".
+  Weak "not reproducible" evidence is intentionally *not* flagged, so
+  those missions fall through to the `skip_*` checks and run the full
+  pipeline — matching the legacy behaviour.
+
+  ## Not yet captured
+
+  The `standard` workflow still routes triage via the legacy path
+  (`workflow_dispatch_active?/1` excludes `"standard"`); migrating it
+  means replacing `standard.yaml`'s `triage: next: research` with the
+  conditional list above and exercising the full suite against the
+  workflow dispatch path.
   """
 
   @behaviour GiTF.Phase
+
+  alias GiTF.{Missions, Triage}
+  alias GiTF.Major.Orchestrator.Decisions
 
   @impl true
   def start(mission, %GiTF.Workflow.Phase{id: id}, _ctx) do
@@ -42,4 +62,26 @@ defmodule GiTF.Phases.Triage do
   def verdict(%{"status" => s}) when s in ["failed", "fail"], do: :fail
   def verdict(artifact) when is_map(artifact), do: :advance
   def verdict(_), do: :inconclusive
+
+  @impl true
+  def before_advance(mission, verdict, artifact)
+      when verdict in [:pass, :advance] and is_map(artifact) do
+    complexity =
+      Triage.complexity_from_string(artifact["complexity"] || artifact[:complexity]) || :complex
+
+    Missions.update(mission.id, %{pipeline_mode: Decisions.pipeline_mode_for_complexity(complexity)})
+
+    bug_reproducible = Map.get(artifact, "bug_reproducible", Map.get(artifact, :bug_reproducible))
+    evidence = Map.get(artifact, "bug_evidence", Map.get(artifact, :bug_evidence, "")) || ""
+
+    if bug_reproducible == false and Triage.strong_no_work_evidence?(evidence) do
+      Missions.store_artifact(mission.id, "triage", Map.put(artifact, "no_work_needed", true))
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  def before_advance(_mission, _verdict, _artifact), do: :ok
 end

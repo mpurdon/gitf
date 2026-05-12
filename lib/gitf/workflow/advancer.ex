@@ -54,26 +54,22 @@ defmodule GiTF.Workflow.Advancer do
 
       {:ok, %Phase{} = phase_config} ->
         artifact = GiTF.Missions.get_artifact(mission.id, phase_id)
-        ctx = %{artifact: artifact, mission: mission}
 
         case compute_verdict(mission, phase_config, artifact) do
-          :wait ->
+          v when v in [:wait, :inconclusive] ->
             {:wait, phase_id}
 
-          :advance ->
-            run_before_advance(phase_config, mission, :advance, artifact)
-            advance_via(workflow, phase_id, :advance, ctx)
+          verdict when verdict in [:advance, :pass, :fail] ->
+            run_before_advance(phase_config, mission, verdict, artifact)
+            # `before_advance` may have enriched the phase artifact (e.g.
+            # `GiTF.Phases.Triage` writing a derived flag a conditional
+            # `next:` rule reads); re-read so routing sees the latest.
+            ctx = %{artifact: GiTF.Missions.get_artifact(mission.id, phase_id), mission: mission}
 
-          :pass ->
-            run_before_advance(phase_config, mission, :pass, artifact)
-            advance_via(workflow, phase_id, :pass, ctx)
-
-          :fail ->
-            run_before_advance(phase_config, mission, :fail, artifact)
-            handle_fail(mission, workflow, phase_config, ctx)
-
-          :inconclusive ->
-            {:wait, phase_id}
+            case verdict do
+              :fail -> handle_fail(mission, workflow, phase_config, ctx)
+              v -> advance_via(workflow, phase_id, v, ctx)
+            end
         end
     end
   end
