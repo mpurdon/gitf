@@ -371,7 +371,12 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem">
         <div class="field">
           <label>next</label>
-          <input type="text" name="next" value={@phase.next} placeholder="phase id or 'end'" />
+          <%= if is_list(@phase.next) do %>
+            <input type="text" name="next" value="(conditional — edit YAML)" disabled
+              title={format_advance(@phase)} style="opacity:0.6" />
+          <% else %>
+            <input type="text" name="next" value={@phase.next} placeholder="phase id or 'end'" />
+          <% end %>
         </div>
 
         <div class="field">
@@ -418,7 +423,14 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
   end
 
   defp rewrite_target(target, removed_id) when is_binary(target) and target == removed_id, do: "end"
-  defp rewrite_target(target, _removed_id), do: target
+  defp rewrite_target(target, _removed_id) when is_binary(target) or is_nil(target), do: target
+
+  defp rewrite_target(transitions, removed_id) when is_list(transitions) do
+    Enum.map(transitions, fn
+      {:else, target} -> {:else, rewrite_target(target, removed_id)}
+      {when_expr, target} -> {when_expr, rewrite_target(target, removed_id)}
+    end)
+  end
 
   defp apply_phase_edits(phase, params) do
     %{
@@ -429,7 +441,9 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
         max_retries: parse_int(params["max_retries"]) || 0,
         produces: blank_to_nil(params["produces"]),
         reads: parse_csv(params["reads"]),
-        next: blank_to_nil(params["next"]),
+        # Conditional `next` rules aren't editable via this form yet — the
+        # text input is disabled when next is a list — so preserve them.
+        next: if(is_list(phase.next), do: phase.next, else: blank_to_nil(params["next"])),
         on_pass: blank_to_nil(params["on_pass"]),
         on_fail: blank_to_nil(params["on_fail"]),
         inject_knowledge: params["inject_knowledge"] == "true",
@@ -499,6 +513,18 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
   defp blank_to_nil(nil), do: nil
   defp blank_to_nil(s) when is_binary(s), do: s
 
+  # Conditional `next` is held as a list of {expr | :else, target} tuples
+  # in the struct; the Schema validator (and YAML on disk) want the map
+  # form. Round-trip it back for the live-validation preview.
+  defp next_to_raw(transitions) when is_list(transitions) do
+    Enum.map(transitions, fn
+      {:else, target} -> %{"else" => target}
+      {when_expr, target} -> %{"when" => when_expr, "then" => target}
+    end)
+  end
+
+  defp next_to_raw(other), do: other
+
   defp validate(workflow) do
     raw = %{
       "name" => workflow.name,
@@ -515,7 +541,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
             "inject_skills" => p.inject_skills,
             "reads" => p.reads,
             "produces" => p.produces,
-            "next" => p.next,
+            "next" => next_to_raw(p.next),
             "on_pass" => p.on_pass,
             "on_fail" => p.on_fail
           }
@@ -535,6 +561,15 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
 
   defp format_advance(%{next: "end"}), do: "(end)"
   defp format_advance(%{next: next}) when is_binary(next), do: next
+
+  defp format_advance(%{next: transitions}) when is_list(transitions) and transitions != [] do
+    transitions
+    |> Enum.map(fn
+      {:else, t} -> "else→#{t}"
+      {w, t} -> "#{w}→#{t}"
+    end)
+    |> Enum.join(" · ")
+  end
 
   defp format_advance(%{on_pass: p, on_fail: f}) when is_binary(p) and is_binary(f),
     do: "pass→#{p} · fail→#{f}"

@@ -54,6 +54,7 @@ defmodule GiTF.Workflow.Advancer do
 
       {:ok, %Phase{} = phase_config} ->
         artifact = GiTF.Missions.get_artifact(mission.id, phase_id)
+        ctx = %{artifact: artifact, mission: mission}
 
         case compute_verdict(mission, phase_config, artifact) do
           :wait ->
@@ -61,15 +62,15 @@ defmodule GiTF.Workflow.Advancer do
 
           :advance ->
             run_before_advance(phase_config, mission, :advance, artifact)
-            advance_via(workflow, phase_id, :advance)
+            advance_via(workflow, phase_id, :advance, ctx)
 
           :pass ->
             run_before_advance(phase_config, mission, :pass, artifact)
-            advance_via(workflow, phase_id, :pass)
+            advance_via(workflow, phase_id, :pass, ctx)
 
           :fail ->
             run_before_advance(phase_config, mission, :fail, artifact)
-            handle_fail(mission, workflow, phase_config)
+            handle_fail(mission, workflow, phase_config, ctx)
 
           :inconclusive ->
             {:wait, phase_id}
@@ -123,22 +124,22 @@ defmodule GiTF.Workflow.Advancer do
 
   # -- Internals -------------------------------------------------------------
 
-  defp advance_via(workflow, phase_id, verdict) do
-    case Workflow.next_phase(workflow, phase_id, verdict) do
+  defp advance_via(workflow, phase_id, verdict, ctx) do
+    case Workflow.next_phase(workflow, phase_id, verdict, ctx) do
       {:ok, :end} -> :complete
       {:ok, next} when is_binary(next) -> {:dispatch, next}
       {:error, _} = err -> err
     end
   end
 
-  defp handle_fail(mission, workflow, %Phase{} = phase_config) do
+  defp handle_fail(mission, workflow, %Phase{} = phase_config, ctx) do
     phase_id = phase_config.id
     retries = retry_count(mission, phase_id)
 
     if retries >= phase_config.max_retries do
-      handle_exhaustion(workflow, phase_config)
+      handle_exhaustion(workflow, phase_config, ctx)
     else
-      case Workflow.next_phase(workflow, phase_id, :fail) do
+      case Workflow.next_phase(workflow, phase_id, :fail, ctx) do
         {:ok, :end} -> :complete
         {:ok, next} when is_binary(next) -> {:retry, phase_id, next}
         {:error, _} = err -> err
@@ -151,13 +152,13 @@ defmodule GiTF.Workflow.Advancer do
   #   :advance        → fall through to on_pass target (review's
   #                     "give up but proceed" semantic)
   #   "<phase_id>"    → force-dispatch to a specific phase
-  defp handle_exhaustion(workflow, %Phase{} = phase_config) do
+  defp handle_exhaustion(workflow, %Phase{} = phase_config, ctx) do
     case phase_config.on_exhausted do
       :fail ->
         {:retries_exhausted, phase_config.id}
 
       :advance ->
-        case Workflow.next_phase(workflow, phase_config.id, :pass) do
+        case Workflow.next_phase(workflow, phase_config.id, :pass, ctx) do
           {:ok, :end} -> :complete
           {:ok, next} when is_binary(next) -> {:dispatch, next}
           {:error, _} = err -> err

@@ -206,28 +206,42 @@ defmodule GiTF.Workflow do
   end
 
   @doc """
-  Returns the next phase for a workflow given the current phase id and
-  the phase verdict. `verdict` is `:pass`, `:fail`, or `:advance` (for
-  unconditional `next`-driven phases).
+  Returns the next phase for a workflow given the current phase id, the
+  phase verdict, and an optional evaluation context.
+
+  `verdict` is `:pass`, `:fail`, or `:advance` (the latter for
+  `next`-driven phases, whether the `next` is a fixed string or a list
+  of conditional transitions).
+
+  `ctx` — `%{artifact: <just-completed phase's artifact>, mission:
+  <mission map>}` — is consulted only when the phase has a conditional
+  `next`. Conditional rules are evaluated top-to-bottom (via
+  `GiTF.Workflow.Expr`); the first `{when_expr, target}` whose expression
+  is truthy wins, otherwise the `{:else, target}` rule. A conditional
+  expression that errors at runtime is treated as a non-match (fall
+  through), so a malformed artifact never wedges a mission.
 
   Returns `{:ok, phase_id}`, `{:ok, :end}`, or `{:error, reason}`.
   """
-  @spec next_phase(t(), String.t(), :pass | :fail | :advance) ::
+  @spec next_phase(t(), String.t(), :pass | :fail | :advance, map()) ::
           {:ok, String.t() | :end} | {:error, term()}
-  def next_phase(%__MODULE__{phases: phases}, current_id, verdict) do
+  def next_phase(%__MODULE__{phases: phases}, current_id, verdict, ctx \\ %{}) do
     case Enum.find(phases, &(&1.id == current_id)) do
       nil ->
         {:error, {:unknown_phase, current_id}}
-
-      %Phase{next: "end"} ->
-        {:ok, :end}
 
       %Phase{} = phase ->
         case verdict do
           :advance ->
             cond do
-              is_binary(phase.next) and phase.next != "" -> {:ok, normalize(phase.next)}
-              true -> {:error, {:no_unconditional_next, current_id}}
+              is_binary(phase.next) and phase.next != "" ->
+                {:ok, normalize(phase.next)}
+
+              is_list(phase.next) and phase.next != [] ->
+                resolve_conditional(phase.next, current_id, ctx)
+
+              true ->
+                {:error, {:no_unconditional_next, current_id}}
             end
 
           :pass when is_binary(phase.on_pass) ->
@@ -240,6 +254,19 @@ defmodule GiTF.Workflow do
             {:error, {:no_branch_for_verdict, current_id, v}}
         end
     end
+  end
+
+  defp resolve_conditional(transitions, current_id, ctx) do
+    Enum.reduce_while(transitions, {:error, {:no_matching_transition, current_id}}, fn
+      {:else, target}, _acc ->
+        {:halt, {:ok, normalize(target)}}
+
+      {when_expr, target}, acc ->
+        case GiTF.Workflow.Expr.eval(when_expr, ctx) do
+          {:ok, true} -> {:halt, {:ok, normalize(target)}}
+          _ -> {:cont, acc}
+        end
+    end)
   end
 
   @doc "Looks up a phase by id within a workflow."
@@ -329,7 +356,7 @@ defmodule GiTF.Workflow do
   end
 
   defp serialize_phase(%Phase{} = p) do
-    fields =
+    scalar_lines =
       [
         {"id", p.id},
         {"handler", handler_str(p.handler)},
@@ -341,15 +368,37 @@ defmodule GiTF.Workflow do
         {"reads", if(p.reads != [], do: yaml_list(p.reads))},
         {"produces", p.produces},
         {"strategies", if(p.strategies != [], do: yaml_list(p.strategies))},
-        {"next", p.next},
+        {"next", if(is_binary(p.next) and p.next != "", do: p.next)},
         {"on_pass", p.on_pass},
         {"on_fail", p.on_fail}
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
       |> Enum.map(fn {k, v} -> "    #{k}: #{v}" end)
-      |> Enum.join("\n")
 
+    conditional_next_lines =
+      if is_list(p.next) and p.next != [] do
+        ["    next:" | Enum.map(p.next, &serialize_transition/1)]
+      else
+        []
+      end
+
+    fields = Enum.join(scalar_lines ++ conditional_next_lines, "\n")
     "  - " <> String.trim_leading(fields, " ")
+  end
+
+  defp serialize_transition({:else, target}), do: "      - else: #{target}"
+
+  defp serialize_transition({when_expr, target}),
+    do: "      - when: #{yaml_inline_string(when_expr)}\n        then: #{target}"
+
+  # Quote an inline scalar only when it could be misread as YAML (has a
+  # colon-space, quotes, leading/trailing space, or YAML-special chars).
+  defp yaml_inline_string(s) do
+    if String.match?(s, ~r/[:#\[\]{}",']|^\s|\s$/) do
+      "\"" <> String.replace(s, "\"", "\\\"") <> "\""
+    else
+      s
+    end
   end
 
   defp handler_str(nil), do: nil
