@@ -97,9 +97,23 @@ defmodule GiTF.Intel do
 
   @doc """
   Returns compact historical context for a sector+phase prompt injection.
+
+  When `mission` is provided AND the knowledge engine is enabled, the
+  Karpathy-style wiki context (sector indexes + top-K relevant pages) is
+  appended to the historical context. Backward compatible: the old
+  arity-2 form remains for callers without a mission in hand.
   """
   def get_prompt_context(sector_id, phase) do
     PromptContext.for_phase(sector_id, phase)
+  end
+
+  def get_prompt_context(sector_id, phase, mission) when is_map(mission) do
+    historical = PromptContext.for_phase(sector_id, phase)
+    knowledge = GiTF.Knowledge.PromptContext.for_phase(sector_id, phase, mission)
+
+    [historical, knowledge]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
   end
 
   @doc """

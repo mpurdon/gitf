@@ -135,6 +135,7 @@ defmodule GiTF.Application do
              {GiTF.LSP.Supervisor, []},
              {GiTF.SectorSupervisor, []},
              {GiTF.Budget.Watchdog, []},
+             {GiTF.Vault.Writer, []},
              {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}
            ],
            [
@@ -188,6 +189,12 @@ defmodule GiTF.Application do
     opts = [strategy: :one_for_one, name: GiTF.Supervisor]
     result = Supervisor.start_link(children, opts)
     log_feature_flags()
+
+    # Attach Vault.Writer telemetry handlers — idempotent and gated at
+    # event time by `:vault_writer_enabled`, so this is safe even when
+    # the operator hasn't opted in to the vault.
+    GiTF.Vault.Writer.attach_telemetry()
+
     result
   end
 
@@ -202,7 +209,12 @@ defmodule GiTF.Application do
       {:skill_refinement_enabled, "GITF_SKILL_REFINEMENT_ENABLED", false},
       {:skill_auto_commit_enabled, "GITF_SKILL_AUTO_COMMIT_ENABLED", false},
       {:outcomes_enabled, "GITF_OUTCOMES_ENABLED", false},
-      {:outcome_refinement_enabled, "GITF_OUTCOME_REFINEMENT_ENABLED", false}
+      {:outcome_refinement_enabled, "GITF_OUTCOME_REFINEMENT_ENABLED", false},
+      {:vault_writer_enabled, "GITF_VAULT_WRITER_ENABLED", false},
+      {:knowledge_context_enabled, "GITF_KNOWLEDGE_CONTEXT_ENABLED", false},
+      {:knowledge_compile_enabled, "GITF_KNOWLEDGE_COMPILE_ENABLED", false},
+      {:workflow_dsl_enabled, "GITF_WORKFLOW_DSL_ENABLED", false},
+      {:workflow_inference_enabled, "GITF_WORKFLOW_INFERENCE_ENABLED", false}
     ]
 
     lines =

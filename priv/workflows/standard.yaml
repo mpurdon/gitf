@@ -1,0 +1,107 @@
+name: standard
+description: |
+  The Factory's default mission workflow. Mirrors the hardcoded phase
+  order shipped before v0.59 — preserving the exact behaviour for
+  missions that don't pick a custom workflow.
+
+phases:
+  - id: triage
+    handler: GiTF.Phases.Triage
+    timeout_minutes: 5
+    next: research
+
+  - id: research
+    handler: GiTF.Phases.Research
+    timeout_minutes: 30
+    model_tier: general
+    inject_knowledge: true
+    inject_skills: false
+    produces: research
+    next: requirements
+
+  - id: requirements
+    handler: GiTF.Phases.Requirements
+    timeout_minutes: 30
+    model_tier: general
+    inject_knowledge: true
+    reads: [research]
+    produces: requirements
+    next: design
+
+  - id: design
+    handler: GiTF.Phases.Design
+    timeout_minutes: 45
+    model_tier: opus
+    inject_knowledge: true
+    strategies: [minimal, normal, complex]
+    reads: [requirements, research]
+    produces: design
+    next: review
+
+  - id: review
+    handler: GiTF.Phases.Review
+    timeout_minutes: 30
+    model_tier: opus
+    inject_knowledge: true
+    reads: [design, requirements]
+    produces: review
+    on_pass: planning
+    on_fail: design
+    max_retries: 2
+    on_exhausted: advance
+
+  - id: planning
+    handler: GiTF.Phases.Planning
+    timeout_minutes: 30
+    model_tier: general
+    inject_knowledge: true
+    gate:
+      when: "mission.review_plan == true"
+      action: await_operator
+    reads: [design, requirements, review]
+    produces: planning
+    next: implementation
+
+  - id: implementation
+    handler: GiTF.Phases.Implementation
+    timeout_minutes: 90
+    model_tier: opus
+    inject_knowledge: true
+    inject_skills: true
+    reads: [planning, design]
+    produces: implementation
+    next: validation
+
+  - id: validation
+    handler: GiTF.Phases.Validation
+    timeout_minutes: 60
+    model_tier: general
+    inject_knowledge: true
+    reads: [implementation, requirements]
+    produces: validation
+    on_pass: simplify
+    on_fail: implementation
+    max_retries: 3
+
+  - id: simplify
+    handler: GiTF.Phases.Simplify
+    timeout_minutes: 30
+    model_tier: general
+    reads: [implementation]
+    produces: simplify
+    next: publish
+
+  - id: publish
+    handler: GiTF.Phases.Publish
+    timeout_minutes: 15
+    reads: [simplify, implementation]
+    produces: publish
+    next: scoring
+
+  - id: scoring
+    handler: GiTF.Phases.Scoring
+    timeout_minutes: 15
+    model_tier: general
+    reads: [validation, requirements]
+    produces: scoring
+    next: end

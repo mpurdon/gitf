@@ -85,6 +85,8 @@ defmodule GiTF.Web.Router do
     live("/approvals", ApprovalsLive)
     live("/ops/:id", OpDetailLive)
     live("/sectors", SectorsLive)
+    live("/workflows", WorkflowsLive)
+    live("/workflows/:name", WorkflowEditorLive)
     live("/autonomy", AutonomyLive)
     live("/providers", ProvidersLive)
     live("/health", HealthLive)

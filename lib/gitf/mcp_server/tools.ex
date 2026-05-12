@@ -578,6 +578,68 @@ defmodule GiTF.MCPServer.Tools do
           },
           required: ["sector_id", "tier", "confirm"]
         }
+      },
+      %{
+        name: "knowledge_get",
+        description:
+          "Read a wiki page by its slug. Returns title, body, tags, and link list. Use sector_id=null for global pages.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: ["string", "null"], description: "Sector ID, or null for global pages"},
+            slug: %{type: "string", description: "Page slug (kebab-case)"}
+          },
+          required: ["slug"]
+        }
+      },
+      %{
+        name: "knowledge_search",
+        description:
+          "Semantic search over wiki pages. Returns top-K page summaries ranked by cosine similarity to the query.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: ["string", "null"], description: "Sector ID, or null for global only"},
+            query: %{type: "string", description: "Free-text query"},
+            top_k: %{type: "integer", description: "Number of results (default 5)"},
+            min_similarity: %{
+              type: "number",
+              description: "Score floor; results below this are dropped (default 0.4)"
+            }
+          },
+          required: ["query"]
+        }
+      },
+      %{
+        name: "knowledge_links",
+        description:
+          "Returns pages linked to or from a given page. direction: 'out' | 'in' | 'both' (default both).",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: ["string", "null"], description: "Sector ID"},
+            slug: %{type: "string", description: "Page slug"},
+            direction: %{
+              type: "string",
+              enum: ["out", "in", "both"],
+              description: "Link direction (default 'both')"
+            }
+          },
+          required: ["slug"]
+        }
+      },
+      %{
+        name: "knowledge_index",
+        description:
+          "Read a curated index (table-of-contents) by name. Returns its structured entries.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: ["string", "null"], description: "Sector ID"},
+            name: %{type: "string", description: "Index name"}
+          },
+          required: ["name"]
+        }
       }
     ]
   end

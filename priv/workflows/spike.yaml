@@ -1,0 +1,32 @@
+name: spike
+description: |
+  Exploratory spike: research and produce a write-up but do NOT ship code.
+  Useful for "investigate whether X is feasible" / "compare approaches"
+  missions where the deliverable is knowledge, not a merge.
+
+phases:
+  - id: research
+    handler: GiTF.Phases.Research
+    timeout_minutes: 60
+    model_tier: opus
+    inject_knowledge: true
+    produces: research
+    next: design
+
+  - id: design
+    handler: GiTF.Phases.Design
+    timeout_minutes: 45
+    model_tier: opus
+    inject_knowledge: true
+    strategies: [minimal, normal, complex]
+    reads: [research]
+    produces: design
+    next: scoring
+
+  - id: scoring
+    handler: GiTF.Phases.Scoring
+    timeout_minutes: 15
+    model_tier: general
+    reads: [research, design]
+    produces: scoring
+    next: end

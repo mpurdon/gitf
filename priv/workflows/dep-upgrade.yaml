@@ -1,0 +1,41 @@
+name: dep-upgrade
+description: |
+  Dependency version bump. Skips research + design — the change is
+  mechanical. Validation is the load-bearing phase: it must catch any
+  behavioural drift introduced by the new version.
+
+phases:
+  - id: implementation
+    handler: GiTF.Phases.Implementation
+    timeout_minutes: 30
+    model_tier: general
+    inject_knowledge: true
+    inject_skills: true
+    produces: implementation
+    next: validation
+
+  - id: validation
+    handler: GiTF.Phases.Validation
+    timeout_minutes: 90
+    model_tier: opus
+    inject_knowledge: true
+    reads: [implementation]
+    produces: validation
+    on_pass: publish
+    on_fail: implementation
+    max_retries: 4
+
+  - id: publish
+    handler: GiTF.Phases.Publish
+    timeout_minutes: 15
+    reads: [implementation, validation]
+    produces: publish
+    next: scoring
+
+  - id: scoring
+    handler: GiTF.Phases.Scoring
+    timeout_minutes: 10
+    model_tier: general
+    reads: [validation]
+    produces: scoring
+    next: end

@@ -276,6 +276,13 @@ defmodule GiTF.Outcomes.Tracker do
         Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
           GiTF.Outcomes.Alerts.maybe_downgrade_on_ci_red(outcome)
         end)
+
+        # Knowledge.Compile distils entity pages from the merged
+        # mission into the sector's wiki. Self-gated; off the poll
+        # stream because the LLM call is slow.
+        Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+          GiTF.Knowledge.Compile.compile_after_merge(mission, outcome)
+        end)
       end
     end
   end

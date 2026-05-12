@@ -65,11 +65,19 @@ defmodule GiTF.Missions do
       explicit_issue_ref = attrs[:issue_ref] || attrs["issue_ref"]
       issue_ref = explicit_issue_ref || parse_issue_ref(goal)
 
+      sector_id = attrs[:sector_id] || attrs["sector_id"]
+      explicit_workflow = attrs[:workflow_id] || attrs["workflow_id"]
+
+      {workflow_id, inference_meta} =
+        resolve_workflow_with_inference(explicit_workflow, sector_id, goal)
+
+      artifacts = if inference_meta, do: %{"workflow_inference" => inference_meta}, else: %{}
+
       record = %{
         name: name,
         goal: goal,
         status: attrs[:status] || "pending",
-        sector_id: attrs[:sector_id] || attrs["sector_id"],
+        sector_id: sector_id,
         current_phase: "pending",
         phase_advance_seq: 0,
         priority: priority,
@@ -78,10 +86,11 @@ defmodule GiTF.Missions do
         review_plan: attrs[:review_plan] || attrs["review_plan"] || false,
         research_summary: nil,
         implementation_plan: nil,
-        artifacts: %{},
+        artifacts: artifacts,
         phase_jobs: %{},
         issue_ref: issue_ref,
-        cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"]
+        cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"],
+        workflow_id: workflow_id
       }
 
       case Archive.insert(:missions, record) do
@@ -92,6 +101,10 @@ defmodule GiTF.Missions do
             priority: priority,
             priority_source: priority_source
           })
+
+          if is_nil(explicit_workflow) and GiTF.Workflow.Inference.enabled?() and is_binary(goal) do
+            schedule_inference_for(mission, goal)
+          end
 
           result
 
@@ -175,6 +188,107 @@ defmodule GiTF.Missions do
   # it as a match within the same sector.
   defp match_issue_owner_repo?(existing, _ref) when is_map(existing), do: true
   defp match_issue_owner_repo?(_, _), do: false
+
+  @doc """
+  Switches a running mission to a different workflow. The mission's
+  `current_phase` is preserved — the new workflow takes effect on the
+  next phase advance. Errors when the target workflow can't be loaded
+  or is incompatible (M3 just persists the field; orchestrator
+  integration is M3-B).
+  """
+  @spec switch_workflow(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def switch_workflow(mission_id, workflow_name) when is_binary(workflow_name) do
+    mission = Archive.get(:missions, mission_id)
+
+    if is_nil(mission) do
+      {:error, :mission_not_found}
+    else
+      case GiTF.Workflow.resolve(workflow_name, mission[:sector_id]) do
+        {:ok, _w} ->
+          Archive.update(:missions, mission_id, fn m ->
+            Map.put(m, :workflow_id, workflow_name)
+          end)
+
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
+  # Resolution order:
+  #   explicit attr → AI classifier (if enabled) → sector default → "standard"
+  #
+  # Returns `{workflow_id, inference_meta}` where inference_meta is a
+  # map persisted under `mission.artifacts.workflow_inference` (or nil
+  # when the classifier wasn't consulted).
+  defp resolve_workflow_with_inference(explicit, _sector_id, _goal)
+       when is_binary(explicit) and explicit != "" do
+    {explicit, nil}
+  end
+
+  # Inference is potentially-slow LLM work; we don't block mission
+  # create on it. The mission ships immediately on the sector default,
+  # then `schedule_inference_for/2` runs the classifier in a Task and
+  # updates `workflow_id` + `artifacts.workflow_inference` if it
+  # comes back confident. Tests can disable async by setting
+  # `:workflow_inference_async` to `false`.
+  defp resolve_workflow_with_inference(_explicit, sector_id, _goal) do
+    {sector_default_workflow(sector_id), nil}
+  end
+
+  defp schedule_inference_for(mission, goal) do
+    if Application.get_env(:gitf, :workflow_inference_async, true) do
+      Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+        run_inference(mission, goal)
+      end)
+
+      :ok
+    else
+      run_inference(mission, goal)
+    end
+  end
+
+  defp run_inference(mission, goal) do
+    case GiTF.Workflow.Inference.classify(goal) do
+      {:ok, name, confidence, rationale} ->
+        meta = %{
+          "classifier" => "auto",
+          "selected" => name,
+          "confidence" => confidence,
+          "rationale" => rationale,
+          "at" => DateTime.utc_now() |> DateTime.to_iso8601()
+        }
+
+        Archive.update(:missions, mission.id, fn m ->
+          artifacts = Map.put(m[:artifacts] || %{}, "workflow_inference", meta)
+          m |> Map.put(:artifacts, artifacts) |> Map.put(:workflow_id, name)
+        end)
+
+      :no_match ->
+        :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # Kept for backward compatibility with any direct callers.
+  @doc false
+  def resolve_workflow_id(attrs, sector_id) do
+    cond do
+      is_binary(attrs[:workflow_id]) -> attrs[:workflow_id]
+      is_binary(attrs["workflow_id"]) -> attrs["workflow_id"]
+      true -> sector_default_workflow(sector_id)
+    end
+  end
+
+  defp sector_default_workflow(nil), do: "standard"
+
+  defp sector_default_workflow(sector_id) do
+    case Archive.get(:sectors, sector_id) do
+      %{default_workflow: w} when is_binary(w) and w != "" -> w
+      _ -> "standard"
+    end
+  end
 
   defp generate_name(goal) do
     goal

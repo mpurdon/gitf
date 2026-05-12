@@ -309,6 +309,72 @@ defmodule GiTF.Major.Orchestrator do
     phase = Map.get(mission, :current_phase, "pending")
     Logger.info("Orchestrator: advancing #{mission.id} from phase=#{phase} status=#{mission.status}")
 
+    if workflow_dispatch_active?(mission) do
+      advance_via_workflow(mission, phase)
+    else
+      advance_via_legacy(mission, phase)
+    end
+  end
+
+  defp workflow_dispatch_active?(mission) do
+    Application.get_env(:gitf, :workflow_dsl_enabled, false) == true and
+      Map.get(mission, :workflow_id) not in [nil, "", "standard"]
+  end
+
+  defp advance_via_workflow(mission, phase) do
+    case GiTF.Workflow.resolve(mission.workflow_id, mission.sector_id) do
+      {:ok, workflow} ->
+        decision = GiTF.Workflow.Advancer.decide(mission, workflow)
+
+        Logger.info(
+          "Orchestrator: workflow=#{workflow.name} decision=#{inspect(decision)} for #{mission.id}@#{phase}"
+        )
+
+        handle_workflow_decision(decision, mission, phase)
+
+      {:error, reason} ->
+        Logger.warning(
+          "Workflow #{mission.workflow_id} did not load for mission #{mission.id}: #{inspect(reason)}; legacy"
+        )
+
+        advance_via_legacy(mission, phase)
+    end
+  end
+
+  defp handle_workflow_decision({:wait, p}, _mission, _phase), do: {:ok, p}
+
+  defp handle_workflow_decision({:dispatch, next_id}, mission, _phase),
+    do: dispatch_phase(next_id, mission)
+
+  defp handle_workflow_decision(:complete, mission, _phase) do
+    GiTF.Missions.complete_quest(mission.id, "workflow reached :end")
+    {:ok, "completed"}
+  end
+
+  defp handle_workflow_decision({:retry, source, target}, mission, _phase) do
+    Archive.update(:missions, mission.id, fn m ->
+      retries = Map.get(m, :phase_retries) || %{}
+      Map.put(m, :phase_retries, Map.update(retries, source, 1, &(&1 + 1)))
+    end)
+
+    dispatch_phase(target, mission)
+  end
+
+  defp handle_workflow_decision({:retries_exhausted, p}, mission, _phase) do
+    Logger.warning("Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed")
+    GiTF.Missions.update(mission.id, %{status: "failed"})
+    {:ok, "failed"}
+  end
+
+  defp handle_workflow_decision({:error, reason}, mission, phase) do
+    Logger.warning(
+      "Workflow dispatch error for mission #{mission.id}: #{inspect(reason)}; falling back to legacy"
+    )
+
+    advance_via_legacy(mission, phase)
+  end
+
+  defp advance_via_legacy(mission, phase) do
     case phase do
       "pending" ->
         # Only start research if mission has a sector_id (new-style missions)
@@ -382,6 +448,44 @@ defmodule GiTF.Major.Orchestrator do
   """
   @spec phases() :: [String.t()]
   def phases, do: @phases
+
+  @doc """
+  Public dispatch hook for `GiTF.Phases.Default` and the upcoming
+  workflow-DSL orchestrator path (M3). Maps a phase id to its
+  hardcoded `start_<phase>/1` function so the workflow can drive phase
+  advancement without exposing every starter as `def`.
+
+  Pre-M3 callers (the existing hardcoded path) continue to call the
+  private `start_<phase>/1` functions directly; this dispatch exists
+  so the workflow DSL can call into the same logic without circular
+  module references.
+  """
+  @spec dispatch_phase(String.t(), map()) ::
+          {:ok, atom() | tuple()} | {:error, term()}
+  def dispatch_phase(phase_id, mission) do
+    case Map.fetch(phase_starters(), phase_id) do
+      {:ok, starter} -> starter.(mission)
+      :error -> {:error, {:unknown_phase, phase_id}}
+    end
+  end
+
+  defp phase_starters do
+    %{
+      "triage" => &start_triage/1,
+      "research" => &start_research/1,
+      "requirements" => &start_requirements/1,
+      "design" => &start_design/1,
+      "review" => &start_review/1,
+      "planning" => &start_planning/1,
+      "implementation" => &start_implementation/1,
+      "validation" => &start_validation/1,
+      "simplify" => &start_simplify/1,
+      "publish" => &start_publish/1,
+      "scoring" => &start_scoring/1,
+      "awaiting_approval" => &start_awaiting_approval/1,
+      "sync" => &start_merge/1
+    }
+  end
 
   # -- Phase Starters ----------------------------------------------------------
 
@@ -484,7 +588,7 @@ defmodule GiTF.Major.Orchestrator do
     else
       with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
         sector = Archive.get(:sectors, sector_id)
-        ctx = GiTF.Intel.get_prompt_context(sector_id, "research")
+        ctx = GiTF.Intel.get_prompt_context(sector_id, "research", mission)
         prompt = PhasePrompts.research_prompt(mission, sector, ctx, complexity: triage_complexity(mission))
         spawn_phase_ghost(mission, "research", prompt, model: "general")
         {:ok, "research"}
@@ -497,7 +601,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "requirements", "Research complete") do
-      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "requirements")
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "requirements", mission)
       prompt = PhasePrompts.requirements_prompt(mission, research, ctx)
       spawn_phase_ghost(mission, "requirements", prompt, model: "general")
       {:ok, "requirements"}
@@ -565,7 +669,7 @@ defmodule GiTF.Major.Orchestrator do
         Map.put(q, :design_strategy_count, length(strategies))
       end)
 
-      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "design")
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "design", mission)
 
       # Spawn parallel design ghosts — count scales with complexity
       Enum.each(strategies, fn %{name: strategy_name} ->
@@ -655,7 +759,7 @@ defmodule GiTF.Major.Orchestrator do
     review = GiTF.Missions.get_artifact(mission.id, "review")
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning", "Review approved") do
-      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "planning")
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "planning", mission)
       prompt = PhasePrompts.planning_prompt(mission, design, requirements, review, ctx)
       spawn_phase_ghost(mission, "planning", prompt, model: phase_model_for_complexity("planning", mission))
       {:ok, "planning"}
@@ -693,7 +797,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
-      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation")
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation", mission)
 
       diff_base = detect_diff_base(mission)
       changed_files = changed_files_from_impl(mission)
@@ -1162,7 +1266,7 @@ defmodule GiTF.Major.Orchestrator do
   # Rebuild the real prompt for a phase re-spawn using available artifacts
   defp rebuild_phase_prompt(mission, phase) do
     sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
-    ctx = GiTF.Intel.get_prompt_context(mission.sector_id, phase)
+    ctx = GiTF.Intel.get_prompt_context(mission.sector_id, phase, mission)
 
     case phase do
       "research" ->
@@ -1253,7 +1357,13 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp promote_selected_design(mission_id, review) do
+  @doc """
+  Copies the review-selected design variant onto the canonical
+  `"design"` artifact key. Public so `GiTF.Phases.Review` can call it
+  without duplicating the strategy-fallback logic.
+  """
+  @spec promote_selected_design(String.t(), map()) :: :ok | {:error, term()}
+  def promote_selected_design(mission_id, review) do
     selected = review["selected_design"] || "normal"
     key = "design_#{selected}"
 
@@ -2011,7 +2121,7 @@ defmodule GiTF.Major.Orchestrator do
            GiTF.Missions.transition_phase(mission.id, "scoring", "Simplify complete, scoring") do
       requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
       validation = GiTF.Missions.get_artifact(mission.id, "validation")
-      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "scoring")
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "scoring", mission)
       prompt = PhasePrompts.scoring_prompt(mission, requirements, validation, ctx)
       spawn_phase_ghost(mission, "scoring", prompt, model: "general")
       {:ok, "scoring"}
@@ -2880,10 +2990,15 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  # Returns the max redesign iterations, consulting sector intelligence at :high confidence.
-  defp max_redesign_for(nil), do: @default_max_redesign
+  @doc """
+  Max redesign iterations for `sector_id`, consulting sector
+  intelligence at `:high` confidence. Public so `GiTF.Phases.Review`
+  can apply the same policy.
+  """
+  @spec max_redesign_for(String.t() | nil) :: pos_integer()
+  def max_redesign_for(nil), do: @default_max_redesign
 
-  defp max_redesign_for(sector_id) do
+  def max_redesign_for(sector_id) do
     profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
 
     case profile do

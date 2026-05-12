@@ -916,6 +916,255 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:vault], result) do
+    subcommand = result_get(result, :args, :subcommand)
+    sector_opt = result_get(result, :options, :sector)
+
+    case subcommand do
+      "path" ->
+        case GiTF.gitf_dir() do
+          {:ok, root} -> IO.puts(GiTF.Vault.Path.vault_root(root))
+          {:error, _} -> Format.error("Not in a gitf workspace")
+        end
+
+      "open" ->
+        case GiTF.gitf_dir() do
+          {:ok, root} ->
+            path = GiTF.Vault.Path.vault_root(root)
+
+            case System.cmd("open", [path], stderr_to_stdout: true) do
+              {_, 0} -> Format.success("Opened #{path}")
+              {out, _} -> Format.error("Failed to open: #{out}")
+            end
+
+          {:error, _} ->
+            Format.error("Not in a gitf workspace")
+        end
+
+      "daily" ->
+        case GiTF.Vault.Writer.render_daily_note() do
+          {:ok, file} -> Format.success("Wrote #{file}")
+          {:error, reason} -> Format.error("Daily note failed: #{inspect(reason)}")
+        end
+
+      "reindex" ->
+        sector = resolve_sector(sector_opt)
+
+        if sector do
+          report = GiTF.Knowledge.Ingest.reindex_sector(sector)
+
+          Format.info(
+            "Reindex #{sector}: rescanned=#{report.rescanned} updated=#{report.updated} missing=#{report.missing}"
+          )
+
+          Enum.each(report.errors, fn {slug, reason} ->
+            Format.error("  #{slug}: #{inspect(reason)}")
+          end)
+        else
+          Format.error("Usage: gitf vault reindex --sector <id>")
+        end
+
+      other ->
+        Format.error("Unknown vault subcommand: #{other}. Try: path, open, daily, reindex")
+    end
+  end
+
+  defp dispatch([:knowledge], result) do
+    subcommand = result_get(result, :args, :subcommand)
+    target = result_get(result, :args, :target)
+    sector = resolve_sector(result_get(result, :options, :sector))
+    top_k = result_get(result, :options, :top_k) || 5
+
+    case subcommand do
+      "get" when is_binary(target) ->
+        case GiTF.Knowledge.Page.get(sector, target) do
+          nil ->
+            Format.error("Page not found: #{target}")
+
+          page ->
+            case GiTF.Knowledge.Page.read_body(sector, target) do
+              {:ok, body, _} -> IO.puts("# #{page.title}\n\n#{body}")
+              _ -> Format.error("Body missing on disk: #{page.file_path}")
+            end
+        end
+
+      "search" when is_binary(target) ->
+        case GiTF.Knowledge.Retrieval.search(sector, target, top_k: top_k, min_similarity: 0.0) do
+          {:ok, []} ->
+            Format.info("No matches.")
+
+          {:ok, results} ->
+            Enum.each(results, fn {score, p} ->
+              IO.puts("#{Float.round(score, 2)}  [#{p.slug}]  #{p.title}")
+            end)
+        end
+
+      "list" ->
+        case GiTF.Knowledge.Page.list(sector) do
+          [] ->
+            Format.info("No pages.")
+
+          pages ->
+            Enum.each(pages, fn p ->
+              tags = if p.tags == [], do: "", else: " (#{Enum.join(p.tags, ", ")})"
+              IO.puts("[#{p.slug}]  #{p.title}#{tags}")
+            end)
+        end
+
+      "links" when is_binary(target) ->
+        for direction <- [:out, :in] do
+          links = GiTF.Knowledge.Retrieval.links(sector, target, direction: direction)
+          IO.puts("#{direction}:")
+
+          if links == [] do
+            IO.puts("  (none)")
+          else
+            Enum.each(links, fn p -> IO.puts("  [#{p.slug}]  #{p.title}") end)
+          end
+        end
+
+      "index" when is_binary(target) ->
+        case GiTF.Knowledge.Index.get(sector, target) do
+          nil ->
+            Format.error("Index not found: #{target}")
+
+          idx ->
+            IO.puts("# #{idx.name}  (#{length(idx.entries)} entries)")
+
+            Enum.each(idx.entries, fn e ->
+              gloss = if e.gloss, do: " — #{e.gloss}", else: ""
+              IO.puts("- [[#{e.slug}]]#{gloss}")
+            end)
+        end
+
+      "lint" ->
+        report = GiTF.Knowledge.Lint.lint(sector)
+
+        Format.info(
+          "Lint #{sector || "(global)"}: #{report.page_count} pages · " <>
+            "#{length(report.orphans)} orphans · #{length(report.broken_links)} broken · " <>
+            "#{length(report.suggested_backlinks)} suggested"
+        )
+
+        if report.orphans != [] do
+          IO.puts("\n## Orphans")
+          Enum.each(report.orphans, fn o -> IO.puts("- [#{o.slug}]  #{o.title}") end)
+        end
+
+        if report.broken_links != [] do
+          IO.puts("\n## Broken links")
+          Enum.each(report.broken_links, fn b -> IO.puts("- [#{b.from}] → [[#{b.to}]]") end)
+        end
+
+        if report.suggested_backlinks != [] do
+          IO.puts("\n## Suggested backlinks")
+
+          Enum.each(report.suggested_backlinks, fn s ->
+            IO.puts("- [#{s.from}] mentions \"#{s.term}\" → [[#{s.to}]]")
+          end)
+        end
+
+      "ingest" ->
+        from = result_get(result, :options, :from)
+        tag = result_get(result, :options, :tag)
+
+        cond do
+          is_nil(from) ->
+            Format.error("Usage: gitf knowledge ingest --from <dir> --sector <id>")
+
+          is_nil(sector) ->
+            Format.error("Usage: gitf knowledge ingest --from <dir> --sector <id>")
+
+          true ->
+            opts = if is_binary(tag), do: [tag: tag], else: []
+            report = GiTF.Knowledge.Ingest.ingest_directory(from, sector, opts)
+
+            Format.info(
+              "Ingested: imported=#{report.imported} skipped=#{report.skipped} errors=#{length(report.errors)}"
+            )
+
+            Enum.each(report.errors, fn {file, reason} ->
+              Format.error("  #{file}: #{inspect(reason)}")
+            end)
+        end
+
+      _ ->
+        Format.error(
+          "Usage: gitf knowledge {get|search|links|index} <slug-or-query> | list | lint | ingest --from <dir>"
+        )
+    end
+  end
+
+  defp resolve_sector(nil) do
+    case GiTF.Sector.current() do
+      {:ok, sector} -> sector.id
+      _ -> nil
+    end
+  end
+
+  defp resolve_sector(id) when is_binary(id), do: id
+
+  defp dispatch([:workflow], result) do
+    subcommand = result_get(result, :args, :subcommand)
+    target = result_get(result, :args, :target)
+    sector = resolve_sector(result_get(result, :options, :sector))
+
+    case subcommand do
+      "list" ->
+        case GiTF.Workflow.list(sector) do
+          [] ->
+            Format.info("No workflows.")
+
+          workflows ->
+            Enum.each(workflows, fn w ->
+              source = if w.source_path, do: " (#{w.source_path})", else: ""
+              IO.puts("[#{w.name}]  #{w.description || ""}#{source}")
+            end)
+        end
+
+      "show" when is_binary(target) ->
+        case GiTF.Workflow.resolve(target, sector) do
+          {:ok, w} ->
+            IO.puts("# #{w.name}")
+            if w.description, do: IO.puts(w.description)
+            IO.puts("")
+
+            Enum.each(w.phases, fn p ->
+              tier = if p.model_tier, do: " · #{p.model_tier}", else: ""
+              advance = format_advance(p)
+              IO.puts("  #{p.id}#{tier}  →  #{advance}")
+            end)
+
+          {:error, reason} ->
+            Format.error("Workflow not found: #{inspect(reason)}")
+        end
+
+      "validate" when is_binary(target) ->
+        case GiTF.Workflow.resolve(target, sector) do
+          {:ok, w} ->
+            Format.success("Workflow #{w.name} is valid (#{length(w.phases)} phases).")
+
+          {:error, errors} when is_list(errors) ->
+            Format.error("Workflow #{target} failed validation:")
+            Enum.each(errors, fn e -> IO.puts("  - #{inspect(e)}") end)
+
+          {:error, reason} ->
+            Format.error("Workflow #{target} could not be loaded: #{inspect(reason)}")
+        end
+
+      _ ->
+        Format.error("Usage: gitf workflow {list | show <name> | validate <name>}")
+    end
+  end
+
+  defp format_advance(%{next: "end"}), do: "(end)"
+  defp format_advance(%{next: next}) when is_binary(next), do: next
+
+  defp format_advance(%{on_pass: p, on_fail: f}) when is_binary(p) and is_binary(f),
+    do: "pass→#{p} · fail→#{f}"
+
+  defp format_advance(_), do: "?"
+
   defp dispatch([:heal], _result) do
     if GiTF.Client.remote?() do
       Format.error("This command runs on the server. Run it there directly.")
@@ -4181,6 +4430,101 @@ defmodule GiTF.CLI do
               short: "-c",
               long: "--sector",
               help: "Sector ID for insights or learning",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        vault: [
+          name: "vault",
+          about: "Obsidian vault: path, open, daily note, reindex",
+          args: [
+            subcommand: [
+              help: "Subcommand: path, open, daily, reindex",
+              parser: :string,
+              required: true
+            ]
+          ],
+          options: [
+            sector: [
+              short: "-c",
+              long: "--sector",
+              help: "Sector ID (for reindex)",
+              parser: :string,
+              required: false
+            ],
+            from: [
+              long: "--from",
+              help: "Source markdown directory (for ingest)",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        workflow: [
+          name: "workflow",
+          about: "Workflows: list, show, validate",
+          args: [
+            subcommand: [
+              help: "Subcommand: list, show, validate",
+              parser: :string,
+              required: true
+            ],
+            target: [
+              help: "Workflow name (for show/validate)",
+              parser: :string,
+              required: false
+            ]
+          ],
+          options: [
+            sector: [
+              short: "-c",
+              long: "--sector",
+              help: "Sector ID (defaults to current sector)",
+              parser: :string,
+              required: false
+            ]
+          ]
+        ],
+        knowledge: [
+          name: "knowledge",
+          about: "Wiki: get, search, list, links, index, lint, ingest",
+          args: [
+            subcommand: [
+              help: "Subcommand: get, search, list, links, index, lint, ingest",
+              parser: :string,
+              required: true
+            ],
+            target: [
+              help: "Slug, query, or index name (subcommand-dependent)",
+              parser: :string,
+              required: false
+            ]
+          ],
+          options: [
+            sector: [
+              short: "-c",
+              long: "--sector",
+              help: "Sector ID (defaults to current sector)",
+              parser: :string,
+              required: false
+            ],
+            top_k: [
+              short: "-k",
+              long: "--top-k",
+              help: "Number of search results (default 5)",
+              parser: :integer,
+              required: false
+            ],
+            from: [
+              long: "--from",
+              help: "Source markdown directory (for ingest)",
+              parser: :string,
+              required: false
+            ],
+            tag: [
+              long: "--tag",
+              help: "Tag to apply to ingested pages",
               parser: :string,
               required: false
             ]

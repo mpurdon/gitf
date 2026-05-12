@@ -236,6 +236,7 @@ defmodule GiTF.Sector do
 
       with {:ok, sector} <- Archive.insert(:sectors, record) do
         set_current(sector.id)
+        seed_vault(sector)
         {:ok, sector}
       end
     end
@@ -260,9 +261,19 @@ defmodule GiTF.Sector do
 
       with {:ok, sector} <- Archive.insert(:sectors, record) do
         set_current(sector.id)
+        seed_vault(sector)
         {:ok, sector}
       end
     end
+  end
+
+  defp seed_vault(sector) do
+    case GiTF.gitf_dir() do
+      {:ok, gitf_root} -> GiTF.Vault.Layout.init_sector(gitf_root, sector)
+      _ -> :ok
+    end
+  rescue
+    _ -> :ok
   end
 
   defp validate_directory(path) do

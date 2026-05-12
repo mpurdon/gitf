@@ -1,0 +1,51 @@
+name: bug-fix
+description: |
+  Fast-path workflow for clear-cut bug fixes. Skips research, requirements,
+  and design — assumes the bug is well understood and goes straight to
+  planning, implementation, and validation. Validation failures retry
+  implementation up to 3 times before giving up.
+
+phases:
+  - id: planning
+    handler: GiTF.Phases.Planning
+    timeout_minutes: 15
+    model_tier: general
+    inject_knowledge: true
+    produces: planning
+    next: implementation
+
+  - id: implementation
+    handler: GiTF.Phases.Implementation
+    timeout_minutes: 60
+    model_tier: opus
+    inject_knowledge: true
+    inject_skills: true
+    reads: [planning]
+    produces: implementation
+    next: validation
+
+  - id: validation
+    handler: GiTF.Phases.Validation
+    timeout_minutes: 30
+    model_tier: general
+    inject_knowledge: true
+    reads: [implementation]
+    produces: validation
+    on_pass: publish
+    on_fail: implementation
+    max_retries: 3
+
+  - id: publish
+    handler: GiTF.Phases.Publish
+    timeout_minutes: 15
+    reads: [implementation, validation]
+    produces: publish
+    next: scoring
+
+  - id: scoring
+    handler: GiTF.Phases.Scoring
+    timeout_minutes: 10
+    model_tier: general
+    reads: [validation]
+    produces: scoring
+    next: end

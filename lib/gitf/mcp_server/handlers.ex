@@ -938,6 +938,108 @@ defmodule GiTF.MCPServer.Handlers do
   def call("set_autonomy_tier", _),
     do: {:error, "Missing required parameters: sector_id, tier, confirm"}
 
+  # -- Knowledge --------------------------------------------------------------
+
+  def call("knowledge_get", %{"slug" => slug} = args) do
+    sector_id = Map.get(args, "sector_id")
+
+    case GiTF.Knowledge.Page.get(sector_id, slug) do
+      nil ->
+        {:error, "Page not found: #{slug}"}
+
+      page ->
+        body =
+          case GiTF.Knowledge.Page.read_body(sector_id, slug) do
+            {:ok, body, _} -> body
+            _ -> ""
+          end
+
+        {:ok,
+         json_text(%{
+           slug: page.slug,
+           sector_id: page.sector_id,
+           title: page.title,
+           tags: page.tags,
+           links_out: page.links_out,
+           links_in: page.links_in,
+           file_path: page.file_path,
+           body: body
+         })}
+    end
+  end
+
+  def call("knowledge_get", _), do: {:error, "Missing required parameter: slug"}
+
+  def call("knowledge_search", %{"query" => query} = args) do
+    sector_id = Map.get(args, "sector_id")
+    top_k = Map.get(args, "top_k", 5)
+    min_sim = Map.get(args, "min_similarity", 0.4)
+
+    case GiTF.Knowledge.Retrieval.search(sector_id, query,
+           top_k: top_k,
+           min_similarity: min_sim
+         ) do
+      {:ok, results} ->
+        out =
+          Enum.map(results, fn {score, p} ->
+            %{
+              slug: p.slug,
+              title: p.title,
+              sector_id: p.sector_id,
+              score: score,
+              tags: p.tags
+            }
+          end)
+
+        {:ok, json_text(%{results: out})}
+    end
+  end
+
+  def call("knowledge_search", _), do: {:error, "Missing required parameter: query"}
+
+  def call("knowledge_links", %{"slug" => slug} = args) do
+    sector_id = Map.get(args, "sector_id")
+
+    direction =
+      case Map.get(args, "direction", "both") do
+        "out" -> :out
+        "in" -> :in
+        _ -> :both
+      end
+
+    pages = GiTF.Knowledge.Retrieval.links(sector_id, slug, direction: direction)
+
+    out =
+      Enum.map(pages, fn p ->
+        %{slug: p.slug, title: p.title, sector_id: p.sector_id, tags: p.tags}
+      end)
+
+    {:ok, json_text(%{slug: slug, direction: direction, pages: out})}
+  end
+
+  def call("knowledge_links", _), do: {:error, "Missing required parameter: slug"}
+
+  def call("knowledge_index", %{"name" => name} = args) do
+    sector_id = Map.get(args, "sector_id")
+
+    case GiTF.Knowledge.Index.get(sector_id, name) do
+      nil ->
+        {:error, "Index not found: #{name}"}
+
+      idx ->
+        {:ok,
+         json_text(%{
+           name: idx.name,
+           sector_id: idx.sector_id,
+           kind: idx.kind,
+           position: idx.position,
+           entries: idx.entries
+         })}
+    end
+  end
+
+  def call("knowledge_index", _), do: {:error, "Missing required parameter: name"}
+
   def call(tool_name, _args), do: {:error, "Unknown tool: #{tool_name}"}
 
   defp parse_autonomy_tier("trusted"), do: {:ok, :trusted}

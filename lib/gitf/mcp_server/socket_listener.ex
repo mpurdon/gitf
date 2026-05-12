@@ -50,8 +50,12 @@ defmodule GiTF.MCPServer.SocketListener do
   def init(_opts) do
     path = socket_path()
 
-    # Ensure directory exists
-    File.mkdir_p!(Path.dirname(path))
+    dir = Path.dirname(path)
+    File.mkdir_p!(dir)
+    # The MCP transport has no per-connection authn — it's "trust whoever
+    # can connect()". Lock down both the parent dir and the socket so only
+    # the BEAM owner can talk to it.
+    _ = File.chmod(dir, 0o700)
 
     case cleanup_stale_socket(path) do
       :ok ->
@@ -66,6 +70,7 @@ defmodule GiTF.MCPServer.SocketListener do
                sndbuf: 1_048_576
              ]) do
           {:ok, listen_socket} ->
+            _ = File.chmod(path, 0o600)
             write_pid_file()
             Logger.info("MCP socket listening at #{path}")
             send(self(), :accept)

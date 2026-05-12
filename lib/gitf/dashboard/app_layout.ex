@@ -95,6 +95,7 @@ defmodule GiTF.Dashboard.AppLayout do
 
           <%!-- Configuration --%>
           <a href={"#{@prefix}/sectors"} class={if @current_path == "/sectors", do: "active"}>Sectors</a>
+          <a href={"#{@prefix}/workflows"} class={if @current_path == "/workflows", do: "active"}>Workflows</a>
           <a href={"#{@prefix}/providers"} class={if @current_path == "/providers", do: "active"}>Providers</a>
           <a href={"#{@prefix}/settings"} class={if active?(@current_path, "/settings"), do: "active"}>Settings</a>
           <span style="font-size:0.7rem; color:#484f58; cursor:help" title="Press ? for keyboard shortcuts">?</span>

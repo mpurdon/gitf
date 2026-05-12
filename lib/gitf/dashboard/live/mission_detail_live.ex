@@ -563,6 +563,18 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <%= if @duration do %>
               <span style="font-size:0.75rem; color:#6b7280">&middot; {@duration}</span>
             <% end %>
+            <% workflow_id = Map.get(@mission, :workflow_id) %>
+            <%= if is_binary(workflow_id) and workflow_id != "" do %>
+              <.link navigate={"/dashboard/workflows/" <> workflow_id} style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:#1f6feb33; color:#58a6ff; text-decoration:none">
+                workflow: {workflow_id}
+              </.link>
+            <% end %>
+            <% inf = get_in(@mission, [:artifacts, "workflow_inference"]) %>
+            <%= if is_map(inf) do %>
+              <span style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:#21262d; color:#8b949e" title={inf["rationale"] || ""}>
+                auto-classified · {Float.round((inf["confidence"] || 0) * 1.0, 2)}
+              </span>
+            <% end %>
           </div>
         </div>
 

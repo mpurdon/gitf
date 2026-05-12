@@ -1,0 +1,28 @@
+name: doc-only
+description: |
+  Documentation-only changes. No implementation phase, no validation
+  loop — the diff is text, the cost is low, and the risk is bounded.
+  Useful for README updates, ADR additions, runbook fixes.
+
+phases:
+  - id: implementation
+    handler: GiTF.Phases.Implementation
+    timeout_minutes: 30
+    model_tier: general
+    inject_knowledge: true
+    produces: implementation
+    next: simplify
+
+  - id: simplify
+    handler: GiTF.Phases.Simplify
+    timeout_minutes: 15
+    reads: [implementation]
+    produces: simplify
+    next: publish
+
+  - id: publish
+    handler: GiTF.Phases.Publish
+    timeout_minutes: 10
+    reads: [implementation]
+    produces: publish
+    next: end

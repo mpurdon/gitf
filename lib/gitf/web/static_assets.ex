@@ -9,6 +9,7 @@ defmodule GiTF.Web.StaticAssets do
 
   @phoenix_js File.read!("deps/phoenix/priv/static/phoenix.min.js")
   @live_view_js File.read!("deps/phoenix_live_view/priv/static/phoenix_live_view.min.js")
+  @sortable_js File.read!("priv/static/assets/sortable.min.js")
 
   @impl true
   def init(opts), do: opts
@@ -25,6 +26,13 @@ defmodule GiTF.Web.StaticAssets do
     conn
     |> Plug.Conn.put_resp_content_type("application/javascript")
     |> Plug.Conn.send_resp(200, @live_view_js)
+    |> Plug.Conn.halt()
+  end
+
+  def call(%{request_path: "/assets/sortable.min.js"} = conn, _opts) do
+    conn
+    |> Plug.Conn.put_resp_content_type("application/javascript")
+    |> Plug.Conn.send_resp(200, @sortable_js)
     |> Plug.Conn.halt()
   end
 

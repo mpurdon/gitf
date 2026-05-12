@@ -1,0 +1,89 @@
+name: security-patch
+description: |
+  Security-sensitive change. Includes design review and an explicit
+  operator-approval gate before publish — a security patch should
+  never auto-merge.
+
+phases:
+  - id: research
+    handler: GiTF.Phases.Research
+    timeout_minutes: 30
+    model_tier: opus
+    inject_knowledge: true
+    produces: research
+    next: design
+
+  - id: design
+    handler: GiTF.Phases.Design
+    timeout_minutes: 45
+    model_tier: opus
+    inject_knowledge: true
+    strategies: [minimal, normal]
+    reads: [research]
+    produces: design
+    next: review
+
+  - id: review
+    handler: GiTF.Phases.Review
+    timeout_minutes: 30
+    model_tier: opus
+    inject_knowledge: true
+    reads: [design, research]
+    produces: review
+    on_pass: planning
+    on_fail: design
+    max_retries: 2
+
+  - id: planning
+    handler: GiTF.Phases.Planning
+    timeout_minutes: 20
+    model_tier: general
+    inject_knowledge: true
+    reads: [design]
+    produces: planning
+    next: implementation
+
+  - id: implementation
+    handler: GiTF.Phases.Implementation
+    timeout_minutes: 60
+    model_tier: opus
+    inject_knowledge: true
+    inject_skills: true
+    reads: [planning, design]
+    produces: implementation
+    next: validation
+
+  - id: validation
+    handler: GiTF.Phases.Validation
+    timeout_minutes: 60
+    model_tier: opus
+    inject_knowledge: true
+    reads: [implementation, design]
+    produces: validation
+    on_pass: awaiting_approval
+    on_fail: implementation
+    max_retries: 3
+
+  - id: awaiting_approval
+    handler: GiTF.Phases.Default
+    gate:
+      when: "true"
+      action: await_operator
+    reads: [validation]
+    produces: awaiting_approval
+    next: publish
+
+  - id: publish
+    handler: GiTF.Phases.Publish
+    timeout_minutes: 15
+    reads: [implementation, validation]
+    produces: publish
+    next: scoring
+
+  - id: scoring
+    handler: GiTF.Phases.Scoring
+    timeout_minutes: 10
+    model_tier: general
+    reads: [validation]
+    produces: scoring
+    next: end

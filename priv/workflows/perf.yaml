@@ -1,0 +1,78 @@
+name: perf
+description: |
+  Performance work. Heavy on validation (the change must be measured)
+  and adds a benchmark-style validation phase via the standard
+  Validation handler — the prompt is expected to require a measured
+  before/after. Otherwise mirrors standard.
+
+phases:
+  - id: research
+    handler: GiTF.Phases.Research
+    timeout_minutes: 45
+    model_tier: opus
+    inject_knowledge: true
+    produces: research
+    next: design
+
+  - id: design
+    handler: GiTF.Phases.Design
+    timeout_minutes: 45
+    model_tier: opus
+    inject_knowledge: true
+    strategies: [minimal, normal, complex]
+    reads: [research]
+    produces: design
+    next: planning
+
+  - id: planning
+    handler: GiTF.Phases.Planning
+    timeout_minutes: 20
+    model_tier: general
+    inject_knowledge: true
+    reads: [design, research]
+    produces: planning
+    next: implementation
+
+  - id: implementation
+    handler: GiTF.Phases.Implementation
+    timeout_minutes: 120
+    model_tier: opus
+    inject_knowledge: true
+    inject_skills: true
+    reads: [planning, design]
+    produces: implementation
+    next: validation
+
+  - id: validation
+    handler: GiTF.Phases.Validation
+    timeout_minutes: 90
+    model_tier: opus
+    inject_knowledge: true
+    reads: [implementation, research]
+    produces: validation
+    on_pass: simplify
+    on_fail: implementation
+    max_retries: 4
+
+  - id: simplify
+    handler: GiTF.Phases.Simplify
+    timeout_minutes: 30
+    model_tier: general
+    reads: [implementation, validation]
+    produces: simplify
+    next: publish
+
+  - id: publish
+    handler: GiTF.Phases.Publish
+    timeout_minutes: 15
+    reads: [simplify, validation]
+    produces: publish
+    next: scoring
+
+  - id: scoring
+    handler: GiTF.Phases.Scoring
+    timeout_minutes: 10
+    model_tier: general
+    reads: [validation]
+    produces: scoring
+    next: end

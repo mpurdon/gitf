@@ -32,6 +32,13 @@ section.log
 .hive/
 .gitf/
 
+# Obsidian vault — runtime projection of the Archive (per the knowledge
+# engine design the default root is <gitf_path>/vault/). Generated, not source.
+/vault/
+
+# macOS Finder metadata.
+.DS_Store
+
 # MCP client config (local to each machine).
 .mcp.json
 

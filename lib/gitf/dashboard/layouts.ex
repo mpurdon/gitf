@@ -617,6 +617,7 @@ defmodule GiTF.Dashboard.Layouts do
         {@inner_content}
         <script src="/assets/phoenix.min.js"></script>
         <script src="/assets/phoenix_live_view.min.js"></script>
+        <script src="/assets/sortable.min.js"></script>
         <script>
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           let Hooks = {};
@@ -629,6 +630,28 @@ defmodule GiTF.Dashboard.Layouts do
                 sessionStorage.setItem(key, value);
               });
             }
+          };
+          // Workflow editor: drag-drop reordering of phase cards.
+          // The hook turns the host element into a Sortable; when the user
+          // releases a drag, it pushes a `reorder_phases` event with the
+          // new ordering of phase ids (taken from each card's data-phase-id).
+          Hooks.SortablePhases = {
+            mounted() {
+              if (!window.Sortable) { return; }
+              this.sortable = new Sortable(this.el, {
+                handle: ".drag-handle",
+                animation: 150,
+                ghostClass: "phase-card-ghost",
+                chosenClass: "phase-card-chosen",
+                onEnd: (evt) => {
+                  let order = Array.from(this.el.children)
+                    .map(el => el.dataset.phaseId)
+                    .filter(id => id);
+                  this.pushEvent("reorder_phases", { order: order });
+                }
+              });
+            },
+            destroyed() { if (this.sortable) { this.sortable.destroy(); } }
           };
           let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
             params: { _csrf_token: csrfToken },

@@ -1,0 +1,71 @@
+name: refactor
+description: |
+  Pure refactor: behaviour-preserving code change. Skips research and
+  requirements (no new behaviour to specify) but keeps design + review
+  to argue the new shape, plus full validation to prove no regressions.
+
+phases:
+  - id: design
+    handler: GiTF.Phases.Design
+    timeout_minutes: 45
+    model_tier: opus
+    inject_knowledge: true
+    strategies: [minimal, normal]
+    produces: design
+    next: review
+
+  - id: review
+    handler: GiTF.Phases.Review
+    timeout_minutes: 30
+    model_tier: opus
+    inject_knowledge: true
+    reads: [design]
+    produces: review
+    on_pass: planning
+    on_fail: design
+    max_retries: 2
+
+  - id: planning
+    handler: GiTF.Phases.Planning
+    timeout_minutes: 20
+    model_tier: general
+    inject_knowledge: true
+    reads: [design, review]
+    produces: planning
+    next: implementation
+
+  - id: implementation
+    handler: GiTF.Phases.Implementation
+    timeout_minutes: 90
+    model_tier: opus
+    inject_knowledge: true
+    inject_skills: true
+    reads: [planning, design]
+    produces: implementation
+    next: validation
+
+  - id: validation
+    handler: GiTF.Phases.Validation
+    timeout_minutes: 60
+    model_tier: general
+    inject_knowledge: true
+    reads: [implementation]
+    produces: validation
+    on_pass: simplify
+    on_fail: implementation
+    max_retries: 3
+
+  - id: simplify
+    handler: GiTF.Phases.Simplify
+    timeout_minutes: 30
+    model_tier: general
+    reads: [implementation]
+    produces: simplify
+    next: publish
+
+  - id: publish
+    handler: GiTF.Phases.Publish
+    timeout_minutes: 15
+    reads: [simplify, implementation]
+    produces: publish
+    next: end
