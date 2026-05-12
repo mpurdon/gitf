@@ -1,5 +1,5 @@
 defmodule GiTF.Skills.HygieneTest do
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.Skills
   alias GiTF.Skills.Hygiene

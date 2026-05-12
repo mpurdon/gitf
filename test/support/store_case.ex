@@ -20,7 +20,8 @@ defmodule GiTF.StoreCase do
   2. Stops any existing Archive
   3. Creates a temp directory
   4. Starts a fresh Archive pointing at the temp dir
-  5. On exit: stops the Archive and cleans up the temp dir
+  5. On exit: stops the test Archive, cleans up the temp dir, and restores a
+     fresh app-level Archive for whatever non-isolated test runs next
 
   All tests using this template run with `async: false` to avoid
   concurrent access to the singleton Archive process.
@@ -46,6 +47,10 @@ defmodule GiTF.StoreCase do
     on_exit(fn ->
       GiTF.Test.StoreHelper.stop_store()
       File.rm_rf!(store_dir)
+      # Leave a healthy app-level Archive behind so non-isolated tests that
+      # run after this module (simulator / skills / E2E) don't inherit a
+      # stopped or half-deleted store.
+      GiTF.Test.StoreHelper.restore_app_store()
     end)
 
     %{store_dir: store_dir}

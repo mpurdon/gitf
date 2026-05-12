@@ -4,7 +4,7 @@ defmodule GiTF.Skills.MCPHandlersTest do
   `delete_skill`, `skills_stats` handlers directly.
   """
 
-  use ExUnit.Case, async: false
+  use GiTF.StoreCase
 
   alias GiTF.MCPServer.Handlers
   alias GiTF.Skills

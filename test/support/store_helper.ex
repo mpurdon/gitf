@@ -32,6 +32,30 @@ defmodule GiTF.Test.StoreHelper do
     Process.sleep(10)
   end
 
+  @doc """
+  Starts a fresh, healthy GiTF.Archive for tests that use the app-level
+  singleton rather than an isolated store (most simulator / skills / E2E
+  tests). Call this from the `on_exit` of any helper that ran `stop_store/0`
+  — otherwise a later non-isolated test finds *no* Archive (or a half-torn-down
+  one) and its setup blows up, which is the dominant source of order-dependent
+  failures in the suite.
+
+  Uses a stable temp directory so repeated restores don't leak dirs; the
+  contents don't matter because non-isolated tests sweep the collections they
+  care about in their own `setup`.
+  """
+  def restore_app_store do
+    stop_store()
+
+    dir = Path.join(System.tmp_dir!(), "gitf_test_app_store")
+    File.mkdir_p!(dir)
+
+    case GiTF.Archive.start_link(data_dir: dir) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+    end
+  end
+
   @doc "Stops a named GenServer if it's running. Catches exits gracefully."
   def safe_stop(name) when is_atom(name) do
     case Process.whereis(name) do
