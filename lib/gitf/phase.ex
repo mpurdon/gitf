@@ -126,18 +126,17 @@ defmodule GiTF.Phase do
   retries exhausted / `:terminal_*` verdict (workflow `:retries_exhausted`).
 
   `kind` is `:complete` (mission finishes successfully) or
-  `:retries_exhausted` (mission finishes in failure). The default
-  behaviour, used when this callback isn't exported, is
+  `:retries_exhausted` (mission finishes in failure). `artifact` is the
+  just-completed phase's artifact (may be `nil`) — handlers like
+  `Phases.Publish` use it to extract a failure reason for telemetry, and
+  `Phases.Triage` to pull `bug_evidence` for the `no_work_needed`
+  completion artifact.
+
+  The default behaviour, used when this callback isn't exported, is
   `Missions.complete_quest/2` for `:complete` and `Missions.update(id,
   %{status: "failed"})` for `:retries_exhausted`.
-
-  Handlers override this for phases where "the workflow is done here"
-  doesn't mean the standard completion semantics — e.g.,
-  `Phases.Scoring.terminal(:complete)` calls `mark_post_processing_done/1`
-  because the mission was already user-visibly completed by
-  `Phases.Publish.before_advance/3`.
   """
-  @callback terminal(mission(), kind :: :complete | :retries_exhausted) :: :ok
+  @callback terminal(mission(), kind :: :complete | :retries_exhausted, artifact :: term()) :: :ok
 
-  @optional_callbacks verdict: 1, verdict: 2, before_advance: 3, terminal: 2
+  @optional_callbacks verdict: 1, verdict: 2, before_advance: 3, terminal: 3
 end

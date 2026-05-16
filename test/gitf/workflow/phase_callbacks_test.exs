@@ -35,9 +35,14 @@ defmodule GiTF.Workflow.PhaseCallbacksTest do
 
     def start(_m, _pc, _ctx), do: {:ok, :spawned}
 
-    # Stash kind on the mission so the test can observe what fired.
-    def terminal(mission, kind) do
-      GiTF.Archive.update(:missions, mission.id, fn m -> Map.put(m, :terminal_kind, kind) end)
+    # Stash kind + the seen artifact on the mission so the test can observe both.
+    def terminal(mission, kind, artifact) do
+      GiTF.Archive.update(:missions, mission.id, fn m ->
+        m
+        |> Map.put(:terminal_kind, kind)
+        |> Map.put(:terminal_artifact, artifact)
+      end)
+
       :ok
     end
   end
@@ -114,22 +119,24 @@ defmodule GiTF.Workflow.PhaseCallbacksTest do
   end
 
   describe "invoke_terminal/3" do
-    test "calls handler.terminal/2 when exported" do
+    test "calls handler.terminal/3 with the just-completed phase's artifact" do
       w = %Workflow{
         name: "t",
         phases: [%Phase{id: "p", handler: RecordsTerminal, next: "end"}]
       }
 
-      m = insert_mission!(%{current_phase: "p"})
+      m = insert_mission!(%{current_phase: "p", artifacts: %{"p" => %{"x" => 1}}})
 
       assert {:ok, :handled} = Advancer.invoke_terminal(m, w, :complete)
-      assert GiTF.Archive.get(:missions, m.id).terminal_kind == :complete
+      stored = GiTF.Archive.get(:missions, m.id)
+      assert stored.terminal_kind == :complete
+      assert stored.terminal_artifact == %{"x" => 1}
 
       assert {:ok, :handled} = Advancer.invoke_terminal(m, w, :retries_exhausted)
       assert GiTF.Archive.get(:missions, m.id).terminal_kind == :retries_exhausted
     end
 
-    test "returns :default when no handler.terminal/2 is exported" do
+    test "returns :default when no handler.terminal/3 is exported" do
       w = %Workflow{name: "t", phases: [%Phase{id: "p", handler: UsesArity2, next: "end"}]}
       m = insert_mission!(%{current_phase: "p"})
       assert :default = Advancer.invoke_terminal(m, w, :complete)

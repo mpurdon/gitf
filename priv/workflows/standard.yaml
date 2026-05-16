@@ -1,14 +1,37 @@
 name: standard
 description: |
-  The Factory's default mission workflow. Mirrors the hardcoded phase
-  order shipped before v0.59 — preserving the exact behaviour for
-  missions that don't pick a custom workflow.
+  The Factory's default mission workflow. Mirrors the legacy hardcoded
+  phase order shipped before v0.59 — preserved exactly, but now declared
+  in this file rather than dispatched by `Major.Orchestrator.advance_via_legacy/2`.
+
+  Conditional `next:`/`on_pass:` rules encode the data-driven routing
+  legacy did with `route_to_first_unskipped_phase/1`,
+  `Override.requires_approval?/1`, the `bug_reproducible == false`
+  short-circuit, and the single-variant-design "skip review" optimisation.
 
 phases:
   - id: triage
     handler: GiTF.Phases.Triage
     timeout_minutes: 5
-    next: research
+    # Routing matches Orchestrator.Decisions.next_phase_after_triage/1 +
+    # the `bug_reproducible == false` + strong-evidence short-circuit
+    # (Phases.Triage.before_advance stamps `no_work_needed` when the
+    # evidence is strong enough; the `then: end` rule completes the
+    # mission via Phases.Triage.terminal/3).
+    next:
+      - when: "artifact.no_work_needed == true"
+        then: end
+      - when: "artifact.skip_flags.skip_research != true"
+        then: research
+      - when: "artifact.skip_flags.skip_requirements != true"
+        then: requirements
+      - when: "artifact.skip_flags.skip_design != true"
+        then: design
+      - when: "artifact.skip_flags.skip_review != true"
+        then: review
+      - when: "artifact.skip_flags.skip_planning != true"
+        then: planning
+      - else: implementation
 
   - id: research
     handler: GiTF.Phases.Research
@@ -36,7 +59,13 @@ phases:
     strategies: [minimal, normal, complex]
     reads: [requirements, research]
     produces: design
-    next: review
+    # Phases.Design.before_advance writes `single_variant`. A single-variant
+    # design has nothing for review to pick among, so skip straight to
+    # planning — matches the legacy check_design_complete optimisation.
+    next:
+      - when: "artifact.single_variant == true"
+        then: planning
+      - else: review
 
   - id: review
     handler: GiTF.Phases.Review
@@ -79,9 +108,34 @@ phases:
     inject_knowledge: true
     reads: [implementation, requirements]
     produces: validation
-    on_pass: simplify
-    on_fail: implementation
-    max_retries: 3
+    # Phases.Validation.verdict/2 stamps `artifact.requires_approval` from
+    # Override.requires_approval?/1 before returning :pass — the conditional
+    # on_pass routes between human-approval and direct merge. on_fail is
+    # declared for the schema's sake but is unreachable: verdict/2 only
+    # returns :pass / :wait / :terminal_fail (the latter handled via
+    # max_retries: 0 + on_exhausted: fail → Phases.Validation.terminal/3).
+    on_pass:
+      - when: "artifact.requires_approval == true"
+        then: awaiting_approval
+      - else: sync
+    on_fail: validation
+    max_retries: 0
+    on_exhausted: fail
+
+  - id: awaiting_approval
+    handler: GiTF.Phases.AwaitingApproval
+    # Phases.AwaitingApproval.verdict/2 covers `:approved`/`:not_required`
+    # → :pass; `:rejected` → :terminal_fail; `:pending` (timeout + auto-
+    # approve / auto-reject / critical-risk alert).
+    on_pass: sync
+    on_fail: awaiting_approval
+    max_retries: 0
+    on_exhausted: fail
+
+  - id: sync
+    handler: GiTF.Phases.Sync
+    timeout_minutes: 30
+    next: simplify
 
   - id: simplify
     handler: GiTF.Phases.Simplify

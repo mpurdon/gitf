@@ -98,9 +98,11 @@ defmodule GiTF.Workflow.Advancer do
 
     with {:ok, %Phase{handler: handler}} when not is_nil(handler) <-
            Workflow.phase(workflow, phase_id),
-         true <- ensure_exported?(handler, :terminal, 2) do
+         true <- ensure_exported?(handler, :terminal, 3) do
+      artifact = GiTF.Missions.get_artifact(mission.id, phase_id)
+
       try do
-        handler.terminal(mission, kind)
+        handler.terminal(mission, kind, artifact)
         {:ok, :handled}
       rescue
         _ -> :default

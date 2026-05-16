@@ -318,7 +318,8 @@ defmodule GiTF.Major.Orchestrator do
 
   defp workflow_dispatch_active?(mission) do
     Application.get_env(:gitf, :workflow_dsl_enabled, true) == true and
-      Map.get(mission, :workflow_id) not in [nil, "", "standard"]
+      is_binary(Map.get(mission, :workflow_id)) and
+      Map.get(mission, :workflow_id) != ""
   end
 
   defp advance_via_workflow(mission, phase) do

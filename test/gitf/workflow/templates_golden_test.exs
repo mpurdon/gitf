@@ -59,23 +59,31 @@ defmodule GiTF.Workflow.TemplatesGoldenTest do
     end
   end
 
-  defp next_states(_workflow, %Phase{next: "end"}, _depth, _path), do: []
-
   defp next_states(_workflow, %Phase{} = phase, depth, path) do
     next_targets =
       cond do
-        is_binary(phase.next) and phase.next != "" -> [phase.next]
-        is_binary(phase.on_pass) and is_binary(phase.on_fail) -> [phase.on_pass, phase.on_fail]
-        true -> []
+        branch_targets(phase.next) != [] ->
+          branch_targets(phase.next)
+
+        branch_targets(phase.on_pass) != [] and branch_targets(phase.on_fail) != [] ->
+          branch_targets(phase.on_pass) ++ branch_targets(phase.on_fail)
+
+        true ->
+          []
       end
 
     Enum.flat_map(next_targets, fn t ->
-      cond do
-        t == "end" -> []
-        true -> [{t, depth + 1, [t | path]}]
-      end
+      if t == "end", do: [], else: [{t, depth + 1, [t | path]}]
     end)
   end
+
+  # A `next:`/`on_pass:`/`on_fail:` field is either a string target, a
+  # conditional rule list `[{when_or_else, target}, ...]`, or nil. The
+  # walker enumerates *every* target reachable from that field so a
+  # mis-routed conditional `then:` is caught at CI time too.
+  defp branch_targets(s) when is_binary(s) and s != "", do: [s]
+  defp branch_targets(list) when is_list(list), do: Enum.map(list, fn {_cond, t} -> t end)
+  defp branch_targets(_), do: []
 
   # We treat a path as "seen" by phase_id PLUS the most recent two
   # steps — that lets a verdict cycle (impl→validate→impl) occur
