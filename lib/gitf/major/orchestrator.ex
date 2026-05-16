@@ -905,7 +905,8 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp start_merge(mission) do
+  @doc false
+  def start_merge(mission) do
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "sync", "Validation passed, merging") do
       sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
@@ -1165,7 +1166,8 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp revalidate_quest(mission) do
+  @doc false
+  def revalidate_quest(mission) do
     # Quick re-validation: check that implementation ops still pass verification
     impl_jobs =
       for op <- mission.ops, !op[:phase_job], op.status == "done", do: op
@@ -1196,7 +1198,8 @@ defmodule GiTF.Major.Orchestrator do
       false
   end
 
-  defp approval_timed_out?(mission_id) do
+  @doc false
+  def approval_timed_out?(mission_id) do
     case Archive.find_one(:approval_requests, fn r ->
            r.mission_id == mission_id and r.status == "pending"
          end) do
@@ -3393,11 +3396,13 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp approval_timeout_hours, do: Config.get([:approvals, :timeout_hours], 1)
+  @doc false
+  def approval_timeout_hours, do: Config.get([:approvals, :timeout_hours], 1)
   defp max_quest_age_hours, do: Config.get([:major, :mission_timeout_hours], 24)
 
   # Determine the highest-risk op type in a mission (for auto-approve gating)
-  defp mission_max_risk(mission_id) do
+  @doc false
+  def mission_max_risk(mission_id) do
     case GiTF.Archive.get(:missions, mission_id) do
       nil ->
         :normal
