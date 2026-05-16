@@ -2,35 +2,42 @@ defmodule GiTF.Phases.Scoring do
   @moduledoc """
   Scoring phase handler.
 
-  Scoring records a quality assessment of the merged work. As a workflow
-  phase it is unconditional: once the `scoring` artifact is present the
-  workflow advances (typically to `end`). A `{"status": "failed"}`
-  artifact routes to `:fail` so an operator-authored workflow can retry
-  or branch on it; everything else is `:advance`.
+  Scoring records a quality assessment of the merged work. In the
+  standard pipeline it runs as **async post-processing after the mission
+  is already user-visibly completed** (`Phases.Publish.before_advance/3`
+  flips the user-visible status). So success and failure don't mean
+  "complete the mission" / "fail the mission" — they flip
+  `post_processing_status`:
 
-  Pair with a workflow phase config like:
+    * `scoring` artifact present → `:advance` (`next: end` → workflow
+      `:complete` → handler `terminal(:complete, artifact)` →
+      `Missions.mark_post_processing_done/1`).
+    * No artifact yet, but ≥ 3 failed scoring ops →
+      `:terminal_fail` (workflow `:retries_exhausted` → handler
+      `terminal(:retries_exhausted, artifact)` →
+      `Missions.mark_post_processing_failed/2`). Mirrors
+      `Orchestrator.scoring_post_processing_exhausted?/1`.
+    * Otherwise → `:wait` (still scoring).
 
-      - id: scoring
-        handler: GiTF.Phases.Scoring
-        reads: [validation, requirements]
-        produces: scoring
-        next: end
+  `before_advance(:advance)` runs the legacy `finish_scored/1`
+  side effects — record triage feedback against the score, ingest
+  per-op outcome data — by delegating to the still-private
+  orchestrator path. (We don't `mark_post_processing_done` here:
+  `:advance` is followed by routing to `:end` and only the workflow's
+  `:complete` decision should flip post-processing.)
 
-  ## Not yet captured
-
-  In the legacy `standard` path, scoring runs as *async post-processing*
-  after the mission is already user-visibly "completed": repeated scoring
-  failures flip `post_processing_status` to `failed` (via
-  `Missions.mark_post_processing_failed/2`) rather than failing the
-  mission, and success calls `mark_post_processing_done/1` instead of
-  `complete_quest/2`. That two-phase-completion semantic is specific to
-  the standard pipeline and is *not* modelled here — operator-authored
-  workflows that end at `scoring` get the ordinary `:complete` →
-  `complete_quest` behaviour. The `standard` workflow therefore stays on
-  the legacy path until this is reconciled.
+  Operator-authored workflows that simply end at `scoring` get the
+  ordinary `:complete` semantic via the same `terminal(:complete, _)`
+  path — which calls `mark_post_processing_done/1` rather than
+  `complete_quest/2`. That matches the standard pipeline; an
+  operator-authored "scoring is the terminal phase of a mission that
+  wasn't already publish-completed" workflow would need a different
+  handler.
   """
 
   @behaviour GiTF.Phase
+
+  require Logger
 
   @impl true
   def start(mission, %GiTF.Workflow.Phase{id: id}, _ctx) do
@@ -38,7 +45,35 @@ defmodule GiTF.Phases.Scoring do
   end
 
   @impl true
-  def verdict(%{"status" => s}) when s in ["failed", "fail"], do: :fail
-  def verdict(artifact) when is_map(artifact), do: :advance
-  def verdict(_), do: :inconclusive
+  def verdict(mission, artifact) do
+    cond do
+      is_map(artifact) -> :advance
+      GiTF.Major.Orchestrator.scoring_post_processing_exhausted?(mission) -> :terminal_fail
+      true -> :wait
+    end
+  end
+
+  @impl true
+  def terminal(mission, :complete, _artifact) do
+    # Mirrors the legacy `check_and_advance("scoring", &finish_scored/1)` —
+    # records triage feedback against the score, ingests per-op outcomes,
+    # flips `post_processing_status` to "done", reaps worktrees/branch.
+    GiTF.Major.Orchestrator.finish_scored(mission)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  def terminal(mission, :retries_exhausted, _artifact) do
+    Logger.warning(
+      "Quest #{mission.id}: scoring exhausted retries — marking post_processing_status=failed"
+    )
+
+    GiTF.Missions.mark_post_processing_failed(mission.id, "scoring exhausted retries")
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  def terminal(_mission, _kind, _artifact), do: :ok
 end

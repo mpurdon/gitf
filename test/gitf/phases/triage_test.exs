@@ -58,6 +58,21 @@ defmodule GiTF.Phases.TriageTest do
     end
   end
 
+  describe "terminal/3" do
+    test ":complete dispatches the legacy no_work_needed completion path" do
+      art = %{"bug_reproducible" => false, "bug_evidence" => "fixed in commit abc1234"}
+      m = insert_mission!(%{status: "active", artifacts: %{"triage" => art}})
+
+      Triage.terminal(m, :complete, Map.put(art, "no_work_needed", true))
+
+      reloaded = GiTF.Archive.get(:missions, m.id)
+      # `complete_quest_no_work_needed/2` calls `Missions.complete_quest/2`
+      # which sets status to "completed" and writes a "preflight" artifact.
+      assert reloaded.status == "completed"
+      assert reloaded.artifacts["preflight"]["resolution"] == "no_work_needed"
+    end
+  end
+
   describe "end-to-end via Advancer with a conditional-next triage workflow" do
     defp triage_workflow do
       %Workflow{

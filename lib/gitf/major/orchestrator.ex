@@ -343,8 +343,8 @@ defmodule GiTF.Major.Orchestrator do
 
   defp handle_workflow_decision({:wait, p}, _mission, _phase, _wf), do: {:ok, p}
 
-  defp handle_workflow_decision({:dispatch, next_id}, mission, _phase, _wf),
-    do: dispatch_phase(next_id, mission)
+  defp handle_workflow_decision({:dispatch, next_id}, mission, _phase, workflow),
+    do: dispatch_via_handler(workflow, next_id, mission)
 
   defp handle_workflow_decision(:complete, mission, _phase, workflow) do
     # Give the just-ended phase's handler first refusal — e.g.,
@@ -360,13 +360,45 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp handle_workflow_decision({:retry, source, target}, mission, _phase, _wf) do
+  defp handle_workflow_decision({:retry, source, target}, mission, _phase, workflow) do
     Archive.update(:missions, mission.id, fn m ->
       retries = Map.get(m, :phase_retries) || %{}
       Map.put(m, :phase_retries, Map.update(retries, source, 1, &(&1 + 1)))
     end)
 
-    dispatch_phase(target, mission)
+    dispatch_via_handler(workflow, target, mission)
+  end
+
+  # Dispatches `phase_id` for a workflow-path mission. Prefers the
+  # workflow phase's `handler:` (a `GiTF.Phase` implementation's `start/3`)
+  # so the handler can run logic legacy keeps in `start_<phase>/1`; falls
+  # back to `dispatch_phase/2` (the legacy starter map) when no handler
+  # is configured or the module hasn't loaded a `start/3`.
+  defp dispatch_via_handler(workflow, phase_id, mission) do
+    case GiTF.Workflow.phase(workflow, phase_id) do
+      {:ok, %GiTF.Workflow.Phase{handler: handler} = phase_config}
+      when not is_nil(handler) ->
+        if Code.ensure_loaded?(handler) and function_exported?(handler, :start, 3) do
+          ctx = %{workflow: workflow, sector_id: Map.get(mission, :sector_id)}
+
+          try do
+            handler.start(mission, phase_config, ctx)
+          rescue
+            e ->
+              Logger.warning(
+                "Handler #{inspect(handler)}.start/3 raised for mission #{mission.id}@#{phase_id}: " <>
+                  "#{Exception.message(e)}; falling back to legacy starter"
+              )
+
+              dispatch_phase(phase_id, mission)
+          end
+        else
+          dispatch_phase(phase_id, mission)
+        end
+
+      _ ->
+        dispatch_phase(phase_id, mission)
+    end
   end
 
   defp handle_workflow_decision({:retries_exhausted, p}, mission, _phase, workflow) do
@@ -2192,7 +2224,11 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp scoring_post_processing_exhausted?(mission) do
+  @doc false
+  # Public so `GiTF.Phases.Scoring.verdict/2` can use the same heuristic
+  # legacy uses: when 3 scoring ops have failed without producing a scoring
+  # artifact, give up on post-processing rather than wait forever.
+  def scoring_post_processing_exhausted?(mission) do
     has_artifact? = not is_nil(GiTF.Missions.get_artifact(mission.id, "scoring"))
 
     failed_scoring_ops =
@@ -2203,7 +2239,13 @@ defmodule GiTF.Major.Orchestrator do
     not has_artifact? and failed_scoring_ops >= @scoring_post_processing_max_failures
   end
 
-  defp finish_scored(mission) do
+  @doc false
+  # Records triage feedback, ingests per-op outcomes, marks
+  # post-processing done, cleans up the mission's worktrees/branch.
+  # Public so `GiTF.Phases.Scoring.terminal/3` can call it on workflow
+  # completion at scoring, matching the legacy
+  # `check_and_advance(mission, "scoring", &finish_scored/1)` semantic.
+  def finish_scored(mission) do
     scoring = GiTF.Missions.get_artifact(mission.id, "scoring")
 
     if scoring do
@@ -2227,6 +2269,20 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp start_publish(mission) do
+    with {:ok, _} <- publish_step(mission) do
+      # Publish runs synchronously (no ghost), so legacy dispatch drives
+      # into the next phase itself rather than waiting for an advance event.
+      after_publish(mission)
+    end
+  end
+
+  @doc false
+  # Workflow-path entry point for publish: do the synchronous publish
+  # (transition + render + artifact write + outcome-tracking kick) without
+  # the legacy `after_publish` post-routing. The workflow's verdict +
+  # `Phases.Publish.before_advance/3` does the equivalent of after_publish.
+  @spec publish_step(map()) :: {:ok, String.t()} | {:error, term()}
+  def publish_step(mission) do
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "publish", "Simplify complete, publishing") do
       sync = GiTF.Missions.get_artifact(mission.id, "sync") || %{}
@@ -2235,15 +2291,9 @@ defmodule GiTF.Major.Orchestrator do
       result = do_publish(mission, sector, sync)
 
       GiTF.Missions.store_artifact(mission.id, "publish", result)
-
-      # Post-completion outcome tracking (gated on :outcomes_enabled).
-      # Fired async under TaskSupervisor so a slow/failing Archive write
-      # cannot stall the orchestrator's transition into post-processing.
       maybe_start_outcome_tracking(mission, result)
 
-      # Publish runs synchronously (no ghost), so we drive into the next
-      # phase ourselves rather than waiting for an advance event.
-      after_publish(mission)
+      {:ok, "publish"}
     end
   end
 
@@ -2774,10 +2824,14 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  @doc false
   # Triage short-circuit: bug not reproducible in current code. Mission is
   # user-visible completed with an explanatory artifact. No impl/validation/
   # sync/simplify/scoring runs — there's literally nothing to do.
-  defp complete_quest_no_work_needed(mission, evidence) do
+  #
+  # `@doc false def` so `GiTF.Phases.Triage.terminal/3` can call it for the
+  # workflow path (`next: [{when: artifact.no_work_needed == true, then: end}]`).
+  def complete_quest_no_work_needed(mission, evidence) do
     Logger.info(
       "Quest #{mission.id}: triage verified bug not reproducible — #{inspect(evidence)}"
     )

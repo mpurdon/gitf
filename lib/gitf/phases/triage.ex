@@ -51,11 +51,12 @@ defmodule GiTF.Phases.Triage do
   @behaviour GiTF.Phase
 
   alias GiTF.{Missions, Triage}
+  alias GiTF.Major.Orchestrator
   alias GiTF.Major.Orchestrator.Decisions
 
   @impl true
   def start(mission, %GiTF.Workflow.Phase{id: id}, _ctx) do
-    GiTF.Major.Orchestrator.dispatch_phase(id, mission)
+    Orchestrator.dispatch_phase(id, mission)
   end
 
   @impl true
@@ -84,4 +85,20 @@ defmodule GiTF.Phases.Triage do
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
+
+  @impl true
+  def terminal(mission, :complete, artifact) when is_map(artifact) do
+    # Conditional `next:` resolved `artifact.no_work_needed == true` to
+    # `end`. Match the legacy `complete_quest_no_work_needed/2` semantics:
+    # store a "preflight" artifact, emit `[:gitf, :mission, :no_work_needed]`
+    # telemetry, complete the mission, dispatch an operator webhook, and
+    # record to the ledger.
+    evidence = Map.get(artifact, "bug_evidence", Map.get(artifact, :bug_evidence, "")) || ""
+    Orchestrator.complete_quest_no_work_needed(mission, evidence)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  def terminal(_mission, _kind, _artifact), do: :ok
 end
