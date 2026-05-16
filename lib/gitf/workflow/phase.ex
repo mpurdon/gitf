@@ -96,8 +96,12 @@ defmodule GiTF.Workflow.Phase do
 
   @doc "Whether this phase branches on verdict."
   @spec verdict_driven?(t()) :: boolean()
-  def verdict_driven?(%__MODULE__{on_pass: p, on_fail: f}) when is_binary(p) and is_binary(f),
-    do: true
+  def verdict_driven?(%__MODULE__{on_pass: p, on_fail: f}),
+    do: branch_present?(p) and branch_present?(f)
 
   def verdict_driven?(_), do: false
+
+  defp branch_present?(b) when is_binary(b) and b != "", do: true
+  defp branch_present?(b) when is_list(b) and b != [], do: true
+  defp branch_present?(_), do: false
 end

@@ -125,19 +125,19 @@ defmodule GiTF.Workflow.ConditionalNextTest do
       assert {:error, errors} =
                Schema.validate(raw([%{"when" => "File.read!(\"x\")", "then" => "research"}, %{"else" => "research"}]))
 
-      assert Enum.any?(errors, &match?({:bad_transition, "triage", {:bad_when_expr, _, _}}, &1))
+      assert Enum.any?(errors, &match?({:bad_transition, "triage", "next", {:bad_when_expr, _, _}}, &1))
     end
 
     test "requires exactly one else, last" do
       assert {:error, e1} = Schema.validate(raw([%{"when" => "artifact.x == true", "then" => "research"}]))
-      assert Enum.any?(e1, &match?({:conditional_next_needs_one_else, "triage"}, &1))
+      assert Enum.any?(e1, &match?({:conditional_branch_needs_one_else, "triage", "next"}, &1))
 
       assert {:error, e2} =
                Schema.validate(
                  raw([%{"else" => "research"}, %{"when" => "artifact.x == true", "then" => "research"}])
                )
 
-      assert Enum.any?(e2, &match?({:conditional_next_else_not_last, "triage"}, &1))
+      assert Enum.any?(e2, &match?({:conditional_branch_else_not_last, "triage", "next"}, &1))
     end
 
     test "rejects next AND on_pass/on_fail together" do
@@ -156,6 +156,68 @@ defmodule GiTF.Workflow.ConditionalNextTest do
                })
 
       assert Enum.any?(errors, &match?({:phase_next_and_branches, "triage"}, &1))
+    end
+  end
+
+  describe "conditional on_pass / on_fail" do
+    test "Workflow.next_phase resolves a conditional on_pass" do
+      w = %Workflow{
+        name: "v",
+        phases: [
+          %Phase{
+            id: "validation",
+            on_pass: [
+              {"mission.requires_approval == true", "awaiting_approval"},
+              {:else, "simplify"}
+            ],
+            on_fail: "implementation"
+          },
+          %Phase{id: "implementation", next: "validation"},
+          %Phase{id: "awaiting_approval", next: "end"},
+          %Phase{id: "simplify", next: "end"}
+        ]
+      }
+
+      assert {:ok, "awaiting_approval"} =
+               Workflow.next_phase(w, "validation", :pass, %{mission: %{requires_approval: true}})
+
+      assert {:ok, "simplify"} =
+               Workflow.next_phase(w, "validation", :pass, %{mission: %{requires_approval: false}})
+    end
+
+    test "schema accepts and round-trips a conditional on_pass" do
+      raw = %{
+        "name" => "v",
+        "phases" => [
+          %{
+            "id" => "validation",
+            "on_pass" => [
+              %{"when" => "mission.requires_approval == true", "then" => "awaiting_approval"},
+              %{"else" => "simplify"}
+            ],
+            "on_fail" => "implementation",
+            "max_retries" => 3
+          },
+          %{"id" => "implementation", "next" => "validation"},
+          %{"id" => "awaiting_approval", "next" => "end"},
+          %{"id" => "simplify", "next" => "end"}
+        ]
+      }
+
+      assert {:ok, w} = Schema.validate(raw)
+      validation_phase = Enum.find(w.phases, &(&1.id == "validation"))
+
+      assert [
+               {"mission.requires_approval == true", "awaiting_approval"},
+               {:else, "simplify"}
+             ] = validation_phase.on_pass
+
+      # round-trip through serialize
+      yaml = Workflow.serialize(w)
+      {:ok, parsed} = YamlElixir.read_from_string(yaml)
+      assert {:ok, w2} = Schema.validate(parsed)
+      validation2 = Enum.find(w2.phases, &(&1.id == "validation"))
+      assert validation2.on_pass == validation_phase.on_pass
     end
   end
 

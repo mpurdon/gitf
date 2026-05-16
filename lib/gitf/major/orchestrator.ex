@@ -330,7 +330,7 @@ defmodule GiTF.Major.Orchestrator do
           "Orchestrator: workflow=#{workflow.name} decision=#{inspect(decision)} for #{mission.id}@#{phase}"
         )
 
-        handle_workflow_decision(decision, mission, phase)
+        handle_workflow_decision(decision, mission, phase, workflow)
 
       {:error, reason} ->
         Logger.warning(
@@ -341,17 +341,26 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp handle_workflow_decision({:wait, p}, _mission, _phase), do: {:ok, p}
+  defp handle_workflow_decision({:wait, p}, _mission, _phase, _wf), do: {:ok, p}
 
-  defp handle_workflow_decision({:dispatch, next_id}, mission, _phase),
+  defp handle_workflow_decision({:dispatch, next_id}, mission, _phase, _wf),
     do: dispatch_phase(next_id, mission)
 
-  defp handle_workflow_decision(:complete, mission, _phase) do
-    GiTF.Missions.complete_quest(mission.id, "workflow reached :end")
-    {:ok, "completed"}
+  defp handle_workflow_decision(:complete, mission, _phase, workflow) do
+    # Give the just-ended phase's handler first refusal — e.g.,
+    # `Phases.Scoring.terminal(:complete)` calls `mark_post_processing_done/1`
+    # since the mission was already user-visibly completed by
+    # `Phases.Publish.before_advance/3`, so the standard `complete_quest`
+    # would be wrong here.
+    case GiTF.Workflow.Advancer.invoke_terminal(mission, workflow, :complete) do
+      {:ok, :handled} -> {:ok, "completed"}
+      :default ->
+        GiTF.Missions.complete_quest(mission.id, "workflow reached :end")
+        {:ok, "completed"}
+    end
   end
 
-  defp handle_workflow_decision({:retry, source, target}, mission, _phase) do
+  defp handle_workflow_decision({:retry, source, target}, mission, _phase, _wf) do
     Archive.update(:missions, mission.id, fn m ->
       retries = Map.get(m, :phase_retries) || %{}
       Map.put(m, :phase_retries, Map.update(retries, source, 1, &(&1 + 1)))
@@ -360,13 +369,20 @@ defmodule GiTF.Major.Orchestrator do
     dispatch_phase(target, mission)
   end
 
-  defp handle_workflow_decision({:retries_exhausted, p}, mission, _phase) do
-    Logger.warning("Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed")
-    GiTF.Missions.update(mission.id, %{status: "failed"})
-    {:ok, "failed"}
+  defp handle_workflow_decision({:retries_exhausted, p}, mission, _phase, workflow) do
+    case GiTF.Workflow.Advancer.invoke_terminal(mission, workflow, :retries_exhausted) do
+      {:ok, :handled} ->
+        Logger.info("Quest #{mission.id}: workflow ended at #{p} (handler-terminated)")
+        {:ok, "failed"}
+
+      :default ->
+        Logger.warning("Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed")
+        GiTF.Missions.update(mission.id, %{status: "failed"})
+        {:ok, "failed"}
+    end
   end
 
-  defp handle_workflow_decision({:error, reason}, mission, phase) do
+  defp handle_workflow_decision({:error, reason}, mission, phase, _wf) do
     Logger.warning(
       "Workflow dispatch error for mission #{mission.id}: #{inspect(reason)}; falling back to legacy"
     )

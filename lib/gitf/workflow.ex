@@ -233,25 +233,35 @@ defmodule GiTF.Workflow do
       %Phase{} = phase ->
         case verdict do
           :advance ->
-            cond do
-              is_binary(phase.next) and phase.next != "" ->
-                {:ok, normalize(phase.next)}
+            resolve_branch(phase.next, current_id, ctx, :no_unconditional_next)
 
-              is_list(phase.next) and phase.next != [] ->
-                resolve_conditional(phase.next, current_id, ctx)
+          :pass ->
+            resolve_branch(phase.on_pass, current_id, ctx, {:no_branch_for_verdict, :pass})
 
-              true ->
-                {:error, {:no_unconditional_next, current_id}}
-            end
-
-          :pass when is_binary(phase.on_pass) ->
-            {:ok, normalize(phase.on_pass)}
-
-          :fail when is_binary(phase.on_fail) ->
-            {:ok, normalize(phase.on_fail)}
+          :fail ->
+            resolve_branch(phase.on_fail, current_id, ctx, {:no_branch_for_verdict, :fail})
 
           v ->
             {:error, {:no_branch_for_verdict, current_id, v}}
+        end
+    end
+  end
+
+  # Resolves a `next:` / `on_pass:` / `on_fail:` branch value. A binary is
+  # a fixed target ("end" terminates); a non-empty list is a conditional
+  # rule set; nil/empty surfaces a structural error keyed to the branch.
+  defp resolve_branch(branch, current_id, ctx, miss_reason) do
+    cond do
+      is_binary(branch) and branch != "" ->
+        {:ok, normalize(branch)}
+
+      is_list(branch) and branch != [] ->
+        resolve_conditional(branch, current_id, ctx)
+
+      true ->
+        case miss_reason do
+          {tag, verdict} -> {:error, {tag, current_id, verdict}}
+          tag -> {:error, {tag, current_id}}
         end
     end
   end
@@ -368,23 +378,25 @@ defmodule GiTF.Workflow do
         {"reads", if(p.reads != [], do: yaml_list(p.reads))},
         {"produces", p.produces},
         {"strategies", if(p.strategies != [], do: yaml_list(p.strategies))},
-        {"next", if(is_binary(p.next) and p.next != "", do: p.next)},
-        {"on_pass", p.on_pass},
-        {"on_fail", p.on_fail}
+        {"next", scalar_branch(p.next)},
+        {"on_pass", scalar_branch(p.on_pass)},
+        {"on_fail", scalar_branch(p.on_fail)}
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
       |> Enum.map(fn {k, v} -> "    #{k}: #{v}" end)
 
-    conditional_next_lines =
-      if is_list(p.next) and p.next != [] do
-        ["    next:" | Enum.map(p.next, &serialize_transition/1)]
-      else
-        []
-      end
+    conditional_lines =
+      [{"next", p.next}, {"on_pass", p.on_pass}, {"on_fail", p.on_fail}]
+      |> Enum.flat_map(fn {k, v} ->
+        if is_list(v) and v != [], do: ["    #{k}:" | Enum.map(v, &serialize_transition/1)], else: []
+      end)
 
-    fields = Enum.join(scalar_lines ++ conditional_next_lines, "\n")
+    fields = Enum.join(scalar_lines ++ conditional_lines, "\n")
     "  - " <> String.trim_leading(fields, " ")
   end
+
+  defp scalar_branch(s) when is_binary(s) and s != "", do: s
+  defp scalar_branch(_), do: nil
 
   defp serialize_transition({:else, target}), do: "      - else: #{target}"
 

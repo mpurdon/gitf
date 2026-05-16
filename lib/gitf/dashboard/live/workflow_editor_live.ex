@@ -381,12 +381,20 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
 
         <div class="field">
           <label>on_pass</label>
-          <input type="text" name="on_pass" value={@phase.on_pass} placeholder="(verdict-driven)" />
+          <%= if is_list(@phase.on_pass) do %>
+            <input type="text" name="on_pass" value="(conditional — edit YAML)" disabled style="opacity:0.6" />
+          <% else %>
+            <input type="text" name="on_pass" value={@phase.on_pass} placeholder="(verdict-driven)" />
+          <% end %>
         </div>
 
         <div class="field">
           <label>on_fail</label>
-          <input type="text" name="on_fail" value={@phase.on_fail} placeholder="(verdict-driven)" />
+          <%= if is_list(@phase.on_fail) do %>
+            <input type="text" name="on_fail" value="(conditional — edit YAML)" disabled style="opacity:0.6" />
+          <% else %>
+            <input type="text" name="on_fail" value={@phase.on_fail} placeholder="(verdict-driven)" />
+          <% end %>
         </div>
       </div>
 
@@ -441,11 +449,12 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
         max_retries: parse_int(params["max_retries"]) || 0,
         produces: blank_to_nil(params["produces"]),
         reads: parse_csv(params["reads"]),
-        # Conditional `next` rules aren't editable via this form yet — the
-        # text input is disabled when next is a list — so preserve them.
+        # Conditional rules on next/on_pass/on_fail aren't editable via this
+        # form yet — the text input is disabled when the value is a list — so
+        # preserve them through phx-change cycles.
         next: if(is_list(phase.next), do: phase.next, else: blank_to_nil(params["next"])),
-        on_pass: blank_to_nil(params["on_pass"]),
-        on_fail: blank_to_nil(params["on_fail"]),
+        on_pass: if(is_list(phase.on_pass), do: phase.on_pass, else: blank_to_nil(params["on_pass"])),
+        on_fail: if(is_list(phase.on_fail), do: phase.on_fail, else: blank_to_nil(params["on_fail"])),
         inject_knowledge: params["inject_knowledge"] == "true",
         inject_skills: params["inject_skills"] == "true"
     }
@@ -513,17 +522,18 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
   defp blank_to_nil(nil), do: nil
   defp blank_to_nil(s) when is_binary(s), do: s
 
-  # Conditional `next` is held as a list of {expr | :else, target} tuples
-  # in the struct; the Schema validator (and YAML on disk) want the map
-  # form. Round-trip it back for the live-validation preview.
-  defp next_to_raw(transitions) when is_list(transitions) do
+  # Conditional branches (next / on_pass / on_fail) are held as lists of
+  # {expr | :else, target} tuples in the struct; the Schema validator (and
+  # YAML on disk) want the map form. Round-trip it back for the
+  # live-validation preview.
+  defp branch_to_raw(transitions) when is_list(transitions) do
     Enum.map(transitions, fn
       {:else, target} -> %{"else" => target}
       {when_expr, target} -> %{"when" => when_expr, "then" => target}
     end)
   end
 
-  defp next_to_raw(other), do: other
+  defp branch_to_raw(other), do: other
 
   defp validate(workflow) do
     raw = %{
@@ -541,9 +551,9 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
             "inject_skills" => p.inject_skills,
             "reads" => p.reads,
             "produces" => p.produces,
-            "next" => next_to_raw(p.next),
-            "on_pass" => p.on_pass,
-            "on_fail" => p.on_fail
+            "next" => branch_to_raw(p.next),
+            "on_pass" => branch_to_raw(p.on_pass),
+            "on_fail" => branch_to_raw(p.on_fail)
           }
           |> Enum.reject(fn {_k, v} -> is_nil(v) end)
           |> Map.new()

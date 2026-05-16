@@ -59,6 +59,12 @@ defmodule GiTF.Workflow.Advancer do
           v when v in [:wait, :inconclusive] ->
             {:wait, phase_id}
 
+          :terminal_complete ->
+            :complete
+
+          :terminal_fail ->
+            {:retries_exhausted, phase_id}
+
           verdict when verdict in [:advance, :pass, :fail] ->
             run_before_advance(phase_config, mission, verdict, artifact)
             # `before_advance` may have enriched the phase artifact (e.g.
@@ -74,14 +80,51 @@ defmodule GiTF.Workflow.Advancer do
     end
   end
 
-  # Verdict resolution: handler.verdict/1 takes precedence when the
-  # phase declares one; otherwise the generic Verdict module decides.
+  @doc """
+  Invokes the handler's `terminal/2` callback for the phase the workflow
+  ended at, if defined. The orchestrator calls this after a `:complete`
+  or `:retries_exhausted` decision so the handler can override the
+  default completion semantics (e.g., `Phases.Scoring` calling
+  `mark_post_processing_done/1` instead of `complete_quest/2`).
+
+  Returns `{:ok, :handled}` when the handler ran, `:default` when the
+  caller should fall back to the orchestrator's standard behaviour
+  (`complete_quest` / `status: failed`).
+  """
+  @spec invoke_terminal(map(), Workflow.t(), :complete | :retries_exhausted) ::
+          {:ok, :handled} | :default
+  def invoke_terminal(mission, workflow, kind) when kind in [:complete, :retries_exhausted] do
+    phase_id = mission_current_phase(mission)
+
+    with {:ok, %Phase{handler: handler}} when not is_nil(handler) <-
+           Workflow.phase(workflow, phase_id),
+         true <- ensure_exported?(handler, :terminal, 2) do
+      try do
+        handler.terminal(mission, kind)
+        {:ok, :handled}
+      rescue
+        _ -> :default
+      end
+    else
+      _ -> :default
+    end
+  end
+
+  # Verdict resolution prefers handler.verdict/2 (mission + artifact),
+  # then handler.verdict/1 (artifact-only), then generic Verdict.compute/2.
+  # The /2 form lets handlers inspect op history, operator state, and
+  # mission flags that an artifact-only verdict can't see.
   defp compute_verdict(mission, %Phase{handler: handler} = phase_config, artifact)
        when not is_nil(handler) do
     cond do
+      ensure_exported?(handler, :verdict, 2) ->
+        try do
+          handler.verdict(mission, artifact)
+        rescue
+          _ -> Verdict.compute(mission, phase_config)
+        end
+
       is_nil(artifact) ->
-        # Without an artifact there's nothing for the handler to inspect;
-        # fall through to Verdict (which returns :wait in this case).
         Verdict.compute(mission, phase_config)
 
       ensure_exported?(handler, :verdict, 1) ->

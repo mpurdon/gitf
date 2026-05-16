@@ -9,13 +9,13 @@ defmodule GiTF.Workflow.Schema do
     * `next`/`on_pass`/`on_fail` referencing unknown phase ids
       (including every target of a conditional `next` rule list)
     * Both `next` AND `on_pass`/`on_fail` set on the same phase
-    * Malformed conditional `next` lists — a bad `when:` expression
-      (validated against `GiTF.Workflow.Expr`'s grammar), a missing or
-      duplicated `else:`, or an `else:` that isn't last
-    * Cycles in fixed `next` chains (verdict branches and conditional
-      `next` rules are explicitly allowed to cycle — `validation` →
-      `implementation` is normal, and a conditional rule is only taken
-      when its expression holds)
+    * Malformed conditional branch lists on `next:`/`on_pass:`/`on_fail:`
+      — a bad `when:` expression (validated against `GiTF.Workflow.Expr`'s
+      grammar), a missing or duplicated `else:`, or an `else:` that isn't
+      last
+    * Cycles in fixed `next:` chains (verdict branches and *any*
+      conditional rule list are explicitly allowed to cycle — a
+      conditional rule is only taken when its expression holds)
     * `reads` referencing artifacts no earlier phase `produces`
     * Unknown handler modules (validated lazily at orchestrator
       dispatch time, not here, since handlers may be defined later in
@@ -95,20 +95,20 @@ defmodule GiTF.Workflow.Schema do
         _ -> nil
       end
 
-    {next, next_errors} = parse_next(id, m["next"])
-    errors = next_errors ++ errors
-    on_pass = m["on_pass"]
-    on_fail = m["on_fail"]
+    {next, next_errors} = parse_branch(id, m["next"], "next")
+    {on_pass, on_pass_errors} = parse_branch(id, m["on_pass"], "on_pass")
+    {on_fail, on_fail_errors} = parse_branch(id, m["on_fail"], "on_fail")
+    errors = next_errors ++ on_pass_errors ++ on_fail_errors ++ errors
 
-    has_next? = (is_binary(next) and next != "") or (is_list(next) and next != [])
+    has_next? = branch_present?(next)
+    has_branches? = branch_present?(on_pass) and branch_present?(on_fail)
 
     errors =
       cond do
-        has_next? and (is_binary(on_pass) or is_binary(on_fail)) ->
+        has_next? and (branch_present?(on_pass) or branch_present?(on_fail)) ->
           [{:phase_next_and_branches, id} | errors]
 
-        not has_next? and not (is_binary(on_pass) and is_binary(on_fail)) and
-            id not in [nil, "end"] ->
+        not has_next? and not has_branches? and id not in [nil, "end"] ->
           [{:phase_no_advance, id} | errors]
 
         true ->
@@ -182,21 +182,22 @@ defmodule GiTF.Workflow.Schema do
   defp parse_on_exhausted(s) when is_binary(s), do: s
   defp parse_on_exhausted(_), do: :fail
 
-  # `next:` is either a plain string target ("end" terminates) or a list
-  # of conditional-transition rules — `{"<expr>" => ..., "then" => ...}`
-  # maps plus exactly one trailing `{"else" => ...}`. Each `when`
-  # expression is validated against GiTF.Workflow.Expr's grammar here so
-  # operators get the error at load time.
-  defp parse_next(_id, nil), do: {nil, []}
-  defp parse_next(_id, s) when is_binary(s) and s != "", do: {s, []}
-  defp parse_next(id, ""), do: {nil, [{:phase_empty_next, id}]}
+  # A `next:` / `on_pass:` / `on_fail:` branch value is either a plain
+  # string target ("end" terminates) or a list of conditional-transition
+  # rules — `{"when" => "<expr>", "then" => "<id>"}` maps plus exactly
+  # one trailing `{"else" => "<id>"}`. Each `when:` expression is
+  # validated against `GiTF.Workflow.Expr`'s grammar here so operators
+  # get the error at load time.
+  defp parse_branch(_id, nil, _field), do: {nil, []}
+  defp parse_branch(_id, s, _field) when is_binary(s) and s != "", do: {s, []}
+  defp parse_branch(id, "", field), do: {nil, [{:phase_empty_branch, id, field}]}
 
-  defp parse_next(id, list) when is_list(list) do
+  defp parse_branch(id, list, field) when is_list(list) do
     {parsed, errs} =
       Enum.reduce(list, {[], []}, fn rule, {acc, errs} ->
         case parse_transition(rule) do
           {:ok, t} -> {[t | acc], errs}
-          {:error, reason} -> {acc, [{:bad_transition, id, reason} | errs]}
+          {:error, reason} -> {acc, [{:bad_transition, id, field, reason} | errs]}
         end
       end)
 
@@ -205,16 +206,20 @@ defmodule GiTF.Workflow.Schema do
 
     structural =
       cond do
-        transitions == [] -> [{:empty_conditional_next, id}]
-        else_count != 1 -> [{:conditional_next_needs_one_else, id}]
-        not match?({:else, _}, List.last(transitions)) -> [{:conditional_next_else_not_last, id}]
+        transitions == [] -> [{:empty_conditional_branch, id, field}]
+        else_count != 1 -> [{:conditional_branch_needs_one_else, id, field}]
+        not match?({:else, _}, List.last(transitions)) -> [{:conditional_branch_else_not_last, id, field}]
         true -> []
       end
 
     if errs == [] and structural == [], do: {transitions, []}, else: {nil, structural ++ errs}
   end
 
-  defp parse_next(id, other), do: {nil, [{:bad_next, id, other}]}
+  defp parse_branch(id, other, field), do: {nil, [{:bad_branch, id, field, other}]}
+
+  defp branch_present?(b) when is_binary(b) and b != "", do: true
+  defp branch_present?(b) when is_list(b) and b != [], do: true
+  defp branch_present?(_), do: false
 
   defp parse_transition(%{"when" => w, "then" => t}) when is_binary(w) and is_binary(t) do
     case GiTF.Workflow.Expr.validate(w) do
@@ -266,9 +271,9 @@ defmodule GiTF.Workflow.Schema do
 
     errors =
       Enum.reduce(phases, errors, fn p, acc ->
-        check_next_targets(p.id, p.next, valid_targets, acc)
-        |> then(&check_target(p.id, p.on_pass, "on_pass", valid_targets, &1))
-        |> then(&check_target(p.id, p.on_fail, "on_fail", valid_targets, &1))
+        check_branch_targets(p.id, p.next, "next", valid_targets, acc)
+        |> then(&check_branch_targets(p.id, p.on_pass, "on_pass", valid_targets, &1))
+        |> then(&check_branch_targets(p.id, p.on_fail, "on_fail", valid_targets, &1))
       end)
 
     errors = errors ++ detect_unconditional_cycles(phases)
@@ -276,16 +281,17 @@ defmodule GiTF.Workflow.Schema do
     if errors == [], do: :ok, else: {:error, Enum.uniq(errors)}
   end
 
-  defp check_next_targets(phase_id, next, valid, errors) when is_binary(next) or is_nil(next),
-    do: check_target(phase_id, next, "next", valid, errors)
+  defp check_branch_targets(phase_id, branch, kind, valid, errors)
+       when is_binary(branch) or is_nil(branch),
+       do: check_target(phase_id, branch, kind, valid, errors)
 
-  defp check_next_targets(phase_id, transitions, valid, errors) when is_list(transitions) do
+  defp check_branch_targets(phase_id, transitions, kind, valid, errors) when is_list(transitions) do
     Enum.reduce(transitions, errors, fn {_cond, target}, acc ->
-      check_target(phase_id, target, "next", valid, acc)
+      check_target(phase_id, target, kind, valid, acc)
     end)
   end
 
-  defp check_next_targets(_phase_id, _next, _valid, errors), do: errors
+  defp check_branch_targets(_phase_id, _branch, _kind, _valid, errors), do: errors
 
   defp check_target(_phase_id, nil, _kind, _valid, errors), do: errors
 
