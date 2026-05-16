@@ -839,7 +839,8 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp start_validation(mission) do
+  @doc false
+  def start_validation(mission) do
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     planning = GiTF.Missions.get_artifact(mission.id, "planning")
 
@@ -1611,7 +1612,8 @@ defmodule GiTF.Major.Orchestrator do
 
   @default_max_fix_attempts 2
 
-  defp handle_validation_result(mission) do
+  @doc false
+  def handle_validation_result(mission) do
     validation = GiTF.Missions.get_artifact(mission.id, "validation")
 
     cond do
@@ -1701,7 +1703,8 @@ defmodule GiTF.Major.Orchestrator do
   # :skill_refinement_enabled flag is on. Non-blocking — refinement
   # runs independently of the main pipeline, so a slow refiner LLM call
   # or critic rejection never delays the orchestrator's next tick.
-  defp maybe_spawn_skill_refinement(mission, validation) do
+  @doc false
+  def maybe_spawn_skill_refinement(mission, validation) do
     if Application.get_env(:gitf, :skill_refinement_enabled, false) do
       applied = GiTF.Skills.Refinement.applied_skill_ids(mission)
 
@@ -1723,7 +1726,8 @@ defmodule GiTF.Major.Orchestrator do
   # outside `.claude/` (which the auto-commit step always adds). Otherwise
   # returns `{:error, reason}` so the orchestrator can override a
   # hallucinated "pass" verdict.
-  defp validate_pass_against_diff(mission) do
+  @doc false
+  def validate_pass_against_diff(mission) do
     impl_ops =
       mission.ops
       |> Enum.filter(fn op ->
@@ -1766,7 +1770,8 @@ defmodule GiTF.Major.Orchestrator do
   # validation passed on the first run, we're confident. When it took 3+
   # validation runs interspersed with fix-ops, validation was likely
   # flip-flopping — log at warning so operators notice the drift.
-  defp emit_validation_confidence(mission) do
+  @doc false
+  def emit_validation_confidence(mission) do
     validation_runs =
       Enum.count(mission.ops, fn op ->
         op[:phase_job] && Map.get(op, :phase) == "validation" and op.status == "done"
@@ -1793,7 +1798,8 @@ defmodule GiTF.Major.Orchestrator do
       :ok
   end
 
-  defp latest_completed_impl_op(mission) do
+  @doc false
+  def latest_completed_impl_op(mission) do
     mission.ops
     |> Enum.reject(& &1[:phase_job])
     |> Enum.filter(&(&1.status == "done"))
@@ -1801,9 +1807,10 @@ defmodule GiTF.Major.Orchestrator do
     |> List.first()
   end
 
-  defp validation_artifact_stale?(nil, _validation, _mid), do: false
+  @doc false
+  def validation_artifact_stale?(nil, _validation, _mid), do: false
 
-  defp validation_artifact_stale?(latest_impl, _validation, mission_id) do
+  def validation_artifact_stale?(latest_impl, _validation, mission_id) do
     # Check if the latest completed impl op finished after the last validation op started
     last_validation_op =
       case GiTF.Missions.get(mission_id) do
@@ -1824,7 +1831,8 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp attempt_validation_fixes(mission, validation, %GiTF.Togusa.FixContext{} = fix_ctx) do
+  @doc false
+  def attempt_validation_fixes(mission, validation, %GiTF.Togusa.FixContext{} = fix_ctx) do
     impl_files = get_mission_changed_files(mission)
 
     # Build fix description with full validation feedback
@@ -2009,7 +2017,8 @@ defmodule GiTF.Major.Orchestrator do
     _ -> spawn_implementation_jobs(mission)
   end
 
-  defp load_mission_fix_context(mission) do
+  @doc false
+  def load_mission_fix_context(mission) do
     case Map.get(mission, :fix_context) do
       nil ->
         max = max_fix_attempts_for(mission.sector_id)
