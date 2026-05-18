@@ -98,8 +98,6 @@ defmodule GiTF.Phases.Design do
     end
 
     :ok
-  rescue
-    _ -> :ok
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
@@ -109,8 +107,6 @@ defmodule GiTF.Phases.Design do
     Logger.warning("Quest #{mission.id}: all design strategies failed")
     GiTF.Missions.fail_quest(mission.id, "All design strategies failed")
     :ok
-  rescue
-    _ -> :ok
   end
 
   def terminal(_mission, _kind, _artifact), do: :ok
@@ -124,7 +120,9 @@ defmodule GiTF.Phases.Design do
     end)
   end
 
-  defp op_strategy(op) do
-    Map.get(op, :strategy) || Map.get(op, "strategy")
-  end
+  # Delegate to the orchestrator's canonical implementation which falls
+  # back to the legacy `[strategy]` title regex for pre-migration ops —
+  # without that fallback, those ops yield `nil` strategy and get filtered
+  # out, falsely marking the design as single-variant.
+  defp op_strategy(op), do: Orchestrator.op_strategy(op)
 end

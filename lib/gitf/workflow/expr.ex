@@ -55,20 +55,49 @@ defmodule GiTF.Workflow.Expr do
   def validate(other), do: {:error, {:not_a_string, other}}
 
   @doc """
+  Parses + whitelist-validates `source` and returns the AST. Use at
+  schema-load time to cache the compiled form — `eval_ast/2` then skips
+  the parse and whitelist check on every poll tick.
+  """
+  @spec compile(String.t()) :: {:ok, Macro.t()} | {:error, term()}
+  def compile(source) when is_binary(source) do
+    with {:ok, ast} <- parse(source),
+         :ok <- check(ast) do
+      {:ok, ast}
+    end
+  end
+
+  def compile(other), do: {:error, {:not_a_string, other}}
+
+  @doc """
   Evaluates `source` against `bindings` (`%{artifact: ..., mission: ...}`).
   Returns `{:ok, boolean()}` — the result is coerced to a boolean via
   truthiness — or `{:error, reason}` if the expression is malformed or a
   strict boolean operator got a non-boolean operand.
+
+  Prefer `compile/1` + `eval_ast/2` for repeated evaluation (e.g.
+  conditional `next:` rules evaluated on every poll tick); `eval/2` does
+  the parse + whitelist check on every call.
   """
   @spec eval(String.t(), bindings()) :: {:ok, boolean()} | {:error, term()}
   def eval(source, bindings \\ %{}) when is_binary(source) do
-    with {:ok, ast} <- parse(source),
-         :ok <- check(ast) do
-      try do
-        {:ok, truthy?(do_eval(ast, bindings))}
-      rescue
-        e -> {:error, {:eval_error, Exception.message(e)}}
-      end
+    with {:ok, ast} <- compile(source) do
+      eval_ast(ast, bindings)
+    end
+  end
+
+  @doc """
+  Evaluates a pre-compiled AST (from `compile/1`) against `bindings`.
+  Skips the parse + whitelist check — safe because `compile/1` validated
+  them — so this is the hot-path entry point for conditional-rule
+  evaluation.
+  """
+  @spec eval_ast(Macro.t(), bindings()) :: {:ok, boolean()} | {:error, term()}
+  def eval_ast(ast, bindings) do
+    try do
+      {:ok, truthy?(do_eval(ast, bindings))}
+    rescue
+      e -> {:error, {:eval_error, Exception.message(e)}}
     end
   end
 

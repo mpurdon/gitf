@@ -1092,7 +1092,8 @@ defmodule GiTF.Major.Orchestrator do
   # written before the `strategy` field existed, and finally to "normal" for
   # ops that have no strategy concept. Prefer `op[:strategy]` for new writes
   # via `spawn_phase_ghost_inner`.
-  defp op_strategy(op) do
+  @doc false
+  def op_strategy(op) do
     case op[:strategy] do
       s when is_binary(s) and s != "" ->
         s
@@ -1809,19 +1810,14 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   @doc false
-  def validation_artifact_stale?(nil, _validation, _mid), do: false
+  def validation_artifact_stale?(nil, _validation, _mission_or_id), do: false
 
-  def validation_artifact_stale?(latest_impl, _validation, mission_id) do
-    # Check if the latest completed impl op finished after the last validation op started
+  def validation_artifact_stale?(latest_impl, _validation, %{ops: ops}) do
     last_validation_op =
-      case GiTF.Missions.get(mission_id) do
-        {:ok, m} ->
-          m.ops
-          |> Enum.filter(&(&1[:phase] == "validation" and &1.status == "done"))
-          |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
-          |> List.first()
-        _ -> nil
-      end
+      ops
+      |> Enum.filter(&(&1[:phase] == "validation" and &1.status == "done"))
+      |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
+      |> List.first()
 
     case {latest_impl[:inserted_at], last_validation_op && last_validation_op[:inserted_at]} do
       {%DateTime{} = impl_at, %DateTime{} = val_at} ->
@@ -1829,6 +1825,13 @@ defmodule GiTF.Major.Orchestrator do
 
       _ ->
         false
+    end
+  end
+
+  def validation_artifact_stale?(latest_impl, validation, mission_id) when is_binary(mission_id) do
+    case GiTF.Missions.get(mission_id) do
+      {:ok, mission} -> validation_artifact_stale?(latest_impl, validation, mission)
+      _ -> false
     end
   end
 

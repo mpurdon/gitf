@@ -31,10 +31,16 @@ defmodule GiTF.Phases.Publish do
   end
 
   @impl true
-  def verdict(_mission, %{"status" => s}) when s in ["pr_failed", "push_failed", "failed"],
+  def verdict(_mission, %{"status" => s}) when s in ["pr_failed", "push_failed"],
     do: :terminal_fail
 
-  def verdict(_mission, artifact) when is_map(artifact), do: :advance
+  def verdict(_mission, artifact) when is_map(artifact) do
+    # `pr_failed`/`push_failed` are publish-domain failures, but a generic
+    # `status: "failed"` (string or atom-keyed) artifact is also a failure
+    # — share that check with the rest of the phase handlers.
+    if GiTF.Workflow.Verdict.artifact_failed?(artifact), do: :terminal_fail, else: :advance
+  end
+
   def verdict(_mission, _), do: :wait
 
   @impl true
@@ -47,8 +53,6 @@ defmodule GiTF.Phases.Publish do
     })
 
     :ok
-  rescue
-    _ -> :ok
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
@@ -68,8 +72,6 @@ defmodule GiTF.Phases.Publish do
 
     GiTF.Missions.fail_quest(mission.id, reason)
     :ok
-  rescue
-    _ -> :ok
   end
 
   def terminal(_mission, _kind, _artifact), do: :ok

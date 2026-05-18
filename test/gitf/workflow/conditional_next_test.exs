@@ -9,8 +9,8 @@ defmodule GiTF.Workflow.ConditionalNextTest do
     %Phase{
       id: "triage",
       next: [
-        {"artifact.bug_reproducible == false", "end"},
-        {"artifact.skip_flags.research == true", "requirements"},
+        Phase.transition!("artifact.bug_reproducible == false", "end"),
+        Phase.transition!("artifact.skip_flags.research == true", "requirements"),
         {:else, "research"}
       ]
     }
@@ -109,7 +109,7 @@ defmodule GiTF.Workflow.ConditionalNextTest do
                  ])
                )
 
-      assert [{"artifact.skip_flags.research == true", "research"}, {:else, "research"}] = triage.next
+      assert [{"artifact.skip_flags.research == true", _ast, "research"}, {:else, "research"}] = triage.next
     end
 
     test "rejects an unknown target inside a rule" do
@@ -167,7 +167,7 @@ defmodule GiTF.Workflow.ConditionalNextTest do
           %Phase{
             id: "validation",
             on_pass: [
-              {"mission.requires_approval == true", "awaiting_approval"},
+              Phase.transition!("mission.requires_approval == true", "awaiting_approval"),
               {:else, "simplify"}
             ],
             on_fail: "implementation"
@@ -208,16 +208,20 @@ defmodule GiTF.Workflow.ConditionalNextTest do
       validation_phase = Enum.find(w.phases, &(&1.id == "validation"))
 
       assert [
-               {"mission.requires_approval == true", "awaiting_approval"},
+               {"mission.requires_approval == true", _ast, "awaiting_approval"},
                {:else, "simplify"}
              ] = validation_phase.on_pass
 
-      # round-trip through serialize
+      # round-trip through serialize. The compiled AST round-trips because
+      # the schema re-compiles the source on the way back in.
       yaml = Workflow.serialize(w)
       {:ok, parsed} = YamlElixir.read_from_string(yaml)
       assert {:ok, w2} = Schema.validate(parsed)
       validation2 = Enum.find(w2.phases, &(&1.id == "validation"))
-      assert validation2.on_pass == validation_phase.on_pass
+      # Compare source + target; the AST is structurally equal but might
+      # differ in metadata between compiles.
+      assert sources_and_targets(validation2.on_pass) ==
+               sources_and_targets(validation_phase.on_pass)
     end
   end
 
@@ -228,11 +232,20 @@ defmodule GiTF.Workflow.ConditionalNextTest do
       assert {:ok, w2} = Schema.validate(parsed)
       [triage2 | _] = w2.phases
 
-      assert triage2.next == [
+      assert sources_and_targets(triage2.next) == [
                {"artifact.bug_reproducible == false", "end"},
                {"artifact.skip_flags.research == true", "requirements"},
                {:else, "research"}
              ]
     end
+  end
+
+  # Strip the cached AST so we can compare source + target across
+  # round-trips without depending on AST metadata equality.
+  defp sources_and_targets(transitions) do
+    Enum.map(transitions, fn
+      {:else, target} -> {:else, target}
+      {source, _ast, target} -> {source, target}
+    end)
   end
 end

@@ -100,6 +100,39 @@ defmodule GiTF.Phases.Validation do
   def verdict(_mission, nil), do: :wait
 
   def verdict(mission, %{"overall_verdict" => "pass"} = artifact) do
+    # Idempotent fast-path: this branch fires on every poll while
+    # current_phase = "validation" and the artifact says pass; if we've
+    # already done the side effects (artifact already carries
+    # `requires_approval`), short-circuit so we don't re-emit telemetry,
+    # re-run the cross-check, or re-write the artifact every tick.
+    if Map.has_key?(artifact, "requires_approval") do
+      :pass
+    else
+      validate_pass(mission, artifact)
+    end
+  end
+
+  def verdict(mission, artifact) when is_map(artifact) do
+    # Cheap staleness check first — if the latest impl op finished after
+    # the validation we're looking at, the artifact is moot regardless of
+    # the fix budget. Skip the (heavier) fix-context load in that case.
+    latest_impl = Orchestrator.latest_completed_impl_op(mission)
+
+    if Orchestrator.validation_artifact_stale?(latest_impl, artifact, mission) do
+      Logger.info(
+        "Quest #{mission.id}: validation artifact is stale (fix completed after), re-validating"
+      )
+
+      Orchestrator.start_validation(mission)
+      :wait
+    else
+      handle_validation_fail(mission, artifact)
+    end
+  end
+
+  def verdict(_mission, _artifact), do: :wait
+
+  defp validate_pass(mission, artifact) do
     Orchestrator.emit_validation_confidence(mission)
 
     case Orchestrator.validate_pass_against_diff(mission) do
@@ -138,39 +171,25 @@ defmodule GiTF.Phases.Validation do
     end
   end
 
-  def verdict(mission, artifact) when is_map(artifact) do
+  defp handle_validation_fail(mission, artifact) do
     fix_ctx = Orchestrator.load_mission_fix_context(mission)
-    latest_impl = Orchestrator.latest_completed_impl_op(mission)
-    stale? = Orchestrator.validation_artifact_stale?(latest_impl, artifact, mission.id)
 
-    cond do
-      stale? ->
-        Logger.info(
-          "Quest #{mission.id}: validation artifact is stale (fix completed after), re-validating"
-        )
+    if FixContext.exhausted?(fix_ctx) do
+      Logger.warning(
+        "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
+      )
 
-        Orchestrator.start_validation(mission)
-        :wait
+      :terminal_fail
+    else
+      Logger.info(
+        "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
+      )
 
-      FixContext.exhausted?(fix_ctx) ->
-        Logger.warning(
-          "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
-        )
-
-        :terminal_fail
-
-      true ->
-        Logger.info(
-          "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
-        )
-
-        Orchestrator.maybe_spawn_skill_refinement(mission, artifact)
-        Orchestrator.attempt_validation_fixes(mission, artifact, fix_ctx)
-        :wait
+      Orchestrator.maybe_spawn_skill_refinement(mission, artifact)
+      Orchestrator.attempt_validation_fixes(mission, artifact, fix_ctx)
+      :wait
     end
   end
-
-  def verdict(_mission, _artifact), do: :wait
 
   @impl true
   def terminal(mission, :retries_exhausted, artifact) do
@@ -185,8 +204,6 @@ defmodule GiTF.Phases.Validation do
     )
 
     :ok
-  rescue
-    _ -> :ok
   end
 
   def terminal(_mission, _kind, _artifact), do: :ok

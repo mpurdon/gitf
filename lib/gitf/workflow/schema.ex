@@ -100,12 +100,12 @@ defmodule GiTF.Workflow.Schema do
     {on_fail, on_fail_errors} = parse_branch(id, m["on_fail"], "on_fail")
     errors = next_errors ++ on_pass_errors ++ on_fail_errors ++ errors
 
-    has_next? = branch_present?(next)
-    has_branches? = branch_present?(on_pass) and branch_present?(on_fail)
+    has_next? = Phase.branch_present?(next)
+    has_branches? = Phase.branch_present?(on_pass) and Phase.branch_present?(on_fail)
 
     errors =
       cond do
-        has_next? and (branch_present?(on_pass) or branch_present?(on_fail)) ->
+        has_next? and (Phase.branch_present?(on_pass) or Phase.branch_present?(on_fail)) ->
           [{:phase_next_and_branches, id} | errors]
 
         not has_next? and not has_branches? and id not in [nil, "end"] ->
@@ -217,13 +217,11 @@ defmodule GiTF.Workflow.Schema do
 
   defp parse_branch(id, other, field), do: {nil, [{:bad_branch, id, field, other}]}
 
-  defp branch_present?(b) when is_binary(b) and b != "", do: true
-  defp branch_present?(b) when is_list(b) and b != [], do: true
-  defp branch_present?(_), do: false
-
   defp parse_transition(%{"when" => w, "then" => t}) when is_binary(w) and is_binary(t) do
-    case GiTF.Workflow.Expr.validate(w) do
-      :ok -> {:ok, {w, t}}
+    # Compile the expression once at load so the per-tick `eval_ast`
+    # path skips parse + whitelist check.
+    case GiTF.Workflow.Expr.compile(w) do
+      {:ok, ast} -> {:ok, {w, ast, t}}
       {:error, reason} -> {:error, {:bad_when_expr, w, reason}}
     end
   end
@@ -242,7 +240,19 @@ defmodule GiTF.Workflow.Schema do
     errors = []
 
     errors =
-      if is_binary(when_clause), do: errors, else: [{:gate_missing_when, id} | errors]
+      cond do
+        not is_binary(when_clause) ->
+          [{:gate_missing_when, id} | errors]
+
+        true ->
+          # Validate the expression against the same grammar `when:` rules
+          # on conditional branches use, so an operator gets the error at
+          # load time rather than at runtime when the gate fires.
+          case GiTF.Workflow.Expr.validate(when_clause) do
+            :ok -> errors
+            {:error, reason} -> [{:gate_bad_when_expr, id, reason} | errors]
+          end
+      end
 
     errors =
       if action in @valid_gate_actions,
@@ -286,8 +296,9 @@ defmodule GiTF.Workflow.Schema do
        do: check_target(phase_id, branch, kind, valid, errors)
 
   defp check_branch_targets(phase_id, transitions, kind, valid, errors) when is_list(transitions) do
-    Enum.reduce(transitions, errors, fn {_cond, target}, acc ->
-      check_target(phase_id, target, kind, valid, acc)
+    Enum.reduce(transitions, errors, fn
+      {:else, target}, acc -> check_target(phase_id, target, kind, valid, acc)
+      {_source, _ast, target}, acc -> check_target(phase_id, target, kind, valid, acc)
     end)
   end
 

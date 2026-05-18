@@ -60,28 +60,27 @@ defmodule GiTF.Phases.Triage do
   end
 
   @impl true
-  def verdict(%{"status" => s}) when s in ["failed", "fail"], do: :fail
-  def verdict(artifact) when is_map(artifact), do: :advance
+  def verdict(artifact) when is_map(artifact) do
+    if GiTF.Workflow.Verdict.artifact_failed?(artifact), do: :fail, else: :advance
+  end
+
   def verdict(_), do: :inconclusive
 
   @impl true
   def before_advance(mission, verdict, artifact)
       when verdict in [:pass, :advance] and is_map(artifact) do
-    complexity =
-      Triage.complexity_from_string(artifact["complexity"] || artifact[:complexity]) || :complex
+    complexity = Triage.complexity_from_string(artifact["complexity"]) || :complex
 
     Missions.update(mission.id, %{pipeline_mode: Decisions.pipeline_mode_for_complexity(complexity)})
 
-    bug_reproducible = Map.get(artifact, "bug_reproducible", Map.get(artifact, :bug_reproducible))
-    evidence = Map.get(artifact, "bug_evidence", Map.get(artifact, :bug_evidence, "")) || ""
+    bug_reproducible = artifact["bug_reproducible"]
+    evidence = artifact["bug_evidence"] || ""
 
     if bug_reproducible == false and Triage.strong_no_work_evidence?(evidence) do
       Missions.store_artifact(mission.id, "triage", Map.put(artifact, "no_work_needed", true))
     end
 
     :ok
-  rescue
-    _ -> :ok
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
@@ -93,11 +92,8 @@ defmodule GiTF.Phases.Triage do
     # store a "preflight" artifact, emit `[:gitf, :mission, :no_work_needed]`
     # telemetry, complete the mission, dispatch an operator webhook, and
     # record to the ledger.
-    evidence = Map.get(artifact, "bug_evidence", Map.get(artifact, :bug_evidence, "")) || ""
-    Orchestrator.complete_quest_no_work_needed(mission, evidence)
+    Orchestrator.complete_quest_no_work_needed(mission, artifact["bug_evidence"] || "")
     :ok
-  rescue
-    _ -> :ok
   end
 
   def terminal(_mission, _kind, _artifact), do: :ok

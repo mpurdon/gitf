@@ -47,9 +47,14 @@ defmodule GiTF.Phases.Scoring do
   @impl true
   def verdict(mission, artifact) do
     cond do
-      is_map(artifact) -> :advance
-      GiTF.Major.Orchestrator.scoring_post_processing_exhausted?(mission) -> :terminal_fail
-      true -> :wait
+      is_map(artifact) ->
+        if GiTF.Workflow.Verdict.artifact_failed?(artifact), do: :terminal_fail, else: :advance
+
+      GiTF.Major.Orchestrator.scoring_post_processing_exhausted?(mission) ->
+        :terminal_fail
+
+      true ->
+        :wait
     end
   end
 
@@ -60,8 +65,6 @@ defmodule GiTF.Phases.Scoring do
     # flips `post_processing_status` to "done", reaps worktrees/branch.
     GiTF.Major.Orchestrator.finish_scored(mission)
     :ok
-  rescue
-    _ -> :ok
   end
 
   def terminal(mission, :retries_exhausted, _artifact) do
@@ -71,8 +74,6 @@ defmodule GiTF.Phases.Scoring do
 
     GiTF.Missions.mark_post_processing_failed(mission.id, "scoring exhausted retries")
     :ok
-  rescue
-    _ -> :ok
   end
 
   def terminal(_mission, _kind, _artifact), do: :ok

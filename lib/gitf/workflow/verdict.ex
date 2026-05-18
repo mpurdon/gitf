@@ -92,8 +92,15 @@ defmodule GiTF.Workflow.Verdict do
 
   # -- Helpers ---------------------------------------------------------------
 
-  defp artifact_failed?(%{"status" => "failed"}), do: true
-  defp artifact_failed?(%{status: "failed"}), do: true
-  defp artifact_failed?(_), do: false
-
+  @doc """
+  Whether an artifact represents a phase-level failure. Matches both
+  string- and atom-keyed `status: "failed"` so handlers that read
+  JSON-via-Archive artifacts and handlers that build atom-keyed maps in
+  tests agree. Phase handlers should call this from `verdict/1` /
+  `verdict/2` rather than open-coding the check.
+  """
+  @spec artifact_failed?(term()) :: boolean()
+  def artifact_failed?(%{"status" => "failed"}), do: true
+  def artifact_failed?(%{status: "failed"}), do: true
+  def artifact_failed?(_), do: false
 end

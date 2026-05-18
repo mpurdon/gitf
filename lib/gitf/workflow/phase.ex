@@ -35,11 +35,13 @@ defmodule GiTF.Workflow.Phase do
         }
 
   @typedoc """
-  One conditional `next` rule. `{when_expr, target}` advances to `target`
-  when `when_expr` (a `GiTF.Workflow.Expr` string) is truthy; `{:else,
-  target}` is the unconditional fallback and must be the last rule.
+  One conditional `next` rule. `{when_source, when_ast, target}`
+  advances to `target` when `when_source` (a `GiTF.Workflow.Expr`
+  string, pre-compiled to `when_ast` at schema load) is truthy;
+  `{:else, target}` is the unconditional fallback and must be the last
+  rule.
   """
-  @type transition :: {String.t(), String.t()} | {:else, String.t()}
+  @type transition :: {String.t(), Macro.t(), String.t()} | {:else, String.t()}
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -101,7 +103,28 @@ defmodule GiTF.Workflow.Phase do
 
   def verdict_driven?(_), do: false
 
-  defp branch_present?(b) when is_binary(b) and b != "", do: true
-  defp branch_present?(b) when is_list(b) and b != [], do: true
-  defp branch_present?(_), do: false
+  @doc """
+  Whether a `next:`/`on_pass:`/`on_fail:` branch value is populated —
+  either a non-empty string target or a non-empty conditional rule list.
+  Shared with `GiTF.Workflow.Schema` so the parser and the struct agree.
+  """
+  @spec branch_present?(term()) :: boolean()
+  def branch_present?(b) when is_binary(b) and b != "", do: true
+  def branch_present?(b) when is_list(b) and b != [], do: true
+  def branch_present?(_), do: false
+
+  @doc """
+  Builds a `{source, ast, target}` transition tuple with the `when:`
+  expression compiled. Raises if the expression doesn't parse against
+  `GiTF.Workflow.Expr`'s grammar. Useful for tests and operator tooling
+  that build `%Phase{}` structs directly rather than going through
+  `GiTF.Workflow.Schema.validate/2`.
+  """
+  @spec transition!(String.t(), String.t()) :: transition()
+  def transition!(source, target) when is_binary(source) and is_binary(target) do
+    case GiTF.Workflow.Expr.compile(source) do
+      {:ok, ast} -> {source, ast, target}
+      {:error, reason} -> raise ArgumentError, "bad when-expr #{inspect(source)}: #{inspect(reason)}"
+    end
+  end
 end

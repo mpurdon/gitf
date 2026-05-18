@@ -69,8 +69,6 @@ defmodule GiTF.Phases.AwaitingApproval do
     Logger.warning("Quest #{mission.id}: awaiting_approval terminated as failed")
     GiTF.Missions.fail_quest(mission.id, "Human review rejected")
     :ok
-  rescue
-    _ -> :ok
   end
 
   def terminal(_mission, _kind, _artifact), do: :ok

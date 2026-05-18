@@ -82,7 +82,14 @@ defmodule GiTF.Workflow.TemplatesGoldenTest do
   # walker enumerates *every* target reachable from that field so a
   # mis-routed conditional `then:` is caught at CI time too.
   defp branch_targets(s) when is_binary(s) and s != "", do: [s]
-  defp branch_targets(list) when is_list(list), do: Enum.map(list, fn {_cond, t} -> t end)
+
+  defp branch_targets(list) when is_list(list) do
+    Enum.map(list, fn
+      {:else, t} -> t
+      {_source, _ast, t} -> t
+    end)
+  end
+
   defp branch_targets(_), do: []
 
   # We treat a path as "seen" by phase_id PLUS the most recent two

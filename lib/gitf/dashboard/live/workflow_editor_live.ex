@@ -436,7 +436,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
   defp rewrite_target(transitions, removed_id) when is_list(transitions) do
     Enum.map(transitions, fn
       {:else, target} -> {:else, rewrite_target(target, removed_id)}
-      {when_expr, target} -> {when_expr, rewrite_target(target, removed_id)}
+      {source, ast, target} -> {source, ast, rewrite_target(target, removed_id)}
     end)
   end
 
@@ -529,7 +529,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
   defp branch_to_raw(transitions) when is_list(transitions) do
     Enum.map(transitions, fn
       {:else, target} -> %{"else" => target}
-      {when_expr, target} -> %{"when" => when_expr, "then" => target}
+      {source, _ast, target} -> %{"when" => source, "then" => target}
     end)
   end
 
@@ -576,7 +576,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
     transitions
     |> Enum.map(fn
       {:else, t} -> "else→#{t}"
-      {w, t} -> "#{w}→#{t}"
+      {source, _ast, t} -> "#{source}→#{t}"
     end)
     |> Enum.join(" · ")
   end

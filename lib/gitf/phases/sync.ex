@@ -25,7 +25,9 @@ defmodule GiTF.Phases.Sync do
   end
 
   @impl true
-  def verdict(%{"status" => "failed"}), do: :fail
-  def verdict(artifact) when is_map(artifact), do: :advance
+  def verdict(artifact) when is_map(artifact) do
+    if GiTF.Workflow.Verdict.artifact_failed?(artifact), do: :fail, else: :advance
+  end
+
   def verdict(_), do: :wait
 end

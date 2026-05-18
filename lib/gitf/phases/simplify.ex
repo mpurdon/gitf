@@ -34,19 +34,12 @@ defmodule GiTF.Phases.Simplify do
   end
 
   @impl true
-  def verdict(mission, artifact) do
-    cond do
-      is_map(artifact) ->
-        :advance
+  def verdict(_mission, artifact) when is_map(artifact), do: :advance
 
-      simplify_ops(mission) == [] ->
-        :wait
-
-      Enum.all?(simplify_ops(mission), &(&1.status in ["done", "failed"])) ->
-        :advance
-
-      true ->
-        :wait
+  def verdict(mission, _artifact) do
+    case simplify_ops(mission) do
+      [] -> :wait
+      ops -> if Enum.all?(ops, &(&1.status in ["done", "failed"])), do: :advance, else: :wait
     end
   end
 
@@ -69,8 +62,6 @@ defmodule GiTF.Phases.Simplify do
     end
 
     :ok
-  rescue
-    _ -> :ok
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
@@ -82,7 +73,8 @@ defmodule GiTF.Phases.Simplify do
     |> Enum.filter(fn op -> Map.get(op, :phase) == "simplify" end)
   end
 
-  defp op_strategy(op) do
-    Map.get(op, :strategy) || Map.get(op, "strategy")
-  end
+  # Delegate to the orchestrator's canonical implementation so legacy
+  # simplify ops (no `:strategy` field, name encoded as `[strategy]` in
+  # the title) still classify correctly.
+  defp op_strategy(op), do: GiTF.Major.Orchestrator.op_strategy(op)
 end

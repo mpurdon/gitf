@@ -82,9 +82,9 @@ defmodule GiTF.Phases.TriageTest do
             id: "triage",
             handler: GiTF.Phases.Triage,
             next: [
-              {"artifact.no_work_needed == true", "end"},
-              {"artifact.skip_flags.skip_research != true", "research"},
-              {"artifact.skip_flags.skip_design != true", "design"},
+              Phase.transition!("artifact.no_work_needed == true", "end"),
+              Phase.transition!("artifact.skip_flags.skip_research != true", "research"),
+              Phase.transition!("artifact.skip_flags.skip_design != true", "design"),
               {:else, "implementation"}
             ]
           },

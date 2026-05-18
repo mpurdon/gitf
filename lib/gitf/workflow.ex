@@ -271,8 +271,8 @@ defmodule GiTF.Workflow do
       {:else, target}, _acc ->
         {:halt, {:ok, normalize(target)}}
 
-      {when_expr, target}, acc ->
-        case GiTF.Workflow.Expr.eval(when_expr, ctx) do
+      {_source, ast, target}, acc ->
+        case GiTF.Workflow.Expr.eval_ast(ast, ctx) do
           {:ok, true} -> {:halt, {:ok, normalize(target)}}
           _ -> {:cont, acc}
         end
@@ -400,8 +400,8 @@ defmodule GiTF.Workflow do
 
   defp serialize_transition({:else, target}), do: "      - else: #{target}"
 
-  defp serialize_transition({when_expr, target}),
-    do: "      - when: #{yaml_inline_string(when_expr)}\n        then: #{target}"
+  defp serialize_transition({source, _ast, target}),
+    do: "      - when: #{yaml_inline_string(source)}\n        then: #{target}"
 
   # Quote an inline scalar only when it could be misread as YAML (has a
   # colon-space, quotes, leading/trailing space, or YAML-special chars).
