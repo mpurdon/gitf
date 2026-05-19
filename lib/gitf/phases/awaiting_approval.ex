@@ -2,12 +2,12 @@ defmodule GiTF.Phases.AwaitingApproval do
   @moduledoc """
   Awaiting-approval phase handler.
 
-  `start/3` delegates to the legacy
-  `Orchestrator.dispatch_phase("awaiting_approval", mission)` →
-  `start_awaiting_approval/1` (transition + `Override.request_approval/1`
-  + `:approval_requested` operator webhook).
+  `start/3` delegates to `Orchestrator.dispatch_phase("awaiting_approval",
+  mission)` → `GiTF.Approval.request/1` (transition +
+  `Override.request_approval/1` + `:approval_requested` operator
+  webhook).
 
-  `verdict/2` mirrors `Orchestrator.handle_approval_result/1` exactly,
+  `verdict/2` mirrors `GiTF.Approval.handle_result/1` exactly,
   translated into workflow verdicts:
 
     * `:approved` → `:pass` (route to merge via `on_pass: sync`)
@@ -41,6 +41,7 @@ defmodule GiTF.Phases.AwaitingApproval do
 
   require Logger
 
+  alias GiTF.Approval
   alias GiTF.Major.Orchestrator
 
   @impl true
@@ -76,10 +77,10 @@ defmodule GiTF.Phases.AwaitingApproval do
   # -- Pending path: timeout → auto-approve / auto-reject / alert -----------
 
   defp handle_pending(mission) do
-    if Orchestrator.approval_timed_out?(mission.id) do
-      timeout_h = Orchestrator.approval_timeout_hours()
+    if Approval.timed_out?(mission.id) do
+      timeout_h = Approval.timeout_hours()
 
-      if Orchestrator.mission_max_risk(mission.id) == :critical do
+      if Approval.mission_max_risk(mission.id) == :critical do
         Logger.warning(
           "Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve"
         )
@@ -91,7 +92,7 @@ defmodule GiTF.Phases.AwaitingApproval do
 
         :wait
       else
-        if Orchestrator.revalidate_quest(mission) do
+        if Approval.revalidate(mission) do
           Logger.info(
             "Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)"
           )

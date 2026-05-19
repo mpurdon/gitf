@@ -462,7 +462,7 @@ defmodule GiTF.Major.Orchestrator do
         handle_validation_result(mission)
 
       "awaiting_approval" ->
-        handle_approval_result(mission)
+        GiTF.Approval.handle_result(mission)
 
       "sync" ->
         check_and_advance(mission, "sync", &start_simplify/1)
@@ -531,7 +531,7 @@ defmodule GiTF.Major.Orchestrator do
       "simplify" => &start_simplify/1,
       "publish" => &start_publish/1,
       "scoring" => &start_scoring/1,
-      "awaiting_approval" => &start_awaiting_approval/1,
+      "awaiting_approval" => &GiTF.Approval.request/1,
       "sync" => &start_merge/1
     }
   end
@@ -1027,24 +1027,6 @@ defmodule GiTF.Major.Orchestrator do
       fail_quest(mission.id, "PR finalization failed")
   end
 
-  defp start_awaiting_approval(mission) do
-    with {:ok, _} <-
-           GiTF.Missions.transition_phase(
-             mission.id,
-             "awaiting_approval",
-             "Validation passed, awaiting human approval"
-           ) do
-      GiTF.Override.request_approval(mission.id)
-
-      GiTF.Observability.Alerts.dispatch_webhook(
-        :approval_requested,
-        "Quest #{mission.id} awaiting human approval: #{String.slice(mission.goal, 0, 80)}"
-      )
-
-      {:ok, "awaiting_approval"}
-    end
-  end
-
   defp check_design_complete(mission) do
     design_ops =
       Archive.filter(:ops, fn j ->
@@ -1103,115 +1085,6 @@ defmodule GiTF.Major.Orchestrator do
           [_, strategy] -> strategy
           _ -> "normal"
         end
-    end
-  end
-
-  defp handle_approval_result(mission) do
-    case GiTF.Override.approval_status(mission.id) do
-      :approved ->
-        {:ok, mission} = GiTF.Missions.get(mission.id)
-        start_merge(mission)
-
-      :rejected ->
-        Logger.warning("Quest #{mission.id} rejected by human reviewer")
-        fail_quest(mission.id, "Human review rejected")
-
-      :pending ->
-        # Check for approval timeout — re-validate then auto-approve
-        if approval_timed_out?(mission.id) do
-          timeout_h = approval_timeout_hours()
-
-          # Critical-risk missions never auto-approve — alert instead
-          if mission_max_risk(mission.id) == :critical do
-            Logger.warning(
-              "Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve"
-            )
-
-            GiTF.Observability.Alerts.dispatch_webhook(
-              :approval_timeout_critical,
-              "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval"
-            )
-
-            {:ok, "awaiting_approval"}
-          else
-            # Re-validate before auto-approving to catch regressions
-            validation_fresh? = revalidate_quest(mission)
-
-            if validation_fresh? do
-              Logger.info(
-                "Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)"
-              )
-
-              GiTF.Override.approve(mission.id, %{
-                approved_by: "auto_timeout",
-                notes: "Auto-approved after #{timeout_h}h (re-validated)"
-              })
-
-              {:ok, mission} = GiTF.Missions.get(mission.id)
-              start_merge(mission)
-            else
-              Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
-
-              GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve", %{
-                rejected_by: "auto_timeout"
-              })
-
-              fail_quest(mission.id, "Auto-approve failed re-validation")
-            end
-          end
-        else
-          {:ok, "awaiting_approval"}
-        end
-
-      :not_required ->
-        {:ok, mission} = GiTF.Missions.get(mission.id)
-        start_merge(mission)
-    end
-  end
-
-  @doc false
-  def revalidate_quest(mission) do
-    # Quick re-validation: check that implementation ops still pass verification
-    impl_jobs =
-      for op <- mission.ops, !op[:phase_job], op.status == "done", do: op
-
-    if impl_jobs == [] do
-      true
-    else
-      # Spot-check: verify a sample of completed ops (max 3)
-      sample = Enum.take(impl_jobs, 3)
-
-      results =
-        Enum.map(sample, fn op ->
-          case GiTF.Audit.verify_job(op.id) do
-            {:ok, :pass, _} -> true
-            _ -> false
-          end
-        end)
-
-      # Pass if all sampled ops still verify
-      Enum.all?(results)
-    end
-  rescue
-    e ->
-      Logger.warning(
-        "Re-validation crashed for mission #{mission.id}: #{Exception.message(e)}, rejecting"
-      )
-
-      false
-  end
-
-  @doc false
-  def approval_timed_out?(mission_id) do
-    case Archive.find_one(:approval_requests, fn r ->
-           r.mission_id == mission_id and r.status == "pending"
-         end) do
-      nil ->
-        false
-
-      request ->
-        hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
-        hours_elapsed > approval_timeout_hours()
     end
   end
 
@@ -1634,7 +1507,7 @@ defmodule GiTF.Major.Orchestrator do
             maybe_spawn_skill_refinement(mission, validation)
 
             if GiTF.Override.requires_approval?(mission) do
-              start_awaiting_approval(mission)
+              GiTF.Approval.request(mission)
             else
               start_merge(mission)
             end
@@ -3409,27 +3282,7 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  @doc false
-  def approval_timeout_hours, do: Config.get([:approvals, :timeout_hours], 1)
   defp max_quest_age_hours, do: Config.get([:major, :mission_timeout_hours], 24)
-
-  # Determine the highest-risk op type in a mission (for auto-approve gating)
-  @doc false
-  def mission_max_risk(mission_id) do
-    case GiTF.Archive.get(:missions, mission_id) do
-      nil ->
-        :normal
-
-      mission ->
-        ops = Map.get(mission, :ops, [])
-
-        cond do
-          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == :critical end) -> :critical
-          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == :high end) -> :high
-          true -> :normal
-        end
-    end
-  end
 
   defp model_id(tier) do
     GiTF.Runtime.ModelResolver.resolve(tier)
