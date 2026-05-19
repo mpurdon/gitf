@@ -350,15 +350,20 @@ defmodule GiTF.Sync do
   # -- Private: mission sync helpers -------------------------------------------
 
   defp cells_for_quest(mission) do
+    winner = Map.get(mission, :winning_variant)
+
     # Implementation ops that completed and have branch info stored on the op record.
     # This is the primary source — survives worktree/shell cleanup.
+    # Tournament mode: keep only the winning variant's ops so loser
+    # branches stay unmerged (they'll be reaped by cleanup later).
     impl_ops =
       mission.ops
       |> Enum.filter(fn op ->
         op.status in ["done", "completed"] and
           not Map.get(op, :phase_job, false) and
           not Map.get(op, :recon, false) and
-          is_binary(op[:branch])
+          is_binary(op[:branch]) and
+          variant_match?(op, winner)
       end)
 
     if impl_ops != [] do
@@ -371,6 +376,7 @@ defmodule GiTF.Sync do
       # Fallback: look for shells that still exist (legacy path)
       ghost_ids =
         mission.ops
+        |> Enum.filter(&variant_match?(&1, winner))
         |> Enum.map(& &1.ghost_id)
         |> Enum.reject(&is_nil/1)
         |> MapSet.new()
@@ -381,6 +387,11 @@ defmodule GiTF.Sync do
       end)
     end
   end
+
+  # Non-tournament missions (no winning_variant) merge every op. Tournament
+  # missions merge only the winner's variant ops.
+  defp variant_match?(_op, nil), do: true
+  defp variant_match?(op, winner), do: Map.get(op, :variant) == winner
 
   defp fetch_sector_for_cells([shell | _]) do
     fetch_sector(shell.sector_id)
