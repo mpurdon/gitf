@@ -1095,15 +1095,6 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp resolve_sector(nil) do
-    case GiTF.Sector.current() do
-      {:ok, sector} -> sector.id
-      _ -> nil
-    end
-  end
-
-  defp resolve_sector(id) when is_binary(id), do: id
-
   defp dispatch([:workflow], result) do
     subcommand = result_get(result, :args, :subcommand)
     target = result_get(result, :args, :target)
@@ -1156,14 +1147,6 @@ defmodule GiTF.CLI do
         Format.error("Usage: gitf workflow {list | show <name> | validate <name>}")
     end
   end
-
-  defp format_advance(%{next: "end"}), do: "(end)"
-  defp format_advance(%{next: next}) when is_binary(next), do: next
-
-  defp format_advance(%{on_pass: p, on_fail: f}) when is_binary(p) and is_binary(f),
-    do: "pass→#{p} · fail→#{f}"
-
-  defp format_advance(_), do: "?"
 
   defp dispatch([:heal], _result) do
     if GiTF.Client.remote?() do
@@ -4982,4 +4965,23 @@ defmodule GiTF.CLI do
     Format.info("Feature flags:")
     Enum.each(lines, &Format.info/1)
   end
+
+  # -- Shared CLI helpers ----------------------------------------------------
+
+  defp resolve_sector(nil) do
+    case GiTF.Sector.current() do
+      {:ok, sector} -> sector.id
+      _ -> nil
+    end
+  end
+
+  defp resolve_sector(id) when is_binary(id), do: id
+
+  defp format_advance(%{next: "end"}), do: "(end)"
+  defp format_advance(%{next: next}) when is_binary(next), do: next
+
+  defp format_advance(%{on_pass: p, on_fail: f}) when is_binary(p) and is_binary(f),
+    do: "pass→#{p} · fail→#{f}"
+
+  defp format_advance(_), do: "?"
 end

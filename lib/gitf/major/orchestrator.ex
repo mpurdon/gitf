@@ -369,6 +369,27 @@ defmodule GiTF.Major.Orchestrator do
     dispatch_via_handler(workflow, target, mission)
   end
 
+  defp handle_workflow_decision({:retries_exhausted, p}, mission, _phase, workflow) do
+    case GiTF.Workflow.Advancer.invoke_terminal(mission, workflow, :retries_exhausted) do
+      {:ok, :handled} ->
+        Logger.info("Quest #{mission.id}: workflow ended at #{p} (handler-terminated)")
+        {:ok, "failed"}
+
+      :default ->
+        Logger.warning("Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed")
+        GiTF.Missions.update(mission.id, %{status: "failed"})
+        {:ok, "failed"}
+    end
+  end
+
+  defp handle_workflow_decision({:error, reason}, mission, phase, _wf) do
+    Logger.warning(
+      "Workflow dispatch error for mission #{mission.id}: #{inspect(reason)}; falling back to legacy"
+    )
+
+    advance_via_legacy(mission, phase)
+  end
+
   # Dispatches `phase_id` for a workflow-path mission. Prefers the
   # workflow phase's `handler:` (a `GiTF.Phase` implementation's `start/3`)
   # so the handler can run logic legacy keeps in `start_<phase>/1`; falls
@@ -399,27 +420,6 @@ defmodule GiTF.Major.Orchestrator do
       _ ->
         dispatch_phase(phase_id, mission)
     end
-  end
-
-  defp handle_workflow_decision({:retries_exhausted, p}, mission, _phase, workflow) do
-    case GiTF.Workflow.Advancer.invoke_terminal(mission, workflow, :retries_exhausted) do
-      {:ok, :handled} ->
-        Logger.info("Quest #{mission.id}: workflow ended at #{p} (handler-terminated)")
-        {:ok, "failed"}
-
-      :default ->
-        Logger.warning("Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed")
-        GiTF.Missions.update(mission.id, %{status: "failed"})
-        {:ok, "failed"}
-    end
-  end
-
-  defp handle_workflow_decision({:error, reason}, mission, phase, _wf) do
-    Logger.warning(
-      "Workflow dispatch error for mission #{mission.id}: #{inspect(reason)}; falling back to legacy"
-    )
-
-    advance_via_legacy(mission, phase)
   end
 
   defp advance_via_legacy(mission, phase) do

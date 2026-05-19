@@ -27,7 +27,8 @@ defmodule GiTF.Approval do
 
   require Logger
 
-  alias GiTF.{Archive, Audit, Config, Missions, Observability, Override}
+  alias GiTF.{Archive, Audit, Missions, Observability, Override}
+  alias GiTF.Config.Provider, as: ConfigProvider
 
   @doc """
   Transitions the mission into the `awaiting_approval` phase, raises
@@ -184,7 +185,7 @@ defmodule GiTF.Approval do
   `[:approvals, :timeout_hours]` (defaults to 1).
   """
   @spec timeout_hours() :: number()
-  def timeout_hours, do: Config.get([:approvals, :timeout_hours], 1)
+  def timeout_hours, do: ConfigProvider.get([:approvals, :timeout_hours], 1)
 
   @doc """
   The highest `risk_level` across a mission's ops. Used by the

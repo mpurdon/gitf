@@ -462,7 +462,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
 
   # Default to "append" (end of list) on malformed input. Never raises:
   # a hostile websocket message can't kill the LV with String.to_integer.
-  defp parse_position(p, fallback) when is_integer(p), do: p
+  defp parse_position(p, _fallback) when is_integer(p), do: p
 
   defp parse_position(p, fallback) when is_binary(p) do
     case Integer.parse(p) do

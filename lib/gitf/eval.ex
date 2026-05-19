@@ -20,8 +20,6 @@ defmodule GiTF.Eval do
   it).
   """
 
-  alias GiTF.Eval.Scenario
-
   @scenarios [
     GiTF.Eval.SkillsRetrieval
   ]

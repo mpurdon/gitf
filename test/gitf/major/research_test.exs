@@ -75,6 +75,13 @@ defmodule GiTF.Major.ResearchTest do
     # First call creates cache
     {:ok, result1} = Research.research_sector(sector.id)
 
+    # Guarantee a distinct `analyzed_at` for the assertion below — Apple
+    # Silicon's clock can return the same microsecond from two
+    # back-to-back `DateTime.utc_now/0` calls, which would make the
+    # refresh look like a cache hit even though the implementation
+    # genuinely re-ran.
+    Process.sleep(2)
+
     # Make git change to invalidate cache
     File.write!(Path.join(sector.path, "new_file.ex"), "defmodule New do\nend")
     System.cmd("git", ["add", "."], cd: sector.path)

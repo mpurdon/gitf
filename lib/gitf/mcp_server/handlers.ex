@@ -861,27 +861,6 @@ defmodule GiTF.MCPServer.Handlers do
   def call("lsp_references", args), do: lsp_call("lsp_references", args, :references, &lsp_refs/1)
   def call("lsp_hover", args), do: lsp_call("lsp_hover", args, :hover, &lsp_hover/1)
 
-  defp lsp_call(name, %{"sector_id" => sid, "file_path" => fp, "line" => l, "character" => c} = args, key, fun) do
-    safe_handler(name, args, fn ->
-      case fun.({sid, fp, l, c, args}) do
-        {:ok, value} -> {:ok, json_text(Map.new([{:ok, true}, {key, value}]))}
-        {:error, reason} -> {:error, "#{name} failed: #{inspect(reason)}"}
-      end
-    end)
-  end
-
-  defp lsp_call(_name, _args, _key, _fun),
-    do: {:error, "Missing required parameters: sector_id, file_path, line, character"}
-
-  defp lsp_def({sid, fp, l, c, _}), do: GiTF.LSP.definition(sid, fp, l, c)
-
-  defp lsp_refs({sid, fp, l, c, args}) do
-    include = Map.get(args, "include_declaration", false) == true
-    GiTF.LSP.references(sid, fp, l, c, include)
-  end
-
-  defp lsp_hover({sid, fp, l, c, _}), do: GiTF.LSP.hover(sid, fp, l, c)
-
   # -- Visual capture --------------------------------------------------------
 
   def call("capture_screenshot", %{"url" => url, "output_path" => output} = args) do
@@ -1405,4 +1384,27 @@ defmodule GiTF.MCPServer.Handlers do
       inserted_at: to_string(l[:inserted_at])
     }
   end
+
+  # -- LSP helpers -----------------------------------------------------------
+
+  defp lsp_call(name, %{"sector_id" => sid, "file_path" => fp, "line" => l, "character" => c} = args, key, fun) do
+    safe_handler(name, args, fn ->
+      case fun.({sid, fp, l, c, args}) do
+        {:ok, value} -> {:ok, json_text(Map.new([{:ok, true}, {key, value}]))}
+        {:error, reason} -> {:error, "#{name} failed: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  defp lsp_call(_name, _args, _key, _fun),
+    do: {:error, "Missing required parameters: sector_id, file_path, line, character"}
+
+  defp lsp_def({sid, fp, l, c, _}), do: GiTF.LSP.definition(sid, fp, l, c)
+
+  defp lsp_refs({sid, fp, l, c, args}) do
+    include = Map.get(args, "include_declaration", false) == true
+    GiTF.LSP.references(sid, fp, l, c, include)
+  end
+
+  defp lsp_hover({sid, fp, l, c, _}), do: GiTF.LSP.hover(sid, fp, l, c)
 end

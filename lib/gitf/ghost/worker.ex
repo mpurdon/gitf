@@ -348,25 +348,6 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  defp fallback_or_fail(reason, state) do
-    case maybe_fallback_model(state) do
-      {:ok, new_task, fallback_model} ->
-        Logger.info("Ghost #{state.ghost_id} falling back to model #{fallback_model}")
-
-        {:noreply,
-         %{
-           state
-           | handle: {:task, new_task},
-             fallback_attempted: true,
-             first_error: state.first_error || reason
-         }}
-
-      :no_fallback ->
-        mark_failed(state, format_api_error(reason, state.first_error))
-        {:stop, :normal, %{state | status: :failed, handle: nil}}
-    end
-  end
-
   def handle_info(
         {:DOWN, ref, :process, _pid, reason},
         %{handle: {:task, %Task{ref: ref}}} = state
@@ -1868,6 +1849,25 @@ defmodule GiTF.Ghost.Worker do
   defp retry_same_model?({:api_error, %{reason: :timeout}}, _state), do: true
   defp retry_same_model?({:api_error, %{cause: %{reason: :timeout}}}, _state), do: true
   defp retry_same_model?(_reason, _state), do: false
+
+  defp fallback_or_fail(reason, state) do
+    case maybe_fallback_model(state) do
+      {:ok, new_task, fallback_model} ->
+        Logger.info("Ghost #{state.ghost_id} falling back to model #{fallback_model}")
+
+        {:noreply,
+         %{
+           state
+           | handle: {:task, new_task},
+             fallback_attempted: true,
+             first_error: state.first_error || reason
+         }}
+
+      :no_fallback ->
+        mark_failed(state, format_api_error(reason, state.first_error))
+        {:stop, :normal, %{state | status: :failed, handle: nil}}
+    end
+  end
 
   defp respawn_current_model(state) do
     with %{worktree_path: path} <- Archive.get(:shells, state.shell_id) do

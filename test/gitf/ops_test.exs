@@ -240,13 +240,15 @@ defmodule GiTF.OpsTest do
       assert {:error, :invalid_transition} = Ops.reset(op.id)
     end
 
-    test "cannot reset a running op", %{mission: mission, sector: sector} do
+    test "can reset a running op (aborts ghost + returns to pending)", %{mission: mission, sector: sector} do
       ghost = create_bee()
       {:ok, op} = create_job(mission, sector)
       {:ok, _} = Ops.assign(op.id, ghost.id)
       {:ok, _} = Ops.start(op.id)
 
-      assert {:error, :invalid_transition} = Ops.reset(op.id)
+      # `running -> reset` is explicitly allowed (see Ops's transition
+      # table) so an operator can yank a stuck ghost back to pending.
+      assert {:ok, %{status: "pending", ghost_id: nil}} = Ops.reset(op.id)
     end
   end
 end

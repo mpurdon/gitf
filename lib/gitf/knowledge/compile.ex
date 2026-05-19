@@ -46,7 +46,6 @@ defmodule GiTF.Knowledge.Compile do
 
   require Logger
 
-  alias GiTF.Archive
   alias GiTF.Knowledge.Index
   alias GiTF.Knowledge.Page
   alias GiTF.Major.PhaseCollector

@@ -343,17 +343,6 @@ defmodule GiTF.Missions do
   end
 
   @doc """
-  Atomically marks a mission as failed.
-
-  Sets `current_phase = "completed"` AND `status = "failed"` in a single
-  Archive.update/3 closure so a crash between the two writes cannot leave the
-  mission in an inconsistent state. Also records a phase_transition event
-  (best-effort, outside the record lock).
-
-  Returns `{:ok, mission}` or `{:error, :not_found}`.
-  """
-  @spec fail_quest(String.t(), String.t() | nil) :: {:ok, map()} | {:error, :not_found}
-  @doc """
   Unconditionally marks a mission as completed.
 
   Unlike `transition_phase/3` and `update_status!/1`, this bypasses the
@@ -497,6 +486,17 @@ defmodule GiTF.Missions do
     end
   end
 
+  @doc """
+  Atomically marks a mission as failed.
+
+  Sets `current_phase = "completed"` AND `status = "failed"` in a single
+  Archive.update/3 closure so a crash between the two writes cannot leave
+  the mission in an inconsistent state. Also records a phase_transition
+  event (best-effort, outside the record lock).
+
+  Returns `{:ok, mission}` or `{:error, :not_found}`.
+  """
+  @spec fail_quest(String.t(), String.t() | nil) :: {:ok, map()} | {:error, :not_found}
   def fail_quest(mission_id, reason \\ nil) do
     # Best-effort append-only event log for the phase transition.
     case Archive.get(:missions, mission_id) do

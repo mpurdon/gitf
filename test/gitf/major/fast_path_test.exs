@@ -96,21 +96,9 @@ defmodule GiTF.Major.FastPathTest do
     end
   end
 
-  describe "execute/1" do
-    test "transitions mission to implementation and creates op", %{mission: mission} do
-      {:ok, phase} = FastPath.execute(mission.id)
-
-      assert phase == "implementation"
-
-      # Verify op was created
-      ops = GiTF.Ops.list(mission_id: mission.id)
-      assert length(ops) == 1
-      assert hd(ops).title == mission.goal
-      refute hd(ops).phase_job
-    end
-
-    test "returns error for non-existent mission" do
-      {:error, :not_found} = FastPath.execute("non-existent")
-    end
-  end
+  # `FastPath.execute/1` was removed in 29b343d ("Streamline fast path:
+  # run all phases with minimal design, skip review"). Fast mode now
+  # threads through the normal pipeline with `mission.pipeline_mode =
+  # "fast"`; see `eligible?/2` + `fast_mode?/1` above. Coverage for the
+  # streamlined design path lives in design_test.exs.
 end

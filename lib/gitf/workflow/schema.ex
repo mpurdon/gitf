@@ -174,6 +174,8 @@ defmodule GiTF.Workflow.Schema do
     end
   end
 
+  defp parse_phase(other), do: {:error, [{:phase_not_a_map, other}]}
+
   defp parse_on_exhausted(nil), do: :fail
   defp parse_on_exhausted("fail"), do: :fail
   defp parse_on_exhausted(:fail), do: :fail
@@ -228,8 +230,6 @@ defmodule GiTF.Workflow.Schema do
 
   defp parse_transition(%{"else" => t}) when is_binary(t), do: {:ok, {:else, t}}
   defp parse_transition(other), do: {:error, {:bad_transition_rule, other}}
-
-  defp parse_phase(other), do: {:error, [{:phase_not_a_map, other}]}
 
   defp parse_gate(_id, nil), do: {nil, []}
 

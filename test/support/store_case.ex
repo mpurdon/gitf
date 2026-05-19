@@ -46,7 +46,17 @@ defmodule GiTF.StoreCase do
 
     on_exit(fn ->
       GiTF.Test.StoreHelper.stop_store()
-      File.rm_rf!(store_dir)
+
+      # `File.rm_rf!` would raise (and fail the test report) when a
+      # background process writes into the tmp dir between scan and
+      # delete — common because the Archive's snapshot writer can
+      # still flush after `stop_store/0`'s 10ms grace. Use the
+      # non-bang variant, then retry a couple of times for any
+      # late-write stragglers. If cleanup ultimately fails, leave a
+      # trail in the test log but don't poison an otherwise-passing
+      # test's result.
+      cleanup_tmp_dir(store_dir, 3)
+
       # Leave a healthy app-level Archive behind so non-isolated tests that
       # run after this module (simulator / skills / E2E) don't inherit a
       # stopped or half-deleted store.
@@ -54,5 +64,19 @@ defmodule GiTF.StoreCase do
     end)
 
     %{store_dir: store_dir}
+  end
+
+  defp cleanup_tmp_dir(_dir, 0), do: :ok
+
+  defp cleanup_tmp_dir(dir, attempts_left) do
+    case File.rm_rf(dir) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _posix, _path} ->
+        # Wait for the late-write to land, then try again.
+        Process.sleep(25)
+        cleanup_tmp_dir(dir, attempts_left - 1)
+    end
   end
 end

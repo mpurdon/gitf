@@ -78,8 +78,11 @@ defmodule GiTF.SyncTest do
   end
 
   describe "sync_back/1 with unknown shell_id" do
-    test "returns {:error, :cell_not_found} for a non-existent shell" do
-      assert {:error, :cell_not_found} = Sync.sync_back("cel-nonexistent")
+    test "returns {:error, :shell_not_found} for a non-existent shell" do
+      # `:shell_not_found` is the canonical name post the `cell`→`shell`
+      # rename; the test previously asserted the old `:cell_not_found`
+      # atom.
+      assert {:error, :shell_not_found} = Sync.sync_back("cel-nonexistent")
     end
   end
 
@@ -120,7 +123,7 @@ defmodule GiTF.SyncTest do
 
   describe "sync_back_with_rebase/1" do
     test "returns error for non-existent shell" do
-      assert {:error, :cell_not_found} = Sync.sync_back_with_rebase("cel-nonexistent")
+      assert {:error, :shell_not_found} = Sync.sync_back_with_rebase("cel-nonexistent")
     end
   end
 end
