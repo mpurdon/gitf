@@ -16,9 +16,10 @@ defmodule GiTF.Phases.Publish do
       (`fail_quest`) — the pipeline's sole user-facing output is the PR;
       claiming "completed" without one is the worst kind of silent failure.
 
-  Maps directly onto the legacy `Major.Orchestrator.after_publish/1`
-  semantic. The legacy path keeps using `start_publish/1` (which calls
-  `after_publish` itself); the workflow path lands here.
+  Maps directly onto the legacy `GiTF.Publish.start/1` semantic, but
+  split into the synchronous publish step (`GiTF.Publish.step/1`) plus
+  workflow-driven `before_advance` / `terminal` so the workflow YAML
+  owns the routing.
   """
 
   @behaviour GiTF.Phase
@@ -27,7 +28,7 @@ defmodule GiTF.Phases.Publish do
 
   @impl true
   def start(mission, _phase_config, _ctx) do
-    GiTF.Major.Orchestrator.publish_step(mission)
+    GiTF.Publish.step(mission)
   end
 
   @impl true

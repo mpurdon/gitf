@@ -69,7 +69,7 @@ defmodule GiTF.Approval do
     case Override.approval_status(mission.id) do
       :approved ->
         {:ok, mission} = Missions.get(mission.id)
-        GiTF.Major.Orchestrator.start_merge(mission)
+        GiTF.Publish.merge(mission)
 
       :rejected ->
         Logger.warning("Quest #{mission.id} rejected by human reviewer")
@@ -80,7 +80,7 @@ defmodule GiTF.Approval do
 
       :not_required ->
         {:ok, mission} = Missions.get(mission.id)
-        GiTF.Major.Orchestrator.start_merge(mission)
+        GiTF.Publish.merge(mission)
     end
   end
 
@@ -111,7 +111,7 @@ defmodule GiTF.Approval do
           })
 
           {:ok, mission} = Missions.get(mission.id)
-          GiTF.Major.Orchestrator.start_merge(mission)
+          GiTF.Publish.merge(mission)
         else
           Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
 
