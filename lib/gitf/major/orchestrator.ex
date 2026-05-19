@@ -871,21 +871,79 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation", mission)
-
       diff_base = detect_diff_base(mission)
-      changed_files = changed_files_from_impl(mission)
 
-      prompt =
-        PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
-          diff_base: diff_base,
-          changed_files: changed_files
-        )
+      case Map.get(mission, :impl_variants) || [] do
+        [] ->
+          spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, nil)
 
-      # Branch the validation worktree from the impl ghost's tip so `git diff`
-      # against the sector main shows the actual implementation changes.
-      opts = [model: "general"] ++ impl_base_branch_opts(mission)
-      spawn_phase_ghost(mission, "validation", prompt, opts)
+        variants ->
+          # Tournament mode: one validation ghost per variant, each
+          # rooted at that variant's last completed impl op so the diff
+          # is variant-local.
+          Enum.each(variants, fn variant_id ->
+            spawn_validation_for_variant(
+              mission,
+              requirements,
+              planning,
+              ctx,
+              diff_base,
+              variant_id
+            )
+          end)
+      end
+
       {:ok, "validation"}
+    end
+  end
+
+  defp spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, variant_id) do
+    changed_files =
+      mission.ops
+      |> Enum.filter(fn op ->
+        op[:phase_job] in [nil, false] and op.status == "done" and
+          (variant_id == nil or op[:variant] == variant_id)
+      end)
+      |> Enum.flat_map(fn op ->
+        case op[:changed_files] do
+          files when is_list(files) -> files
+          _ -> []
+        end
+      end)
+      |> Enum.uniq()
+
+    prompt =
+      PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
+        diff_base: diff_base,
+        changed_files: changed_files
+      )
+
+    # Branch the validation worktree from the variant's impl ghost tip so
+    # `git diff` against the sector main shows that variant's changes only.
+    base_opts =
+      case variant_base_branch(mission, variant_id) do
+        nil -> impl_base_branch_opts(mission)
+        base -> [base_branch: base]
+      end
+
+    opts = [model: "general"] ++ base_opts ++ if variant_id, do: [variant: variant_id], else: []
+    spawn_phase_ghost(mission, "validation", prompt, opts)
+  end
+
+  # Returns the ghost-id-based branch for `variant_id`'s most recent
+  # completed impl op, or `nil` if none / non-tournament mode.
+  defp variant_base_branch(_mission, nil), do: nil
+
+  defp variant_base_branch(mission, variant_id) do
+    mission.ops
+    |> Enum.filter(fn op ->
+      op[:phase_job] in [nil, false] and op.status == "done" and op[:variant] == variant_id
+    end)
+    |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
+    |> List.first()
+    |> case do
+      %{ghost_id: ghost_id} when is_binary(ghost_id) -> "ghost/#{ghost_id}"
+      _ -> nil
     end
   end
 
@@ -1902,13 +1960,19 @@ defmodule GiTF.Major.Orchestrator do
     )
 
     strategy = Keyword.get(opts, :strategy)
+    variant = Keyword.get(opts, :variant)
 
-    # Build title with strategy label for parallel planning ghosts
+    # Build title with strategy or variant label for parallel ghosts.
     title =
-      if strategy do
-        "#{String.capitalize(phase)} [#{strategy}] for: #{String.slice(mission.goal, 0, 50)}"
-      else
-        "#{String.capitalize(phase)} phase for: #{String.slice(mission.goal, 0, 60)}"
+      cond do
+        variant ->
+          "#{String.capitalize(phase)} [#{variant}] for: #{String.slice(mission.goal, 0, 50)}"
+
+        strategy ->
+          "#{String.capitalize(phase)} [#{strategy}] for: #{String.slice(mission.goal, 0, 50)}"
+
+        true ->
+          "#{String.capitalize(phase)} phase for: #{String.slice(mission.goal, 0, 60)}"
       end
 
     # Create a phase op
@@ -1920,6 +1984,7 @@ defmodule GiTF.Major.Orchestrator do
       phase_job: true,
       phase: phase,
       strategy: strategy,
+      variant: variant,
       assigned_model: model_id(model)
     }
 

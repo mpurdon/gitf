@@ -110,4 +110,65 @@ defmodule GiTF.Phases.ValidationTest do
       assert Validation.verdict(m, art) == :wait
     end
   end
+
+  describe "verdict/2 — tournament mode" do
+    test ":wait while any variant is still in flight" do
+      m =
+        insert_mission!(%{
+          impl_variants: ["v1", "v2"],
+          artifacts: %{
+            "validation_v1" => %{"overall_verdict" => "pass"}
+          }
+        })
+
+      assert Validation.verdict(m, nil) == :wait
+    end
+
+    test "picks winner + stamps mission + promotes artifact when all variants validated" do
+      v1_artifact = %{
+        "overall_verdict" => "pass",
+        "requirements_met" => [%{"met" => true}],
+        "gaps" => ["minor nit"]
+      }
+
+      v2_artifact = %{
+        "overall_verdict" => "pass",
+        "requirements_met" => [%{"met" => true}],
+        "gaps" => []
+      }
+
+      ops = [
+        %{phase_job: false, status: "done", changed_files: ["lib/v2.ex"], files_changed: 1}
+      ]
+
+      m =
+        insert_mission!(%{
+          impl_variants: ["v1", "v2"],
+          ops: ops,
+          artifacts: %{"validation_v1" => v1_artifact, "validation_v2" => v2_artifact}
+        })
+
+      # v2 wins (zero gaps vs v1's one gap). Verdict falls through into
+      # the single-variant pass path which stamps requires_approval.
+      assert Validation.verdict(m, nil) == :pass
+
+      reloaded = GiTF.Archive.get(:missions, m.id)
+      assert reloaded.winning_variant == "v2"
+      assert reloaded.artifacts["validation"]["overall_verdict"] == "pass"
+      assert Map.has_key?(reloaded.artifacts["validation"], "requires_approval")
+    end
+
+    test ":terminal_fail when every variant was disqualified by cross-check" do
+      m =
+        insert_mission!(%{
+          impl_variants: ["v1", "v2"],
+          artifacts: %{
+            "validation_v1" => %{"cross_check_override" => "no commits"},
+            "validation_v2" => %{"cross_check_override" => "all .claude/"}
+          }
+        })
+
+      assert Validation.verdict(m, nil) == :terminal_fail
+    end
+  end
 end

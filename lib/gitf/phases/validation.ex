@@ -95,10 +95,87 @@ defmodule GiTF.Phases.Validation do
   def verdict(_), do: :inconclusive
 
   # 2-arg verdict — the full faithful port of handle_validation_result/1.
+  # Tournament mode (mission.impl_variants != []) short-circuits ahead of
+  # the single-variant artifact-driven path: each variant has its own
+  # `validation_<id>` artifact, and the verdict is driven by
+  # `GiTF.Tournament` instead of a single `validation` key.
   @impl true
-  def verdict(_mission, nil), do: :wait
+  def verdict(mission, _artifact) when is_map(mission) do
+    cond do
+      # Tournament already resolved — winner_variant stamped; stay on the
+      # single-variant path so subsequent polls don't re-run the
+      # tournament.
+      is_binary(Map.get(mission, :winning_variant)) ->
+        verdict_single(mission, Missions.get_artifact(mission.id, "validation"))
 
-  def verdict(mission, %{"overall_verdict" => "pass"} = artifact) do
+      (Map.get(mission, :impl_variants) || []) != [] ->
+        verdict_tournament(mission)
+
+      true ->
+        verdict_single(mission, Missions.get_artifact(mission.id, "validation"))
+    end
+  end
+
+  defp verdict_tournament(mission) do
+    cond do
+      not GiTF.Tournament.ready?(mission) ->
+        :wait
+
+      true ->
+        case GiTF.Tournament.pick_winner(mission) do
+          {:ok, winning_variant} ->
+            promote_winning_variant(mission, winning_variant)
+
+          {:error, :all_disqualified} ->
+            Logger.warning(
+              "Quest #{mission.id}: all #{length(mission.impl_variants)} variants disqualified"
+            )
+
+            :terminal_fail
+
+          {:error, :no_variants} ->
+            # Defensive: impl_variants was populated but pick_winner saw
+            # it empty (race against an Archive update). Wait and retry.
+            :wait
+        end
+    end
+  end
+
+  defp promote_winning_variant(mission, winning_variant) do
+    winner_key = "validation_#{winning_variant}"
+    winner_artifact = Missions.get_artifact(mission.id, winner_key) || %{}
+
+    GiTF.Archive.update(:missions, mission.id, fn record ->
+      Map.put(record, :winning_variant, winning_variant)
+    end)
+
+    # Copy the winner's validation artifact into the canonical
+    # "validation" slot so the rest of the workflow (sync, publish,
+    # scoring) reads it like a single-variant mission.
+    Missions.store_artifact(mission.id, "validation", winner_artifact)
+
+    Logger.info(
+      "Quest #{mission.id}: tournament winner = #{winning_variant} " <>
+        "(score breakdown via GiTF.Tournament.rank/1)"
+    )
+
+    GiTF.Telemetry.emit([:gitf, :validation, :tournament_winner], %{}, %{
+      mission_id: mission.id,
+      winner: winning_variant,
+      variant_count: length(mission.impl_variants)
+    })
+
+    # Fall through to the single-variant verdict path on the now-canonical
+    # validation artifact so the requires-approval / cross-check / fix
+    # logic stays unchanged. Update the in-memory mission with the
+    # winning_variant stamp; reloading via Missions.get would clobber
+    # mission.ops for tests that hand-build them on the record.
+    verdict_single(Map.put(mission, :winning_variant, winning_variant), winner_artifact)
+  end
+
+  defp verdict_single(_mission, nil), do: :wait
+
+  defp verdict_single(mission, %{"overall_verdict" => "pass"} = artifact) do
     # Idempotent fast-path: this branch fires on every poll while
     # current_phase = "validation" and the artifact says pass; if we've
     # already done the side effects (artifact already carries
@@ -111,7 +188,7 @@ defmodule GiTF.Phases.Validation do
     end
   end
 
-  def verdict(mission, artifact) when is_map(artifact) do
+  defp verdict_single(mission, artifact) when is_map(artifact) do
     # Cheap staleness check first — if the latest impl op finished after
     # the validation we're looking at, the artifact is moot regardless of
     # the fix budget. Skip the (heavier) fix-context load in that case.
@@ -129,7 +206,7 @@ defmodule GiTF.Phases.Validation do
     end
   end
 
-  def verdict(_mission, _artifact), do: :wait
+  defp verdict_single(_mission, _artifact), do: :wait
 
   defp validate_pass(mission, artifact) do
     Validation.emit_confidence(mission)
@@ -166,7 +243,10 @@ defmodule GiTF.Phases.Validation do
           |> Map.put("cross_check_override", reason)
 
         Missions.store_artifact(mission.id, "validation", overridden)
-        verdict(mission, overridden)
+        # Stay on the single-variant path; otherwise we'd re-enter
+        # verdict_tournament which would re-pick the same winner and
+        # loop indefinitely.
+        verdict_single(mission, overridden)
     end
   end
 

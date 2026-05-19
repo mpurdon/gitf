@@ -608,7 +608,17 @@ defmodule GiTF.Web.ApiController do
 
           case GiTF.Major.PhaseCollector.collect(phase, log_content, events) do
             {:ok, artifact} ->
-              GiTF.Missions.store_artifact(op.mission_id, phase, artifact)
+              # Tournament-mode phase ghosts carry a variant tag (`"v1"`,
+              # `"v2"`, ...); their artifacts go into per-variant slots
+              # (`validation_v1`/`validation_v2`/...) so the tournament
+              # can compare them side-by-side.
+              artifact_key =
+                case Map.get(op, :variant) do
+                  v when is_binary(v) and v != "" -> "#{phase}_#{v}"
+                  _ -> phase
+                end
+
+              GiTF.Missions.store_artifact(op.mission_id, artifact_key, artifact)
 
             {:error, reason} ->
               require Logger
