@@ -88,6 +88,10 @@ defmodule GiTF.Ops do
         phase_job: attrs[:phase_job] || false,
         phase: attrs[:phase],
         strategy: attrs[:strategy],
+        # Tournament variant (nil for single-variant missions; "v1"/"v2"/...
+        # when GiTF.Tournament.enabled? duplicated this op across parallel
+        # implementation branches).
+        variant: attrs[:variant],
         acceptance_criteria: attrs[:acceptance_criteria] || [],
         target_files: attrs[:target_files] || [],
         # Audit fields

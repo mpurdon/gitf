@@ -214,7 +214,8 @@ defmodule GiTF.Application do
       {:knowledge_context_enabled, "GITF_KNOWLEDGE_CONTEXT_ENABLED", false},
       {:knowledge_compile_enabled, "GITF_KNOWLEDGE_COMPILE_ENABLED", false},
       {:workflow_dsl_enabled, "GITF_WORKFLOW_DSL_ENABLED", true},
-      {:workflow_inference_enabled, "GITF_WORKFLOW_INFERENCE_ENABLED", false}
+      {:workflow_inference_enabled, "GITF_WORKFLOW_INFERENCE_ENABLED", false},
+      {:parallel_impl_attempts, "GITF_PARALLEL_IMPL_ATTEMPTS", 1}
     ]
 
     lines =

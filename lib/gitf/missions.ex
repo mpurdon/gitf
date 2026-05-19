@@ -90,7 +90,14 @@ defmodule GiTF.Missions do
         phase_jobs: %{},
         issue_ref: issue_ref,
         cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"],
-        workflow_id: workflow_id
+        workflow_id: workflow_id,
+        # Tournament fields — `impl_variants` is set by the implementation
+        # phase when GiTF.Tournament.enabled? to the list of variant ids
+        # (`["v1", "v2", ...]`) the mission is running in parallel.
+        # `winning_variant` is stamped by Phases.Validation after the
+        # tournament completes. Both stay nil for single-variant missions.
+        impl_variants: [],
+        winning_variant: nil
       }
 
       case Archive.insert(:missions, record) do

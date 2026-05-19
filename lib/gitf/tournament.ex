@@ -41,6 +41,8 @@ defmodule GiTF.Tournament do
   """
 
   @disqualified_score -1_000.0
+  @min_attempts 1
+  @max_attempts 3
 
   @type variant_id :: String.t()
   @type score_breakdown :: %{
@@ -51,6 +53,40 @@ defmodule GiTF.Tournament do
           gaps: non_neg_integer(),
           disqualified_reason: String.t() | nil
         }
+
+  @doc """
+  The number of implementation variants to spawn per mission, clamped
+  to `1..3`. Read from the `:parallel_impl_attempts` flag (env override
+  `GITF_PARALLEL_IMPL_ATTEMPTS`). Default `1` (single variant —
+  tournament disabled).
+  """
+  @spec configured_attempts() :: pos_integer()
+  def configured_attempts do
+    case Application.get_env(:gitf, :parallel_impl_attempts, @min_attempts) do
+      n when is_integer(n) -> n |> max(@min_attempts) |> min(@max_attempts)
+      n when is_binary(n) -> n |> String.to_integer() |> max(@min_attempts) |> min(@max_attempts)
+      _ -> @min_attempts
+    end
+  rescue
+    _ -> @min_attempts
+  end
+
+  @doc """
+  Is parallel-impl tournament mode active for this mission? `true` when
+  `configured_attempts() > 1`. Operator-authored workflows can override
+  via per-mission state in the future; today the flag is global.
+  """
+  @spec enabled?() :: boolean()
+  def enabled?, do: configured_attempts() > 1
+
+  @doc """
+  Build the variant-id list a mission with `attempts` parallel impls
+  should run. `["v1", "v2", "v3"]` for `attempts=3`.
+  """
+  @spec variant_ids(pos_integer()) :: [variant_id()]
+  def variant_ids(attempts) when is_integer(attempts) and attempts >= 1 do
+    Enum.map(1..attempts, &"v#{&1}")
+  end
 
   @doc """
   Score a single validation artifact.

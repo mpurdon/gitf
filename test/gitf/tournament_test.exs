@@ -3,6 +3,44 @@ defmodule GiTF.TournamentTest do
 
   alias GiTF.Tournament
 
+  describe "configured_attempts/0" do
+    test "defaults to 1 when no override" do
+      Application.delete_env(:gitf, :parallel_impl_attempts)
+      assert Tournament.configured_attempts() == 1
+      refute Tournament.enabled?()
+    end
+
+    test "clamps integer overrides to 1..3" do
+      Application.put_env(:gitf, :parallel_impl_attempts, 5)
+      assert Tournament.configured_attempts() == 3
+      assert Tournament.enabled?()
+    after
+      Application.delete_env(:gitf, :parallel_impl_attempts)
+    end
+
+    test "parses string overrides (env var path)" do
+      Application.put_env(:gitf, :parallel_impl_attempts, "2")
+      assert Tournament.configured_attempts() == 2
+    after
+      Application.delete_env(:gitf, :parallel_impl_attempts)
+    end
+
+    test "garbage value falls back to 1" do
+      Application.put_env(:gitf, :parallel_impl_attempts, :weird)
+      assert Tournament.configured_attempts() == 1
+    after
+      Application.delete_env(:gitf, :parallel_impl_attempts)
+    end
+  end
+
+  describe "variant_ids/1" do
+    test "builds v1..vN" do
+      assert Tournament.variant_ids(1) == ["v1"]
+      assert Tournament.variant_ids(2) == ["v1", "v2"]
+      assert Tournament.variant_ids(3) == ["v1", "v2", "v3"]
+    end
+  end
+
   describe "score/1" do
     test "pass + all requirements met + zero gaps scores 150" do
       artifact = %{
