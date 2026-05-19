@@ -46,4 +46,14 @@ defmodule GiTF.Phases.Review do
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
+
+  # The YAML's `max_retries: 2` is a template default; if the mission's
+  # sector has a high-confidence intelligence profile recommending a
+  # different redesign budget, honour that. Mirrors the legacy
+  # `reject_design/2` / `handle_review_result/1` policy so operator
+  # rejections and ghost-driven review failures share the same ceiling.
+  @impl true
+  def max_retries(mission, _phase_config) do
+    GiTF.Major.Orchestrator.max_redesign_for(Map.get(mission, :sector_id))
+  end
 end

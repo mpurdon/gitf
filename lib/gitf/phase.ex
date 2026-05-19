@@ -138,5 +138,19 @@ defmodule GiTF.Phase do
   """
   @callback terminal(mission(), kind :: :complete | :retries_exhausted, artifact :: term()) :: :ok
 
-  @optional_callbacks verdict: 1, verdict: 2, before_advance: 3, terminal: 3
+  @doc """
+  Override the phase's static `max_retries:` from the workflow YAML with
+  a runtime-computed limit. Implement when retry budget depends on
+  mission/sector state — e.g., `Phases.Review` consulting
+  `GiTF.Major.Orchestrator.max_redesign_for/1` so a high-confidence
+  sector intelligence profile can raise (or lower) the redesign budget
+  beyond the YAML default.
+
+  Returns a non-negative integer. The Advancer compares the running
+  retry count against this value; if the callback raises, the static
+  `phase_config.max_retries` is used as the fallback.
+  """
+  @callback max_retries(mission(), phase_config()) :: non_neg_integer()
+
+  @optional_callbacks verdict: 1, verdict: 2, before_advance: 3, terminal: 3, max_retries: 2
 end

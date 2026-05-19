@@ -177,7 +177,7 @@ defmodule GiTF.Workflow.Advancer do
     phase_id = phase_config.id
     retries = retry_count(mission, phase_id)
 
-    if retries >= phase_config.max_retries do
+    if retries >= resolve_max_retries(phase_config, mission) do
       handle_exhaustion(workflow, phase_config, ctx)
     else
       case Workflow.next_phase(workflow, phase_id, :fail, ctx) do
@@ -187,6 +187,25 @@ defmodule GiTF.Workflow.Advancer do
       end
     end
   end
+
+  # Prefer the handler's runtime `max_retries/2` (e.g., `Phases.Review`
+  # consulting `max_redesign_for/1` so sector intelligence overrides the
+  # YAML default); fall back to the static `phase_config.max_retries` if
+  # the callback isn't exported or raises.
+  defp resolve_max_retries(%Phase{handler: handler} = phase_config, mission)
+       when not is_nil(handler) do
+    if ensure_exported?(handler, :max_retries, 2) do
+      try do
+        handler.max_retries(mission, phase_config)
+      rescue
+        _ -> phase_config.max_retries
+      end
+    else
+      phase_config.max_retries
+    end
+  end
+
+  defp resolve_max_retries(%Phase{max_retries: n}, _mission), do: n
 
   # `on_exhausted` policy:
   #   :fail (default) → mark mission failed

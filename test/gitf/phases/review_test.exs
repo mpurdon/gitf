@@ -77,4 +77,18 @@ defmodule GiTF.Phases.ReviewTest do
       assert nil == GiTF.Missions.get_artifact(mission.id, "design")
     end
   end
+
+  describe "max_retries/2" do
+    test "delegates to Orchestrator.max_redesign_for/1 (sector-aware budget)" do
+      # Without a sector intelligence profile the orchestrator returns
+      # its default; the value matters less than the fact that the
+      # callback consults the orchestrator at runtime (so a high-confidence
+      # profile would propagate without changing standard.yaml).
+      mission = %{sector_id: nil}
+      expected = GiTF.Major.Orchestrator.max_redesign_for(nil)
+
+      assert Review.max_retries(mission, %GiTF.Workflow.Phase{id: "review", max_retries: 2}) ==
+               expected
+    end
+  end
 end

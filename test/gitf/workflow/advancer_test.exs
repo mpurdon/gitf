@@ -204,6 +204,64 @@ defmodule GiTF.Workflow.AdvancerTest do
       assert %{"approach" => "minimal"} = GiTF.Missions.get_artifact(m.id, "design")
     end
 
+    test "handler.max_retries/2 overrides the YAML default" do
+      # A handler that always reports a budget of 5 should keep retrying
+      # past the phase's static `max_retries: 2`.
+      m =
+        insert_mission!(%{
+          current_phase: "review",
+          phase_retries: %{"review" => 4}
+        })
+
+      {:ok, _} = GiTF.Missions.store_artifact(m.id, "review", %{"approved" => false})
+      m = GiTF.Archive.get(:missions, m.id)
+
+      w =
+        build_workflow([
+          %Phase{
+            id: "review",
+            handler: GiTF.Workflow.AdvancerTest.GenerousReview,
+            on_pass: "planning",
+            on_fail: "design",
+            max_retries: 2,
+            on_exhausted: :fail
+          },
+          %Phase{id: "design", next: "review"},
+          %Phase{id: "planning", next: "end"}
+        ])
+
+      # 4 < 5: still retrying despite YAML max_retries=2.
+      assert {:retry, "review", "design"} = Advancer.decide(m, w)
+    end
+
+    test "handler.max_retries/2 raising falls back to the YAML default" do
+      m =
+        insert_mission!(%{
+          current_phase: "review",
+          phase_retries: %{"review" => 2}
+        })
+
+      {:ok, _} = GiTF.Missions.store_artifact(m.id, "review", %{"approved" => false})
+      m = GiTF.Archive.get(:missions, m.id)
+
+      w =
+        build_workflow([
+          %Phase{
+            id: "review",
+            handler: GiTF.Workflow.AdvancerTest.ExplodingReview,
+            on_pass: "planning",
+            on_fail: "design",
+            max_retries: 2,
+            on_exhausted: :fail
+          },
+          %Phase{id: "design", next: "review"},
+          %Phase{id: "planning", next: "end"}
+        ])
+
+      # Callback raises → fall back to static max_retries: 2; 2 >= 2 exhausts.
+      assert {:retries_exhausted, "review"} = Advancer.decide(m, w)
+    end
+
     test "on_exhausted: :advance falls through to on_pass target" do
       m =
         insert_mission!(%{
@@ -230,5 +288,23 @@ defmodule GiTF.Workflow.AdvancerTest do
       # max_retries=2 is hit; on_exhausted: :advance routes via on_pass.
       assert {:dispatch, "planning"} = Advancer.decide(m, w)
     end
+  end
+
+  defmodule GenerousReview do
+    @behaviour GiTF.Phase
+    def start(_m, _p, _ctx), do: {:ok, :spawned}
+    def verdict(%{"approved" => true}), do: :pass
+    def verdict(%{"approved" => false}), do: :fail
+    def verdict(_), do: :inconclusive
+    def max_retries(_mission, _phase), do: 5
+  end
+
+  defmodule ExplodingReview do
+    @behaviour GiTF.Phase
+    def start(_m, _p, _ctx), do: {:ok, :spawned}
+    def verdict(%{"approved" => true}), do: :pass
+    def verdict(%{"approved" => false}), do: :fail
+    def verdict(_), do: :inconclusive
+    def max_retries(_mission, _phase), do: raise("boom")
   end
 end
