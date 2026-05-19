@@ -458,7 +458,7 @@ defmodule GiTF.Major.Orchestrator do
         check_implementation_complete(mission)
 
       "validation" ->
-        handle_validation_result(mission)
+        GiTF.Validation.handle_result(mission)
 
       "awaiting_approval" ->
         GiTF.Approval.handle_result(mission)
@@ -839,8 +839,7 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  @doc false
-  def start_validation(mission) do
+  defp start_validation(mission) do
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     planning = GiTF.Missions.get_artifact(mission.id, "planning")
 
@@ -897,7 +896,7 @@ defmodule GiTF.Major.Orchestrator do
   # the mission, or [] if none — in which case worktrees branch from sector
   # HEAD (the current default).
   defp impl_base_branch_opts(mission) do
-    case latest_completed_impl_op(mission) do
+    case GiTF.Validation.latest_completed_impl_op(mission) do
       %{ghost_id: ghost_id} when is_binary(ghost_id) ->
         [base_branch: "ghost/#{ghost_id}"]
 
@@ -1364,465 +1363,6 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  @default_max_fix_attempts 2
-
-  @doc false
-  def handle_validation_result(mission) do
-    validation = GiTF.Missions.get_artifact(mission.id, "validation")
-
-    cond do
-      is_nil(validation) ->
-        {:ok, "validation"}
-
-      validation["overall_verdict"] == "pass" ->
-        emit_validation_confidence(mission)
-
-        # Sanity cross-check: validator says pass, but did the impl ops
-        # actually commit anything? A "pass" with zero meaningful files
-        # changed almost certainly means the validator hallucinated and
-        # we'd ship an empty PR. Override to fail with a clear reason.
-        case validate_pass_against_diff(mission) do
-          :ok ->
-            maybe_spawn_skill_refinement(mission, validation)
-
-            if GiTF.Override.requires_approval?(mission) do
-              GiTF.Approval.request(mission)
-            else
-              GiTF.Publish.merge(mission)
-            end
-
-          {:error, reason} ->
-            Logger.warning(
-              "Quest #{mission.id}: validator said PASS but cross-check failed (#{reason}); " <>
-                "treating as fail and re-routing to fix loop"
-            )
-
-            GiTF.Telemetry.emit([:gitf, :validation, :pass_overridden], %{}, %{
-              mission_id: mission.id,
-              reason: reason
-            })
-
-            # Stash an overridden validation artifact so the fix loop
-            # gets the correct verdict + a description of why.
-            overridden =
-              validation
-              |> Map.put("overall_verdict", "fail")
-              |> Map.put(
-                "gaps",
-                ["Validator returned pass but no impl commits found: #{reason}"]
-              )
-              |> Map.put("cross_check_override", reason)
-
-            GiTF.Missions.store_artifact(mission.id, "validation", overridden)
-            handle_validation_result(mission)
-        end
-
-      true ->
-        # Validation failed — check if we still have fix attempts left.
-        # Important: check the validation artifact's freshness — if a fix ghost
-        # just completed, the old "fail" artifact is stale and we should re-validate
-        # rather than give up.
-        fix_ctx = load_mission_fix_context(mission)
-
-        # Check if the latest impl op was a fix that completed AFTER this validation ran
-        latest_impl = latest_completed_impl_op(mission)
-        validation_stale? = validation_artifact_stale?(latest_impl, validation, mission.id)
-
-        cond do
-          validation_stale? ->
-            # Fix ghost completed after last validation — re-validate before deciding
-            Logger.info("Quest #{mission.id}: validation artifact is stale (fix completed after), re-validating")
-            start_validation(mission)
-
-          GiTF.Togusa.FixContext.exhausted?(fix_ctx) ->
-            Logger.warning(
-              "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
-            )
-
-            maybe_spawn_skill_refinement(mission, validation)
-            fail_quest(mission.id, "Ghost lost in the net — validation failed after #{fix_ctx.attempt} attempts")
-
-          true ->
-            Logger.info(
-              "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
-            )
-
-            maybe_spawn_skill_refinement(mission, validation)
-            attempt_validation_fixes(mission, validation, fix_ctx)
-        end
-    end
-  end
-
-  # Spawns an async skill-refinement task under TaskSupervisor when the
-  # :skill_refinement_enabled flag is on. Non-blocking — refinement
-  # runs independently of the main pipeline, so a slow refiner LLM call
-  # or critic rejection never delays the orchestrator's next tick.
-  @doc false
-  def maybe_spawn_skill_refinement(mission, validation) do
-    if Application.get_env(:gitf, :skill_refinement_enabled, false) do
-      applied = GiTF.Skills.Refinement.applied_skill_ids(mission)
-
-      Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
-        GiTF.Skills.Refinement.refine_after_validation(mission, validation, applied)
-      end)
-
-      :ok
-    else
-      :ok
-    end
-  rescue
-    e ->
-      Logger.debug("maybe_spawn_skill_refinement failed: #{Exception.message(e)}")
-      :ok
-  end
-
-  # Returns `:ok` when at least one impl op committed at least one file
-  # outside `.claude/` (which the auto-commit step always adds). Otherwise
-  # returns `{:error, reason}` so the orchestrator can override a
-  # hallucinated "pass" verdict.
-  @doc false
-  def validate_pass_against_diff(mission) do
-    impl_ops =
-      mission.ops
-      |> Enum.filter(fn op ->
-        op.status == "done" and (op[:phase_job] in [nil, false])
-      end)
-
-    cond do
-      impl_ops == [] ->
-        {:error, "no completed impl ops"}
-
-      true ->
-        meaningful_files =
-          impl_ops
-          |> Enum.flat_map(fn op ->
-            (op[:changed_files] || [])
-            |> Enum.reject(&claude_settings_path?/1)
-          end)
-          |> Enum.uniq()
-
-        if meaningful_files == [] do
-          total_changed =
-            impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
-
-          {:error,
-           "impl ops total #{total_changed} files changed but all are " <>
-             "`.claude/` settings — no real code changes"}
-        else
-          :ok
-        end
-    end
-  end
-
-  defp claude_settings_path?(path) when is_binary(path) do
-    String.starts_with?(path, ".claude/") or String.contains?(path, "/.claude/")
-  end
-
-  defp claude_settings_path?(_), do: false
-
-  # Counts the completed validation ops and emits a telemetry signal. When
-  # validation passed on the first run, we're confident. When it took 3+
-  # validation runs interspersed with fix-ops, validation was likely
-  # flip-flopping — log at warning so operators notice the drift.
-  @doc false
-  def emit_validation_confidence(mission) do
-    validation_runs =
-      Enum.count(mission.ops, fn op ->
-        op[:phase_job] && Map.get(op, :phase) == "validation" and op.status == "done"
-      end)
-
-    GiTF.Telemetry.emit([:gitf, :validation, :passed], %{runs: validation_runs}, %{
-      mission_id: mission.id,
-      sector_id: mission.sector_id,
-      first_try: validation_runs <= 1
-    })
-
-    if validation_runs >= 3 do
-      Logger.warning(
-        "Quest #{mission.id}: validation passed after #{validation_runs} runs — " <>
-          "likely indecisive validator or fix-ops chasing its tail"
-      )
-    end
-  rescue
-    e ->
-      Logger.warning(
-        "emit_validation_confidence failed for #{mission.id}: #{Exception.message(e)}"
-      )
-
-      :ok
-  end
-
-  @doc false
-  def latest_completed_impl_op(mission) do
-    mission.ops
-    |> Enum.reject(& &1[:phase_job])
-    |> Enum.filter(&(&1.status == "done"))
-    |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
-    |> List.first()
-  end
-
-  @doc false
-  def validation_artifact_stale?(nil, _validation, _mission_or_id), do: false
-
-  def validation_artifact_stale?(latest_impl, _validation, %{ops: ops}) do
-    last_validation_op =
-      ops
-      |> Enum.filter(&(&1[:phase] == "validation" and &1.status == "done"))
-      |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
-      |> List.first()
-
-    case {latest_impl[:inserted_at], last_validation_op && last_validation_op[:inserted_at]} do
-      {%DateTime{} = impl_at, %DateTime{} = val_at} ->
-        DateTime.compare(impl_at, val_at) == :gt
-
-      _ ->
-        false
-    end
-  end
-
-  def validation_artifact_stale?(latest_impl, validation, mission_id) when is_binary(mission_id) do
-    case GiTF.Missions.get(mission_id) do
-      {:ok, mission} -> validation_artifact_stale?(latest_impl, validation, mission)
-      _ -> false
-    end
-  end
-
-  @doc false
-  def attempt_validation_fixes(mission, validation, %GiTF.Togusa.FixContext{} = fix_ctx) do
-    impl_files = get_mission_changed_files(mission)
-
-    # Build fix description with full validation feedback
-    fix_description = build_fix_description(mission, validation, impl_files)
-
-    # Record this attempt in the fix context
-    fix_ctx =
-      GiTF.Togusa.FixContext.record_attempt(
-        fix_ctx,
-        :goal_fulfillment,
-        mission.id,
-        validation,
-        fix_description
-      )
-
-    # Persist updated fix context on the mission record
-    store_mission_fix_context(mission.id, fix_ctx)
-
-    # Learn from failure (agent profile improvement — previously missing from orchestrator)
-    learn_from_validation_failure(mission, validation)
-
-    shell = find_implementation_shell(mission)
-
-    # Include fix history in the prompt so the ghost sees all prior attempts
-    history_prompt = GiTF.Togusa.FixContext.format_for_prompt(fix_ctx)
-    full_description = fix_description <> "\n" <> history_prompt
-
-    fix_title = "Fix validation issues (attempt #{fix_ctx.attempt})"
-
-    case GiTF.Ops.create(%{
-           title: fix_title,
-           description: full_description,
-           mission_id: mission.id,
-           sector_id: mission.sector_id,
-           phase_job: false,
-           skip_verification: false,
-           fix_context: GiTF.Togusa.FixContext.to_map(fix_ctx),
-           fix_of: fix_ctx.original_op_id,
-           target_files: impl_files
-         }) do
-      {:ok, fix_op} ->
-        GiTF.Missions.transition_phase(
-          mission.id,
-          "implementation",
-          "Validation fix attempt #{fix_ctx.attempt}"
-        )
-
-        if shell do
-          spawn_fix_in_worktree(fix_op, shell, mission)
-        else
-          {:ok, mission} = GiTF.Missions.get(mission.id)
-          spawn_implementation_jobs(mission)
-        end
-
-        {:ok, "implementation"}
-
-      {:error, reason} ->
-        Logger.warning("Quest #{mission.id}: failed to create fix op: #{inspect(reason)}")
-        fail_quest(mission.id, "Could not create fix op")
-    end
-  rescue
-    e ->
-      Logger.error(
-        "Validation fix attempt failed for mission #{mission.id}: " <>
-          Exception.format(:error, e, __STACKTRACE__)
-      )
-
-      fail_quest(
-        mission.id,
-        "Validation fix attempt crashed: #{Exception.message(e)}"
-      )
-  end
-
-  # Build a comprehensive fix description from validation findings
-  defp build_fix_description(_mission, validation, impl_files) do
-
-    gaps = Map.get(validation, "gaps", [])
-
-    unmet =
-      (Map.get(validation, "requirements_met", []) || [])
-      |> Enum.filter(fn r -> Map.get(r, "met") == false end)
-
-    raw = Map.get(validation, "raw_output", "")
-    summary = Map.get(validation, "summary", "")
-
-    sections = ["## Validation Feedback\n"]
-
-    sections =
-      if unmet != [] do
-        req_lines =
-          Enum.map(unmet, fn req ->
-            id = Map.get(req, "req_id", "?")
-            evidence = Map.get(req, "evidence", "No details")
-            files = extract_file_paths(evidence)
-            file_hint = if files != [], do: " (#{Enum.join(files, ", ")})", else: ""
-            "- **#{id}**: #{evidence}#{file_hint}"
-          end)
-
-        sections ++ ["### Unmet Requirements\n"] ++ req_lines ++ [""]
-      else
-        sections
-      end
-
-    sections =
-      if gaps != [] do
-        gap_lines = Enum.map(gaps, fn gap -> "- #{gap}" end)
-        sections ++ ["### Gaps\n"] ++ gap_lines ++ [""]
-      else
-        sections
-      end
-
-    sections =
-      if summary != "" do
-        sections ++ ["### Summary\n", summary, ""]
-      else
-        sections
-      end
-
-    sections =
-      if unmet == [] and gaps == [] and raw != "" do
-        sections ++ ["### Raw Validator Output\n", String.slice(raw, 0, 2000), ""]
-      else
-        sections
-      end
-
-    sections =
-      if impl_files != [] do
-        sections ++ ["### Files Changed\n", Enum.join(impl_files, ", "), ""]
-      else
-        sections
-      end
-
-    instructions = """
-    ## Instructions
-
-    Your previous implementation was reviewed and the issues above were found.
-    You are working in the SAME worktree with your previous changes still present.
-
-    1. Review the feedback above carefully
-    2. Read the specific files mentioned to understand what needs to change
-    3. Make the minimal fixes needed to address each issue
-    4. Verify your fixes are correct
-    5. Commit your changes
-    """
-
-    Enum.join(sections, "\n") <> "\n" <> instructions
-  end
-
-  # Find a shell with an on-disk worktree from the mission's implementation ops
-  defp find_implementation_shell(mission) do
-    ghost_ids =
-      mission.ops
-      |> Enum.reject(& &1[:phase_job])
-      |> Enum.map(& &1[:ghost_id])
-      |> Enum.reject(&is_nil/1)
-
-    # Prefer the most recent implementation ghost's shell
-    ghost_ids
-    |> Enum.reverse()
-    |> Enum.find_value(fn ghost_id ->
-      Archive.find_one(:shells, fn s ->
-        s.ghost_id == ghost_id and
-          s[:worktree_path] != nil and
-          File.dir?(s.worktree_path)
-      end)
-    end)
-  end
-
-  # Spawn a fix ghost in an existing worktree so it inherits the implementation's code
-  defp spawn_fix_in_worktree(fix_op, shell, mission) do
-    case GiTF.gitf_dir() do
-      {:ok, gitf_root} ->
-        case GiTF.Ghosts.spawn_in_worktree(fix_op.id, shell.id, mission.sector_id, gitf_root) do
-          {:ok, _ghost} -> :ok
-          {:error, _} -> spawn_implementation_jobs(mission)
-        end
-
-      _ ->
-        spawn_implementation_jobs(mission)
-    end
-  rescue
-    _ -> spawn_implementation_jobs(mission)
-  end
-
-  @doc false
-  def load_mission_fix_context(mission) do
-    case Map.get(mission, :fix_context) do
-      nil ->
-        max = max_fix_attempts_for(mission.sector_id)
-        GiTF.Togusa.FixContext.new(mission.id, max_attempts: max)
-
-      ctx_map ->
-        GiTF.Togusa.FixContext.from_map(ctx_map) ||
-          GiTF.Togusa.FixContext.new(mission.id, max_attempts: max_fix_attempts_for(mission.sector_id))
-    end
-  end
-
-  defp store_mission_fix_context(mission_id, fix_ctx) do
-    Archive.update(:missions, mission_id, fn record ->
-      Map.put(record, :fix_context, GiTF.Togusa.FixContext.to_map(fix_ctx))
-    end)
-
-    :ok
-  end
-
-  defp learn_from_validation_failure(mission, validation) do
-    # Find the most recent implementation op to attribute the failure to
-    impl_op =
-      (mission.ops || [])
-      |> Enum.reject(& &1[:phase_job])
-      |> Enum.max_by(& &1[:inserted_at], fn -> nil end)
-
-    if impl_op do
-      GiTF.Togusa.learn_from_failure(impl_op.id, validation)
-    end
-  rescue
-    e ->
-      Logger.warning(
-        "learn_from_validation_failure failed for #{mission.id}: #{Exception.message(e)}"
-      )
-
-      :ok
-  end
-
-  # Extract file paths from text (looks for common patterns like path/to/file.ext)
-  defp extract_file_paths(text) when is_binary(text) do
-    regex = ~r/(?:^|[\s`'"])([a-zA-Z][\w.\/-]*\.\w{1,6})(?:[\s`'",:\]]|$)/
-    Regex.scan(regex, text)
-    |> Enum.map(fn [_, path] -> path end)
-    |> Enum.uniq()
-  end
-
-  defp extract_file_paths(_), do: []
-
 
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
 
@@ -1851,7 +1391,7 @@ defmodule GiTF.Major.Orchestrator do
         repo_path = if sector, do: sector.path, else: nil
 
         # Get changed files from all implementation ops
-        changed_files = get_mission_changed_files(mission)
+        changed_files = mission_changed_files(mission)
 
         # Branch simplify worktrees from the quest branch (the one sync just
         # merged impl ghosts into) so cleanup commits land on that branch
@@ -1918,7 +1458,12 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp get_mission_changed_files(mission) do
+  @doc false
+  # The set of files that the mission's implementation ops have
+  # reported as changed. Public so `GiTF.Validation.attempt_fixes/3`
+  # can target fix ops at the right files. Used internally by
+  # `start_simplify/1` for the simplify worktree base.
+  def mission_changed_files(mission) do
     mission.ops
     |> Enum.reject(& &1[:phase_job])
     |> Enum.flat_map(fn op ->
@@ -2398,20 +1943,6 @@ defmodule GiTF.Major.Orchestrator do
     _ -> @default_max_redesign
   end
 
-  # Returns the max validation fix attempts, consulting sector intelligence at :high confidence.
-  defp max_fix_attempts_for(nil), do: @default_max_fix_attempts
-
-  defp max_fix_attempts_for(sector_id) do
-    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
-
-    case profile do
-      %{confidence: :high, recommendations: %{max_validation_fix_attempts: n}} -> n
-      _ -> @default_max_fix_attempts
-    end
-  rescue
-    _ -> @default_max_fix_attempts
-  end
-
   # Returns the phase timeout in seconds, consulting sector intelligence.
   defp phase_timeout_for(nil, _phase), do: @default_phase_timeout_seconds
 
@@ -2478,10 +2009,13 @@ defmodule GiTF.Major.Orchestrator do
 
   defp normalize_model_key(model), do: GiTF.Runtime.ModelResolver.normalize_key(model)
 
+  @doc false
   # Delegates to Major's priority-aware scheduler instead of bypassing it.
   # The scheduler will pick up pending implementation ops in priority order,
-  # respecting ghost slot limits and budget checks.
-  defp spawn_implementation_jobs(_mission) do
+  # respecting ghost slot limits and budget checks. Public so
+  # `GiTF.Validation.attempt_fixes/3` can kick a fresh impl op when no
+  # implementation shell is available for the fix ghost.
+  def spawn_implementation_jobs(_mission) do
     case Process.whereis(GiTF.Major) do
       pid when is_pid(pid) -> send(pid, :spawn_ready_jobs)
       nil -> Logger.warning("Orchestrator: Major process not found, cannot trigger spawn")

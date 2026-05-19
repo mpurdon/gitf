@@ -1,7 +1,7 @@
 defmodule GiTF.Phases.Validation do
   @moduledoc """
-  Validation phase handler — faithful mirror of the legacy
-  `Orchestrator.handle_validation_result/1`.
+  Validation phase handler — faithful mirror of
+  `GiTF.Validation.handle_result/1`.
 
   Validation is the most state-dependent phase: pass/fail isn't a simple
   read of `artifact["overall_verdict"]` because legacy applies a
@@ -71,8 +71,7 @@ defmodule GiTF.Phases.Validation do
 
   require Logger
 
-  alias GiTF.Major.Orchestrator
-  alias GiTF.Missions
+  alias GiTF.{Major.Orchestrator, Missions, Validation}
   alias GiTF.Togusa.FixContext
 
   @impl true
@@ -116,14 +115,14 @@ defmodule GiTF.Phases.Validation do
     # Cheap staleness check first — if the latest impl op finished after
     # the validation we're looking at, the artifact is moot regardless of
     # the fix budget. Skip the (heavier) fix-context load in that case.
-    latest_impl = Orchestrator.latest_completed_impl_op(mission)
+    latest_impl = Validation.latest_completed_impl_op(mission)
 
-    if Orchestrator.validation_artifact_stale?(latest_impl, artifact, mission) do
+    if Validation.artifact_stale?(latest_impl, artifact, mission) do
       Logger.info(
         "Quest #{mission.id}: validation artifact is stale (fix completed after), re-validating"
       )
 
-      Orchestrator.start_validation(mission)
+      Orchestrator.dispatch_phase("validation", mission)
       :wait
     else
       handle_validation_fail(mission, artifact)
@@ -133,11 +132,11 @@ defmodule GiTF.Phases.Validation do
   def verdict(_mission, _artifact), do: :wait
 
   defp validate_pass(mission, artifact) do
-    Orchestrator.emit_validation_confidence(mission)
+    Validation.emit_confidence(mission)
 
-    case Orchestrator.validate_pass_against_diff(mission) do
+    case Validation.validate_pass_against_diff(mission) do
       :ok ->
-        Orchestrator.maybe_spawn_skill_refinement(mission, artifact)
+        Validation.maybe_spawn_skill_refinement(mission, artifact)
 
         requires_approval = GiTF.Override.requires_approval?(mission)
 
@@ -172,7 +171,7 @@ defmodule GiTF.Phases.Validation do
   end
 
   defp handle_validation_fail(mission, artifact) do
-    fix_ctx = Orchestrator.load_mission_fix_context(mission)
+    fix_ctx = Validation.load_fix_context(mission)
 
     if FixContext.exhausted?(fix_ctx) do
       Logger.warning(
@@ -185,8 +184,8 @@ defmodule GiTF.Phases.Validation do
         "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
       )
 
-      Orchestrator.maybe_spawn_skill_refinement(mission, artifact)
-      Orchestrator.attempt_validation_fixes(mission, artifact, fix_ctx)
+      Validation.maybe_spawn_skill_refinement(mission, artifact)
+      Validation.attempt_fixes(mission, artifact, fix_ctx)
       :wait
     end
   end
@@ -194,9 +193,9 @@ defmodule GiTF.Phases.Validation do
   @impl true
   def terminal(mission, :retries_exhausted, artifact) do
     if is_map(artifact),
-      do: Orchestrator.maybe_spawn_skill_refinement(mission, artifact)
+      do: Validation.maybe_spawn_skill_refinement(mission, artifact)
 
-    fix_ctx = Orchestrator.load_mission_fix_context(mission)
+    fix_ctx = Validation.load_fix_context(mission)
 
     Missions.fail_quest(
       mission.id,
