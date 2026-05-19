@@ -198,4 +198,47 @@ defmodule GiTF.Major.PlannerTest do
       end)
     end
   end
+
+  describe "create_jobs_from_specs/3 — tournament variant" do
+    test "tags every op with the supplied variant id", %{mission: mission} do
+      specs = [
+        %{"title" => "Step one", "description" => "do it", "target_files" => ["a.ex"]},
+        %{"title" => "Step two", "description" => "more", "target_files" => ["b.ex"]}
+      ]
+
+      {:ok, ops} = Planner.create_jobs_from_specs(mission.id, specs, variant: "v1")
+
+      assert length(ops) == 2
+      assert Enum.all?(ops, &(&1.variant == "v1"))
+      assert Enum.all?(ops, &String.starts_with?(&1.title, "[v1] "))
+    end
+
+    test "no variant key when called without the option", %{mission: mission} do
+      {:ok, [op]} =
+        Planner.create_jobs_from_specs(mission.id, [
+          %{"title" => "Solo", "description" => "x", "target_files" => ["c.ex"]}
+        ])
+
+      assert op.variant == nil
+      refute String.starts_with?(op.title, "[")
+    end
+  end
+
+  describe "create_jobs_for_variants/3 — tournament fan-out" do
+    test "creates an independent op set per variant id", %{mission: mission} do
+      specs = [
+        %{"title" => "Step", "description" => "x", "target_files" => ["a.ex"]}
+      ]
+
+      {:ok, by_variant} = Planner.create_jobs_for_variants(mission.id, specs, ["v1", "v2"])
+
+      assert Map.keys(by_variant) |> Enum.sort() == ["v1", "v2"]
+      assert [v1_op] = by_variant["v1"]
+      assert [v2_op] = by_variant["v2"]
+      assert v1_op.variant == "v1"
+      assert v2_op.variant == "v2"
+      # Distinct op records, not the same one.
+      assert v1_op.id != v2_op.id
+    end
+  end
 end

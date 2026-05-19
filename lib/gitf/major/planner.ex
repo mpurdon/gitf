@@ -410,11 +410,19 @@ defmodule GiTF.Major.Planner do
   creates real op records with dependencies.
 
   Returns `{:ok, [op]}`.
+
+  ## Options
+
+    * `:variant` — tournament variant id (e.g., `"v1"`). When set, every
+      created op carries the variant tag so the validator and the
+      branch-merge step can tell variants apart. The op title is also
+      prefixed `[<variant>]` for log readability.
   """
-  @spec create_jobs_from_specs(String.t(), [map()]) :: {:ok, [map()]}
-  def create_jobs_from_specs(mission_id, job_specs) do
+  @spec create_jobs_from_specs(String.t(), [map()], keyword()) :: {:ok, [map()]}
+  def create_jobs_from_specs(mission_id, job_specs, opts \\ []) do
     mission = Archive.get(:missions, mission_id)
     sector_id = if mission, do: mission.sector_id
+    variant = Keyword.get(opts, :variant)
 
     {ops, _id_map} =
       job_specs
@@ -427,14 +435,18 @@ defmodule GiTF.Major.Planner do
         # ModelSelector policy is the source of truth; planning's
         # suggestion is only honored when it escalates above the policy
         # default.
+        base_title = spec["title"] || "Job #{idx + 1}"
+        title = if variant, do: "[#{variant}] #{base_title}", else: base_title
+
         job_attrs = %{
-          title: spec["title"] || "Job #{idx + 1}",
+          title: title,
           description: spec["description"],
           mission_id: mission_id,
           sector_id: sector_id,
           acceptance_criteria: spec["acceptance_criteria"] || [],
           target_files: spec["target_files"] || [],
           phase_job: false,
+          variant: variant,
           assigned_model: impl_op_model(spec["model_recommendation"]),
           verification_contract: spec["verification_contract"]
         }
@@ -461,6 +473,26 @@ defmodule GiTF.Major.Planner do
     ops = Enum.reverse(ops)
     add_file_overlap_dependencies(ops)
     {:ok, ops}
+  end
+
+  @doc """
+  Tournament-mode op creation: call `create_jobs_from_specs/3` once per
+  variant id, tagging each op with its variant. Dependencies stay
+  variant-internal (each call has its own dependency-resolution scope),
+  so v1's ops never block on v2's.
+
+  Returns `{:ok, %{"v1" => [...], "v2" => [...]}}`.
+  """
+  @spec create_jobs_for_variants(String.t(), [map()], [String.t()]) ::
+          {:ok, %{String.t() => [map()]}}
+  def create_jobs_for_variants(mission_id, job_specs, variant_ids) do
+    by_variant =
+      Enum.reduce(variant_ids, %{}, fn variant_id, acc ->
+        {:ok, ops} = create_jobs_from_specs(mission_id, job_specs, variant: variant_id)
+        Map.put(acc, variant_id, ops)
+      end)
+
+    {:ok, by_variant}
   end
 
   # Scan all op pairs for target_files overlap and add implicit dependencies.

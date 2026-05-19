@@ -819,11 +819,14 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "implementation", "Planning complete") do
-      # Planning phase already scored and selected the best plan.
-      # Just create ops from whatever planning artifact exists.
+      # Planning phase already scored and selected the best plan. Just
+      # create ops from whatever planning artifact exists. In
+      # tournament mode (`Tournament.enabled?`), the planned op list is
+      # duplicated across each variant id so multiple impl ghosts can
+      # work the same plan on independent branches.
       case planning_artifact do
         specs when is_list(specs) and specs != [] ->
-          Planner.create_jobs_from_specs(mission.id, specs)
+          create_implementation_ops(mission, specs)
 
         _ ->
           Logger.warning("Planning artifact is not a list, falling back to synthetic planning")
@@ -836,6 +839,28 @@ defmodule GiTF.Major.Orchestrator do
 
       GiTF.Missions.update_status!(mission.id)
       {:ok, "implementation"}
+    end
+  end
+
+  # Single- or multi-variant op creation. Tournament mode stamps
+  # `mission.impl_variants = ["v1", ..., "vN"]` and creates N copies of
+  # the planned op list, one per variant.
+  defp create_implementation_ops(mission, specs) do
+    if GiTF.Tournament.enabled?() do
+      variant_ids = GiTF.Tournament.variant_ids(GiTF.Tournament.configured_attempts())
+
+      Archive.update(:missions, mission.id, fn record ->
+        Map.put(record, :impl_variants, variant_ids)
+      end)
+
+      Logger.info(
+        "Quest #{mission.id}: tournament mode — spawning #{length(variant_ids)} impl variants " <>
+          "(#{Enum.join(variant_ids, ", ")})"
+      )
+
+      Planner.create_jobs_for_variants(mission.id, specs, variant_ids)
+    else
+      Planner.create_jobs_from_specs(mission.id, specs)
     end
   end
 
