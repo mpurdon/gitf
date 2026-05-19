@@ -89,7 +89,7 @@ defmodule GiTF.AuditTest do
     # Remove the shell
     Archive.delete(:shells, shell.id)
 
-    assert {:error, :no_cell} = Audit.verify_job(op.id)
+    assert {:error, :no_shell} = Audit.verify_job(op.id)
   end
 
   test "verify_job! raises on failure", %{op: op, shell: shell} do

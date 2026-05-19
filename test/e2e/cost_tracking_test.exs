@@ -31,7 +31,7 @@ defmodule GiTF.E2E.CostTrackingTest do
     await({:bee_stopped, bee1.id}, timeout: 5_000)
 
     # Verify costs were recorded
-    bee_costs = GiTF.Costs.for_bee(bee1.id)
+    bee_costs = GiTF.Costs.for_ghost(bee1.id)
     assert length(bee_costs) > 0
 
     cost = hd(bee_costs)
@@ -83,8 +83,8 @@ defmodule GiTF.E2E.CostTrackingTest do
     assert summary.total_input_tokens >= 300
     assert summary.total_output_tokens >= 150
 
-    # by_bee should have entries for both ghosts
-    assert Map.has_key?(summary.by_bee, bee1.id)
-    assert Map.has_key?(summary.by_bee, bee2.id)
+    # by_ghost should have entries for both ghosts
+    assert Map.has_key?(summary.by_ghost, bee1.id)
+    assert Map.has_key?(summary.by_ghost, bee2.id)
   end
 end

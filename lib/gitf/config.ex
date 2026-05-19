@@ -30,20 +30,24 @@ defmodule GiTF.Config do
     "observability" => %{"webhook_url" => ""}
   }
 
-  @project_default_config %{
-    "gitf" => %{"version" => GiTF.version()},
-    "session" => %{"current_sector" => ""}
-  }
-
-  @default_config Map.merge(@global_default_config, @project_default_config)
-
   @doc "Returns the default global configuration map (API keys, budgets, thresholds)."
   @spec global_default_config() :: map()
   def global_default_config, do: @global_default_config
 
-  @doc "Returns the default project configuration map (version, session)."
+  @doc """
+  Returns the default project configuration map (version, session).
+
+  Built at call-time so `GiTF.version/0` reads the current `mix.exs`
+  string — otherwise a module-attribute snapshot would freeze whatever
+  version was compiled into the beam.
+  """
   @spec project_default_config() :: map()
-  def project_default_config, do: @project_default_config
+  def project_default_config do
+    %{
+      "gitf" => %{"version" => GiTF.version()},
+      "session" => %{"current_sector" => ""}
+    }
+  end
 
   @doc """
   Returns the full default configuration map (global + project merged).
@@ -55,7 +59,7 @@ defmodule GiTF.Config do
       5
   """
   @spec default_config() :: map()
-  def default_config, do: @default_config
+  def default_config, do: Map.merge(@global_default_config, project_default_config())
 
   @doc """
   Writes a configuration map to the given file path as TOML.

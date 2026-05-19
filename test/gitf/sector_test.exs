@@ -190,10 +190,14 @@ defmodule GiTF.CombTest do
   end
 
   describe "sync_strategy field" do
-    test "defaults to manual when not specified", %{tmp: tmp} do
+    test "defaults to auto_merge when no github remote is detected", %{tmp: tmp} do
+      # `manual` used to be the default but silently discarded completed
+      # mission changes; commit 6bed962 replaced it with strategy
+      # auto-detection (auto_merge for unprotected repos / no remote,
+      # pr_branch when GitHub branch protection is on).
       assert {:ok, sector} = Sector.add(tmp, name: "default-strategy")
 
-      assert sector.sync_strategy == "manual"
+      assert sector.sync_strategy == "auto_merge"
     end
 
     test "can create sector with specific sync_strategy" do

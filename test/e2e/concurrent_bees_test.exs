@@ -80,8 +80,8 @@ defmodule GiTF.E2E.ConcurrentGhostsTest do
     Process.sleep(100)
 
     # Each ghost should have its own cost records, not mixed
-    costs1 = GiTF.Costs.for_bee(bee1.id)
-    costs2 = GiTF.Costs.for_bee(bee2.id)
+    costs1 = GiTF.Costs.for_ghost(bee1.id)
+    costs2 = GiTF.Costs.for_ghost(bee2.id)
 
     assert length(costs1) > 0
     assert length(costs2) > 0

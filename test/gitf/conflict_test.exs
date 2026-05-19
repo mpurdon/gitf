@@ -67,7 +67,7 @@ defmodule GiTF.ConflictTest do
     end
 
     test "returns error for non-existent shell" do
-      assert {:error, :cell_not_found} = Conflict.check("cel-nonexistent")
+      assert {:error, :shell_not_found} = Conflict.check("cel-nonexistent")
     end
   end
 
@@ -79,7 +79,7 @@ defmodule GiTF.ConflictTest do
 
   describe "resolve/2" do
     test "returns error for non-existent shell" do
-      assert {:error, :cell_not_found} = Conflict.resolve("cel-nonexistent", :rebase)
+      assert {:error, :shell_not_found} = Conflict.resolve("cel-nonexistent", :rebase)
     end
 
     test "defer strategy marks shell for manual sync", %{
@@ -206,7 +206,7 @@ defmodule GiTF.ConflictTest do
     end
 
     test "returns error for non-existent shell" do
-      assert {:error, :cell_not_found} =
+      assert {:error, :shell_not_found} =
                Conflict.check_between_cells("cel-nonexistent", "cel-other")
     end
   end

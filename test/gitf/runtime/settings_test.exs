@@ -74,20 +74,20 @@ defmodule GiTF.Runtime.SettingsTest do
       refute "Edit" in tools
     end
 
-    test "SessionStart hook runs section brief --queen" do
+    test "SessionStart hook runs section brief --major" do
       settings = Settings.build_major_settings("/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["SessionStart"]
       assert hook["type"] == "command"
-      assert hook["command"] =~ "brief --queen"
+      assert hook["command"] =~ "brief --major"
     end
 
-    test "Stop hook runs section costs record --queen" do
+    test "Stop hook runs section costs record --major" do
       settings = Settings.build_major_settings("/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["Stop"]
       assert hook["type"] == "command"
-      assert hook["command"] =~ "costs record --queen"
+      assert hook["command"] =~ "costs record --major"
     end
   end
 

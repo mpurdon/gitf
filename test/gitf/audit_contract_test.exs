@@ -52,7 +52,11 @@ defmodule GiTF.AuditContractTest do
       assert Enum.any?(reasons, &String.contains?(&1, "security"))
     end
 
-    test "fails when a required check has nil score" do
+    test "treats a nil score as :pass (analysis didn't run)" do
+      # A required check whose score is nil means the analysis didn't
+      # produce results (tool not installed, language not supported,
+      # etc.); contract policy is to pass rather than block. See
+      # do_threshold_check/3.
       contract = %{
         required_checks: [:static, :security],
         skip_checks: [],
@@ -65,8 +69,7 @@ defmodule GiTF.AuditContractTest do
         quality_score: 85
       }
 
-      assert {:fail, reasons} = AuditContract.evaluate(contract, result)
-      assert Enum.any?(reasons, &String.contains?(&1, "security"))
+      assert :pass = AuditContract.evaluate(contract, result)
     end
 
     test "skipped checks are not evaluated" do

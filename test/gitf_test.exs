@@ -12,20 +12,30 @@ defmodule GiTFTest do
 
   describe "gitf_dir/0" do
     test "returns {:error, :not_in_gitf} when no .gitf directory exists" do
-      # Clear any GITF_PATH env var for this test
-      original = System.get_env("GITF_PATH")
+      # `gitf_dir/0` resolves via GITF_PATH → walk up from cwd → homedir
+      # (`$GITF_HOME || $HOME`) fallback. Block all three so the test
+      # genuinely exercises the "no marker anywhere" branch — otherwise
+      # the dev machine's own `~/.gitf/config.toml` makes this assert
+      # the wrong thing.
+      original_path = System.get_env("GITF_PATH")
+      original_home = System.get_env("GITF_HOME")
       System.delete_env("GITF_PATH")
 
-      # Use a temp dir that has no .gitf/ marker
       tmp = Path.join(System.tmp_dir!(), "gitf_no_marker_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(tmp)
+      System.put_env("GITF_HOME", tmp)
+
       original_cwd = File.cwd!()
       File.cd!(tmp)
 
       on_exit(fn ->
         File.cd!(original_cwd)
         File.rm_rf!(tmp)
-        if original, do: System.put_env("GITF_PATH", original)
+        if original_path, do: System.put_env("GITF_PATH", original_path)
+
+        if original_home,
+          do: System.put_env("GITF_HOME", original_home),
+          else: System.delete_env("GITF_HOME")
       end)
 
       assert {:error, :not_in_gitf} = GiTF.gitf_dir()

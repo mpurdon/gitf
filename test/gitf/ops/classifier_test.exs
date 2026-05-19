@@ -94,8 +94,11 @@ defmodule GiTF.Ops.ClassifierTest do
       complex = Classifier.classify_and_recommend("Implement complex payment integration")
       assert complex.recommended_model == "thinking"
 
+      # Implementation ops route to `thinking` at every complexity tier
+      # (ModelSelector policy — see project_flash_implementation_policy).
+      # Flash/general models loop on Read/Grep without emitting edits.
       moderate = Classifier.classify_and_recommend("Add new API endpoint")
-      assert moderate.recommended_model == "general"
+      assert moderate.recommended_model == "thinking"
     end
 
     test "includes reasoning" do

@@ -118,18 +118,18 @@ defmodule GiTF.CostsTest do
     end
   end
 
-  describe "for_bee/1" do
+  describe "for_ghost/1" do
     test "returns costs for a specific ghost", %{ghost: ghost} do
       {:ok, _} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       {:ok, _} = Costs.record(ghost.id, %{input_tokens: 200, output_tokens: 100})
 
-      costs = Costs.for_bee(ghost.id)
+      costs = Costs.for_ghost(ghost.id)
       assert length(costs) == 2
       assert Enum.all?(costs, &(&1.ghost_id == ghost.id))
     end
 
     test "returns empty list for unknown ghost" do
-      assert [] = Costs.for_bee("ghost-nonexistent")
+      assert [] = Costs.for_ghost("ghost-nonexistent")
     end
   end
 
@@ -190,7 +190,7 @@ defmodule GiTF.CostsTest do
       assert summary.total_input_tokens >= 1000
       assert summary.total_output_tokens >= 500
       assert is_map(summary.by_model)
-      assert is_map(summary.by_bee)
+      assert is_map(summary.by_ghost)
       assert is_map(summary.by_category)
     end
 

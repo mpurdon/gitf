@@ -118,7 +118,7 @@ defmodule GiTF.BriefTest do
     end
 
     test "returns error for nonexistent ghost" do
-      assert {:error, :bee_not_found} = Brief.brief(:ghost, "ghost-000000")
+      assert {:error, :ghost_not_found} = Brief.brief(:ghost, "ghost-000000")
     end
 
     test "shows no op when ghost has no assignment" do

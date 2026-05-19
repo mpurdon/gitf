@@ -79,7 +79,7 @@ defmodule GiTF.TransferTest do
     end
 
     test "returns error for non-existent ghost" do
-      assert {:error, :bee_not_found} = Transfer.create("ghost-nonexistent")
+      assert {:error, :ghost_not_found} = Transfer.create("ghost-nonexistent")
     end
   end
 
@@ -208,7 +208,7 @@ defmodule GiTF.TransferTest do
     end
 
     test "returns error for non-existent ghost" do
-      assert {:error, :bee_not_found} = Transfer.build_handoff_context("ghost-000000")
+      assert {:error, :ghost_not_found} = Transfer.build_handoff_context("ghost-000000")
     end
   end
 end

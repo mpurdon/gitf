@@ -85,7 +85,7 @@ defmodule GiTF.TranscriptWatcherTest do
       # Wait for at least one poll cycle
       Process.sleep(250)
 
-      costs = GiTF.Costs.for_bee(ghost.id)
+      costs = GiTF.Costs.for_ghost(ghost.id)
       assert length(costs) >= 1
       assert hd(costs).input_tokens == 1000
     end
@@ -110,7 +110,7 @@ defmodule GiTF.TranscriptWatcherTest do
 
       TranscriptWatcher.final_parse(ghost.id, path)
 
-      costs = GiTF.Costs.for_bee(ghost.id)
+      costs = GiTF.Costs.for_ghost(ghost.id)
       assert length(costs) == 2
     end
 
