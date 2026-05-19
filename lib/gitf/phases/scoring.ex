@@ -16,15 +16,12 @@ defmodule GiTF.Phases.Scoring do
       `:terminal_fail` (workflow `:retries_exhausted` → handler
       `terminal(:retries_exhausted, artifact)` →
       `Missions.mark_post_processing_failed/2`). Mirrors
-      `Orchestrator.scoring_post_processing_exhausted?/1`.
+      `GiTF.Scoring.post_processing_exhausted?/1`.
     * Otherwise → `:wait` (still scoring).
 
-  `before_advance(:advance)` runs the legacy `finish_scored/1`
-  side effects — record triage feedback against the score, ingest
-  per-op outcome data — by delegating to the still-private
-  orchestrator path. (We don't `mark_post_processing_done` here:
-  `:advance` is followed by routing to `:end` and only the workflow's
-  `:complete` decision should flip post-processing.)
+  `terminal(:complete)` runs `GiTF.Scoring.finish/1` — record triage
+  feedback against the score, ingest per-op outcome data, flip
+  `post_processing_status` to `"done"`, reap worktrees/branch.
 
   Operator-authored workflows that simply end at `scoring` get the
   ordinary `:complete` semantic via the same `terminal(:complete, _)`
@@ -50,7 +47,7 @@ defmodule GiTF.Phases.Scoring do
       is_map(artifact) ->
         if GiTF.Workflow.Verdict.artifact_failed?(artifact), do: :terminal_fail, else: :advance
 
-      GiTF.Major.Orchestrator.scoring_post_processing_exhausted?(mission) ->
+      GiTF.Scoring.post_processing_exhausted?(mission) ->
         :terminal_fail
 
       true ->
@@ -60,10 +57,10 @@ defmodule GiTF.Phases.Scoring do
 
   @impl true
   def terminal(mission, :complete, _artifact) do
-    # Mirrors the legacy `check_and_advance("scoring", &finish_scored/1)` —
+    # Mirrors the legacy `check_and_advance("scoring", &Scoring.finish/1)` —
     # records triage feedback against the score, ingests per-op outcomes,
     # flips `post_processing_status` to "done", reaps worktrees/branch.
-    GiTF.Major.Orchestrator.finish_scored(mission)
+    GiTF.Scoring.finish(mission)
     :ok
   end
 

@@ -26,7 +26,6 @@ defmodule GiTF.Major.Orchestrator do
 
   # Post-processing scoring gives up after this many failed scoring ops —
   # user already sees "completed", so endless retries waste budget.
-  @scoring_post_processing_max_failures 3
 
   alias GiTF.Config.Provider, as: Config
 
@@ -477,14 +476,14 @@ defmodule GiTF.Major.Orchestrator do
         # Scoring runs as async post-processing; user-visible status is
         # already "completed". If scoring fails repeatedly, give up on
         # post-processing rather than leaving the phase stuck forever.
-        if scoring_post_processing_exhausted?(mission) do
+        if GiTF.Scoring.post_processing_exhausted?(mission) do
           Logger.warning(
             "Quest #{mission.id}: scoring exhausted retries — marking post_processing_status=failed"
           )
 
           GiTF.Missions.mark_post_processing_failed(mission.id, "scoring exhausted retries")
         else
-          check_and_advance(mission, "scoring", &finish_scored/1)
+          check_and_advance(mission, "scoring", &GiTF.Scoring.finish/1)
         end
 
       other ->
@@ -2113,50 +2112,6 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  @doc false
-  # Public so `GiTF.Phases.Scoring.verdict/2` can use the same heuristic
-  # legacy uses: when 3 scoring ops have failed without producing a scoring
-  # artifact, give up on post-processing rather than wait forever.
-  def scoring_post_processing_exhausted?(mission) do
-    has_artifact? = not is_nil(GiTF.Missions.get_artifact(mission.id, "scoring"))
-
-    failed_scoring_ops =
-      Enum.count(mission.ops, fn op ->
-        op[:phase_job] && Map.get(op, :phase) == "scoring" && op.status == "failed"
-      end)
-
-    not has_artifact? and failed_scoring_ops >= @scoring_post_processing_max_failures
-  end
-
-  @doc false
-  # Records triage feedback, ingests per-op outcomes, marks
-  # post-processing done, cleans up the mission's worktrees/branch.
-  # Public so `GiTF.Phases.Scoring.terminal/3` can call it on workflow
-  # completion at scoring, matching the legacy
-  # `check_and_advance(mission, "scoring", &finish_scored/1)` semantic.
-  def finish_scored(mission) do
-    scoring = GiTF.Missions.get_artifact(mission.id, "scoring")
-
-    if scoring do
-      score = Map.get(scoring, "overall_score", 0)
-      Logger.info("Quest #{mission.id} scored #{score}/100")
-      record_triage_feedback(mission, score)
-    end
-
-    # Feed the learning loop — analyze each op's outcome
-    ingest_mission_outcome(mission)
-
-    # Final transition: post-processing done. User-visible status was already
-    # "completed" since after_publish/1; this just advances current_phase to
-    # "completed" and flips post_processing_status to "done".
-    result = GiTF.Missions.mark_post_processing_done(mission.id)
-
-    # Reap ghost worktrees + branches now that the mission is fully done.
-    cleanup_mission_branch(mission)
-
-    result
-  end
-
   defp start_publish(mission) do
     with {:ok, _} <- publish_step(mission) do
       # Publish runs synchronously (no ghost), so legacy dispatch drives
@@ -2472,57 +2427,6 @@ defmodule GiTF.Major.Orchestrator do
   # Store triage-vs-outcome data for future accuracy analysis.
   # Links the original triage complexity to the final quality score so
   # patterns like "ops triaged as simple but scored < 70" can be detected.
-  defp record_triage_feedback(mission, score) do
-    research = GiTF.Missions.get_artifact(mission.id, "research")
-    triage_complexity = if research, do: Map.get(research, "complexity"), else: nil
-    pipeline_mode = Map.get(mission, :pipeline_mode)
-
-    Archive.insert(:triage_feedback, %{
-      mission_id: mission.id,
-      sector_id: mission.sector_id,
-      triage_complexity: triage_complexity,
-      pipeline_mode: pipeline_mode,
-      quality_score: score,
-      completed_at: DateTime.utc_now()
-    })
-  rescue
-    e -> Logger.debug("Triage feedback recording failed: #{Exception.message(e)}")
-  end
-
-  # Analyze each non-phase op outcome and invalidate the sector profile.
-  defp ingest_mission_outcome(mission) do
-    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
-      mission.ops
-      |> Enum.reject(& &1[:phase_job])
-      |> Enum.each(fn op ->
-        try do
-          case op.status do
-            "done" -> GiTF.Intel.analyze_success(op.id)
-            "failed" -> GiTF.Intel.FailureAnalysis.analyze_failure(op.id)
-            _ -> :ok
-          end
-        rescue
-          e ->
-            Logger.warning(
-              "ingest_mission_outcome: per-op analysis failed for #{op.id}: " <>
-                Exception.message(e)
-            )
-
-            :ok
-        end
-      end)
-
-      GiTF.Intel.SectorProfile.invalidate(mission.sector_id)
-    end)
-  rescue
-    e ->
-      Logger.warning(
-        "ingest_mission_outcome failed for #{mission.id}: #{Exception.message(e)}"
-      )
-
-      :ok
-  end
-
   defp ingest_failure_outcome(mission_id) do
     Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
       case GiTF.Missions.get(mission_id) do
@@ -2802,7 +2706,12 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp cleanup_mission_branch(mission) do
+  @doc false
+  # Public so `GiTF.Scoring.finish/1` can reap a mission's ghost
+  # worktrees + branches without reaching back through the orchestrator's
+  # private API. Still called internally from
+  # `complete_quest_no_work_needed/2` for the triage short-circuit path.
+  def cleanup_mission_branch(mission) do
     mission_id = mission.id
     sector_id = mission.sector_id
 
