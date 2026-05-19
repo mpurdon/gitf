@@ -46,6 +46,7 @@ defmodule GiTF.Ghost.WorkerTest do
   end
 
   describe "start_link/1 with successful command" do
+    @tag timeout: 60_000
     test "provisions and runs to completion", ctx do
       # Use /bin/echo as a fake "claude" that exits immediately with 0
       {:ok, pid} =
@@ -60,8 +61,11 @@ defmodule GiTF.Ghost.WorkerTest do
 
       ref = Process.monitor(pid)
 
-      # Wait for the process to finish (echo exits quickly)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+      # 30 s wait covers slow CI/sandbox env — provisioning has grown
+      # over time (real git, real worktree, audit step) and 5 s isn't
+      # enough on the dev machine after the cell→shell rename added
+      # extra steps.
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 30_000
 
       # Verify DB state: ghost should be stopped or crashed
       # (validation failure in test env may mark ghost as crashed)
@@ -90,6 +94,7 @@ defmodule GiTF.Ghost.WorkerTest do
   end
 
   describe "start_link/1 with failing command" do
+    @tag timeout: 60_000
     test "marks ghost crashed and op failed on non-zero exit", ctx do
       # Use /usr/bin/false which exits with status 1
       {:ok, pid} =
@@ -103,7 +108,7 @@ defmodule GiTF.Ghost.WorkerTest do
         )
 
       ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 30_000
 
       # Verify DB state: ghost should be crashed
       {:ok, ghost} = GiTF.Ghosts.get(ctx.ghost.id)
@@ -120,6 +125,7 @@ defmodule GiTF.Ghost.WorkerTest do
   end
 
   describe "status/1" do
+    @tag timeout: 60_000
     test "returns the worker status while running", ctx do
       # Use /bin/sleep to keep the process alive
       {:ok, pid} =
@@ -132,10 +138,12 @@ defmodule GiTF.Ghost.WorkerTest do
           prompt: "30"
         )
 
-      # Give it a moment to provision
+      # Give it a moment to provision. Worker.status/2 with 30 s timeout
+      # covers slow worktree+shell provisioning that runs in
+      # handle_continue ahead of the call reply.
       Process.sleep(500)
 
-      assert {:ok, status} = Worker.status(ctx.ghost.id)
+      assert {:ok, status} = Worker.status(ctx.ghost.id, 30_000)
       assert status.ghost_id == ctx.ghost.id
       assert status.op_id == ctx.op.id
       assert status.status == :running
@@ -151,6 +159,7 @@ defmodule GiTF.Ghost.WorkerTest do
   end
 
   describe "stop/1" do
+    @tag timeout: 60_000
     test "gracefully stops a running worker", ctx do
       # Trap exits so the :exfil signal from GenServer.stop doesn't kill the test
       Process.flag(:trap_exit, true)
@@ -168,8 +177,8 @@ defmodule GiTF.Ghost.WorkerTest do
       Process.sleep(500)
       ref = Process.monitor(pid)
 
-      assert :ok = Worker.stop(ctx.ghost.id)
-      assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 5_000
+      assert :ok = Worker.stop(ctx.ghost.id, 30_000)
+      assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 30_000
       assert reason in [:normal, :shutdown]
 
       {:ok, ghost} = GiTF.Ghosts.get(ctx.ghost.id)

@@ -100,20 +100,32 @@ defmodule GiTF.Ghost.Worker do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Returns the current status of a ghost worker by ghost_id."
-  @spec status(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def status(ghost_id) do
+  @doc """
+  Returns the current status of a ghost worker by ghost_id.
+
+  `timeout` defaults to 5 seconds but can be lengthened — the worker
+  serialises `handle_continue(:provision, _)` (real git/shell work)
+  ahead of handle_call replies, so a status query during provisioning
+  may queue behind it.
+  """
+  @spec status(String.t(), timeout()) :: {:ok, map()} | {:error, :not_found}
+  def status(ghost_id, timeout \\ 5_000) do
     case lookup(ghost_id) do
-      {:ok, pid} -> {:ok, GenServer.call(pid, :status)}
+      {:ok, pid} -> {:ok, GenServer.call(pid, :status, timeout)}
       :error -> {:error, :not_found}
     end
   end
 
-  @doc "Gracefully stops a ghost worker."
-  @spec stop(String.t()) :: :ok | {:error, :not_found}
-  def stop(ghost_id) do
+  @doc """
+  Gracefully stops a ghost worker.
+
+  `timeout` defaults to 5 seconds; bump it when the worker may still
+  be provisioning a shell/worktree (see `status/2`).
+  """
+  @spec stop(String.t(), timeout()) :: :ok | {:error, :not_found}
+  def stop(ghost_id, timeout \\ 5_000) do
     case lookup(ghost_id) do
-      {:ok, pid} -> GenServer.call(pid, :stop)
+      {:ok, pid} -> GenServer.call(pid, :stop, timeout)
       :error -> {:error, :not_found}
     end
   end

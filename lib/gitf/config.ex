@@ -66,9 +66,9 @@ defmodule GiTF.Config do
 
   Returns `:ok` on success or `{:error, reason}` on failure.
   """
-  @spec write_config(String.t(), map()) :: :ok | {:error, term()}
-  def write_config(path, config \\ @default_config) do
-    content = encode_toml(config)
+  @spec write_config(String.t(), map() | nil) :: :ok | {:error, term()}
+  def write_config(path, config \\ nil) do
+    content = encode_toml(config || default_config())
     File.write(path, content)
   end
 
