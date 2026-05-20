@@ -204,9 +204,12 @@ defmodule GiTF.TestDriver.Harness do
   """
   @spec send_waggle_to_major(map()) :: :ok
   def send_waggle_to_major(link_msg) do
+    # Major listens for `{:link_received, _}` (the post-cell→shell /
+    # waggle→link rename); harness still uses the old function name for
+    # backwards-compat with existing E2E scenarios.
     case Process.whereis(GiTF.Major) do
       nil -> :ok
-      pid -> send(pid, {:waggle_received, link_msg})
+      pid -> send(pid, {:link_received, link_msg})
     end
 
     :ok

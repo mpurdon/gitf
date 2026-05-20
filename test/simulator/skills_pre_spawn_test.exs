@@ -52,6 +52,11 @@ defmodule GiTF.Simulator.SkillsPreSpawnTest do
     end)
 
     # Seed a skill that should match a "lockfile" op
+    # `Skills.create/1` writes to the app Archive — make sure it's
+    # healthy before the rest of setup runs (StoreCase teardown from a
+    # prior test may have left it pointing at a deleted data_dir).
+    GiTF.Test.StoreHelper.restore_app_store()
+
     {:ok, skill} =
       GiTF.Skills.create(%{
         name: "test-lockfile-skill-#{:erlang.unique_integer([:positive])}",
