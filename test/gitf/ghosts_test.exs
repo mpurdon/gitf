@@ -222,12 +222,12 @@ defmodule GiTF.GhostsTest do
     end
 
     @tag timeout: 60_000
-    test "revive leaves a terminal op alone (no status change)", ctx do
-      # Spawn and let it complete. `/bin/echo` exits 0 but the
-      # post-worker verification can mark the op `failed` in the test
-      # env (Tachikoma not running, signature check fails, etc.); the
-      # contract is "revive doesn't change a terminal op", not "the
-      # status is specifically done".
+    test "revive leaves a done op alone (no status change)", ctx do
+      # `revive_job/2` semantics: failed → restart; done → no-op;
+      # other → swap ghost_id. This test exercises the `done` branch
+      # specifically, so we force the op to `done` after the worker
+      # finishes (the test env's post-worker verification path may
+      # have left it `failed`).
       {:ok, ghost} =
         Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
           name: "done-op-test",
@@ -248,13 +248,13 @@ defmodule GiTF.GhostsTest do
       {:ok, stopped_ghost} = Ghosts.get(ghost.id)
       Archive.put(:ghosts, %{stopped_ghost | status: "crashed"})
 
-      {:ok, op_before} = GiTF.Ops.get(ctx.op.id)
-      assert op_before.status in ["done", "failed"]
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      Archive.put(:ops, %{op | status: "done"})
 
       {:ok, _new_ghost} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
-      {:ok, op_after} = GiTF.Ops.get(ctx.op.id)
-      assert op_after.status == op_before.status
+      {:ok, still_done_op} = GiTF.Ops.get(ctx.op.id)
+      assert still_done_op.status == "done"
 
       Process.sleep(1_000)
     end
