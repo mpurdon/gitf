@@ -89,6 +89,15 @@ defmodule GiTF.Tournament do
   end
 
   @doc """
+  Per-variant artifact key for a phase. `validation_key("v1") == "validation_v1"`.
+  Centralises the magic-string format so the workflow handler, the
+  artifact storage path (`api_controller.maybe_collect_phase_artifact`),
+  and the tournament scorer all agree.
+  """
+  @spec validation_key(variant_id()) :: String.t()
+  def validation_key(variant_id), do: "validation_" <> variant_id
+
+  @doc """
   Score a single validation artifact.
   """
   @spec score(map() | nil) :: score_breakdown()
@@ -159,12 +168,17 @@ defmodule GiTF.Tournament do
     variants = Map.get(mission, :impl_variants) || []
     artifacts = Map.get(mission, :artifacts) || %{}
 
-    variants
-    |> Enum.map(fn variant_id ->
-      artifact = Map.get(artifacts, "validation_#{variant_id}")
-      score(artifact) |> Map.put(:variant, variant_id)
-    end)
-    |> Enum.sort_by(&{rank_key(&1.score), variant_index(&1.variant)})
+    scored =
+      Enum.map(variants, fn variant_id ->
+        artifact = Map.get(artifacts, validation_key(variant_id))
+        score(artifact) |> Map.put(:variant, variant_id)
+      end)
+
+    # Disqualified variants sort last regardless of numeric score; live
+    # variants sort by score desc with the lower index breaking ties.
+    {live, dq} = Enum.split_with(scored, &(&1.score != :disqualified))
+    Enum.sort_by(live, &{-&1.score, variant_index(&1.variant)}) ++
+      Enum.sort_by(dq, &variant_index(&1.variant))
   end
 
   @doc """
@@ -202,8 +216,39 @@ defmodule GiTF.Tournament do
 
     variants != [] and
       Enum.all?(variants, fn variant_id ->
-        Map.has_key?(artifacts, "validation_#{variant_id}")
+        Map.has_key?(artifacts, validation_key(variant_id))
       end)
+  end
+
+  @doc """
+  Single-pass `ready? + pick_winner`. Returns:
+
+    * `{:ok, winner_id}` — every variant has a validation artifact AND
+      at least one isn't disqualified.
+    * `{:error, :not_ready}` — at least one variant hasn't validated.
+    * `{:error, :all_disqualified}` — every variant lost the cross-check.
+    * `{:error, :no_variants}` — `impl_variants` is empty.
+
+  Avoids walking `impl_variants` twice (once in `ready?`, once in
+  `rank/pick_winner`) on every poll while the tournament is in flight.
+  """
+  @spec resolve(map()) ::
+          {:ok, variant_id()}
+          | {:error, :not_ready | :all_disqualified | :no_variants}
+  def resolve(%{} = mission) do
+    variants = Map.get(mission, :impl_variants) || []
+    artifacts = Map.get(mission, :artifacts) || %{}
+
+    cond do
+      variants == [] ->
+        {:error, :no_variants}
+
+      not Enum.all?(variants, &Map.has_key?(artifacts, validation_key(&1))) ->
+        {:error, :not_ready}
+
+      true ->
+        pick_winner(mission)
+    end
   end
 
   # -- Helpers ----------------------------------------------------------------
@@ -215,12 +260,6 @@ defmodule GiTF.Tournament do
       _ -> :unknown
     end
   end
-
-  # Sort by score descending. `:disqualified` sorts last regardless of
-  # original score. We invert numeric scores via negation so the
-  # default ascending Enum.sort_by yields highest-first.
-  defp rank_key(:disqualified), do: {1, 0}
-  defp rank_key(score) when is_number(score), do: {0, -score}
 
   # Parse "v1" → 1, "v2" → 2, etc. Used as a tie-breaker so ties favour
   # the earlier-spawned variant.

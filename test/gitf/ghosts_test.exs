@@ -262,27 +262,11 @@ defmodule GiTF.GhostsTest do
 
   # -- Helpers -----------------------------------------------------------------
 
-  # Poll `check` every 200 ms until it returns `:ok` or `timeout_ms`
-  # elapses. Used to wait on Worker terminal states without baking in
-  # a fixed sleep that has to be longer than the slowest path.
+  # Wait on a Worker terminal state. `check` returns `:ok` once
+  # satisfied. Wraps `TestDriver.Assertions.await/2` so the same poll
+  # loop everything else uses also handles "ghost is now stopped".
   defp assert_eventually(check, timeout_ms) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_poll(check, deadline)
-  end
-
-  defp do_poll(check, deadline) do
-    case check.() do
-      :ok ->
-        :ok
-
-      _ ->
-        if System.monotonic_time(:millisecond) > deadline do
-          flunk("assert_eventually: condition never became truthy within deadline")
-        else
-          Process.sleep(200)
-          do_poll(check, deadline)
-        end
-    end
+    GiTF.TestDriver.Assertions.await(fn -> check.() == :ok end, timeout: timeout_ms, interval: 200)
   end
 
   defp create_temp_git_repo do

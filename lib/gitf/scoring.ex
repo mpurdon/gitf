@@ -10,7 +10,7 @@ defmodule GiTF.Scoring do
       (and `Phases.Scoring`) use to give up on post-processing rather
       than wait forever for a scoring ghost that keeps crashing.
 
-  Both the legacy orchestrator dispatch path (line 480/487) and the
+  Both the legacy orchestrator dispatch path (`advance_via_legacy/2`) and the
   workflow phase handler (`GiTF.Phases.Scoring`) call into this module.
   The actual scoring ghost is still spawned by
   `Major.Orchestrator.dispatch_phase("scoring", _)` → `start_scoring/1`,

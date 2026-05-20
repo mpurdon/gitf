@@ -132,6 +132,11 @@ defmodule GiTF.TestDriver.Assertions do
 
   # -- Private: condition checking ---------------------------------------------
 
+  # Escape hatch for ad-hoc predicates so callers don't need to
+  # hand-roll a poll loop. The fn must return `true` to stop or
+  # `false`/anything else to keep waiting.
+  defp check_condition(fun) when is_function(fun, 0), do: fun.() == true
+
   defp check_condition({:job_done, op_id}) do
     case GiTF.Ops.get(op_id) do
       {:ok, %{status: "done"}} -> true

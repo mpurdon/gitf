@@ -117,42 +117,42 @@ defmodule GiTF.Phases.Validation do
   end
 
   defp verdict_tournament(mission) do
-    cond do
-      not GiTF.Tournament.ready?(mission) ->
+    case GiTF.Tournament.resolve(mission) do
+      {:ok, winning_variant} ->
+        promote_winning_variant(mission, winning_variant)
+
+      {:error, :not_ready} ->
         :wait
 
-      true ->
-        case GiTF.Tournament.pick_winner(mission) do
-          {:ok, winning_variant} ->
-            promote_winning_variant(mission, winning_variant)
+      {:error, :all_disqualified} ->
+        Logger.warning(
+          "Quest #{mission.id}: all #{length(mission.impl_variants)} variants disqualified"
+        )
 
-          {:error, :all_disqualified} ->
-            Logger.warning(
-              "Quest #{mission.id}: all #{length(mission.impl_variants)} variants disqualified"
-            )
+        :terminal_fail
 
-            :terminal_fail
-
-          {:error, :no_variants} ->
-            # Defensive: impl_variants was populated but pick_winner saw
-            # it empty (race against an Archive update). Wait and retry.
-            :wait
-        end
+      # impl_variants was populated when the dispatcher checked but
+      # came back empty here (race against an Archive update). Wait
+      # and retry.
+      {:error, :no_variants} ->
+        :wait
     end
   end
 
   defp promote_winning_variant(mission, winning_variant) do
-    winner_key = "validation_#{winning_variant}"
-    winner_artifact = Missions.get_artifact(mission.id, winner_key) || %{}
+    winner_artifact =
+      Missions.get_artifact(mission.id, GiTF.Tournament.validation_key(winning_variant)) || %{}
+
+    # Store the artifact BEFORE stamping `winning_variant` so the
+    # tournament short-circuit at verdict/2 (which keys off
+    # winning_variant) never sees a stamp without a canonical artifact
+    # to consume. A crash between the two writes would leave the next
+    # poll re-running this path and producing the same result.
+    Missions.store_artifact(mission.id, "validation", winner_artifact)
 
     GiTF.Archive.update(:missions, mission.id, fn record ->
       Map.put(record, :winning_variant, winning_variant)
     end)
-
-    # Copy the winner's validation artifact into the canonical
-    # "validation" slot so the rest of the workflow (sync, publish,
-    # scoring) reads it like a single-variant mission.
-    Missions.store_artifact(mission.id, "validation", winner_artifact)
 
     Logger.info(
       "Quest #{mission.id}: tournament winner = #{winning_variant} " <>
@@ -166,10 +166,9 @@ defmodule GiTF.Phases.Validation do
     })
 
     # Fall through to the single-variant verdict path on the now-canonical
-    # validation artifact so the requires-approval / cross-check / fix
-    # logic stays unchanged. Update the in-memory mission with the
-    # winning_variant stamp; reloading via Missions.get would clobber
-    # mission.ops for tests that hand-build them on the record.
+    # validation artifact. Update the in-memory mission with the stamp;
+    # reloading via Missions.get would clobber `mission.ops` for tests
+    # that hand-build them on the record.
     verdict_single(Map.put(mission, :winning_variant, winning_variant), winner_artifact)
   end
 

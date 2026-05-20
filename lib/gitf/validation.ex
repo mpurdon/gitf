@@ -30,7 +30,7 @@ defmodule GiTF.Validation do
       spawn a fix op (reusing the impl shell when possible), transition
       back to implementation.
 
-  Both the legacy orchestrator dispatch path (line 461) and the workflow
+  Both the legacy orchestrator dispatch path (`advance_via_legacy/2`) and the workflow
   phase handler `GiTF.Phases.Validation` call into this module.
   `start_validation/1` (the ghost-spawning entry point) stays on the
   orchestrator because it shares `spawn_phase_ghost/4` with every other

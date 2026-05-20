@@ -68,7 +68,7 @@ defmodule GiTF.Approval do
   @spec handle_result(map()) :: {:ok, String.t()} | {:error, term()}
   def handle_result(mission) do
     case Override.approval_status(mission.id) do
-      :approved ->
+      status when status in [:approved, :not_required] ->
         {:ok, mission} = Missions.get(mission.id)
         GiTF.Publish.merge(mission)
 
@@ -78,10 +78,6 @@ defmodule GiTF.Approval do
 
       :pending ->
         handle_pending(mission)
-
-      :not_required ->
-        {:ok, mission} = Missions.get(mission.id)
-        GiTF.Publish.merge(mission)
     end
   end
 

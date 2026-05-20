@@ -846,8 +846,10 @@ defmodule GiTF.Major.Orchestrator do
   # `mission.impl_variants = ["v1", ..., "vN"]` and creates N copies of
   # the planned op list, one per variant.
   defp create_implementation_ops(mission, specs) do
-    if GiTF.Tournament.enabled?() do
-      variant_ids = GiTF.Tournament.variant_ids(GiTF.Tournament.configured_attempts())
+    attempts = GiTF.Tournament.configured_attempts()
+
+    if attempts > 1 do
+      variant_ids = GiTF.Tournament.variant_ids(attempts)
 
       Archive.update(:missions, mission.id, fn record ->
         Map.put(record, :impl_variants, variant_ids)
@@ -873,22 +875,36 @@ defmodule GiTF.Major.Orchestrator do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation", mission)
       diff_base = detect_diff_base(mission)
 
+      # Walk mission.ops once and bucket by variant_id (nil for
+      # single-variant missions). The tournament fan-out below then
+      # spawns one validation ghost per variant from its bucket without
+      # re-walking the full op list per spawn.
+      ops_by_variant =
+        Enum.group_by(mission.ops, fn op ->
+          if op[:phase_job] in [nil, false] and op.status == "done", do: op[:variant], else: :_skip
+        end)
+        |> Map.delete(:_skip)
+
       case Map.get(mission, :impl_variants) || [] do
         [] ->
-          spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, nil)
+          changed_files = collect_changed_files(ops_by_variant, nil)
+          spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, nil, changed_files)
 
         variants ->
           # Tournament mode: one validation ghost per variant, each
           # rooted at that variant's last completed impl op so the diff
           # is variant-local.
           Enum.each(variants, fn variant_id ->
+            changed_files = collect_changed_files(ops_by_variant, variant_id)
+
             spawn_validation_for_variant(
               mission,
               requirements,
               planning,
               ctx,
               diff_base,
-              variant_id
+              variant_id,
+              changed_files
             )
           end)
       end
@@ -897,21 +913,19 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, variant_id) do
-    changed_files =
-      mission.ops
-      |> Enum.filter(fn op ->
-        op[:phase_job] in [nil, false] and op.status == "done" and
-          (variant_id == nil or op[:variant] == variant_id)
-      end)
-      |> Enum.flat_map(fn op ->
-        case op[:changed_files] do
-          files when is_list(files) -> files
-          _ -> []
-        end
-      end)
-      |> Enum.uniq()
+  defp collect_changed_files(ops_by_variant, variant_id) do
+    ops_by_variant
+    |> Map.get(variant_id, [])
+    |> Enum.flat_map(fn op ->
+      case op[:changed_files] do
+        files when is_list(files) -> files
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
 
+  defp spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, variant_id, changed_files) do
     prompt =
       PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
         diff_base: diff_base,
