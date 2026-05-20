@@ -1008,21 +1008,12 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  # Collects the changed file list reported by every completed implementation
-  # op. Used as ground truth in the validation prompt — if this list is
-  # non-empty, the implementation ghost definitely committed work.
+  # Wrapper over the canonical helper in `GiTF.Validation`. Kept for
+  # call-site readability in this file (the orchestrator's prompt
+  # builder reads better as `changed_files_from_impl/1` than as the
+  # full keyword-flag call).
   defp changed_files_from_impl(mission) do
-    mission.ops
-    |> Enum.filter(fn op ->
-      op[:phase_job] in [nil, false] and op.status == "done"
-    end)
-    |> Enum.flat_map(fn op ->
-      case op[:changed_files] do
-        files when is_list(files) -> files
-        _ -> []
-      end
-    end)
-    |> Enum.uniq()
+    GiTF.Validation.mission_changed_files(mission, completed_only: true)
   end
 
   # Returns [base_branch: "ghost/<id>"] when a completed impl op exists for
@@ -1524,7 +1515,7 @@ defmodule GiTF.Major.Orchestrator do
         repo_path = if sector, do: sector.path, else: nil
 
         # Get changed files from all implementation ops
-        changed_files = mission_changed_files(mission)
+        changed_files = GiTF.Validation.mission_changed_files(mission)
 
         # Branch simplify worktrees from the quest branch (the one sync just
         # merged impl ghosts into) so cleanup commits land on that branch
@@ -1592,22 +1583,6 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   @doc false
-  # The set of files that the mission's implementation ops have
-  # reported as changed. Public so `GiTF.Validation.attempt_fixes/3`
-  # can target fix ops at the right files. Used internally by
-  # `start_simplify/1` for the simplify worktree base.
-  def mission_changed_files(mission) do
-    mission.ops
-    |> Enum.reject(& &1[:phase_job])
-    |> Enum.flat_map(fn op ->
-      case Map.get(op, :files_changed) || Map.get(op, :changed_files) do
-        files when is_list(files) -> files
-        _ -> []
-      end
-    end)
-    |> Enum.uniq()
-  end
-
   # -- Scoring Phase: final quality assessment --------------------------------
 
   defp start_scoring(mission) do

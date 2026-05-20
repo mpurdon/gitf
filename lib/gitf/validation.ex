@@ -44,6 +44,36 @@ defmodule GiTF.Validation do
   alias GiTF.Major.Orchestrator
   alias GiTF.Togusa.FixContext
 
+  @doc """
+  Returns the deduped list of files reported as changed by the
+  mission's implementation ops (`:files_changed` / `:changed_files`
+  fields). Reads non-phase ops only.
+
+  `:completed_only` (default `false`) restricts to ops with
+  `status == "done"`; the validation prompt builder uses this to
+  ensure the "implementation definitely committed work" ground truth
+  excludes in-flight ops. Other callers (simplify worktree base,
+  Validation.attempt_fixes/3 fix targeting) want the full list.
+  """
+  @spec mission_changed_files(map(), keyword()) :: [String.t()]
+  def mission_changed_files(mission, opts \\ []) do
+    completed_only? = Keyword.get(opts, :completed_only, false)
+
+    mission.ops
+    |> Enum.reject(& &1[:phase_job])
+    |> maybe_filter_done(completed_only?)
+    |> Enum.flat_map(fn op ->
+      case Map.get(op, :files_changed) || Map.get(op, :changed_files) do
+        files when is_list(files) -> files
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp maybe_filter_done(ops, false), do: ops
+  defp maybe_filter_done(ops, true), do: Enum.filter(ops, &(&1.status == "done"))
+
   # Sector-intelligence recommendations override this default at :high
   # confidence — see `max_fix_attempts_for/1`.
   @default_max_fix_attempts 2
@@ -272,7 +302,7 @@ defmodule GiTF.Validation do
   """
   @spec attempt_fixes(map(), map(), FixContext.t()) :: {:ok, String.t()} | {:error, term()}
   def attempt_fixes(mission, validation, %FixContext{} = fix_ctx) do
-    impl_files = Orchestrator.mission_changed_files(mission)
+    impl_files = mission_changed_files(mission)
 
     fix_description = build_fix_description(mission, validation, impl_files)
 
