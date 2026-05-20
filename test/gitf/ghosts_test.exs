@@ -37,6 +37,7 @@ defmodule GiTF.GhostsTest do
   end
 
   describe "spawn/4" do
+    @tag timeout: 60_000
     test "creates a ghost record, assigns the op, and starts a worker", ctx do
       assert {:ok, ghost} =
                Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
@@ -53,12 +54,19 @@ defmodule GiTF.GhostsTest do
       assert op.ghost_id == ghost.id
       assert op.status == "assigned"
 
-      # Worker should have started (wait for it to finish since echo exits fast)
-      Process.sleep(1_000)
+      # Worker should have started (wait for it to finish since echo exits fast).
+      # Provisioning + mark_success + auto-commit + audit can take 10+ s
+      # in the test env; poll until terminal rather than fixed sleep.
+      assert_eventually(
+        fn ->
+          case Ghosts.get(ghost.id) do
+            {:ok, %{status: s}} when s in ["stopped", "crashed"] -> :ok
+            _ -> :not_yet
+          end
+        end,
+        30_000
+      )
 
-      # After echo finishes, ghost should be terminal. `stopped` is the
-      # happy-path; `crashed` is the post-completion verification path
-      # marking it bad when Tachikoma isn't running in the test env.
       {:ok, updated_bee} = Ghosts.get(ghost.id)
       assert updated_bee.status in ["stopped", "crashed"]
     end
@@ -112,6 +120,7 @@ defmodule GiTF.GhostsTest do
   end
 
   describe "stop/1" do
+    @tag timeout: 60_000
     test "stops a running worker", ctx do
       {:ok, ghost} =
         Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
@@ -122,7 +131,10 @@ defmodule GiTF.GhostsTest do
 
       Process.sleep(500)
 
-      assert :ok = Ghosts.stop(ghost.id)
+      # 30 s timeout: Worker.stop calls GenServer.call/3 against a
+      # process that's still in handle_continue(:provision, _) on slow
+      # envs; the default 5 s isn't enough.
+      assert :ok = Ghosts.stop(ghost.id, 30_000)
       Process.sleep(200)
 
       {:ok, stopped_ghost} = Ghosts.get(ghost.id)
@@ -209,6 +221,7 @@ defmodule GiTF.GhostsTest do
       Process.sleep(1_000)
     end
 
+    @tag timeout: 60_000
     test "revive leaves a terminal op alone (no status change)", ctx do
       # Spawn and let it complete. `/bin/echo` exits 0 but the
       # post-worker verification can mark the op `failed` in the test
@@ -222,7 +235,15 @@ defmodule GiTF.GhostsTest do
           prompt: "hello"
         )
 
-      Process.sleep(1_000)
+      assert_eventually(
+        fn ->
+          case GiTF.Ops.get(ctx.op.id) do
+            {:ok, %{status: s}} when s in ["done", "failed"] -> :ok
+            _ -> :not_yet
+          end
+        end,
+        30_000
+      )
 
       {:ok, stopped_ghost} = Ghosts.get(ghost.id)
       Archive.put(:ghosts, %{stopped_ghost | status: "crashed"})
@@ -240,6 +261,29 @@ defmodule GiTF.GhostsTest do
   end
 
   # -- Helpers -----------------------------------------------------------------
+
+  # Poll `check` every 200 ms until it returns `:ok` or `timeout_ms`
+  # elapses. Used to wait on Worker terminal states without baking in
+  # a fixed sleep that has to be longer than the slowest path.
+  defp assert_eventually(check, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_poll(check, deadline)
+  end
+
+  defp do_poll(check, deadline) do
+    case check.() do
+      :ok ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) > deadline do
+          flunk("assert_eventually: condition never became truthy within deadline")
+        else
+          Process.sleep(200)
+          do_poll(check, deadline)
+        end
+    end
+  end
 
   defp create_temp_git_repo do
     name = "gitf_bees_test_#{:erlang.unique_integer([:positive])}"

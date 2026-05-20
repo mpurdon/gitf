@@ -46,6 +46,14 @@ defmodule GiTF.Test.Simulator do
     sector_name = Keyword.get(opts, :sector_name, "sim-#{:erlang.unique_integer([:positive])}")
     seed_files = Keyword.get(opts, :files, %{"README.md" => "# sim\n"})
 
+    # Make sure the app-level Archive is healthy. A prior StoreCase test
+    # can leave the Archive pointing at a torn-down temp data_dir; the
+    # `Archive.insert(:sectors, ...)` below would then return
+    # `{:error, :enoent}` and the `{:ok, sector} = ...` bind would
+    # crash with CaseClauseError. `restore_app_store/0` is idempotent
+    # and fast.
+    GiTF.Test.StoreHelper.restore_app_store()
+
     # Ensure a gitf root exists — phase-ghost spawning calls GiTF.gitf_dir()
     # which needs a .gitf/config.toml somewhere on disk. Use a per-scenario
     # GITF_PATH so parallel scenarios can't step on each other.

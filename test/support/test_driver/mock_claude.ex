@@ -53,9 +53,30 @@ defmodule GiTF.TestDriver.MockClaude do
         ""
       end
 
+    # Worker.mark_success now treats "ghost reported success but
+    # produced zero file changes" as a failure (the `empty_completion?`
+    # gate added to catch hallucinated impl ghosts). Tests need the
+    # mock to actually touch a file in the worktree (cwd at spawn
+    # time) so the auto-commit step records non-zero changes. Caller
+    # can opt out with `touch_file: false` for tests that genuinely
+    # want the failure path.
+    touch_path =
+      case Keyword.get(opts, :touch_file, true) do
+        false -> nil
+        true -> "mock_claude_marker_#{:erlang.unique_integer([:positive])}.txt"
+        path when is_binary(path) -> path
+      end
+
+    touch_cmd =
+      if touch_path do
+        "echo \"mock claude run #{:erlang.unique_integer([:positive])}\" > #{touch_path}\n"
+      else
+        ""
+      end
+
     script = """
     #!/bin/bash
-    #{delay_cmd}cat <<'MOCK_OUTPUT'
+    #{delay_cmd}#{touch_cmd}cat <<'MOCK_OUTPUT'
     #{body}
     MOCK_OUTPUT
     exit #{exit_code}

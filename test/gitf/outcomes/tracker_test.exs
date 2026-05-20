@@ -7,6 +7,14 @@ defmodule GiTF.Outcomes.TrackerTest do
   setup do
     prior = Application.get_env(:gitf, :outcomes_enabled, false)
 
+    # Make sure the app-level Archive is healthy and writable. A prior
+    # StoreCase test may have torn down its temp data_dir while leaving
+    # the Archive process pointing at it; `restore_app_store/0` kills
+    # the stale process and starts a fresh Archive at a stable temp
+    # path. Without this guard, `Archive.insert` for tests below blows
+    # up with `{:error, :enoent}` and CaseClauseError on the bind.
+    GiTF.Test.StoreHelper.restore_app_store()
+
     GiTF.Archive.all(:mission_outcomes)
     |> Enum.each(fn o -> GiTF.Archive.delete(:mission_outcomes, o.id) end)
 

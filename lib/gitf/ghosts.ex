@@ -250,9 +250,9 @@ defmodule GiTF.Ghosts do
 
   Returns `:ok` or `{:error, :not_found}` if the worker process is not running.
   """
-  @spec stop(String.t()) :: :ok | {:error, :not_found}
-  def stop(ghost_id) do
-    GiTF.Ghost.Worker.stop(ghost_id)
+  @spec stop(String.t(), timeout()) :: :ok | {:error, :not_found}
+  def stop(ghost_id, timeout \\ 5_000) do
+    GiTF.Ghost.Worker.stop(ghost_id, timeout)
   end
 
   @doc """
