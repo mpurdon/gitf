@@ -5,6 +5,10 @@ defmodule GiTF.Trust.SectorMergeRateTest do
   alias GiTF.Trust
 
   setup do
+    # Refresh the app-level Archive (a prior StoreCase test may have
+    # torn down its data_dir while leaving the process pointing at it).
+    GiTF.Test.StoreHelper.restore_app_store()
+
     # Clean :mission_outcomes + :model_reputation caches between tests
     Enum.each(Archive.all(:mission_outcomes), fn o -> Archive.delete(:mission_outcomes, o.id) end)
 

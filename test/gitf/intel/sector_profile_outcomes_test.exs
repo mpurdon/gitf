@@ -5,6 +5,11 @@ defmodule GiTF.Intel.SectorProfileOutcomesTest do
   alias GiTF.Intel.SectorProfile
 
   setup do
+    # Make sure the app-level Archive isn't pointing at a torn-down
+    # StoreCase temp dir from a prior test; otherwise inserts below
+    # blow up with `{:error, :enoent}` and the bind crashes with
+    # CaseClauseError.
+    GiTF.Test.StoreHelper.restore_app_store()
     Enum.each(Archive.all(:mission_outcomes), fn o -> Archive.delete(:mission_outcomes, o.id) end)
     Enum.each(Archive.all(:sector_profiles), fn p -> Archive.delete(:sector_profiles, p.id) end)
     :ok

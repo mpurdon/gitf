@@ -54,6 +54,15 @@ defmodule GiTF.Test.Simulator do
     # and fast.
     GiTF.Test.StoreHelper.restore_app_store()
 
+    # Make sure Major is running. The Harness for E2E tests calls
+    # `Supervisor.terminate_child + delete_child` on Major, so once
+    # the harness exits Major is gone from the supervisor tree.
+    # Simulator scenarios rely on Major receiving `:spawn_ready_jobs`
+    # to actually launch impl ops; without Major, the impl op is
+    # created but stays `pending` forever and the mission stalls at
+    # implementation.
+    ensure_major_running()
+
     # Ensure a gitf root exists — phase-ghost spawning calls GiTF.gitf_dir()
     # which needs a .gitf/config.toml somewhere on disk. Use a per-scenario
     # GITF_PATH so parallel scenarios can't step on each other.
@@ -85,6 +94,28 @@ defmodule GiTF.Test.Simulator do
     }
 
     {:ok, ctx}
+  end
+
+  # Start Major if it's not running. Best-effort — falls back silently
+  # if start_link returns `{:error, _}` so a misconfigured test
+  # environment doesn't crash setup; the test will still time out
+  # with a clear "mission stalled at implementation" snapshot.
+  defp ensure_major_running do
+    if Process.whereis(GiTF.Major) == nil do
+      gitf_root =
+        case GiTF.gitf_dir() do
+          {:ok, root} -> root
+          _ -> System.tmp_dir!()
+        end
+
+      case GiTF.Major.start_link(gitf_root: gitf_root) do
+        {:ok, _} -> :ok
+        {:error, {:already_started, _}} -> :ok
+        _ -> :ok
+      end
+    end
+
+    :ok
   end
 
   defp ensure_gitf_root(sector_name) do
