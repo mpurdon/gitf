@@ -1439,15 +1439,20 @@ defmodule GiTF.Ghost.Worker do
   # For parallel phase ops (design, planning, simplify) with a [strategy] tag in
   # the title, use a strategy-specific artifact key so parallel ghosts don't collide.
   defp planning_artifact_key(op) do
-    case op.phase do
-      phase when phase in ["design", "planning", "simplify"] ->
+    cond do
+      # Tournament-mode phases (today: validation) carry an op.variant
+      # tag — write per-variant artifacts so the tournament can compare.
+      is_binary(op[:variant]) and op[:variant] != "" ->
+        "#{op.phase}_#{op[:variant]}"
+
+      op.phase in ["design", "planning", "simplify"] ->
         case Regex.run(~r/\[([^\]]+)\]/, op.title || "") do
-          [_, strategy] -> "#{phase}_#{String.replace(strategy, ~r/\s+/, "-")}"
-          _ -> phase
+          [_, strategy] -> "#{op.phase}_#{String.replace(strategy, ~r/\s+/, "-")}"
+          _ -> op.phase
         end
 
-      phase ->
-        phase
+      true ->
+        op.phase
     end
   end
 

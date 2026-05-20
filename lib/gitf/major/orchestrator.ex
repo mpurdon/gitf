@@ -845,31 +845,67 @@ defmodule GiTF.Major.Orchestrator do
   # Single- or multi-variant op creation. Tournament mode stamps
   # `mission.impl_variants = ["v1", ..., "vN"]` and creates N copies of
   # the planned op list, one per variant.
+  #
+  # Idempotent: if any non-phase impl op already exists for the mission
+  # (a concurrent advance loop or a re-dispatch beat us here) we return
+  # `{:ok, :already_seeded}` instead of duplicating the op set. Without
+  # this guard, double-dispatch under tournament mode silently created
+  # 2N impl ops, half of which would have stale shells and never
+  # complete.
   defp create_implementation_ops(mission, specs) do
-    attempts = GiTF.Tournament.configured_attempts()
-
-    if attempts > 1 do
-      variant_ids = GiTF.Tournament.variant_ids(attempts)
-
-      Archive.update(:missions, mission.id, fn record ->
-        Map.put(record, :impl_variants, variant_ids)
-      end)
-
-      Logger.info(
-        "Quest #{mission.id}: tournament mode — spawning #{length(variant_ids)} impl variants " <>
-          "(#{Enum.join(variant_ids, ", ")})"
-      )
-
-      Planner.create_jobs_for_variants(mission.id, specs, variant_ids)
+    if impl_ops_exist?(mission.id) do
+      {:ok, :already_seeded}
     else
-      Planner.create_jobs_from_specs(mission.id, specs)
+      attempts = GiTF.Tournament.configured_attempts()
+
+      if attempts > 1 do
+        variant_ids = GiTF.Tournament.variant_ids(attempts)
+
+        Archive.update(:missions, mission.id, fn record ->
+          Map.put(record, :impl_variants, variant_ids)
+        end)
+
+        Logger.info(
+          "Quest #{mission.id}: tournament mode — spawning #{length(variant_ids)} impl variants " <>
+            "(#{Enum.join(variant_ids, ", ")})"
+        )
+
+        Planner.create_jobs_for_variants(mission.id, specs, variant_ids)
+      else
+        Planner.create_jobs_from_specs(mission.id, specs)
+      end
     end
+  end
+
+  defp impl_ops_exist?(mission_id) do
+    Archive.filter(:ops, fn op ->
+      op.mission_id == mission_id and op[:phase_job] in [nil, false]
+    end)
+    |> Enum.any?()
   end
 
   defp start_validation(mission) do
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     planning = GiTF.Missions.get_artifact(mission.id, "planning")
 
+    # Idempotent — re-dispatch under a concurrent advance loop would
+    # otherwise spawn a second wave of validation ghosts, each
+    # consuming another scripted LLM rule and starving downstream phases.
+    if phase_ops_exist?(mission.id, "validation") do
+      {:ok, "validation"}
+    else
+      do_start_validation(mission, requirements, planning)
+    end
+  end
+
+  defp phase_ops_exist?(mission_id, phase) do
+    Archive.filter(:ops, fn op ->
+      op.mission_id == mission_id and op[:phase_job] == true and op[:phase] == phase
+    end)
+    |> Enum.any?()
+  end
+
+  defp do_start_validation(mission, requirements, planning) do
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation", mission)
@@ -2174,7 +2210,11 @@ defmodule GiTF.Major.Orchestrator do
 
     if specs != [] do
       Logger.info("Quest #{mission.id}: generated #{length(specs)} synthetic ops from artifacts")
-      Planner.create_jobs_from_specs(mission.id, specs)
+      # Route through `create_implementation_ops/2` so the synthetic
+      # fallback honours `Tournament.configured_attempts/0` the same way
+      # the planning-artifact path does — otherwise triage-skip-planning
+      # missions silently bypass the tournament feature.
+      create_implementation_ops(mission, specs)
     end
 
     {:ok, specs}
