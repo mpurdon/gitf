@@ -40,7 +40,7 @@ defmodule GiTF.Validation do
 
   require Logger
 
-  alias GiTF.{Archive, Missions, Telemetry, Togusa, Override}
+  alias GiTF.{Archive, Missions, Telemetry, Togusa}
   alias GiTF.Major.Orchestrator
   alias GiTF.Togusa.FixContext
 
@@ -49,95 +49,44 @@ defmodule GiTF.Validation do
   @default_max_fix_attempts 2
 
   @doc """
-  Legacy advance-loop entry for the validation phase. Returns
-  `{:ok, "validation"}` while waiting for a new artifact, or whichever
-  status the chosen next step returns.
+  Legacy advance-loop entry for the validation phase. Thin shim over
+  `GiTF.Phases.Validation.verdict/2`: that module owns the decision
+  tree (pass/wait/terminal_fail) and the side effects (cross-check
+  override, refinement, attempt_fixes, dispatch_phase on stale).
+  This function just maps the verdict atom to the legacy driver's
+  terminal calls (`Approval.request`, `Publish.merge`, `fail_quest`)
+  that the workflow path handles via `on_pass:` routing rules and
+  `terminal/3`.
 
-  Workflow path: `GiTF.Phases.Validation.verdict/2` expresses the same
-  decision tree as verdict atoms.
+  Returns `{:ok, phase}` for advance-loop callers.
   """
   @spec handle_result(map()) :: {:ok, String.t()} | {:error, term()}
   def handle_result(mission) do
-    validation = Missions.get_artifact(mission.id, "validation")
+    artifact = Missions.get_artifact(mission.id, "validation")
 
-    cond do
-      is_nil(validation) ->
-        {:ok, "validation"}
+    case GiTF.Phases.Validation.verdict(mission, artifact) do
+      :pass ->
+        # verdict_single stamped `requires_approval` into the artifact;
+        # read the fresh copy to route.
+        stamped = Missions.get_artifact(mission.id, "validation") || %{}
 
-      validation["overall_verdict"] == "pass" ->
-        emit_confidence(mission)
-
-        # Sanity cross-check: validator says pass, but did the impl ops
-        # actually commit anything? A "pass" with zero meaningful files
-        # changed almost certainly means the validator hallucinated and
-        # we'd ship an empty PR. Override to fail with a clear reason.
-        case validate_pass_against_diff(mission) do
-          :ok ->
-            maybe_spawn_skill_refinement(mission, validation)
-
-            if Override.requires_approval?(mission) do
-              GiTF.Approval.request(mission)
-            else
-              GiTF.Publish.merge(mission)
-            end
-
-          {:error, reason} ->
-            Logger.warning(
-              "Quest #{mission.id}: validator said PASS but cross-check failed (#{reason}); " <>
-                "treating as fail and re-routing to fix loop"
-            )
-
-            Telemetry.emit([:gitf, :validation, :pass_overridden], %{}, %{
-              mission_id: mission.id,
-              reason: reason
-            })
-
-            overridden =
-              validation
-              |> Map.put("overall_verdict", "fail")
-              |> Map.put(
-                "gaps",
-                ["Validator returned pass but no impl commits found: #{reason}"]
-              )
-              |> Map.put("cross_check_override", reason)
-
-            Missions.store_artifact(mission.id, "validation", overridden)
-            handle_result(mission)
+        if Map.get(stamped, "requires_approval", false) do
+          GiTF.Approval.request(mission)
+        else
+          GiTF.Publish.merge(mission)
         end
 
-      true ->
+      :terminal_fail ->
         fix_ctx = load_fix_context(mission)
-        latest_impl = latest_completed_impl_op(mission)
-        validation_stale? = artifact_stale?(latest_impl, validation, mission.id)
 
-        cond do
-          validation_stale? ->
-            Logger.info(
-              "Quest #{mission.id}: validation artifact is stale (fix completed after), re-validating"
-            )
+        Missions.fail_quest(
+          mission.id,
+          "Ghost lost in the net — validation failed after #{fix_ctx.attempt} attempts"
+        )
 
-            Orchestrator.dispatch_phase("validation", mission)
-
-          FixContext.exhausted?(fix_ctx) ->
-            Logger.warning(
-              "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
-            )
-
-            maybe_spawn_skill_refinement(mission, validation)
-
-            Missions.fail_quest(
-              mission.id,
-              "Ghost lost in the net — validation failed after #{fix_ctx.attempt} attempts"
-            )
-
-          true ->
-            Logger.info(
-              "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
-            )
-
-            maybe_spawn_skill_refinement(mission, validation)
-            attempt_fixes(mission, validation, fix_ctx)
-        end
+      _ ->
+        # :wait | :inconclusive — keep polling.
+        {:ok, "validation"}
     end
   end
 
