@@ -80,6 +80,20 @@ defmodule GiTF.Tournament do
   def enabled?, do: configured_attempts() > 1
 
   @doc """
+  Per-mission predicate: is `mission` actually running a tournament
+  right now? Reads `mission.impl_variants` rather than the global flag
+  so missions that started under tournament mode keep their UI even
+  if `:parallel_impl_attempts` was toggled mid-run.
+  """
+  @spec running?(map()) :: boolean()
+  def running?(mission) do
+    case Map.get(mission, :impl_variants) do
+      [_, _ | _] -> true
+      _ -> false
+    end
+  end
+
+  @doc """
   Build the variant-id list a mission with `attempts` parallel impls
   should run. `["v1", "v2", "v3"]` for `attempts=3`.
   """

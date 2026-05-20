@@ -41,6 +41,23 @@ defmodule GiTF.TournamentTest do
     end
   end
 
+  describe "running?/1" do
+    test "true when mission has 2+ impl_variants" do
+      assert Tournament.running?(%{impl_variants: ["v1", "v2"]})
+      assert Tournament.running?(%{impl_variants: ["v1", "v2", "v3"]})
+    end
+
+    test "false when impl_variants is empty / missing / single" do
+      refute Tournament.running?(%{impl_variants: []})
+      refute Tournament.running?(%{})
+      refute Tournament.running?(%{impl_variants: nil})
+      # A single-element variant list is structurally possible but
+      # would still be running a "tournament of one" — treat as not
+      # running so the panel doesn't render a 1-row tournament table.
+      refute Tournament.running?(%{impl_variants: ["v1"]})
+    end
+  end
+
   describe "score/1" do
     test "pass + all requirements met + zero gaps scores 150" do
       artifact = %{

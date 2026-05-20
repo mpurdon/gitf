@@ -617,6 +617,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         </div>
       </div>
 
+      <%!-- Tournament Panel (only when parallel-impl tournament is active) --%>
+      <%= if GiTF.Tournament.running?(@mission) do %>
+        {render_tournament_panel(assigns)}
+      <% end %>
+
       <%!-- Report (full width) --%>
       <%= if @report do %>
         <%!-- Summary Metrics --%>
@@ -1012,6 +1017,90 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     </.live_component>
     """
   end
+
+  # -- Tournament panel ------------------------------------------------------
+
+  defp render_tournament_panel(assigns) do
+    mission = assigns.mission
+
+    rank = GiTF.Tournament.rank(mission)
+    winner = Map.get(mission, :winning_variant)
+
+    assigns =
+      assigns
+      |> Map.put(:tournament_rank, rank)
+      |> Map.put(:tournament_winner, winner)
+      |> Map.put(:tournament_variants, mission.impl_variants)
+
+    ~H"""
+    <div class="panel">
+      <div class="panel-title" style="display:flex; align-items:center; gap:0.5rem">
+        Tournament
+        <span class="badge badge-purple" style="font-size:0.6rem">
+          {length(@tournament_variants)} variants
+        </span>
+        <%= if @tournament_winner do %>
+          <span class="badge badge-green" style="font-size:0.6rem">
+            winner: {@tournament_winner}
+          </span>
+        <% else %>
+          <span class="badge" style="font-size:0.6rem; background:#21262d; color:#8b949e">
+            unresolved
+          </span>
+        <% end %>
+      </div>
+      <table style="width:100%; font-size:0.8rem; border-collapse:collapse">
+        <thead>
+          <tr style="text-align:left; color:#8b949e; border-bottom:1px solid #21262d">
+            <th style="padding:0.4rem 0.5rem">variant</th>
+            <th style="padding:0.4rem 0.5rem">score</th>
+            <th style="padding:0.4rem 0.5rem">verdict</th>
+            <th style="padding:0.4rem 0.5rem">requirements</th>
+            <th style="padding:0.4rem 0.5rem">gaps</th>
+            <th style="padding:0.4rem 0.5rem">note</th>
+          </tr>
+        </thead>
+        <tbody>
+          <%= for row <- @tournament_rank do %>
+            <tr style={"border-bottom:1px solid #161b22; #{if row.variant == @tournament_winner, do: "background:#13361f"}"}>
+              <td style="padding:0.4rem 0.5rem; font-family:monospace">
+                {row.variant}
+                <%= if row.variant == @tournament_winner do %>
+                  <Heroicons.trophy mini class="w-3 h-3" style="display:inline; color:#3fb950; margin-left:0.25rem" />
+                <% end %>
+              </td>
+              <td style="padding:0.4rem 0.5rem; font-family:monospace">
+                {format_tournament_score(row.score)}
+              </td>
+              <td style="padding:0.4rem 0.5rem">
+                <span class={"badge #{verdict_badge_class(row.verdict)}"} style="font-size:0.6rem">
+                  {row.verdict}
+                </span>
+              </td>
+              <td style="padding:0.4rem 0.5rem; color:#8b949e">
+                {row.requirements_met}/{row.requirements_total}
+              </td>
+              <td style={"padding:0.4rem 0.5rem; color:#{if row.gaps > 0, do: "#f85149", else: "#8b949e"}"}>
+                {row.gaps}
+              </td>
+              <td style="padding:0.4rem 0.5rem; color:#8b949e; font-size:0.7rem">
+                {row.disqualified_reason || ""}
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    """
+  end
+
+  defp format_tournament_score(:disqualified), do: "DQ"
+  defp format_tournament_score(n) when is_number(n), do: :erlang.float_to_binary(n * 1.0, decimals: 1)
+  defp format_tournament_score(_), do: "—"
+
+  defp verdict_badge_class(:pass), do: "badge-green"
+  defp verdict_badge_class(:fail), do: "badge-red"
+  defp verdict_badge_class(_), do: ""
 
   # Map orchestrator phases that aren't in the visual pipeline to their
   # nearest visual equivalent.  "awaiting_approval" sits between validation
