@@ -16,6 +16,7 @@ defmodule GiTF.GitHub.CLI do
   require Logger
 
   @timeout_ms 15_000
+  @create_pr_timeout_ms 30_000
 
   @type pr_details :: %{
           state: String.t(),
@@ -95,6 +96,44 @@ defmodule GiTF.GitHub.CLI do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  @doc """
+  Creates a pull request via `gh pr create`. Returns `{:ok, url}` on
+  success, `{:error, output}` on a non-zero exit (the first 200 chars
+  of combined stderr+stdout), or `{:error, "gh pr create timed out"}`
+  if the call doesn't return inside the timeout. Unlike `pr_details/2`
+  and `main_branch_runs/2`, the error here is a string rather than an
+  `error_class()` atom because `Publish` needs the literal output to
+  classify transient vs. permanent gh failures via
+  `transient_gh_error?/1` (rate-limit / 5xx / timeout substrings).
+  """
+  @spec create_pr(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          keyword()
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  def create_pr(repo_path, branch, base, title, body, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout_ms, @create_pr_timeout_ms)
+
+    task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        System.cmd(
+          "gh",
+          ["pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body],
+          cd: repo_path,
+          stderr_to_stdout: true
+        )
+      end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {output, 0}} -> {:ok, String.trim(output)}
+      {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
+      nil -> {:error, "gh pr create timed out after #{div(timeout, 1_000)}s"}
     end
   end
 

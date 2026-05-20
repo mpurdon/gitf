@@ -442,22 +442,24 @@ defmodule GiTF.Publish do
 
   # Retries `gh pr create` up to 3 times on transient failures
   # (rate-limit, 5xx) with exponential backoff. Gives up on persistent
-  # errors like branch protection, auth failure, or an already-merged base.
-  defp run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body, attempt \\ 1) do
-    case run_gh_pr_create(repo_path, branch, main_branch, title, body) do
-      {:ok, url} ->
-        if valid_pr_url?(url), do: {:ok, url}, else: {:error, {:invalid_pr_url, url}}
+  # errors like branch protection, auth failure, or an already-merged
+  # base. The shell-out lives in `GiTF.GitHub.CLI.create_pr/6`; the
+  # retry loop lives in `GiTF.Resilience.retry_with_backoff/2`. Here we
+  # just glue them together with a transient-error predicate.
+  defp run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body) do
+    GiTF.Resilience.retry_with_backoff(
+      fn ->
+        case GiTF.GitHub.CLI.create_pr(repo_path, branch, main_branch, title, body) do
+          {:ok, url} ->
+            if valid_pr_url?(url), do: {:ok, url}, else: {:error, {:invalid_pr_url, url}}
 
-      {:error, reason} = err ->
-        if attempt < 3 and transient_gh_error?(reason) do
-          backoff_ms = :math.pow(2, attempt) |> round() |> Kernel.*(1_000)
-          Logger.info("gh pr create attempt #{attempt} transient fail, retrying in #{backoff_ms}ms")
-          Process.sleep(backoff_ms)
-          run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body, attempt + 1)
-        else
-          err
+          err ->
+            err
         end
-    end
+      end,
+      max_attempts: 3,
+      retriable?: &transient_gh_error?/1
+    )
   end
 
   defp transient_gh_error?(reason) when is_binary(reason) do
@@ -469,35 +471,6 @@ defmodule GiTF.Publish do
   end
 
   defp transient_gh_error?(_), do: false
-
-  defp run_gh_pr_create(repo_path, branch, main_branch, title, body) do
-    task =
-      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
-        System.cmd(
-          "gh",
-          [
-            "pr",
-            "create",
-            "--head",
-            branch,
-            "--base",
-            main_branch,
-            "--title",
-            title,
-            "--body",
-            body
-          ],
-          cd: repo_path,
-          stderr_to_stdout: true
-        )
-      end)
-
-    case Task.yield(task, 30_000) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {output, 0}} -> {:ok, String.trim(output)}
-      {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
-      nil -> {:error, "gh pr create timed out after 30s"}
-    end
-  end
 
   defp publish_push_main(mission, sector, _sync) do
     repo_path = sector.path

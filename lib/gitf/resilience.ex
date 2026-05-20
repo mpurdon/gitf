@@ -26,20 +26,43 @@ defmodule GiTF.Resilience do
   @doc """
   Retry operation with exponential backoff.
 
-  Delegates to `GiTF.Intel.Retry` for strategy selection.
-  This function is kept as a lightweight convenience wrapper.
+  Options:
+
+    * `:max_attempts` (default `3`) — total attempts including the first.
+    * `:retriable?` (default `fn _ -> true end`) — predicate on the
+      `reason` from `{:error, reason}`; when it returns `false` the
+      error is returned immediately without further retries. Use this
+      for callers that distinguish transient from permanent failures
+      (e.g. `gh pr create` retries on rate-limit / 5xx / timeout
+      substrings but not on auth or branch-protection errors).
+
+  Accepts a positive integer as the second argument as a shorthand for
+  `[max_attempts: n]` to preserve backwards compatibility.
   """
-  def retry_with_backoff(operation, max_attempts \\ 3) do
+  def retry_with_backoff(operation, opts \\ [])
+
+  def retry_with_backoff(operation, max_attempts) when is_integer(max_attempts) do
+    retry_with_backoff(operation, max_attempts: max_attempts)
+  end
+
+  def retry_with_backoff(operation, opts) when is_list(opts) do
+    max_attempts = Keyword.get(opts, :max_attempts, 3)
+    retriable? = Keyword.get(opts, :retriable?, fn _ -> true end)
+
     Enum.reduce_while(1..max_attempts, nil, fn attempt, _acc ->
       case operation.() do
         {:ok, result} ->
           {:halt, {:ok, result}}
 
-        {:error, reason} when attempt < max_attempts ->
-          backoff = (:math.pow(2, attempt) * 1000) |> round()
-          Logger.info("Retry attempt #{attempt}/#{max_attempts}, waiting #{backoff}ms")
-          Process.sleep(backoff)
-          {:cont, {:error, reason}}
+        {:error, reason} = err when attempt < max_attempts ->
+          if retriable?.(reason) do
+            backoff = (:math.pow(2, attempt) * 1000) |> round()
+            Logger.info("Retry attempt #{attempt}/#{max_attempts}, waiting #{backoff}ms")
+            Process.sleep(backoff)
+            {:cont, err}
+          else
+            {:halt, err}
+          end
 
         {:error, reason} ->
           {:halt, {:error, {:max_retries, reason}}}
