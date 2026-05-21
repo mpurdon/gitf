@@ -21,7 +21,8 @@ defmodule GiTF.Eval do
   """
 
   @scenarios [
-    GiTF.Eval.SkillsRetrieval
+    GiTF.Eval.SkillsRetrieval,
+    GiTF.Eval.KnowledgeRetrieval
   ]
 
   @doc "Returns the list of registered scenario modules."

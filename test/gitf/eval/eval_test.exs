@@ -74,5 +74,9 @@ defmodule GiTF.EvalTest do
     test "registers the skills_retrieval scenario" do
       assert GiTF.Eval.SkillsRetrieval in GiTF.Eval.scenarios()
     end
+
+    test "registers the knowledge_retrieval scenario" do
+      assert GiTF.Eval.KnowledgeRetrieval in GiTF.Eval.scenarios()
+    end
   end
 end
