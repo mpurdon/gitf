@@ -1064,6 +1064,38 @@ defmodule GiTF.CLI do
           end)
         end
 
+      "rescan" ->
+        dry = result_get(result, :flags, :dry_run) == true
+
+        report = GiTF.Knowledge.Rename.rescan(sector, dry_run: dry)
+
+        Format.info(
+          "Rescan #{sector || "(global)"}: " <>
+            "renames=#{length(report.renames)} backlinks_rewritten=#{report.backlinks_rewritten} " <>
+            "ambiguous=#{length(report.ambiguous)} hash_drift=#{length(report.hash_drift)} " <>
+            "errors=#{length(report.errors)}#{if dry, do: " (dry run)", else: ""}"
+        )
+
+        Enum.each(report.renames, fn r ->
+          Format.info("  #{r.old_slug} → #{r.new_slug}")
+        end)
+
+        if report.ambiguous != [] do
+          IO.puts("\n## Ambiguous (multiple orphans with the same hash — resolve manually)")
+          Enum.each(report.ambiguous, fn {slug, paths} ->
+            IO.puts("- [#{slug}] matches: #{Enum.join(paths, ", ")}")
+          end)
+        end
+
+        if report.hash_drift != [] do
+          IO.puts("\n## Hash drift (file gone, no matching orphan — likely edited + renamed at once)")
+          Enum.each(report.hash_drift, fn slug -> IO.puts("- [#{slug}]") end)
+        end
+
+        Enum.each(report.errors, fn {slug, reason} ->
+          Format.error("  #{slug}: #{inspect(reason)}")
+        end)
+
       "ingest" ->
         from = result_get(result, :options, :from)
         url = result_get(result, :options, :url)
@@ -1111,7 +1143,7 @@ defmodule GiTF.CLI do
 
       _ ->
         Format.error(
-          "Usage: gitf knowledge {get|search|links|index} <slug-or-query> | list | lint | ingest {--from <dir> | --url <url>}"
+          "Usage: gitf knowledge {get|search|links|index} <slug-or-query> | list | lint | ingest {--from <dir> | --url <url>} | rescan"
         )
     end
   end
@@ -4543,6 +4575,12 @@ defmodule GiTF.CLI do
               help: "Tag to apply to ingested pages",
               parser: :string,
               required: false
+            ]
+          ],
+          flags: [
+            dry_run: [
+              long: "--dry-run",
+              help: "Detect but don't apply (for rescan)"
             ]
           ]
         ],
