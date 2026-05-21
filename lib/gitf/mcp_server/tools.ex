@@ -541,6 +541,82 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "lsp_diagnostics",
+        description:
+          "Cached compile/lint diagnostics for a file in a sector. Opens the file with the language server if it isn't already open. Diagnostics arrive asynchronously after didOpen — first call may return [] until the server finishes analysis (ElixirLS cold start can take 5-30s).",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            file_path: %{type: "string", description: "Absolute path to the source file"}
+          },
+          required: ["sector_id", "file_path"]
+        }
+      },
+      %{
+        name: "lsp_document_symbol",
+        description:
+          "File symbol outline (hierarchical: modules, functions, types). Useful as prompt context when planning edits.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            file_path: %{type: "string", description: "Absolute path to the source file"}
+          },
+          required: ["sector_id", "file_path"]
+        }
+      },
+      %{
+        name: "lsp_workspace_symbol",
+        description:
+          "Workspace-wide symbol search by name (modules, functions, types matching `query`). Complements lsp_definition (which needs a position) — find by name.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            query: %{type: "string", description: "Symbol name fragment"}
+          },
+          required: ["sector_id", "query"]
+        }
+      },
+      %{
+        name: "lsp_code_action",
+        description:
+          "Available code actions (quick fixes, refactors) for a range in a file. Returns the action list; nothing is applied automatically. Use lsp_apply_code_action with one of the returned actions to apply its edit.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            file_path: %{type: "string", description: "Absolute path to the source file"},
+            start_line: %{type: "integer", description: "0-indexed start line"},
+            start_character: %{type: "integer", description: "0-indexed start column"},
+            end_line: %{type: "integer", description: "0-indexed end line"},
+            end_character: %{type: "integer", description: "0-indexed end column"},
+            only: %{
+              type: "array",
+              items: %{type: "string"},
+              description: "Optional CodeActionKind filter (e.g. ['quickfix', 'refactor'])"
+            }
+          },
+          required: ["sector_id", "file_path", "start_line", "start_character", "end_line", "end_character"]
+        }
+      },
+      %{
+        name: "lsp_apply_code_action",
+        description:
+          "Apply the WorkspaceEdit attached to a CodeAction returned by lsp_code_action. Writes files on disk; caller is responsible for committing. Returns the list of paths changed.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            edit: %{
+              type: "object",
+              description: "The `edit` field of a CodeAction (a WorkspaceEdit with `changes`)"
+            }
+          },
+          required: ["edit"]
+        }
+      },
+      %{
         name: "capture_screenshot",
         description:
           "Take a screenshot of a URL using headless Chromium (Playwright). Returns the absolute path of the saved PNG. Requires :visual_capture_enabled and `npx playwright` on PATH.",

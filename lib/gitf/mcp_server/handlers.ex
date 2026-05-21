@@ -861,6 +861,88 @@ defmodule GiTF.MCPServer.Handlers do
   def call("lsp_references", args), do: lsp_call("lsp_references", args, :references, &lsp_refs/1)
   def call("lsp_hover", args), do: lsp_call("lsp_hover", args, :hover, &lsp_hover/1)
 
+  def call("lsp_diagnostics", %{"sector_id" => sid, "file_path" => fp} = args) do
+    safe_handler("lsp_diagnostics", args, fn ->
+      case GiTF.LSP.diagnostics(sid, fp) do
+        {:ok, diags} -> {:ok, json_text(%{ok: true, diagnostics: diags})}
+        {:error, reason} -> {:error, "lsp_diagnostics failed: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  def call("lsp_diagnostics", _),
+    do: {:error, "Missing required parameters: sector_id, file_path"}
+
+  def call("lsp_document_symbol", %{"sector_id" => sid, "file_path" => fp} = args) do
+    safe_handler("lsp_document_symbol", args, fn ->
+      case GiTF.LSP.document_symbol(sid, fp) do
+        {:ok, symbols} -> {:ok, json_text(%{ok: true, symbols: symbols})}
+        {:error, reason} -> {:error, "lsp_document_symbol failed: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  def call("lsp_document_symbol", _),
+    do: {:error, "Missing required parameters: sector_id, file_path"}
+
+  def call("lsp_workspace_symbol", %{"sector_id" => sid, "query" => query} = args) do
+    safe_handler("lsp_workspace_symbol", args, fn ->
+      case GiTF.LSP.workspace_symbol(sid, query) do
+        {:ok, symbols} -> {:ok, json_text(%{ok: true, symbols: symbols})}
+        {:error, reason} -> {:error, "lsp_workspace_symbol failed: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  def call("lsp_workspace_symbol", _),
+    do: {:error, "Missing required parameters: sector_id, query"}
+
+  def call(
+        "lsp_code_action",
+        %{
+          "sector_id" => sid,
+          "file_path" => fp,
+          "start_line" => sl,
+          "start_character" => sc,
+          "end_line" => el,
+          "end_character" => ec
+        } = args
+      ) do
+    safe_handler("lsp_code_action", args, fn ->
+      range = %{
+        start: %{line: sl, character: sc},
+        end: %{line: el, character: ec}
+      }
+
+      context =
+        case Map.get(args, "only") do
+          only when is_list(only) and only != [] -> %{only: only}
+          _ -> %{}
+        end
+
+      case GiTF.LSP.code_action(sid, fp, range, context) do
+        {:ok, actions} -> {:ok, json_text(%{ok: true, actions: actions})}
+        {:error, reason} -> {:error, "lsp_code_action failed: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  def call("lsp_code_action", _),
+    do:
+      {:error,
+       "Missing required parameters: sector_id, file_path, start_line, start_character, end_line, end_character"}
+
+  def call("lsp_apply_code_action", %{"edit" => edit} = args) do
+    safe_handler("lsp_apply_code_action", args, fn ->
+      case GiTF.LSP.apply_workspace_edit(edit) do
+        {:ok, paths} -> {:ok, json_text(%{ok: true, paths: paths})}
+        {:error, reason} -> {:error, "lsp_apply_code_action failed: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  def call("lsp_apply_code_action", _), do: {:error, "Missing required parameter: edit"}
+
   # -- Visual capture --------------------------------------------------------
 
   def call("capture_screenshot", %{"url" => url, "output_path" => output} = args) do

@@ -42,6 +42,52 @@ defmodule GiTF.LSP do
   end
 
   @doc """
+  Returns the symbol outline of a file. See `Client.document_symbol/2`.
+  """
+  @spec document_symbol(String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
+  def document_symbol(sector_id, file_path) do
+    with_client(sector_id, &Client.document_symbol(&1, file_path))
+  end
+
+  @doc """
+  Workspace-wide symbol search by name. See `Client.workspace_symbol/2`.
+  """
+  @spec workspace_symbol(String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
+  def workspace_symbol(sector_id, query) do
+    with_client(sector_id, &Client.workspace_symbol(&1, query))
+  end
+
+  @doc """
+  Returns available code actions for `range` in `file_path`.
+  """
+  @spec code_action(String.t(), String.t(), map(), map()) ::
+          {:ok, [map()]} | {:error, term()}
+  def code_action(sector_id, file_path, range, context \\ %{}) do
+    with_client(sector_id, &Client.code_action(&1, file_path, range, context))
+  end
+
+  @doc """
+  Cached diagnostics for `file_path`. Auto-calls `did_open/2` on the
+  client so the server starts pushing diagnostics if it hasn't already.
+  Caller may need to poll (see `Client.diagnostics/2`).
+  """
+  @spec diagnostics(String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
+  def diagnostics(sector_id, file_path) do
+    with_client(sector_id, fn pid ->
+      :ok = Client.did_open(pid, file_path)
+      Client.diagnostics(pid, file_path)
+    end)
+  end
+
+  @doc """
+  Applies a `WorkspaceEdit` (returned by a `CodeAction.edit`) to the
+  workspace's files. Side-effect: writes files on disk. Caller is
+  responsible for committing.
+  """
+  @spec apply_workspace_edit(map()) :: {:ok, [String.t()]} | {:error, term()}
+  def apply_workspace_edit(edit), do: GiTF.LSP.Edits.apply_workspace_edit(edit)
+
+  @doc """
   Looks up the live `GiTF.LSP.Client` PID for `sector_id`, starting
   one if none exists. Returns `{:ok, pid}` or a clear error.
   """
