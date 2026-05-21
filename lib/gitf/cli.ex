@@ -1066,16 +1066,34 @@ defmodule GiTF.CLI do
 
       "ingest" ->
         from = result_get(result, :options, :from)
+        url = result_get(result, :options, :url)
         tag = result_get(result, :options, :tag)
+        depth = result_get(result, :options, :depth) || 0
 
         cond do
-          is_nil(from) ->
-            Format.error("Usage: gitf knowledge ingest --from <dir> --sector <id>")
-
           is_nil(sector) ->
-            Format.error("Usage: gitf knowledge ingest --from <dir> --sector <id>")
+            Format.error("Usage: gitf knowledge ingest {--from <dir> | --url <url>} --sector <id>")
 
-          true ->
+          is_binary(url) ->
+            opts =
+              [depth: depth]
+              |> then(fn o -> if is_binary(tag), do: [{:tags, [tag]} | o], else: o end)
+
+            report = GiTF.Knowledge.Ingest.URL.ingest(url, sector, opts)
+
+            Format.info(
+              "Ingested from URL: pages=#{length(report.ingested)} skipped=#{length(report.skipped)} errors=#{length(report.errors)}"
+            )
+
+            Enum.each(report.ingested, fn {u, slug} ->
+              Format.info("  #{slug}  ← #{u}")
+            end)
+
+            Enum.each(report.errors, fn {u, reason} ->
+              Format.error("  #{u}: #{inspect(reason)}")
+            end)
+
+          is_binary(from) ->
             opts = if is_binary(tag), do: [tag: tag], else: []
             report = GiTF.Knowledge.Ingest.ingest_directory(from, sector, opts)
 
@@ -1086,11 +1104,14 @@ defmodule GiTF.CLI do
             Enum.each(report.errors, fn {file, reason} ->
               Format.error("  #{file}: #{inspect(reason)}")
             end)
+
+          true ->
+            Format.error("Usage: gitf knowledge ingest {--from <dir> | --url <url>} --sector <id>")
         end
 
       _ ->
         Format.error(
-          "Usage: gitf knowledge {get|search|links|index} <slug-or-query> | list | lint | ingest --from <dir>"
+          "Usage: gitf knowledge {get|search|links|index} <slug-or-query> | list | lint | ingest {--from <dir> | --url <url>}"
         )
     end
   end
@@ -4503,6 +4524,18 @@ defmodule GiTF.CLI do
               long: "--from",
               help: "Source markdown directory (for ingest)",
               parser: :string,
+              required: false
+            ],
+            url: [
+              long: "--url",
+              help: "Source URL (for `ingest --url`); fetched + HTML→markdown",
+              parser: :string,
+              required: false
+            ],
+            depth: [
+              long: "--depth",
+              help: "Crawl depth for URL ingest: 0 (single page, default) or 1",
+              parser: :integer,
               required: false
             ],
             tag: [

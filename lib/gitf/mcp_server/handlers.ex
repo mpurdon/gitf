@@ -1019,6 +1019,30 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("knowledge_index", _), do: {:error, "Missing required parameter: name"}
 
+  def call("knowledge_ingest_url", %{"url" => url} = args) do
+    sector_id = Map.get(args, "sector_id")
+
+    opts =
+      [
+        depth: Map.get(args, "depth"),
+        slug: Map.get(args, "slug"),
+        title: Map.get(args, "title"),
+        dry_run: Map.get(args, "dry_run")
+      ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+    report = GiTF.Knowledge.Ingest.URL.ingest(url, sector_id, opts)
+
+    {:ok,
+     json_text(%{
+       ingested: Enum.map(report.ingested, fn {u, slug} -> %{url: u, slug: slug} end),
+       skipped: Enum.map(report.skipped, fn {u, reason} -> %{url: to_string(u), reason: inspect(reason)} end),
+       errors: Enum.map(report.errors, fn {u, reason} -> %{url: to_string(u), reason: inspect(reason)} end)
+     })}
+  end
+
+  def call("knowledge_ingest_url", _), do: {:error, "Missing required parameter: url"}
+
   def call(tool_name, _args), do: {:error, "Unknown tool: #{tool_name}"}
 
   defp parse_autonomy_tier("trusted"), do: {:ok, :trusted}

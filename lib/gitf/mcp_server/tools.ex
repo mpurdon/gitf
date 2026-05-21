@@ -640,6 +640,26 @@ defmodule GiTF.MCPServer.Tools do
           },
           required: ["name"]
         }
+      },
+      %{
+        name: "knowledge_ingest_url",
+        description:
+          "Fetch a web page, convert to markdown, and persist as a Knowledge.Page in the target sector. Returns a summary {ingested, skipped, errors}. Use sparingly — each call hits the network and embeds.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: ["string", "null"], description: "Sector ID (or null for global)"},
+            url: %{type: "string", description: "Source URL (http or https)"},
+            depth: %{
+              type: "integer",
+              description: "Crawl depth: 0 (single page, default) or 1 (follow same-host links one hop)"
+            },
+            slug: %{type: "string", description: "Override slug (default derived from URL)"},
+            title: %{type: "string", description: "Override title (default from <title> or <h1>)"},
+            dry_run: %{type: "boolean", description: "Parse but don't persist"}
+          },
+          required: ["url"]
+        }
       }
     ]
   end
