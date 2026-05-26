@@ -1107,9 +1107,8 @@ defmodule GiTF.CLI do
             Format.error("Usage: gitf knowledge ingest {--from <dir> | --url <url>} --sector <id>")
 
           is_binary(url) ->
-            opts =
-              [depth: depth]
-              |> then(fn o -> if is_binary(tag), do: [{:tags, [tag]} | o], else: o end)
+            opts = [depth: depth]
+            opts = if is_binary(tag), do: Keyword.put(opts, :tags, [tag]), else: opts
 
             report = GiTF.Knowledge.Ingest.URL.ingest(url, sector, opts)
 

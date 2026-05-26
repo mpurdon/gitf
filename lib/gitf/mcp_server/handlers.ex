@@ -861,38 +861,26 @@ defmodule GiTF.MCPServer.Handlers do
   def call("lsp_references", args), do: lsp_call("lsp_references", args, :references, &lsp_refs/1)
   def call("lsp_hover", args), do: lsp_call("lsp_hover", args, :hover, &lsp_hover/1)
 
-  def call("lsp_diagnostics", %{"sector_id" => sid, "file_path" => fp} = args) do
-    safe_handler("lsp_diagnostics", args, fn ->
-      case GiTF.LSP.diagnostics(sid, fp) do
-        {:ok, diags} -> {:ok, json_text(%{ok: true, diagnostics: diags})}
-        {:error, reason} -> {:error, "lsp_diagnostics failed: #{inspect(reason)}"}
-      end
-    end)
-  end
+  def call("lsp_diagnostics", %{"sector_id" => sid, "file_path" => fp} = args),
+    do: lsp_simple("lsp_diagnostics", args, :diagnostics, fn -> GiTF.LSP.diagnostics(sid, fp) end)
 
   def call("lsp_diagnostics", _),
     do: {:error, "Missing required parameters: sector_id, file_path"}
 
-  def call("lsp_document_symbol", %{"sector_id" => sid, "file_path" => fp} = args) do
-    safe_handler("lsp_document_symbol", args, fn ->
-      case GiTF.LSP.document_symbol(sid, fp) do
-        {:ok, symbols} -> {:ok, json_text(%{ok: true, symbols: symbols})}
-        {:error, reason} -> {:error, "lsp_document_symbol failed: #{inspect(reason)}"}
-      end
-    end)
-  end
+  def call("lsp_document_symbol", %{"sector_id" => sid, "file_path" => fp} = args),
+    do:
+      lsp_simple("lsp_document_symbol", args, :symbols, fn ->
+        GiTF.LSP.document_symbol(sid, fp)
+      end)
 
   def call("lsp_document_symbol", _),
     do: {:error, "Missing required parameters: sector_id, file_path"}
 
-  def call("lsp_workspace_symbol", %{"sector_id" => sid, "query" => query} = args) do
-    safe_handler("lsp_workspace_symbol", args, fn ->
-      case GiTF.LSP.workspace_symbol(sid, query) do
-        {:ok, symbols} -> {:ok, json_text(%{ok: true, symbols: symbols})}
-        {:error, reason} -> {:error, "lsp_workspace_symbol failed: #{inspect(reason)}"}
-      end
-    end)
-  end
+  def call("lsp_workspace_symbol", %{"sector_id" => sid, "query" => query} = args),
+    do:
+      lsp_simple("lsp_workspace_symbol", args, :symbols, fn ->
+        GiTF.LSP.workspace_symbol(sid, query)
+      end)
 
   def call("lsp_workspace_symbol", _),
     do: {:error, "Missing required parameters: sector_id, query"}
@@ -908,22 +896,16 @@ defmodule GiTF.MCPServer.Handlers do
           "end_character" => ec
         } = args
       ) do
-    safe_handler("lsp_code_action", args, fn ->
-      range = %{
-        start: %{line: sl, character: sc},
-        end: %{line: el, character: ec}
-      }
+    range = %{start: %{line: sl, character: sc}, end: %{line: el, character: ec}}
 
-      context =
-        case Map.get(args, "only") do
-          only when is_list(only) and only != [] -> %{only: only}
-          _ -> %{}
-        end
-
-      case GiTF.LSP.code_action(sid, fp, range, context) do
-        {:ok, actions} -> {:ok, json_text(%{ok: true, actions: actions})}
-        {:error, reason} -> {:error, "lsp_code_action failed: #{inspect(reason)}"}
+    context =
+      case Map.get(args, "only") do
+        only when is_list(only) and only != [] -> %{only: only}
+        _ -> %{}
       end
+
+    lsp_simple("lsp_code_action", args, :actions, fn ->
+      GiTF.LSP.code_action(sid, fp, range, context)
     end)
   end
 
@@ -932,14 +914,11 @@ defmodule GiTF.MCPServer.Handlers do
       {:error,
        "Missing required parameters: sector_id, file_path, start_line, start_character, end_line, end_character"}
 
-  def call("lsp_apply_code_action", %{"edit" => edit} = args) do
-    safe_handler("lsp_apply_code_action", args, fn ->
-      case GiTF.LSP.apply_workspace_edit(edit) do
-        {:ok, paths} -> {:ok, json_text(%{ok: true, paths: paths})}
-        {:error, reason} -> {:error, "lsp_apply_code_action failed: #{inspect(reason)}"}
-      end
-    end)
-  end
+  def call("lsp_apply_code_action", %{"edit" => edit} = args),
+    do:
+      lsp_simple("lsp_apply_code_action", args, :paths, fn ->
+        GiTF.LSP.apply_workspace_edit(edit)
+      end)
 
   def call("lsp_apply_code_action", _), do: {:error, "Missing required parameter: edit"}
 
@@ -1102,25 +1081,33 @@ defmodule GiTF.MCPServer.Handlers do
   def call("knowledge_index", _), do: {:error, "Missing required parameter: name"}
 
   def call("knowledge_ingest_url", %{"url" => url} = args) do
-    sector_id = Map.get(args, "sector_id")
+    safe_handler("knowledge_ingest_url", args, fn ->
+      sector_id = Map.get(args, "sector_id")
 
-    opts =
-      [
-        depth: Map.get(args, "depth"),
-        slug: Map.get(args, "slug"),
-        title: Map.get(args, "title"),
-        dry_run: Map.get(args, "dry_run")
-      ]
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      opts =
+        [
+          depth: Map.get(args, "depth"),
+          slug: Map.get(args, "slug"),
+          title: Map.get(args, "title"),
+          dry_run: Map.get(args, "dry_run")
+        ]
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
-    report = GiTF.Knowledge.Ingest.URL.ingest(url, sector_id, opts)
+      report = GiTF.Knowledge.Ingest.URL.ingest(url, sector_id, opts)
 
-    {:ok,
-     json_text(%{
-       ingested: Enum.map(report.ingested, fn {u, slug} -> %{url: u, slug: slug} end),
-       skipped: Enum.map(report.skipped, fn {u, reason} -> %{url: to_string(u), reason: inspect(reason)} end),
-       errors: Enum.map(report.errors, fn {u, reason} -> %{url: to_string(u), reason: inspect(reason)} end)
-     })}
+      {:ok,
+       json_text(%{
+         ingested: Enum.map(report.ingested, fn {u, slug} -> %{url: u, slug: slug} end),
+         skipped:
+           Enum.map(report.skipped, fn {u, reason} ->
+             %{url: to_string(u), reason: inspect(reason)}
+           end),
+         errors:
+           Enum.map(report.errors, fn {u, reason} ->
+             %{url: to_string(u), reason: inspect(reason)}
+           end)
+       })}
+    end)
   end
 
   def call("knowledge_ingest_url", _), do: {:error, "Missing required parameter: url"}
@@ -1504,6 +1491,21 @@ defmodule GiTF.MCPServer.Handlers do
 
   defp lsp_call(_name, _args, _key, _fun),
     do: {:error, "Missing required parameters: sector_id, file_path, line, character"}
+
+  # Same envelope as `lsp_call/4` but the args check + fn signature are
+  # tool-specific (some tools need just sector + file, others need a
+  # range, etc.), so each caller computes the LSP arguments inline and
+  # passes a zero-arity closure that invokes the right `GiTF.LSP.*`
+  # function. Centralises the `{:ok, _} | {:error, _} → json_text`
+  # envelope across all 5 M3 tools.
+  defp lsp_simple(name, args, key, fun) when is_function(fun, 0) do
+    safe_handler(name, args, fn ->
+      case fun.() do
+        {:ok, value} -> {:ok, json_text(Map.new([{:ok, true}, {key, value}]))}
+        {:error, reason} -> {:error, "#{name} failed: #{inspect(reason)}"}
+      end
+    end)
+  end
 
   defp lsp_def({sid, fp, l, c, _}), do: GiTF.LSP.definition(sid, fp, l, c)
 

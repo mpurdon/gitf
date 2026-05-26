@@ -2,7 +2,6 @@ defmodule GiTF.Knowledge.RenameTest do
   use GiTF.StoreCase
 
   alias GiTF.Knowledge.{Page, Rename}
-  alias GiTF.Vault.Path, as: VPath
 
   setup do
     gitf_root =
@@ -174,6 +173,4 @@ defmodule GiTF.Knowledge.RenameTest do
     end
   end
 
-  # Suppress warning if VPath ends up unused in this file's evolution
-  _ = VPath
 end

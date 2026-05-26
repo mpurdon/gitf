@@ -38,7 +38,21 @@ defmodule GiTF.Dashboard.Helpers do
   def verification_badge("passed"), do: "badge-green"
   def verification_badge("failed"), do: "badge-red"
   def verification_badge("pending"), do: "badge-yellow"
+  def verification_badge(:pass), do: "badge-green"
+  def verification_badge(:fail), do: "badge-red"
+  def verification_badge(:pending), do: "badge-yellow"
   def verification_badge(_), do: "badge-grey"
+
+  @doc """
+  Formats a score for display. Accepts a number (rounded to `decimals`,
+  default 1), the atom `:disqualified` (→ "DQ"), or `nil` (→ "—").
+  """
+  def format_score(score, decimals \\ 1)
+  def format_score(:disqualified, _), do: "DQ"
+  def format_score(nil, _), do: "—"
+  def format_score(n, decimals) when is_number(n),
+    do: Float.round(n * 1.0, decimals) |> Float.to_string()
+  def format_score(_, _), do: "—"
 
   def format_cost(cost, decimals \\ 4)
   def format_cost(cost, decimals) when is_float(cost), do: "$#{:erlang.float_to_binary(cost, decimals: decimals)}"

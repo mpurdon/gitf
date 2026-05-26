@@ -878,31 +878,30 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp impl_ops_exist?(mission_id) do
-    Archive.filter(:ops, fn op ->
-      op.mission_id == mission_id and op[:phase_job] in [nil, false]
-    end)
-    |> Enum.any?()
+    # `by_index` is O(k) on the per-mission ops bucket; the predicate
+    # then short-circuits at the first non-phase op. The previous
+    # `filter |> any?` form re-scanned every op in the Archive on
+    # every advance-loop tick.
+    Archive.by_index(:ops, :mission_id, mission_id)
+    |> Enum.any?(&(&1[:phase_job] in [nil, false]))
   end
 
   defp start_validation(mission) do
-    requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
-    planning = GiTF.Missions.get_artifact(mission.id, "planning")
-
     # Idempotent — re-dispatch under a concurrent advance loop would
     # otherwise spawn a second wave of validation ghosts, each
     # consuming another scripted LLM rule and starving downstream phases.
     if phase_ops_exist?(mission.id, "validation") do
       {:ok, "validation"}
     else
+      requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
+      planning = GiTF.Missions.get_artifact(mission.id, "planning")
       do_start_validation(mission, requirements, planning)
     end
   end
 
   defp phase_ops_exist?(mission_id, phase) do
-    Archive.filter(:ops, fn op ->
-      op.mission_id == mission_id and op[:phase_job] == true and op[:phase] == phase
-    end)
-    |> Enum.any?()
+    Archive.by_index(:ops, :mission_id, mission_id)
+    |> Enum.any?(&(&1[:phase_job] == true and &1[:phase] == phase))
   end
 
   defp do_start_validation(mission, requirements, planning) do
@@ -1006,14 +1005,6 @@ defmodule GiTF.Major.Orchestrator do
     else
       _ -> "main"
     end
-  end
-
-  # Wrapper over the canonical helper in `GiTF.Validation`. Kept for
-  # call-site readability in this file (the orchestrator's prompt
-  # builder reads better as `changed_files_from_impl/1` than as the
-  # full keyword-flag call).
-  defp changed_files_from_impl(mission) do
-    GiTF.Validation.mission_changed_files(mission, completed_only: true)
   end
 
   # Returns [base_branch: "ghost/<id>"] when a completed impl op exists for
@@ -1232,7 +1223,7 @@ defmodule GiTF.Major.Orchestrator do
         prompt =
           PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
             diff_base: detect_diff_base(mission),
-            changed_files: changed_files_from_impl(mission)
+            changed_files: GiTF.Validation.mission_changed_files(mission, completed_only: true)
           )
 
         {prompt, "general"}

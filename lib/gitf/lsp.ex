@@ -68,8 +68,9 @@ defmodule GiTF.LSP do
 
   @doc """
   Cached diagnostics for `file_path`. Auto-calls `did_open/2` on the
-  client so the server starts pushing diagnostics if it hasn't already.
-  Caller may need to poll (see `Client.diagnostics/2`).
+  client (idempotent — the client tracks open URIs and drops repeat
+  casts) so the server starts pushing diagnostics if it hasn't
+  already. Caller may need to poll (see `Client.diagnostics/2`).
   """
   @spec diagnostics(String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
   def diagnostics(sector_id, file_path) do

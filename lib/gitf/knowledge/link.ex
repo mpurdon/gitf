@@ -13,6 +13,7 @@ defmodule GiTF.Knowledge.Link do
   """
 
   @link_re ~r/\[\[([^\[\]\|\n]+?)(?:\|[^\[\]\n]*?)?\]\]/
+  @protected_re ~r/```[\s\S]*?```|`[^`\n]+`/
 
   @doc """
   Parses `body` and returns the unique, normalized slugs referenced via
@@ -35,15 +36,51 @@ defmodule GiTF.Knowledge.Link do
     |> Enum.uniq()
   end
 
+  @doc """
+  Rewrites `[[old_slug]]` and `[[old_slug|alias]]` references in `body`
+  to point at `new_slug`. Respects code fences and inline backticks the
+  same way `parse_wikilinks/1` does — links inside ``` blocks or
+  `inline code` are left untouched.
+
+  Used by `GiTF.Knowledge.Rename` to propagate slug renames through
+  backlinking pages.
+  """
+  @spec rewrite_target(String.t(), String.t(), String.t()) :: String.t()
+  def rewrite_target(body, old_slug, new_slug)
+      when is_binary(body) and is_binary(old_slug) and is_binary(new_slug) do
+    rewrite_re = ~r/\[\[#{Regex.escape(old_slug)}(\|[^\]\n]*)?\]\]/
+
+    body
+    |> split_protected()
+    |> Enum.map_join("", fn
+      {:prose, chunk} ->
+        Regex.replace(rewrite_re, chunk, fn _full, alias_part ->
+          "[[#{new_slug}#{alias_part || ""}]]"
+        end)
+
+      {:protected, chunk} ->
+        chunk
+    end)
+  end
+
   # Replace fenced code blocks and inline-code spans with whitespace so
   # offsets line up but the content is invisible to the link regex.
   defp strip_code_regions(body) do
-    body
-    |> String.replace(~r/```[\s\S]*?```/, fn match ->
+    String.replace(body, @protected_re, fn match ->
       String.duplicate(" ", String.length(match))
     end)
-    |> String.replace(~r/`[^`\n]+`/, fn match ->
-      String.duplicate(" ", String.length(match))
+  end
+
+  # Splits the body into alternating prose / protected regions
+  # (code fences + inline backticks) preserving content so the caller
+  # can rewrite only inside prose.
+  defp split_protected(body) do
+    @protected_re
+    |> Regex.split(body, include_captures: true, trim: false)
+    |> Enum.map(fn chunk ->
+      if Regex.match?(@protected_re, chunk),
+        do: {:protected, chunk},
+        else: {:prose, chunk}
     end)
   end
 end

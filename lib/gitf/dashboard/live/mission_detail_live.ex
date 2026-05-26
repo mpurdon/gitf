@@ -58,6 +58,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           |> assign(:confirm_remove, false)
           |> assign(:removing, false)
           |> assign(:refresh_scheduled, false)
+          |> assign(:tournament_rank, [])
+          |> assign(:tournament_winner, nil)
           |> compute_op_stats()
 
         socket = if connected?(socket), do: reload(socket), else: socket
@@ -344,6 +346,16 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             _ -> %{}
           end
 
+        # Tournament rank is derived from the mission record; computing
+        # it here (once per reload) avoids recomputing on every LV
+        # re-render driven by heartbeat / PubSub / filter clicks.
+        {tournament_rank, tournament_winner} =
+          if GiTF.Tournament.running?(mission) do
+            {GiTF.Tournament.rank(mission), Map.get(mission, :winning_variant)}
+          else
+            {[], nil}
+          end
+
         socket
         |> assign(
           mission: mission,
@@ -353,7 +365,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           rollback_status: rollback_status,
           priority: priority,
           duration: duration,
-          phase_durations: phase_durations
+          phase_durations: phase_durations,
+          tournament_rank: tournament_rank,
+          tournament_winner: tournament_winner
         )
         |> compute_op_stats()
 
@@ -1021,16 +1035,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   # -- Tournament panel ------------------------------------------------------
 
   defp render_tournament_panel(assigns) do
-    mission = assigns.mission
-
-    rank = GiTF.Tournament.rank(mission)
-    winner = Map.get(mission, :winning_variant)
-
-    assigns =
-      assigns
-      |> Map.put(:tournament_rank, rank)
-      |> Map.put(:tournament_winner, winner)
-      |> Map.put(:tournament_variants, mission.impl_variants)
+    assigns = Map.put(assigns, :tournament_variants, assigns.mission.impl_variants)
 
     ~H"""
     <div class="panel">
@@ -1070,10 +1075,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 <% end %>
               </td>
               <td style="padding:0.4rem 0.5rem; font-family:monospace">
-                {format_tournament_score(row.score)}
+                {format_score(row.score)}
               </td>
               <td style="padding:0.4rem 0.5rem">
-                <span class={"badge #{verdict_badge_class(row.verdict)}"} style="font-size:0.6rem">
+                <span class={"badge #{verification_badge(row.verdict)}"} style="font-size:0.6rem">
                   {row.verdict}
                 </span>
               </td>
@@ -1093,14 +1098,6 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     </div>
     """
   end
-
-  defp format_tournament_score(:disqualified), do: "DQ"
-  defp format_tournament_score(n) when is_number(n), do: :erlang.float_to_binary(n * 1.0, decimals: 1)
-  defp format_tournament_score(_), do: "—"
-
-  defp verdict_badge_class(:pass), do: "badge-green"
-  defp verdict_badge_class(:fail), do: "badge-red"
-  defp verdict_badge_class(_), do: ""
 
   # Map orchestrator phases that aren't in the visual pipeline to their
   # nearest visual equivalent.  "awaiting_approval" sits between validation

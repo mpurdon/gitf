@@ -73,25 +73,9 @@ defmodule GiTF.Eval.SkillsRetrieval do
     top_k = Keyword.get(opts, :top_k, 5)
 
     {:ok, ranked} = Skills.Retrieval.retrieve(op, nil, top_k: top_k)
-    rank = find_rank(ranked, case_map.expected_skill_name)
+    rank = GiTF.Eval.Helpers.find_rank(ranked, case_map.expected_skill_name, & &1.name)
     names = Enum.map(ranked, & &1.name)
 
-    cond do
-      is_nil(rank) ->
-        {:fail, %{rank: nil, top_k: names, reason: "expected skill not in top-#{top_k}"}}
-
-      rank <= case_map.min_rank ->
-        {:pass, %{rank: rank, top_k: names}}
-
-      true ->
-        {:fail, %{rank: rank, top_k: names, reason: "rank #{rank} > min_rank #{case_map.min_rank}"}}
-    end
-  end
-
-  defp find_rank(ranked, expected_name) do
-    case Enum.find_index(ranked, &(&1.name == expected_name)) do
-      nil -> nil
-      idx -> idx + 1
-    end
+    GiTF.Eval.Helpers.rank_verdict(rank, names, case_map.min_rank, top_k)
   end
 end

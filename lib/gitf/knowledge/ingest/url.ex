@@ -62,9 +62,11 @@ defmodule GiTF.Knowledge.Ingest.URL do
 
     do_crawl([url], sector_id, depth, opts, visited, %{
       ingested: [],
+      ingested_count: 0,
       skipped: [],
       errors: []
     })
+    |> Map.delete(:ingested_count)
   end
 
   defp clamp_depth(d) when is_integer(d) and d >= 0 and d <= 1, do: d
@@ -72,24 +74,24 @@ defmodule GiTF.Knowledge.Ingest.URL do
 
   defp do_crawl([], _sector, _depth, _opts, _visited, acc), do: acc
 
-  defp do_crawl(_queue, _sector, _depth, _opts, _visited, %{ingested: ing} = acc)
-       when length(ing) >= @max_pages_per_crawl,
+  defp do_crawl(_queue, _sector, _depth, _opts, _visited, %{ingested_count: n} = acc)
+       when n >= @max_pages_per_crawl,
        do: %{acc | skipped: [{:crawl_cap, "hit #{@max_pages_per_crawl}-page cap"} | acc.skipped]}
 
   defp do_crawl([url | rest], sector_id, depth, opts, visited, acc) do
     case fetch(url, opts) do
       {:ok, html, final_url} ->
         case render(html, final_url, sector_id, opts) do
-          {:ok, slug, title, links} ->
-            acc = %{acc | ingested: [{url, slug} | acc.ingested]}
+          {:ok, slug, links} ->
+            new_queue = if depth > 0, do: queue_links(links, visited), else: []
+            visited = Enum.reduce(new_queue, visited, &MapSet.put(&2, canonical(&1)))
 
-            new_queue =
-              if depth > 0,
-                do: queue_links(links, visited),
-                else: []
+            acc = %{
+              acc
+              | ingested: [{url, slug} | acc.ingested],
+                ingested_count: acc.ingested_count + 1
+            }
 
-            visited = MapSet.union(visited, MapSet.new(Enum.map(new_queue, &canonical/1)))
-            _ = title
             do_crawl(rest ++ new_queue, sector_id, depth, opts, visited, acc)
 
           {:skip, reason} ->
@@ -149,12 +151,15 @@ defmodule GiTF.Knowledge.Ingest.URL do
         slug = Keyword.get(opts, :slug) || slug_from_url(final_url)
         markdown = html_to_markdown(cleaned)
         tags = ["url" | List.wrap(Keyword.get(opts, :tags, []))]
-
         body = "Source: #{final_url}\n\n" <> markdown
+        links = same_host_links(cleaned, final_url)
 
         if Keyword.get(opts, :dry_run, false) do
-          Logger.info("Knowledge.Ingest.URL [dry]: would ingest #{slug} (#{title}) from #{final_url}")
-          {:ok, slug, title, same_host_links(cleaned, final_url)}
+          Logger.info(
+            "Knowledge.Ingest.URL [dry]: would ingest #{slug} (#{title}) from #{final_url}"
+          )
+
+          {:ok, slug, links}
         else
           case Page.put(%{
                  slug: slug,
@@ -163,7 +168,7 @@ defmodule GiTF.Knowledge.Ingest.URL do
                  body: body,
                  tags: tags
                }) do
-            {:ok, _} -> {:ok, slug, title, same_host_links(cleaned, final_url)}
+            {:ok, _} -> {:ok, slug, links}
             {:error, reason} -> {:error, reason}
           end
         end
@@ -393,13 +398,9 @@ defmodule GiTF.Knowledge.Ingest.URL do
   end
 
   defp resolve_url(href, base_url) do
-    case URI.parse(href) do
-      %URI{scheme: scheme} when scheme in ["http", "https"] ->
-        href
-
-      %URI{scheme: nil, host: nil, path: path} when is_binary(path) ->
-        base = URI.parse(base_url)
-        URI.to_string(%{base | path: path, query: nil, fragment: nil})
+    case URI.merge(base_url, href) do
+      %URI{scheme: scheme} = u when scheme in ["http", "https"] ->
+        u |> Map.put(:fragment, nil) |> URI.to_string()
 
       _ ->
         nil

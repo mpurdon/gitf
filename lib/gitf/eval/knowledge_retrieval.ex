@@ -121,50 +121,29 @@ defmodule GiTF.Eval.KnowledgeRetrieval do
            top_k: top_k,
            min_similarity: min_similarity
          ) do
-      {:ok, ranked} ->
-        evaluate(case_map, ranked, top_k)
+      {:ok, ranked} -> evaluate(case_map, ranked, top_k)
+      {:error, reason} -> {:fail, %{reason: "retrieval failed: #{inspect(reason)}"}}
     end
   end
 
-  defp evaluate(%{expected_slug: :none} = _case_map, ranked, _top_k) do
-    if ranked == [] do
-      {:pass, %{top_k: [], note: "no result above threshold (as expected)"}}
-    else
-      slugs_with_scores =
-        Enum.map(ranked, fn {score, page} ->
-          "#{page.slug}=#{Float.round(score, 3)}"
-        end)
+  defp evaluate(%{expected_slug: :none}, [], _top_k) do
+    {:pass, %{top_k: [], note: "no result above threshold (as expected)"}}
+  end
 
-      {:fail,
-       %{
-         top_k: slugs_with_scores,
-         reason: "off-topic query returned matches above threshold"
-       }}
-    end
+  defp evaluate(%{expected_slug: :none}, ranked, _top_k) do
+    slugs_with_scores =
+      Enum.map(ranked, fn {score, page} ->
+        "#{page.slug}=#{Float.round(score, 3)}"
+      end)
+
+    {:fail,
+     %{top_k: slugs_with_scores, reason: "off-topic query returned matches above threshold"}}
   end
 
   defp evaluate(case_map, ranked, top_k) do
     slugs = Enum.map(ranked, fn {_score, page} -> page.slug end)
-    rank = find_rank(slugs, case_map.expected_slug)
-
-    cond do
-      is_nil(rank) ->
-        {:fail, %{rank: nil, top_k: slugs, reason: "expected slug not in top-#{top_k}"}}
-
-      rank <= case_map.min_rank ->
-        {:pass, %{rank: rank, top_k: slugs}}
-
-      true ->
-        {:fail,
-         %{rank: rank, top_k: slugs, reason: "rank #{rank} > min_rank #{case_map.min_rank}"}}
-    end
-  end
-
-  defp find_rank(slugs, expected) do
-    case Enum.find_index(slugs, &(&1 == expected)) do
-      nil -> nil
-      idx -> idx + 1
-    end
+    rank = GiTF.Eval.Helpers.find_rank(slugs, case_map.expected_slug)
+    GiTF.Eval.Helpers.rank_verdict(rank, slugs, case_map.min_rank, top_k)
   end
 
   # -- Corpus seeding --------------------------------------------------------

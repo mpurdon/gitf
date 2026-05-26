@@ -274,7 +274,8 @@ defmodule GiTF.LSP.Client do
       root_path: root_path,
       status: :initializing,
       queued: [],
-      diagnostics: %{}
+      diagnostics: %{},
+      open_uris: MapSet.new()
     }
 
     # Return immediately so DynamicSupervisor.start_child unblocks the
@@ -325,35 +326,15 @@ defmodule GiTF.LSP.Client do
 
   @impl true
   def handle_cast({:did_open, file_path, opts}, state) do
-    language_id = Keyword.get(opts, :language_id, "elixir")
     uri = file_uri(file_path)
 
-    text =
-      case File.read(file_path) do
-        {:ok, content} -> content
-        _ -> ""
-      end
-
-    payload = %{
-      jsonrpc: "2.0",
-      method: "textDocument/didOpen",
-      params: %{
-        textDocument: %{
-          uri: uri,
-          languageId: language_id,
-          version: 1,
-          text: text
-        }
-      }
-    }
-
-    if state.status == :ready do
-      Port.command(state.port, Framing.encode(payload))
+    if MapSet.member?(state.open_uris, uri) do
+      # Already open — re-sending didOpen makes ElixirLS re-analyze and
+      # restart the diagnostic publish loop. Drop the cast.
+      {:noreply, state}
+    else
+      send_did_open(state, file_path, uri, opts)
     end
-
-    # Seed the diagnostics cache so a poll-loop has somewhere to land
-    # even before the first publish.
-    {:noreply, %{state | diagnostics: Map.put_new(state.diagnostics, uri, [])}}
   end
 
   def handle_cast({:did_close, file_path}, state) do
@@ -369,7 +350,40 @@ defmodule GiTF.LSP.Client do
       Port.command(state.port, Framing.encode(payload))
     end
 
-    {:noreply, %{state | diagnostics: Map.delete(state.diagnostics, uri)}}
+    {:noreply,
+     %{
+       state
+       | diagnostics: Map.delete(state.diagnostics, uri),
+         open_uris: MapSet.delete(state.open_uris, uri)
+     }}
+  end
+
+  # Read the file on the caller thread via Task so the GenServer
+  # mailbox isn't blocked on disk I/O when many files are opened in a
+  # row. The Task's result is sent back to self() as a :did_open_ready
+  # message that performs the actual Port.command.
+  defp send_did_open(state, file_path, uri, opts) do
+    language_id = Keyword.get(opts, :language_id, "elixir")
+    server = self()
+
+    Task.start(fn ->
+      text =
+        case File.read(file_path) do
+          {:ok, content} -> content
+          _ -> ""
+        end
+
+      send(server, {:did_open_ready, uri, language_id, text})
+    end)
+
+    # Track the URI immediately so a follow-up did_open cast for the
+    # same path coalesces even before the Task finishes.
+    {:noreply,
+     %{
+       state
+       | open_uris: MapSet.put(state.open_uris, uri),
+         diagnostics: Map.put_new(state.diagnostics, uri, [])
+     }}
   end
 
   @impl true
@@ -395,6 +409,27 @@ defmodule GiTF.LSP.Client do
     Logger.warning("LSP server exited with status #{code}")
     fail_pending(state, {:lsp_exited, code})
     {:stop, :normal, state}
+  end
+
+  def handle_info({:did_open_ready, uri, language_id, text}, state) do
+    payload = %{
+      jsonrpc: "2.0",
+      method: "textDocument/didOpen",
+      params: %{
+        textDocument: %{
+          uri: uri,
+          languageId: language_id,
+          version: 1,
+          text: text
+        }
+      }
+    }
+
+    if state.status == :ready do
+      Port.command(state.port, Framing.encode(payload))
+    end
+
+    {:noreply, state}
   end
 
   def handle_info({:request_timeout, id}, state) do
@@ -487,15 +522,22 @@ defmodule GiTF.LSP.Client do
         {messages, buffer} = Framing.parse(state.buffer <> chunk)
         state = %{state | buffer: buffer}
 
-        case Enum.find(messages, &(Map.get(&1, "id") == id)) do
-          nil ->
+        case Enum.split_with(messages, &(Map.get(&1, "id") == id)) do
+          {[matched | _], others} ->
+            # Drain notifications (e.g. publishDiagnostics) that the
+            # server may have pushed before the initialize response —
+            # the mainloop hasn't started yet so they'd otherwise be
+            # silently dropped from the cache.
+            state = Enum.reduce(others, state, &handle_message/2)
+
+            case matched do
+              %{"result" => result} -> {:ok, result, state}
+              %{"error" => err} -> {:error, err}
+            end
+
+          {[], notifications} ->
+            state = Enum.reduce(notifications, state, &handle_message/2)
             wait_for_response(state, id, timeout_ms)
-
-          %{"result" => result} ->
-            {:ok, result, state}
-
-          %{"error" => err} ->
-            {:error, err}
         end
 
       {port, {:exit_status, code}} when port == state.port ->

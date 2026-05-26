@@ -50,6 +50,7 @@ defmodule GiTF.Knowledge.Rename do
 
   alias GiTF.Archive
   alias GiTF.Knowledge.{Link, Page}
+  alias GiTF.Vault.File, as: VFile
   alias GiTF.Vault.Path, as: VPath
 
   @collection :knowledge_pages
@@ -167,9 +168,11 @@ defmodule GiTF.Knowledge.Rename do
 
   defp index_orphans_by_hash(paths) do
     Enum.reduce(paths, %{}, fn path, acc ->
-      case File.read(path) do
-        {:ok, body} ->
-          hash = :crypto.hash(:sha256, body) |> Base.encode16(case: :lower)
+      # `VFile.read/1` produces the same hash format Page.put/1 stores
+      # (lowercase hex SHA-256). Going through the canonical helper
+      # keeps the two definitions from drifting silently.
+      case VFile.read(path) do
+        {:ok, _body, hash} ->
           Map.update(acc, hash, [path], &[path | &1])
 
         _ ->
@@ -196,42 +199,32 @@ defmodule GiTF.Knowledge.Rename do
   # -- Application -----------------------------------------------------------
 
   defp apply_rename(sector_id, rename) do
-    case Archive.filter(@collection, fn p ->
-           p[:slug] == rename.old_slug and p[:sector_id] == sector_id
-         end)
-         |> List.first() do
+    case Page.get(sector_id, rename.old_slug) do
       nil ->
         {:error, :record_gone}
 
       page ->
-        # Step 1: write the renamed page through `Page.put/1` under
-        # its new slug, which (re)computes links + adjusts the
-        # reciprocal links_in on every target.
-        {:ok, body} = File.read(rename.new_file_path)
+        with {:ok, body} <- File.read(rename.new_file_path),
+             {:ok, _new_page} <-
+               Page.put(%{
+                 slug: rename.new_slug,
+                 sector_id: sector_id,
+                 title: page[:title],
+                 body: body,
+                 tags: page[:tags] || []
+               }) do
+          # Rewrite [[old]] → [[new]] in every page that still
+          # references the old slug. Obsidian-rewrite case is a no-op
+          # because the body no longer contains [[old]].
+          rewrite_count = rewrite_backlinks(sector_id, page[:links_in] || [], rename)
 
-        # Carry forward title/tags so the operator-facing metadata
-        # survives the rename.
-        {:ok, _new_page} =
-          Page.put(%{
-            slug: rename.new_slug,
-            sector_id: sector_id,
-            title: page[:title],
-            body: body,
-            tags: page[:tags] || []
-          })
+          # Old file was moved (not duplicated); only the Archive row +
+          # PageIndex entry need to go.
+          Archive.delete(@collection, page[:id])
+          GiTF.Knowledge.PageIndex.delete(sector_id, rename.old_slug)
 
-        # Step 2: rewrite [[old]] → [[new]] in every page that still
-        # references the old slug. Obsidian-rewrite case is a no-op
-        # because the body no longer contains [[old]].
-        rewrite_count = rewrite_backlinks(sector_id, page[:links_in] || [], rename)
-
-        # Step 3: delete the now-orphaned record under the old slug.
-        # The old file was moved (not duplicated) so there's no file
-        # to remove — just the Archive row.
-        Archive.delete(@collection, page[:id])
-        GiTF.Knowledge.PageIndex.delete(sector_id, rename.old_slug)
-
-        {:ok, rewrite_count}
+          {:ok, rewrite_count}
+        end
     end
   rescue
     e -> {:error, Exception.message(e)}
@@ -244,49 +237,43 @@ defmodule GiTF.Knowledge.Rename do
           acc
 
         source ->
-          case File.read(source[:file_path]) do
-            {:ok, body} ->
-              new_body = rewrite_links(body, rename.old_slug, rename.new_slug)
-
-              if new_body == body do
-                # Already pointing at the new slug (Obsidian-rewrite
-                # case) — just refresh the index entry so links_out
-                # reflects reality.
-                _ = Page.reindex(sector_id, source_slug)
-                acc
-              else
-                {:ok, _} =
-                  Page.put(%{
-                    slug: source_slug,
-                    sector_id: sector_id,
-                    title: source[:title],
-                    body: new_body,
-                    tags: source[:tags] || []
-                  })
-
-                acc + 1
-              end
-
-            _ ->
-              acc
-          end
+          rewrite_one_source(sector_id, source, rename, acc)
       end
     end)
   end
 
-  # Rewrites `[[old]]` and `[[old|label]]` to `[[new]]` / `[[new|label]]`.
-  # Anchored to the wikilink boundary so substrings within longer words
-  # are untouched.
-  defp rewrite_links(body, old_slug, new_slug) do
-    old_escaped = Regex.escape(old_slug)
-    re = ~r/\[\[#{old_escaped}(\|[^\]]*)?\]\]/
+  defp rewrite_one_source(sector_id, source, rename, acc) do
+    case File.read(source[:file_path]) do
+      {:ok, body} ->
+        new_body = Link.rewrite_target(body, rename.old_slug, rename.new_slug)
 
-    Regex.replace(re, body, fn _full, alias_part ->
-      "[[#{new_slug}#{alias_part}]]"
-    end)
+        cond do
+          new_body != body ->
+            # Plain-mv case: body still references the old slug.
+            {:ok, _} =
+              Page.put(%{
+                slug: source[:slug],
+                sector_id: sector_id,
+                title: source[:title],
+                body: new_body,
+                tags: source[:tags] || []
+              })
+
+            acc + 1
+
+          rename.old_slug in (source[:links_out] || []) ->
+            # Obsidian-rewrite case: disk body already updated but our
+            # Archive index still references the old slug. Refresh so
+            # links_out reflects reality.
+            _ = Page.reindex(sector_id, source[:slug])
+            acc
+
+          true ->
+            acc
+        end
+
+      _ ->
+        acc
+    end
   end
-
-  # Suppresses warnings about Link being unused if rewrite_links above
-  # ever gets generalised through it.
-  _ = Link
 end
