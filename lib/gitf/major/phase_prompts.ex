@@ -662,6 +662,7 @@ defmodule GiTF.Major.PhasePrompts do
     planning_json = encode_or(planning, "[]")
     diff_base = Keyword.get(opts, :diff_base, "main")
     changed_files = Keyword.get(opts, :changed_files, [])
+    lsp_diagnostics = Keyword.get(opts, :lsp_diagnostics, [])
 
     changed_files_block =
       case changed_files do
@@ -683,6 +684,8 @@ defmodule GiTF.Major.PhasePrompts do
           """
       end
 
+    lsp_diagnostics_block = render_lsp_diagnostics_block(lsp_diagnostics)
+
     """
     # Validation Phase
 
@@ -702,7 +705,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-    #{changed_files_block}
+    #{changed_files_block}#{lsp_diagnostics_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's
@@ -746,6 +749,47 @@ defmodule GiTF.Major.PhasePrompts do
     Set `overall_verdict` to "fail" if any must-have requirements are not met.
     """
   end
+
+  # Renders error-severity LSP diagnostics as ground-truth context.
+  # Skipped (empty string) when no errors — keeps the prompt slim.
+  defp render_lsp_diagnostics_block([]), do: ""
+
+  defp render_lsp_diagnostics_block(file_diagnostics) when is_list(file_diagnostics) do
+    body =
+      file_diagnostics
+      |> Enum.map_join("\n\n", fn {file, diags} ->
+        "### `#{file}`\n\n" <>
+          Enum.map_join(diags, "\n", &format_diagnostic/1)
+      end)
+
+    """
+
+    ## LSP diagnostics on the changed files
+
+    The language server reported these compile-time errors on the
+    implementation's changes. If any are present, the verdict should
+    almost certainly be `fail` — the impl ghost shipped broken code.
+
+    #{body}
+    """
+  end
+
+  defp render_lsp_diagnostics_block(_), do: ""
+
+  defp format_diagnostic(diag) do
+    line = get_in(diag, ["range", "start", "line"]) || 0
+    char = get_in(diag, ["range", "start", "character"]) || 0
+    severity = severity_label(Map.get(diag, "severity", 1))
+    source = Map.get(diag, "source", "lsp")
+    msg = Map.get(diag, "message", "") |> String.split("\n") |> List.first()
+    "- [#{severity}] L#{line + 1}:#{char + 1} (#{source}) #{msg}"
+  end
+
+  defp severity_label(1), do: "error"
+  defp severity_label(2), do: "warning"
+  defp severity_label(3), do: "info"
+  defp severity_label(4), do: "hint"
+  defp severity_label(_), do: "?"
 
   @doc """
   Returns 3 {focus, prompt} tuples for parallel simplify agents.

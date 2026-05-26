@@ -203,5 +203,54 @@ defmodule GiTF.Major.PhasePromptsTest do
       assert prompt =~ "FR-1"
       assert prompt =~ "Implement feature"
     end
+
+    test "omits the LSP diagnostics section when none are provided" do
+      prompt = PhasePrompts.validation_prompt(@mission, %{}, [], "", lsp_diagnostics: [])
+      refute prompt =~ "LSP diagnostics"
+    end
+
+    test "renders LSP diagnostics with file headers, severity, location, source" do
+      diags = [
+        {"lib/auth.ex",
+         [
+           %{
+             "severity" => 1,
+             "source" => "elixir-ls",
+             "message" => "undefined function foo/1",
+             "range" => %{"start" => %{"line" => 41, "character" => 4}}
+           },
+           %{
+             "severity" => 1,
+             "source" => "elixir-ls",
+             "message" => "unused variable x",
+             "range" => %{"start" => %{"line" => 50, "character" => 0}}
+           }
+         ]},
+        {"lib/session.ex",
+         [
+           %{
+             "severity" => 1,
+             "source" => "elixir-ls",
+             "message" => "syntax error",
+             "range" => %{"start" => %{"line" => 9, "character" => 12}}
+           }
+         ]}
+      ]
+
+      prompt =
+        PhasePrompts.validation_prompt(@mission, %{}, [], "",
+          lsp_diagnostics: diags,
+          changed_files: ["lib/auth.ex", "lib/session.ex"]
+        )
+
+      assert prompt =~ "LSP diagnostics on the changed files"
+      assert prompt =~ "### `lib/auth.ex`"
+      assert prompt =~ "### `lib/session.ex`"
+      assert prompt =~ "[error] L42:5 (elixir-ls) undefined function foo/1"
+      assert prompt =~ "[error] L10:13 (elixir-ls) syntax error"
+      # Tells the validator how to act on it
+      assert prompt =~ "verdict should"
+      assert prompt =~ "fail"
+    end
   end
 end

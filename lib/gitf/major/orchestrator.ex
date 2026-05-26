@@ -960,11 +960,31 @@ defmodule GiTF.Major.Orchestrator do
     |> Enum.uniq()
   end
 
+  # Gated on :lsp_validation_enabled. Returns the `{file, [error_diag]}`
+  # pairs for whatever the diagnostic cache currently holds. Falls
+  # through to `[]` on any LSP error (disabled, driver missing, sector
+  # unknown) so the validation prompt stays renderable.
+  defp collect_lsp_diagnostics_for_validation(_mission, []), do: []
+
+  defp collect_lsp_diagnostics_for_validation(mission, files) do
+    if Application.get_env(:gitf, :lsp_validation_enabled, false) do
+      case GiTF.LSP.collect_errors(mission.sector_id, files) do
+        {:ok, pairs} -> pairs
+        {:error, _} -> []
+      end
+    else
+      []
+    end
+  end
+
   defp spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, variant_id, changed_files) do
+    lsp_diagnostics = collect_lsp_diagnostics_for_validation(mission, changed_files)
+
     prompt =
       PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
         diff_base: diff_base,
-        changed_files: changed_files
+        changed_files: changed_files,
+        lsp_diagnostics: lsp_diagnostics
       )
 
     # Branch the validation worktree from the variant's impl ghost tip so

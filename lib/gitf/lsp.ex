@@ -89,6 +89,66 @@ defmodule GiTF.LSP do
   def apply_workspace_edit(edit), do: GiTF.LSP.Edits.apply_workspace_edit(edit)
 
   @doc """
+  Best-effort: returns `{file_path, [diagnostic]}` pairs for each path
+  in `relative_paths`, resolved against the sector's repo root. Paths
+  with no diagnostics (or where the LSP isn't available) yield `[]`.
+
+  Non-blocking — uses whatever the diagnostic cache holds at call
+  time. The first call for a file triggers an async `did_open`, so
+  subsequent calls (e.g. on the next advance tick) will see real
+  results once the server has analyzed.
+
+  Returns `{:error, reason}` only when the LSP itself is
+  disabled/unavailable/sector-unknown — never when individual files
+  have no analysis yet.
+  """
+  @spec collect_diagnostics(String.t(), [String.t()]) ::
+          {:ok, [{String.t(), [map()]}]} | {:error, term()}
+  def collect_diagnostics(sector_id, relative_paths) when is_list(relative_paths) do
+    with {:ok, %{path: repo_path}} <- fetch_sector(sector_id) do
+      pairs =
+        relative_paths
+        |> Enum.map(fn rel ->
+          abs_path = Path.expand(rel, repo_path)
+
+          case diagnostics(sector_id, abs_path) do
+            {:ok, diags} -> {rel, diags}
+            {:error, _} -> {rel, []}
+          end
+        end)
+
+      {:ok, pairs}
+    end
+  end
+
+  @doc """
+  Returns only the *error*-severity diagnostics (LSP severity 1) from
+  `collect_diagnostics/2`. Warnings/info/hints are filtered out —
+  validators care about hard errors, not style nudges.
+  """
+  @spec collect_errors(String.t(), [String.t()]) ::
+          {:ok, [{String.t(), [map()]}]} | {:error, term()}
+  def collect_errors(sector_id, relative_paths) do
+    with {:ok, pairs} <- collect_diagnostics(sector_id, relative_paths) do
+      errors =
+        pairs
+        |> Enum.map(fn {file, diags} ->
+          {file, Enum.filter(diags, &(Map.get(&1, "severity") == 1))}
+        end)
+        |> Enum.reject(fn {_, diags} -> diags == [] end)
+
+      {:ok, errors}
+    end
+  end
+
+  defp fetch_sector(sector_id) do
+    case GiTF.Archive.get(:sectors, sector_id) do
+      %{path: path} = sector when is_binary(path) -> {:ok, sector}
+      _ -> {:error, :sector_not_found}
+    end
+  end
+
+  @doc """
   Looks up the live `GiTF.LSP.Client` PID for `sector_id`, starting
   one if none exists. Returns `{:ok, pid}` or a clear error.
   """

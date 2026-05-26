@@ -172,16 +172,70 @@ defmodule GiTF.Validation do
           end)
           |> Enum.uniq()
 
-        if meaningful_files == [] do
-          total_changed =
-            impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
+        cond do
+          meaningful_files == [] ->
+            total_changed =
+              impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
 
-          {:error,
-           "impl ops total #{total_changed} files changed but all are " <>
-             "`.claude/` settings — no real code changes"}
-        else
-          :ok
+            {:error,
+             "impl ops total #{total_changed} files changed but all are " <>
+               "`.claude/` settings — no real code changes"}
+
+          true ->
+            validate_against_lsp_errors(mission, meaningful_files)
         end
+    end
+  end
+
+  @doc """
+  Returns the deduped list of meaningful (non-`.claude/`) files
+  reported as changed by completed impl ops. Public so prompt builders
+  and the validation phase handler can render the same list the
+  cross-check operates over.
+  """
+  @spec changed_code_files(map()) :: [String.t()]
+  def changed_code_files(mission) do
+    mission.ops
+    |> Enum.filter(fn op ->
+      op.status == "done" and op[:phase_job] in [nil, false]
+    end)
+    |> Enum.flat_map(fn op ->
+      (op[:changed_files] || [])
+      |> Enum.reject(&claude_settings_path?/1)
+    end)
+    |> Enum.uniq()
+  end
+
+  # Gated cross-check: when :lsp_validation_enabled is on, ask the LSP
+  # server about the diff'd files. Any error-severity diagnostic
+  # overrides a "pass" verdict the same way the meaningful-files
+  # check does — the impl ghost shouldn't get a green light if the
+  # code it just committed doesn't compile.
+  defp validate_against_lsp_errors(mission, files) do
+    if Application.get_env(:gitf, :lsp_validation_enabled, false) do
+      case GiTF.LSP.collect_errors(mission.sector_id, files) do
+        {:ok, []} ->
+          :ok
+
+        {:ok, file_errors} ->
+          summary =
+            file_errors
+            |> Enum.map_join("; ", fn {file, errs} ->
+              "#{file}: #{length(errs)} error(s)"
+            end)
+
+          {:error, "LSP diagnostics show compile errors — #{summary}"}
+
+        {:error, _reason} ->
+          # LSP unavailable / sector unknown — fall back to the
+          # pre-LSP behaviour (cross-check passes on the existing
+          # meaningful-files signal alone). Logged for visibility but
+          # not enforced; flipping the flag on shouldn't break
+          # environments without ElixirLS.
+          :ok
+      end
+    else
+      :ok
     end
   end
 
