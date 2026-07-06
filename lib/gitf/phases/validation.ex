@@ -210,23 +210,27 @@ defmodule GiTF.Phases.Validation do
   defp validate_pass(mission, artifact) do
     Validation.emit_confidence(mission)
 
-    case Validation.validate_pass_against_diff(mission) do
-      :ok ->
-        Validation.maybe_spawn_skill_refinement(mission, artifact)
+    # Two gates, both fail-safe overrides of a "pass" verdict: (1) the diff
+    # cross-check (real commits exist), then (2) behavioral verification
+    # (holdout scenarios driven through the artifact's real interface). Either
+    # failing routes back into the fix loop rather than merging.
+    with :ok <- Validation.validate_pass_against_diff(mission),
+         :ok <- Validation.verify_behavior(mission) do
+      Validation.maybe_spawn_skill_refinement(mission, artifact)
 
-        requires_approval = GiTF.Override.requires_approval?(mission)
+      requires_approval = GiTF.Override.requires_approval?(mission)
 
-        Missions.store_artifact(
-          mission.id,
-          "validation",
-          Map.put(artifact, "requires_approval", requires_approval)
-        )
+      Missions.store_artifact(
+        mission.id,
+        "validation",
+        Map.put(artifact, "requires_approval", requires_approval)
+      )
 
-        :pass
-
+      :pass
+    else
       {:error, reason} ->
         Logger.warning(
-          "Quest #{mission.id}: validator said PASS but cross-check failed (#{reason}); " <>
+          "Quest #{mission.id}: validator said PASS but a gate overrode it (#{reason}); " <>
             "treating as fail and re-routing to fix loop"
         )
 
@@ -238,7 +242,7 @@ defmodule GiTF.Phases.Validation do
         overridden =
           artifact
           |> Map.put("overall_verdict", "fail")
-          |> Map.put("gaps", ["Validator returned pass but no impl commits found: #{reason}"])
+          |> Map.put("gaps", ["Validator returned pass but a gate overrode it: #{reason}"])
           |> Map.put("cross_check_override", reason)
 
         Missions.store_artifact(mission.id, "validation", overridden)
