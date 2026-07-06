@@ -23,7 +23,14 @@ defmodule GiTF.Config do
       "artifact_compact_days" => 7,
       "pattern_retention_max" => 200
     },
-    "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
+    "costs" => %{
+      "warn_threshold_usd" => 5.0,
+      "budget_usd" => 10.0,
+      # Factory-wide safety ceiling: total spend across ALL missions in a
+      # rolling 24h window. Fail-closed — new ghosts/missions are refused once
+      # hit. Conservative by default; raise consciously for higher throughput.
+      "daily_budget_usd" => 100.0
+    },
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
     "server" => %{"url" => ""},
