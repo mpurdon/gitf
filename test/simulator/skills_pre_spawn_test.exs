@@ -51,11 +51,24 @@ defmodule GiTF.Simulator.SkillsPreSpawnTest do
       restore_env(:skill_min_similarity, prev_threshold)
     end)
 
-    # Seed a skill that should match a "lockfile" op
-    # `Skills.create/1` writes to the app Archive — make sure it's
-    # healthy before the rest of setup runs (StoreCase teardown from a
-    # prior test may have left it pointing at a deleted data_dir).
     GiTF.Test.StoreHelper.restore_app_store()
+
+    {:ok, sim_ctx} =
+      Simulator.setup_scenario(
+        rules: scenario_rules(),
+        sector_name: "skills-pre-spawn-#{:erlang.unique_integer([:positive])}",
+        files: %{"app/main.js" => "// initial\n"}
+      )
+
+    on_exit(fn -> Simulator.reset!(sim_ctx) end)
+
+    # Seed the skill AFTER setup_scenario: that call restarts the app Archive
+    # (restore_app_store), which reloads from disk — so a skill created before
+    # it would be lost (writes are ETS-first + async-persisted). Clear any
+    # global skills other tests leaked to the shared store first, so the
+    # cosine-tied mock embedding + top_k retrieval deterministically returns
+    # ours instead of crowding it out.
+    for s <- GiTF.Archive.all(:skills), do: GiTF.Skills.delete(s.id)
 
     {:ok, skill} =
       GiTF.Skills.create(%{
@@ -66,15 +79,6 @@ defmodule GiTF.Simulator.SkillsPreSpawnTest do
       })
 
     on_exit(fn -> GiTF.Skills.delete(skill.id) end)
-
-    {:ok, sim_ctx} =
-      Simulator.setup_scenario(
-        rules: scenario_rules(),
-        sector_name: "skills-pre-spawn-#{:erlang.unique_integer([:positive])}",
-        files: %{"app/main.js" => "// initial\n"}
-      )
-
-    on_exit(fn -> Simulator.reset!(sim_ctx) end)
 
     %{sim_ctx: sim_ctx, skill: skill}
   end
