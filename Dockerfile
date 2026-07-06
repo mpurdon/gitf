@@ -1,12 +1,12 @@
 # -- Build Stage -------------------------------------------------------------
-FROM hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim as builder
+FROM hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim AS builder
 
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update &&
-    apt-get install -y build-essential git &&
-    mix local.hex --force &&
+RUN apt-get update && \
+    apt-get install -y build-essential git && \
+    mix local.hex --force && \
     mix local.rebar --force
 
 # Set build environment
@@ -32,35 +32,43 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 # Install runtime dependencies for the "Dark Factory"
-# - git: for worktree management
-# - bubblewrap: for sandboxing
-# - curl/ca-certificates: for API calls
-# - openssl: for BEAM crypto
-# - locales: for proper encoding
-# - inotify-tools: required by :fs dep for filesystem watching on Linux
-RUN apt-get update &&
-    apt-get install -y --no-install-recommends
-    git
-    bubblewrap
-    curl
-    ca-certificates
-    openssl
-    libncurses5
-    locales
-    inotify-tools
-    && rm -rf /var/lib/apt/lists/*
+# - git: worktree management
+# - bubblewrap: ghost sandboxing (GiTF.Sandbox.Bubblewrap)
+# - curl/ca-certificates: API calls
+# - openssl: BEAM crypto
+# - locales: encoding
+# - inotify-tools: :fs dep filesystem watching on Linux
+# - nodejs/npm: required by the Claude/Copilot CLIs (CLI execution mode)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      git \
+      bubblewrap \
+      curl \
+      ca-certificates \
+      openssl \
+      libncurses6 \
+      locales \
+      inotify-tools \
+      nodejs \
+      npm && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install the Claude Code CLI so CLI-mode ghosts can run in-container.
+# (API mode via ReqLLM needs no CLI; this makes both modes work.)
+RUN npm install -g @anthropic-ai/claude-code || \
+    echo "WARN: claude CLI install failed; container supports API mode only"
 
 # Set locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
-ENV LC_ALL en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 
 # Copy release from builder
 COPY --from=builder /app/_build/prod/rel/gitf .
 
 # Create gitf data directories
-RUN mkdir -p /data/gitf/store /data/gitf/worktrees
+RUN mkdir -p /data/gitf/store /data/gitf/worktrees /data/gitf/logs
 ENV GITF_HOME=/data/gitf
 
 # Server configuration (overridable at runtime)
@@ -69,6 +77,10 @@ ENV GITF_HOST=0.0.0.0
 
 # Expose Dashboard + API port
 EXPOSE 4000
+
+# Container health probe hits the readiness endpoint.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:4000/api/v1/health || exit 1
 
 # Set entrypoint
 CMD ["bin/gitf", "start"]
