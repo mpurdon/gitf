@@ -31,6 +31,13 @@ defmodule GiTF.Application do
     GiTF.Init.init_global()
     File.mkdir_p!(Path.join(GiTF.global_config_dir(), "llm_db"))
 
+    # The escript boots this application BEFORE GiTF.CLI.main/1 parses the
+    # `-w`/`--workspace` flag, so GITF_PATH isn't set yet and the store would
+    # resolve via cwd-walkup (e.g. to the source repo) — silently ignoring -w.
+    # Recover the flag from the raw escript args here so store resolution honors
+    # it. No-op when GITF_PATH is already set or -w wasn't passed.
+    maybe_set_workspace_from_argv()
+
     # Determine project root for config overlay.
     # Resolution: GITF_PATH env → walk-up from cwd → homedir (~/.gitf)
     # Homedir is the default for system-wide installs; walk-up is legacy
@@ -214,6 +221,26 @@ defmodule GiTF.Application do
     GiTF.Vault.Writer.attach_telemetry()
 
     result
+  end
+
+  # Sets GITF_PATH from the escript's `-w`/`--workspace` argument if it wasn't
+  # already set by the CLI (which parses it too late for app boot). Reads the
+  # raw escript args via :init.get_plain_arguments/0.
+  defp maybe_set_workspace_from_argv do
+    if System.get_env("GITF_PATH") == nil do
+      args = Enum.map(:init.get_plain_arguments(), &List.to_string/1)
+
+      args
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.find_value(fn
+        [flag, val] when flag in ["-w", "--workspace"] -> val
+        _ -> nil
+      end)
+      |> case do
+        nil -> :ok
+        path -> System.put_env("GITF_PATH", Path.expand(path))
+      end
+    end
   end
 
   # Logs every known feature flag's effective value on startup so operators
