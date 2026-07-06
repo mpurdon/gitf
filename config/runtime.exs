@@ -77,24 +77,33 @@ if config_env() == :prod do
   host = System.get_env("GITF_HOST") || "127.0.0.1"
   {:ok, ip} = host |> String.to_charlist() |> :inet.parse_address()
 
-  secret =
-    System.get_env("SECRET_KEY_BASE") ||
-      raise """
-      environment variable SECRET_KEY_BASE is missing.
-      Generate one via: mix phx.gen.secret
-      """
+  # A stable secret only matters for a network-facing DEPLOYMENT (session/cookie
+  # continuity across restarts). A release signals that via RELEASE_NAME, so we
+  # hard-require the secret there. A local escript (no RELEASE_NAME) is a
+  # single-user daemon — generate an ephemeral secret with a warning so the CLI
+  # works out of the box instead of crashing on every invocation.
+  require_secret = fn name ->
+    case System.get_env(name) do
+      nil ->
+        if System.get_env("RELEASE_NAME") do
+          raise "environment variable #{name} is missing. Generate one via: mix phx.gen.secret"
+        else
+          IO.puts(
+            :stderr,
+            "[warn] #{name} not set; using an ephemeral value (OK for local use, NOT a deployment)"
+          )
 
-  live_view_salt =
-    System.get_env("LIVE_VIEW_SIGNING_SALT") ||
-      raise """
-      environment variable LIVE_VIEW_SIGNING_SALT is missing.
-      """
+          :crypto.strong_rand_bytes(48) |> Base.encode64()
+        end
 
-  session_salt =
-    System.get_env("SESSION_SIGNING_SALT") ||
-      raise """
-      environment variable SESSION_SIGNING_SALT is missing.
-      """
+      value ->
+        value
+    end
+  end
+
+  secret = require_secret.("SECRET_KEY_BASE")
+  live_view_salt = require_secret.("LIVE_VIEW_SIGNING_SALT")
+  session_salt = require_secret.("SESSION_SIGNING_SALT")
 
   check_origin =
     case System.get_env("GITF_CHECK_ORIGIN") do
