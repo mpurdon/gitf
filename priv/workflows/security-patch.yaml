@@ -65,13 +65,19 @@ phases:
     max_retries: 3
 
   - id: awaiting_approval
-    handler: GiTF.Phases.Default
+    handler: GiTF.Phases.AwaitingApproval
+    # A security patch must NEVER auto-merge. The AwaitingApproval handler
+    # makes the phase resolvable (verdict-driven, not artifact-driven), and
+    # the always-on operator gate blocks the advance to publish until a
+    # human explicitly clears it — even if the handler would otherwise
+    # auto-approve on timeout. Cleared via Override.approve / clear_gate.
     gate:
       when: "true"
       action: await_operator
-    reads: [validation]
-    produces: awaiting_approval
-    next: publish
+    on_pass: publish
+    on_fail: awaiting_approval
+    max_retries: 0
+    on_exhausted: fail
 
   - id: publish
     handler: GiTF.Phases.Publish

@@ -49,9 +49,35 @@ defmodule GiTF.Sandbox.SandboxExec do
     (allow file-read* file-write* (subpath "/tmp"))
     (allow file-read* file-write* (subpath "/private/tmp"))
     (allow file-read* file-write* (subpath "/var/tmp"))
+    #{home_rules()}
     #{cwd_rule(escaped_cwd, risk_level)}\
     """
     |> String.trim()
+  end
+
+  # AI CLIs (claude/node/git) need to READ the user home (config, node
+  # runtime, ~/.gitconfig, nvm) to function, and WRITE a small set of config
+  # dirs (session state, caches). Broad read is acceptable — network is
+  # allowed regardless, so read-restriction wouldn't prevent exfil; the real
+  # threat is destructive writes, which stay confined to these dirs + the
+  # worktree + tmp.
+  defp home_rules do
+    case System.user_home() do
+      nil ->
+        ""
+
+      home ->
+        h = escape_sbpl(home)
+
+        [
+          ~s[(allow file-read* (subpath "#{h}"))],
+          ~s[(allow file-read* file-write* (subpath "#{h}/.claude"))],
+          ~s[(allow file-read* file-write* (subpath "#{h}/.config"))],
+          ~s[(allow file-read* file-write* (subpath "#{h}/.cache"))],
+          ~s[(allow file-read* file-write* (subpath "#{h}/.npm"))]
+        ]
+        |> Enum.join("\n    ")
+    end
   end
 
   defp cwd_rule(escaped_cwd, :critical) do

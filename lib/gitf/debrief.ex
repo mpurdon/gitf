@@ -66,9 +66,11 @@ defmodule GiTF.Debrief do
       if is_nil(validation_command) do
         {:ok, :clean}
       else
+        {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(validation_command, cd: sector.path)
+
         task =
           Task.async(fn ->
-            System.cmd("sh", ["-c", validation_command], cd: sector.path, stderr_to_stdout: true)
+            System.cmd(cmd, cmd_args, cd: sector.path, stderr_to_stdout: true)
           end)
 
         case Task.yield(task, 120_000) || Task.shutdown(task, 5_000) do

@@ -887,10 +887,15 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp start_validation(mission) do
-    # Idempotent — re-dispatch under a concurrent advance loop would
-    # otherwise spawn a second wave of validation ghosts, each
-    # consuming another scripted LLM rule and starving downstream phases.
-    if phase_ops_exist?(mission.id, "validation") do
+    # Only short-circuit when a validation ghost is CURRENTLY in-flight —
+    # that's the concurrent-advance double-spawn we must avoid. A *completed*
+    # prior validation must NOT block re-validation: after a fix op the mission
+    # re-enters here from implementation and needs a fresh validation ghost.
+    # Guarding on "any validation op ever existed" wedged the fix loop —
+    # the mission stayed in `implementation` forever, never re-validating to
+    # detect exhaustion. (advance_quest is serialized per-mission via
+    # MissionLock, so an in-flight check is sufficient.)
+    if validation_in_flight?(mission.id) do
       {:ok, "validation"}
     else
       requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
@@ -899,9 +904,12 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp phase_ops_exist?(mission_id, phase) do
+  defp validation_in_flight?(mission_id) do
     Archive.by_index(:ops, :mission_id, mission_id)
-    |> Enum.any?(&(&1[:phase_job] == true and &1[:phase] == phase))
+    |> Enum.any?(fn op ->
+      op[:phase_job] == true and op[:phase] == "validation" and
+        op.status in ["pending", "assigned", "running"]
+    end)
   end
 
   defp do_start_validation(mission, requirements, planning) do
@@ -1659,8 +1667,10 @@ defmodule GiTF.Major.Orchestrator do
     # Rollback worktree if mission has a sector
     with {:ok, %{sector_id: sid}} when is_binary(sid) <- GiTF.Missions.get(mission_id),
          %{path: path} when is_binary(path) <- Archive.get(:sectors, sid) do
-      Logger.info("Quest #{mission_id} failed: rolling back sector at #{path}")
-      GiTF.Git.rollback(path)
+      Logger.info("Quest #{mission_id} failed: non-destructive sector cleanup at #{path}")
+      # Never reset --hard / clean -fd the shared sector repo — it may hold a
+      # human's uncommitted work. Abort any in-progress merge, else stash.
+      GiTF.Git.safe_rollback(path, mission_id)
     else
       _ -> :ok
     end
@@ -2255,6 +2265,33 @@ defmodule GiTF.Major.Orchestrator do
   # -- Helpers -----------------------------------------------------------------
 
   defp budget_preflight(mission_id) do
+    case GiTF.Budget.global_check() do
+      {:ok, _remaining} ->
+        budget_preflight_mission(mission_id)
+
+      {:error, :daily_budget_exceeded, spent} ->
+        Logger.warning(
+          "Quest #{mission_id} blocked: factory daily budget exceeded ($#{Float.round(spent, 2)} in last 24h)"
+        )
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :budget_blocked,
+          "Factory daily budget exceeded ($#{Float.round(spent, 2)} in last 24h) — blocking new missions"
+        )
+
+        {:error, :daily_budget_exceeded}
+    end
+  rescue
+    e ->
+      # Fail-closed: a budget check we cannot complete must NOT admit work.
+      Logger.warning(
+        "Budget preflight crashed for #{mission_id}: #{Exception.message(e)} — blocking"
+      )
+
+      {:error, :budget_check_failed}
+  end
+
+  defp budget_preflight_mission(mission_id) do
     case GiTF.Budget.preflight_check(mission_id) do
       :ok ->
         :ok
@@ -2285,11 +2322,12 @@ defmodule GiTF.Major.Orchestrator do
     end
   rescue
     e ->
+      # Fail-closed: an unverifiable budget must not admit work.
       Logger.warning(
-        "Budget preflight check failed for #{mission_id}: #{Exception.message(e)}, allowing"
+        "Budget preflight check failed for #{mission_id}: #{Exception.message(e)} — blocking"
       )
 
-      :ok
+      {:error, :budget_check_failed}
   end
 
   defp provider_preflight do

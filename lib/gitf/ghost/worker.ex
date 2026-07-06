@@ -56,12 +56,26 @@ defmodule GiTF.Ghost.Worker do
           sector_id: String.t(),
           shell_id: String.t() | nil,
           handle: handle(),
+          os_pid: pos_integer() | nil,
+          started_at: integer() | nil,
           execution_mode: :api | :cli | :ollama | :bedrock,
-          status: :provisioning | :running | :done | :failed,
+          status: :provisioning | :running | :retrying | :done | :failed,
           gitf_root: String.t(),
           output: iodata(),
+          output_bytes: non_neg_integer(),
           parsed_events: [map()]
         }
+
+  # Cap on retained ghost output. A runaway ghost can emit unbounded text;
+  # we keep only the most recent bytes (which carry the verdict/tail the
+  # pipeline actually parses). Slack avoids re-collapsing on every chunk.
+  @output_cap_bytes 4_000_000
+  @output_slack_bytes 1_000_000
+
+  # Retain only the most recent parsed events (newest-first) so a long-running
+  # ghost's event list can't grow the heap without bound. Recent events are
+  # what cost/context tracking reads; older ones are already accounted for.
+  @max_parsed_events 2_000
 
   # -- Child spec --------------------------------------------------------------
 
@@ -157,10 +171,13 @@ defmodule GiTF.Ghost.Worker do
       sector_id: sector_id,
       shell_id: nil,
       handle: nil,
+      os_pid: nil,
+      started_at: nil,
       execution_mode: GiTF.Runtime.ModelResolver.execution_mode(),
       status: :provisioning,
       gitf_root: gitf_root,
       output: [],
+      output_bytes: 0,
       parsed_events: [],
       opts: opts,
       backup_timer: schedule_checkpoint(),
@@ -175,6 +192,20 @@ defmodule GiTF.Ghost.Worker do
 
   @impl true
   def handle_continue(:provision, state) do
+    # Rate-limit agent spawning WITHOUT blocking the mailbox: if the limiter
+    # asks us to wait, reschedule provisioning via send_after rather than
+    # Process.sleep, so a :stop during startup backoff is still processed.
+    case GiTF.RateLimiter.acquire(GiTF.RateLimiter) do
+      {:ok, delay_ms} when is_integer(delay_ms) and delay_ms > 0 ->
+        Process.send_after(self(), :provision, delay_ms)
+        {:noreply, state}
+
+      _ ->
+        do_provision(state)
+    end
+  end
+
+  defp do_provision(state) do
     case provision(state) do
       {:ok, updated_state} ->
         {:noreply, updated_state}
@@ -234,11 +265,14 @@ defmodule GiTF.Ghost.Worker do
     # Track context usage from events
     track_context_usage(state.ghost_id, events)
 
+    {output, output_bytes} = append_output(state.output, state.output_bytes, data)
+
     {:noreply,
      %{
        state
-       | output: [state.output, data],
-         parsed_events: Enum.reverse(events) ++ state.parsed_events,
+       | output: output,
+         output_bytes: output_bytes,
+         parsed_events: cap_events(events, state.parsed_events),
          last_activity_at: System.monotonic_time(:second)
      }}
   end
@@ -310,10 +344,13 @@ defmodule GiTF.Ghost.Worker do
         {:stop, :normal, %{state | status: :failed, handle: nil}}
 
       true ->
+        {output, output_bytes} = append_output(state.output, state.output_bytes, text)
+
         state = %{
           state
-          | parsed_events: Enum.reverse(events) ++ state.parsed_events,
-            output: [state.output, text],
+          | parsed_events: cap_events(events, state.parsed_events),
+            output: output,
+            output_bytes: output_bytes,
             handle: nil
         }
 
@@ -335,29 +372,48 @@ defmodule GiTF.Ghost.Worker do
 
     cond do
       retry_same_model?(reason, state) ->
-        case respawn_current_model(state) do
-          {:ok, new_task} ->
-            Logger.info(
-              "Ghost #{state.ghost_id} retrying same model " <>
-                "(retry #{state.same_model_retries + 1}/#{@max_same_model_retries}) after #{inspect(reason)}"
-            )
+        backoff = same_model_backoff_ms(state.same_model_retries)
 
-            {:noreply,
-             %{
-               state
-               | handle: {:task, new_task},
-                 same_model_retries: state.same_model_retries + 1,
-                 first_error: state.first_error || reason
-             }}
+        Logger.info(
+          "Ghost #{state.ghost_id} scheduling same-model retry " <>
+            "(retry #{state.same_model_retries + 1}/#{@max_same_model_retries}) in #{backoff}ms after #{inspect(reason)}"
+        )
 
-          :error ->
-            # Couldn't respawn — fall through to fallback path
-            fallback_or_fail(reason, state)
-        end
+        # Non-blocking backoff: schedule the respawn instead of Process.sleep so
+        # the worker stays responsive to :stop and :verify_beacon during the
+        # wait. Status :retrying parks the heartbeat (see the non-running
+        # :verify_beacon clause); the respawn handler re-arms it.
+        Process.send_after(self(), {:respawn_same_model, reason}, backoff)
+
+        {:noreply,
+         %{
+           state
+           | status: :retrying,
+             handle: nil,
+             same_model_retries: state.same_model_retries + 1,
+             first_error: state.first_error || reason
+         }}
 
       true ->
         fallback_or_fail(reason, state)
     end
+  end
+
+  def handle_info({:respawn_same_model, reason}, %{status: :retrying} = state) do
+    case respawn_current_model(state) do
+      {:ok, new_task} ->
+        # Re-arm the heartbeat — it stopped rescheduling while status != :running.
+        Process.send_after(self(), :verify_beacon, timeout_cfg(:heartbeat_interval_ms, 15_000))
+        {:noreply, %{state | handle: {:task, new_task}, status: :running}}
+
+      :error ->
+        fallback_or_fail(reason, state)
+    end
+  end
+
+  def handle_info({:respawn_same_model, _reason}, state) do
+    # Status changed (stopped/failed) before the scheduled retry fired — ignore.
+    {:noreply, state}
   end
 
   def handle_info(
@@ -431,6 +487,9 @@ defmodule GiTF.Ghost.Worker do
     {:noreply, state}
   end
 
+  # Deferred provisioning retry — the spawn rate limiter asked us to back off.
+  def handle_info(:provision, state), do: handle_continue(:provision, state)
+
   # Recurring heartbeat — checks process health and activity staleness.
   # Timeouts live in `config :gitf, :timeouts` (see config/config.exs) so ops
   # can tune them at runtime without editing source.
@@ -439,11 +498,22 @@ defmodule GiTF.Ghost.Worker do
     now = System.monotonic_time(:second)
     idle_seconds = now - state.last_activity_at
     stale_threshold = timeout_cfg(:stale_threshold_seconds, 120)
+    max_wallclock = timeout_cfg(:max_wallclock_seconds, 3_600)
+    wall_seconds = now - (state.started_at || now)
 
     cond do
       not alive? ->
         Logger.warning("Ghost #{state.ghost_id}: process is dead")
         mark_failed(state, "Underlying process died")
+        {:stop, :normal, %{state | status: :failed}}
+
+      wall_seconds > max_wallclock ->
+        Logger.warning(
+          "Ghost #{state.ghost_id}: exceeded wall-clock cap (#{wall_seconds}s > #{max_wallclock}s), killing"
+        )
+
+        kill_handle(state)
+        mark_failed(state, "Exceeded wall-clock cap of #{max_wallclock} seconds")
         {:stop, :normal, %{state | status: :failed}}
 
       idle_seconds > stale_threshold ->
@@ -550,6 +620,11 @@ defmodule GiTF.Ghost.Worker do
         Task.shutdown(task, timeout)
 
       {:port, port} ->
+        # Port.close alone does not kill an unresponsive OS process — signal
+        # the real pid too so a graceful stop can't leak a running subprocess.
+        os_pid = state.os_pid || GiTF.Runtime.OsProc.port_pid(port)
+        GiTF.Runtime.OsProc.terminate_async(os_pid, [])
+
         try do
           if port_alive?(port), do: Port.close(port)
         rescue
@@ -575,6 +650,14 @@ defmodule GiTF.Ghost.Worker do
         Task.shutdown(task, :brutal_kill)
 
       {:port, port} ->
+        # Port.close alone does NOT kill an OS process that isn't reading
+        # stdin — it would keep running, holding the worktree and burning
+        # API spend. Signal the real OS pid (SIGTERM→SIGKILL) first, then
+        # close the port. Async so the worker's stop path isn't blocked on
+        # the grace period.
+        os_pid = state.os_pid || GiTF.Runtime.OsProc.port_pid(port)
+        GiTF.Runtime.OsProc.terminate_async(os_pid, [])
+
         try do
           Port.close(port)
         rescue
@@ -584,6 +667,28 @@ defmodule GiTF.Ghost.Worker do
       nil ->
         :ok
     end
+  end
+
+  # Append to the retained output buffer, keeping only the most recent
+  # @output_cap_bytes. Slack avoids collapsing to a binary on every chunk:
+  # we only truncate once accumulation exceeds cap + slack.
+  defp append_output(output, output_bytes, data) do
+    data_bytes = byte_size(IO.iodata_to_binary(data))
+    combined = [output, data]
+    total = output_bytes + data_bytes
+
+    if total > @output_cap_bytes + @output_slack_bytes do
+      bin = IO.iodata_to_binary(combined)
+      kept = binary_part(bin, byte_size(bin) - @output_cap_bytes, @output_cap_bytes)
+      {kept, @output_cap_bytes}
+    else
+      {combined, total}
+    end
+  end
+
+  # Prepend new events (newest-first) and bound the retained list.
+  defp cap_events(events, existing) do
+    (Enum.reverse(events) ++ existing) |> Enum.take(@max_parsed_events)
   end
 
   defp save_crash_context(state) do
@@ -638,12 +743,6 @@ defmodule GiTF.Ghost.Worker do
   # -- Private: provisioning ---------------------------------------------------
 
   defp provision(state) do
-    # Rate limit agent spawning to avoid API throttling
-    case GiTF.RateLimiter.acquire(GiTF.RateLimiter) do
-      :ok -> :ok
-      {:ok, delay_ms} -> Process.sleep(delay_ms)
-    end
-
     cond do
       Keyword.get(state.opts, :revive, false) ->
         provision_revive(state)
@@ -863,7 +962,34 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp attach_handle(state, shell, handle) do
-    %{state | shell_id: shell.id, status: :running, handle: handle}
+    os_pid =
+      case handle do
+        {:port, port} -> GiTF.Runtime.OsProc.port_pid(port)
+        _ -> nil
+      end
+
+    # Persist the OS pid on the ghost record so external supervisors (Janitor
+    # hard-stall recovery, Ghosts.stop) can kill a wedged ghost's subprocess
+    # even when the Worker GenServer itself is unresponsive.
+    persist_os_pid(state.ghost_id, os_pid)
+
+    %{
+      state
+      | shell_id: shell.id,
+        status: :running,
+        handle: handle,
+        os_pid: os_pid,
+        started_at: System.monotonic_time(:second)
+    }
+  end
+
+  defp persist_os_pid(_ghost_id, nil), do: :ok
+
+  defp persist_os_pid(ghost_id, os_pid) do
+    Archive.update(:ghosts, ghost_id, fn ghost -> Map.put(ghost, :pid, os_pid) end)
+    :ok
+  rescue
+    _ -> :ok
   end
 
   defp provision_revive(state) do
@@ -1886,6 +2012,14 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
+  # Backoff before a same-model retry so an empty-response / timeout loop can't
+  # thrash the API. Bounded (retries cap at 2) and short; the factory daily
+  # budget cap is the hard cost backstop. Applied via send_after (see the retry
+  # scheduler), NOT Process.sleep, so it never blocks the worker mailbox.
+  defp same_model_backoff_ms(retries) do
+    min(500 * (retries + 1) * (retries + 1), 4_000)
+  end
+
   defp respawn_current_model(state) do
     with %{worktree_path: path} <- Archive.get(:shells, state.shell_id) do
       prompt = build_prompt(state)
@@ -1960,8 +2094,17 @@ defmodule GiTF.Ghost.Worker do
 
   defp update_ghost_status(ghost_id, status) do
     case Archive.update(:ghosts, ghost_id, fn ghost -> %{ghost | status: status} end) do
-      {:ok, _} -> :ok
-      _ -> :ok
+      {:ok, _} ->
+        :ok
+
+      other ->
+        # A failed terminal-status write leaves a dead ghost marked "working",
+        # which corrupts pool-saturation and stall detection. Surface it.
+        Logger.warning(
+          "Ghost #{ghost_id}: failed to persist status #{inspect(status)}: #{inspect(other)}"
+        )
+
+        :ok
     end
   end
 

@@ -44,7 +44,7 @@ defmodule GiTF.Application do
     # Derive store dir from gitf_root unless explicitly overridden (tests do this).
     store_dir = Application.get_env(:gitf, :store_dir, Path.join(gitf_root, ".gitf/store"))
 
-    setup_file_logging()
+    setup_file_logging(gitf_root)
 
     # Keys must load before any supervised child may use them
     GiTF.Runtime.Keys.load()
@@ -101,6 +101,10 @@ defmodule GiTF.Application do
       # ETS heir must start before Archive so Archive's cache can be made recoverable
       GiTF.Archive.TableHeir,
       {GiTF.Archive, data_dir: store_dir},
+      # Per-collection write serializers: same collection → same partition
+      # (atomic RMW), different collections → parallel. Starts after Archive so
+      # the ETS tables + dirty set exist.
+      {PartitionSupervisor, child_spec: GiTF.Archive.Writer, name: GiTF.Archive.Writers},
       {Registry, keys: :unique, name: GiTF.Registry},
       {Task.Supervisor, name: GiTF.TaskSupervisor},
       # Deferred init — non-critical one-shot work under supervision. Runs after
@@ -165,7 +169,10 @@ defmodule GiTF.Application do
         {Supervisor, :start_link,
          [
            interface_children,
-           [strategy: :one_for_one, name: GiTF.Interface.Supervisor]
+           # A generous restart budget: for a long-running autonomous system a
+           # flapping endpoint must not collapse the whole interface subtree via
+           # the tight default 3/5s.
+           [strategy: :one_for_one, name: GiTF.Interface.Supervisor, max_restarts: 10, max_seconds: 60]
          ]}
     }
 
@@ -180,7 +187,7 @@ defmodule GiTF.Application do
              {GiTF.Plugin.ChannelSupervisor, []},
              {GiTF.Plugin.Manager, []}
            ],
-           [strategy: :one_for_one, name: GiTF.Plugin.Supervisor]
+           [strategy: :one_for_one, name: GiTF.Plugin.Supervisor, max_restarts: 10, max_seconds: 60]
          ]}
     }
 
@@ -297,7 +304,10 @@ defmodule GiTF.Application do
         ]
       end
 
-    bg_children = bg ++ optional
+    # Aramaki (PM/admission layer) is opt-in — only supervise it when enabled.
+    aramaki = if GiTF.Aramaki.enabled?(), do: [{GiTF.Aramaki, []}], else: []
+
+    bg_children = bg ++ optional ++ aramaki
 
     [
       %{
@@ -398,11 +408,21 @@ defmodule GiTF.Application do
     _ -> :ok
   end
 
-  defp setup_file_logging do
-    log_file = Path.join(File.cwd!(), "section.log")
+  defp setup_file_logging(gitf_root) do
+    # Keep logs inside the workspace's .gitf dir (not the cwd, where they
+    # polluted the repo) and cap total size: :logger_std_h rotates at
+    # max_no_bytes and keeps max_no_files archives (~250 MB ceiling here),
+    # so section.log can no longer grow without bound.
+    log_dir = Path.join(gitf_root, ".gitf/logs")
+    File.mkdir_p(log_dir)
+    log_file = Path.join(log_dir, "section.log")
 
     :logger.add_handler(:gitf_file, :logger_std_h, %{
-      config: %{file: String.to_charlist(log_file)},
+      config: %{
+        file: String.to_charlist(log_file),
+        max_no_bytes: 50_000_000,
+        max_no_files: 5
+      },
       formatter:
         {GiTF.LogFormatter,
          %{

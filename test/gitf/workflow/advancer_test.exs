@@ -42,6 +42,66 @@ defmodule GiTF.Workflow.AdvancerTest do
     end
   end
 
+  describe "decide/2 — operator gates" do
+    defp gated_planning_workflow do
+      build_workflow([
+        %Phase{
+          id: "planning",
+          next: "implementation",
+          gate: %{when: "mission.review_plan == true", action: :await_operator}
+        },
+        %Phase{id: "implementation", next: "end"}
+      ])
+    end
+
+    test "blocks advance when the gate is active and uncleared" do
+      m = insert_mission!(%{current_phase: "planning", review_plan: true})
+      {:ok, _} = GiTF.Missions.store_artifact(m.id, "planning", %{"specs" => []})
+      m = GiTF.Archive.get(:missions, m.id)
+
+      assert {:wait, "planning"} = Advancer.decide(m, gated_planning_workflow())
+    end
+
+    test "advances once the operator clears the gate" do
+      m = insert_mission!(%{current_phase: "planning", review_plan: true})
+      {:ok, _} = GiTF.Missions.store_artifact(m.id, "planning", %{"specs" => []})
+      {:ok, _} = GiTF.Missions.clear_gate(m.id, "planning")
+      m = GiTF.Archive.get(:missions, m.id)
+
+      assert {:dispatch, "implementation"} = Advancer.decide(m, gated_planning_workflow())
+    end
+
+    test "does not block when the gate condition is false" do
+      m = insert_mission!(%{current_phase: "planning", review_plan: false})
+      {:ok, _} = GiTF.Missions.store_artifact(m.id, "planning", %{"specs" => []})
+      m = GiTF.Archive.get(:missions, m.id)
+
+      assert {:dispatch, "implementation"} = Advancer.decide(m, gated_planning_workflow())
+    end
+
+    test "always-on gate (when: true) blocks until cleared" do
+      w =
+        build_workflow([
+          %Phase{
+            id: "review",
+            next: "publish",
+            gate: %{when: "true", action: :await_operator}
+          },
+          %Phase{id: "publish", next: "end"}
+        ])
+
+      m = insert_mission!(%{current_phase: "review"})
+      {:ok, _} = GiTF.Missions.store_artifact(m.id, "review", %{"summary" => "x"})
+      m = GiTF.Archive.get(:missions, m.id)
+
+      assert {:wait, "review"} = Advancer.decide(m, w)
+
+      {:ok, _} = GiTF.Missions.clear_gate(m.id, "review")
+      m = GiTF.Archive.get(:missions, m.id)
+      assert {:dispatch, "publish"} = Advancer.decide(m, w)
+    end
+  end
+
   describe "decide/2 — verdict + branching" do
     test ":wait when current phase has no artifact yet" do
       m = insert_mission!()

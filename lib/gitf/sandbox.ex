@@ -26,6 +26,40 @@ defmodule GiTF.Sandbox do
   end
 
   @doc """
+  Whether sandboxing is enabled (config `[:gitf, :sandbox_enabled]`, default
+  true). Lets an operator disable sandboxing globally if a profile proves too
+  restrictive for their toolchain.
+  """
+  def enabled? do
+    Application.get_env(:gitf, :sandbox_enabled, true) != false
+  end
+
+  @doc """
+  Returns `{cmd, args}` for running `sh -c command` through the configured
+  kernel sandbox, or the unsandboxed `{"sh", ["-c", command]}` when no real
+  sandbox is enabled/available. Intended for `System.cmd/3`.
+
+  Use this for executing AI-authored test/validation commands so they cannot
+  damage the host outside the worktree.
+  """
+  @spec wrap_shell(String.t(), keyword()) :: {String.t(), [String.t()]}
+  def wrap_shell(command, opts \\ []) do
+    cwd = Keyword.get(opts, :cd, File.cwd!())
+    risk = Keyword.get(opts, :risk_level, :low)
+
+    if enabled?() and available?() and name() != "local" do
+      {sb_cmd, sb_args, _} = wrap_command("sh", ["-c", command], cd: cwd, risk_level: risk)
+
+      case System.find_executable(sb_cmd) do
+        nil -> {"sh", ["-c", command]}
+        _ -> {sb_cmd, sb_args}
+      end
+    else
+      {"sh", ["-c", command]}
+    end
+  end
+
+  @doc """
   Returns the name of the active sandbox adapter.
   """
   def name do

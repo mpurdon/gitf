@@ -327,6 +327,9 @@ defmodule GiTF.Web.ApiController do
 
     {:ok, ops} = GiTF.Major.Planner.create_jobs_from_specs(mission_id, specs)
     GiTF.Missions.store_artifact(mission_id, "planning", specs)
+    # Clearing the planning gate is what lets a review_plan mission advance
+    # past planning into implementation — the operator has approved the plan.
+    GiTF.Missions.clear_gate(mission_id, "planning")
     json(conn, %{data: %{mission_id: mission_id, jobs_created: length(ops)}})
   end
 

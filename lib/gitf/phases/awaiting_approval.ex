@@ -81,16 +81,40 @@ defmodule GiTF.Phases.AwaitingApproval do
       timeout_h = Approval.timeout_hours()
 
       if Approval.mission_max_risk(mission.id) == :critical do
-        Logger.warning(
-          "Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve"
-        )
+        # Never auto-approve critical work — but don't wait forever either.
+        # Past the terminal escalation window with no human decision, fail
+        # the mission (fail-safe: unreviewed critical work is not merged).
+        if Approval.critical_escalation_timed_out?(mission.id) do
+          esc_h = Approval.critical_escalation_hours()
 
-        GiTF.Observability.Alerts.dispatch_webhook(
-          :approval_timeout_critical,
-          "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval"
-        )
+          Logger.warning(
+            "Quest #{mission.id} critical-risk and unapproved after #{esc_h}h escalation window — failing (fail-safe)"
+          )
 
-        :wait
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :approval_escalation_failed,
+            "Quest #{mission.id} critical-risk auto-FAILED: no human approval within #{esc_h}h"
+          )
+
+          GiTF.Override.reject(
+            mission.id,
+            "No human approval within critical escalation window",
+            %{rejected_by: "auto_escalation"}
+          )
+
+          :terminal_fail
+        else
+          Logger.warning(
+            "Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve"
+          )
+
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :approval_timeout_critical,
+            "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval"
+          )
+
+          :wait
+        end
       else
         if Approval.revalidate(mission) do
           Logger.info(

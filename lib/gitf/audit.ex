@@ -196,9 +196,11 @@ defmodule GiTF.Audit do
   @validation_timeout_ms 120_000
 
   defp run_validation_command(shell, command) do
+    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(command, cd: shell.worktree_path)
+
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-c", command],
+        System.cmd(cmd, cmd_args,
           cd: shell.worktree_path,
           stderr_to_stdout: true
         )

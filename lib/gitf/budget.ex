@@ -7,6 +7,8 @@ defmodule GiTF.Budget do
   """
 
   @default_budget_usd 10.0
+  @default_daily_budget_usd 100.0
+  @rolling_window_seconds 24 * 60 * 60
 
   @doc """
   Checks whether a mission is within budget.
@@ -45,6 +47,54 @@ defmodule GiTF.Budget do
     case GiTF.Config.Provider.get([:costs, :budget_usd]) do
       val when is_number(val) and val > 0 -> val * 1.0
       _ -> @default_budget_usd
+    end
+  end
+
+  @doc """
+  Factory-wide daily spend cap (rolling 24h) from config.
+
+  This is the global safety ceiling that per-mission budgets sit beneath —
+  it bounds total spend across *all* missions and unbounded concurrency.
+  """
+  @spec daily_budget() :: float()
+  def daily_budget do
+    case GiTF.Config.Provider.get([:costs, :daily_budget_usd]) do
+      val when is_number(val) and val > 0 -> val * 1.0
+      _ -> @default_daily_budget_usd
+    end
+  end
+
+  @doc "Total USD spent across all missions within the rolling 24h window."
+  @spec global_spent() :: float()
+  def global_spent do
+    cutoff = DateTime.add(DateTime.utc_now(), -@rolling_window_seconds, :second)
+
+    GiTF.Archive.all(:costs)
+    |> Enum.filter(fn cost ->
+      case Map.get(cost, :recorded_at) do
+        %DateTime{} = ts -> DateTime.compare(ts, cutoff) != :lt
+        # No timestamp: count it (fail-safe — err toward including spend).
+        _ -> true
+      end
+    end)
+    |> GiTF.Costs.total()
+  end
+
+  @doc """
+  Fail-closed factory-wide budget check. Refuses new work once rolling-24h
+  spend reaches the daily cap.
+
+  Returns `{:ok, remaining}` or `{:error, :daily_budget_exceeded, spent}`.
+  """
+  @spec global_check() :: {:ok, float()} | {:error, :daily_budget_exceeded, float()}
+  def global_check do
+    cap = daily_budget()
+    spent = global_spent()
+
+    if spent < cap do
+      {:ok, Float.round(cap - spent, 6)}
+    else
+      {:error, :daily_budget_exceeded, spent}
     end
   end
 

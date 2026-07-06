@@ -2,9 +2,11 @@ defmodule GiTF.SectorSupervisor do
   @moduledoc """
   DynamicSupervisor for ghost processes.
 
-  Each ghost runs as a temporary child under this supervisor. When a ghost
-  crashes or finishes, it is not automatically restarted -- the Major
-  decides whether to respawn.
+  Each ghost runs as a `:transient` child (see `GiTF.Ghost.Worker`'s
+  child_spec): a clean `:normal` exit is not restarted, but an abnormal crash
+  IS restarted by this supervisor, at which point the worker auto-resumes from
+  its last checkpoint (`provision_auto_resume`). The Major coordinates ops but
+  does not hand-roll ghost restarts.
 
   The supervisor itself uses `:one_for_one` strategy and lives in the
   Application supervision tree. It starts empty and children are added
@@ -31,6 +33,19 @@ defmodule GiTF.SectorSupervisor do
           DynamicSupervisor.on_start_child()
   def start_child(child_spec) do
     DynamicSupervisor.start_child(@name, child_spec)
+  end
+
+  @doc """
+  Terminates a ghost worker child via the supervisor.
+
+  Unlike `Process.exit(pid, :kill)`, a supervisor-initiated termination does
+  **not** count as a restart, so a `:transient` worker is not revived into a
+  second subprocess for the same op. Gives the worker's `terminate/2` a
+  chance to run (killing its OS subprocess) before shutdown.
+  """
+  @spec terminate_child(pid()) :: :ok | {:error, :not_found}
+  def terminate_child(pid) when is_pid(pid) do
+    DynamicSupervisor.terminate_child(@name, pid)
   end
 
   @doc "Returns the count of active children."

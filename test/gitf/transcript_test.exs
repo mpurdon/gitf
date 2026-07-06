@@ -71,6 +71,28 @@ defmodule GiTF.TranscriptTest do
       assert cost.model == "claude-sonnet-4-20250514"
     end
 
+    test "counts cache tokens from the real Claude CLI usage keys" do
+      # The Claude CLI stream-json emits the Anthropic API usage key names.
+      # These must be counted (previously read as the never-present
+      # cache_read_tokens/cache_write_tokens and silently dropped to $0).
+      entries = [
+        %{
+          "type" => "result",
+          "usage" => %{
+            "input_tokens" => 1000,
+            "output_tokens" => 500,
+            "cache_read_input_tokens" => 8000,
+            "cache_creation_input_tokens" => 1200
+          },
+          "model" => "claude-sonnet-4-20250514"
+        }
+      ]
+
+      [cost] = Transcript.extract_costs(entries)
+      assert cost.cache_read_tokens == 8000
+      assert cost.cache_write_tokens == 1200
+    end
+
     test "returns empty list when no result entries exist" do
       entries = [
         %{"type" => "user", "message" => "hello"},

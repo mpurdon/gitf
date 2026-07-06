@@ -86,16 +86,41 @@ defmodule GiTF.Approval do
       timeout_h = timeout_hours()
 
       if mission_max_risk(mission.id) == :critical do
-        Logger.warning(
-          "Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve"
-        )
+        # Critical-risk missions never auto-approve. But they must not wait
+        # forever either — the mission max-age/cost caps exempt
+        # awaiting_approval, so without a terminal window an unattended
+        # critical mission stalls indefinitely. After a long escalation
+        # grace with no human decision, fail (reject) it: NOT merging
+        # unreviewed critical work is the fail-safe outcome.
+        if critical_escalation_timed_out?(mission.id) do
+          esc_h = critical_escalation_hours()
 
-        Observability.Alerts.dispatch_webhook(
-          :approval_timeout_critical,
-          "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval"
-        )
+          Logger.warning(
+            "Quest #{mission.id} critical-risk and unapproved after #{esc_h}h escalation window — failing (fail-safe, not merging)"
+          )
 
-        {:ok, "awaiting_approval"}
+          Observability.Alerts.dispatch_webhook(
+            :approval_escalation_failed,
+            "Quest #{mission.id} critical-risk auto-FAILED: no human approval within #{esc_h}h"
+          )
+
+          Override.reject(mission.id, "No human approval within critical escalation window", %{
+            rejected_by: "auto_escalation"
+          })
+
+          Missions.fail_quest(mission.id, "Critical-risk approval timed out (#{esc_h}h)")
+        else
+          Logger.warning(
+            "Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve"
+          )
+
+          Observability.Alerts.dispatch_webhook(
+            :approval_timeout_critical,
+            "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval"
+          )
+
+          {:ok, "awaiting_approval"}
+        end
       else
         if revalidate(mission) do
           Logger.info(
@@ -182,6 +207,34 @@ defmodule GiTF.Approval do
   """
   @spec timeout_hours() :: number()
   def timeout_hours, do: ConfigProvider.get([:approvals, :timeout_hours], 1)
+
+  @doc """
+  Terminal escalation window (hours) for critical-risk missions that never
+  received a human decision. Past this, the mission is failed rather than
+  left waiting forever. Configurable via `[:approvals,
+  :critical_escalation_hours]` (defaults to 24).
+  """
+  @spec critical_escalation_hours() :: number()
+  def critical_escalation_hours,
+    do: ConfigProvider.get([:approvals, :critical_escalation_hours], 24)
+
+  @doc """
+  Has a pending critical-risk approval exceeded the terminal escalation
+  window (measured from the request time)?
+  """
+  @spec critical_escalation_timed_out?(String.t()) :: boolean()
+  def critical_escalation_timed_out?(mission_id) do
+    case Archive.find_one(:approval_requests, fn r ->
+           r.mission_id == mission_id and r.status == "pending"
+         end) do
+      nil ->
+        false
+
+      request ->
+        hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
+        hours_elapsed > critical_escalation_hours()
+    end
+  end
 
   @doc """
   The highest `risk_level` across a mission's ops. Used by the

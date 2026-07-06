@@ -128,8 +128,12 @@ defmodule GiTF.Ghosts do
          {:transition, :ok} <- {:transition, maybe_transition_job(op_id)},
          {:agent, :ok} <- {:agent, maybe_ensure_agent(op_id, sector_id, shell)},
          {:dispatch, :ok} <- {:dispatch, write_pre_dispatch(shell.worktree_path, op_id)},
-         {:spawn, {:ok, _os_pid}} <-
+         {:spawn, {:ok, detached_pid}} <-
            {:spawn, spawn_model_detached(ghost.id, op_id, shell, gitf_root)} do
+      # Persist the detached OS pid so it can be killed later (crash cleanup,
+      # Ghosts.stop). Without this a detached ghost is orphaned by design.
+      store_detached_pid(ghost.id, detached_pid)
+
       GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{
         ghost_id: ghost.id,
         op_id: op_id,
@@ -252,7 +256,45 @@ defmodule GiTF.Ghosts do
   """
   @spec stop(String.t(), timeout()) :: :ok | {:error, :not_found}
   def stop(ghost_id, timeout \\ 5_000) do
-    GiTF.Ghost.Worker.stop(ghost_id, timeout)
+    # Prefer a graceful Worker stop — its terminate path already OS-kills the
+    # subprocess. Only when there is NO supervised worker (a detached CLI
+    # ghost) do we kill the recorded OS pid directly; doing it unconditionally
+    # would race the worker into self-terminating before Worker.stop runs.
+    case GiTF.Ghost.Worker.stop(ghost_id, timeout) do
+      {:error, :not_found} ->
+        case kill_detached_pid(ghost_id) do
+          :killed -> :ok
+          _ -> {:error, :not_found}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  # Persist the OS pid of a detached ghost onto its record.
+  defp store_detached_pid(_ghost_id, nil), do: :ok
+
+  defp store_detached_pid(ghost_id, os_pid) do
+    Archive.update(:ghosts, ghost_id, fn ghost -> Map.put(ghost, :pid, os_pid) end)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  # Terminate the detached OS process recorded for a ghost, if any.
+  # Returns `:killed` when a pid was found and signalled, `:none` otherwise.
+  defp kill_detached_pid(ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
+      %{pid: os_pid} when not is_nil(os_pid) ->
+        GiTF.Runtime.OsProc.terminate(os_pid, [])
+        :killed
+
+      _ ->
+        :none
+    end
+  rescue
+    _ -> :none
   end
 
   @doc """

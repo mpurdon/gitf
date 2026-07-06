@@ -296,8 +296,79 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  Non-destructive failure cleanup for a repository's **working tree**.
+
+  Unlike `rollback/1`, this NEVER runs `reset --hard` or `clean -fd` on a
+  tree that may contain a human's uncommitted work. It:
+
+    1. Aborts an in-progress merge / rebase / cherry-pick (the mission's own
+       operation — safe to abort, and it only undoes that operation).
+    2. If the tree is otherwise dirty, preserves the changes in a labeled
+       `git stash` (recoverable) rather than deleting them.
+    3. Otherwise does nothing.
+
+  Use this on the shared sector repo. `rollback/1` (hard reset + clean) is
+  only appropriate for a disposable ghost worktree.
+
+  Returns `:ok`, `{:ok, {:stashed, label}}`, or `{:error, reason}`.
+  """
+  @spec safe_rollback(String.t(), String.t()) ::
+          :ok | {:ok, {:stashed, String.t()}} | {:error, String.t()}
+  def safe_rollback(repo_path, label \\ "gitf") do
+    cond do
+      operation_in_progress?(repo_path) ->
+        abort_in_progress(repo_path)
+        :ok
+
+      working_tree_dirty?(repo_path) ->
+        stash_label = "gitf-failed-#{label}"
+
+        case safe_cmd(["stash", "push", "-u", "-m", stash_label],
+               cd: repo_path,
+               stderr_to_stdout: true
+             ) do
+          {_, 0} -> {:ok, {:stashed, stash_label}}
+          # Do NOT fall back to a destructive reset — leave the tree as-is.
+          {output, _} -> {:error, "stash failed (tree left intact): #{String.trim(output)}"}
+        end
+
+      true ->
+        :ok
+    end
+  end
+
+  defp operation_in_progress?(repo_path) do
+    git_dir = Path.join(repo_path, ".git")
+
+    Enum.any?(
+      ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "rebase-merge", "rebase-apply"],
+      fn marker -> File.exists?(Path.join(git_dir, marker)) end
+    )
+  end
+
+  defp abort_in_progress(repo_path) do
+    # Try each abort; only the matching one succeeds, the rest are harmless no-ops.
+    for sub <- [["merge", "--abort"], ["rebase", "--abort"], ["cherry-pick", "--abort"]] do
+      safe_cmd(sub, cd: repo_path, stderr_to_stdout: true)
+    end
+
+    :ok
+  end
+
+  defp working_tree_dirty?(repo_path) do
+    case safe_cmd(["status", "--porcelain"], cd: repo_path, stderr_to_stdout: true) do
+      {output, 0} -> String.trim(output) != ""
+      _ -> false
+    end
+  end
+
+  @doc """
   Rolls back a repository to its last committed state.
   Runs `git reset --hard HEAD` and `git clean -fd`.
+
+  DESTRUCTIVE — only safe for a disposable ghost worktree, never a shared
+  sector repo that may hold a human's uncommitted work (use `safe_rollback/2`
+  there).
   """
   @spec rollback(String.t()) :: :ok | {:error, String.t()}
   def rollback(repo_path) do

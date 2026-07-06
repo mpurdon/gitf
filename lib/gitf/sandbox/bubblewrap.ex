@@ -13,6 +13,7 @@ defmodule GiTF.Sandbox.Bubblewrap do
 
     bwrap_args =
       base_args() ++
+        home_bind_args() ++
         cwd_bind_args(cwd, risk_level) ++
         [
           "--die-with-parent",
@@ -22,6 +23,27 @@ defmodule GiTF.Sandbox.Bubblewrap do
         ] ++ args
 
     {"bwrap", bwrap_args, opts}
+  end
+
+  # AI CLIs (claude/node/git, incl. nvm-installed runtimes) need to read the
+  # user home to run, and write a few config/cache dirs. Bind home read-only
+  # for resolution, then rebind the writable config dirs. Destructive writes
+  # stay confined to these + the worktree + tmpfs /tmp.
+  defp home_bind_args do
+    case System.user_home() do
+      nil ->
+        []
+
+      home ->
+        writable =
+          for sub <- [".claude", ".config", ".cache", ".npm"],
+              path = Path.join(home, sub),
+              File.dir?(path),
+              arg <- ["--bind", path, path],
+              do: arg
+
+        ["--ro-bind", home, home] ++ writable
+    end
   end
 
   defp base_args do
