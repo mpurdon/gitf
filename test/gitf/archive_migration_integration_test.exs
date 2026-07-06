@@ -206,6 +206,8 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
     assert length(by_index) == 1
     assert hd(by_index).id == record.id
 
+    # Async persistence: flush to assert on the on-disk file.
+    :ok = GiTF.Archive.flush()
     ops_etf = Path.join(ctx.store_dir, "ops.etf")
     assert File.exists?(ops_etf)
     ops_data = File.read!(ops_etf) |> :erlang.binary_to_term([:safe])

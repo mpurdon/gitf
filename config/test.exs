@@ -15,6 +15,12 @@ config :gitf, GiTF.Dashboard.Endpoint,
 
 config :logger, level: :warning
 
+# Disable the Archive's periodic async flush in tests: they flush explicitly
+# (Archive.flush/0) where they assert on disk, and the terminate flush handles
+# graceful stops. This prevents a background disk write from racing a test's
+# temp-dir teardown.
+config :gitf, :archive_flush_interval_ms, 0
+
 # Disable OTel tracing in tests
 config :opentelemetry,
   traces_exporter: :none

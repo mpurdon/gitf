@@ -133,6 +133,8 @@ defmodule GiTF.Archive.IndexesTest do
   describe "index survives Archive restart" do
     test "by_index works after stop and restart", %{store_dir: store_dir} do
       {:ok, op} = Archive.insert(:ops, %{status: "pending", mission_id: "msn-1"})
+      # Async persistence: flush so the restart recovers from disk.
+      :ok = Archive.flush()
 
       GiTF.Test.StoreHelper.stop_store()
       {:ok, _} = Archive.start_link(data_dir: store_dir)
@@ -161,15 +163,15 @@ defmodule GiTF.Archive.IndexesTest do
     end
   end
 
-  describe "transact maintains indexes" do
-    test "indexes updated after transact touching indexed collection" do
+  describe "update maintains indexes incrementally" do
+    test "index reflects the new value and drops the old after update/3" do
       {:ok, op} = Archive.insert(:ops, %{status: "pending", mission_id: "msn-1"})
+      assert length(Archive.by_index(:ops, :status, "pending")) == 1
 
-      :ok =
-        Archive.transact(fn data ->
-          put_in(data, [:ops, op.id, :status], "blocked")
-        end)
+      {:ok, _} = Archive.update(:ops, op.id, fn o -> %{o | status: "blocked"} end)
 
+      # Incremental index diff: old value removed, new value added — no full
+      # rebuild.
       assert Archive.by_index(:ops, :status, "pending") == []
       assert length(Archive.by_index(:ops, :status, "blocked")) == 1
     end

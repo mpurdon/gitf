@@ -157,7 +157,9 @@ defmodule GiTF.Test.Simulator do
 
     case ctx do
       %{sector_path: path} when is_binary(path) ->
-        File.rm_rf!(path)
+        # Non-raising: a lingering ghost/worktree write can race the recursive
+        # delete during teardown; that must not fail an otherwise-passing test.
+        File.rm_rf(path)
 
       _ ->
         :ok

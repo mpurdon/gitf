@@ -250,13 +250,17 @@ defmodule GiTF.AgentProfile.FailureModes do
   end
 
   defp slugify(text) do
-    text
-    |> String.downcase()
-    |> String.replace(~r/[^a-z0-9\s]/, "")
-    |> String.trim()
-    |> String.replace(~r/\s+/, "_")
-    |> String.slice(0, 50)
-    |> String.to_atom()
+    slug =
+      text
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9\s]/, "")
+      |> String.trim()
+      |> String.replace(~r/\s+/, "_")
+      |> String.slice(0, 50)
+
+    # LLM-derived — bound atom creation (see GiTF.SafeAtom); collapse anything
+    # past the budget to a stable sentinel rather than risk atom exhaustion.
+    GiTF.SafeAtom.intern!(slug, :unclassified)
   end
 
   defp extract_root_cause(analysis) do

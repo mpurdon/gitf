@@ -1,15 +1,31 @@
 defmodule GiTF.Archive do
   @moduledoc """
-  Pure-Elixir key-value store backed by per-collection ETF files.
+  In-memory-first key-value store backed by per-collection ETF files.
 
-  Each collection is persisted as `<data_dir>/<collection>.etf` with a
-  `manifest.etf` tracking the known collection set. Only dirty (changed)
-  collections are re-serialized on write.
+  ETS is the source of truth; each collection is an ETS table plus a
+  `<data_dir>/<collection>.etf` file that is a lazily-flushed durable copy.
 
-  Concurrent cross-process safety is achieved via:
-  - `mkdir`-based advisory locking (POSIX `mkdir` is atomic)
-  - Atomic `rename(2)` for writes (write to `.tmp`, rename into place)
-  - Lock-free reads (readers always see a complete, consistent snapshot)
+  Concurrency model (the interesting part):
+
+    * **Reads are lock-free** — `get`/`all`/`filter`/`by_index` hit `:public,
+      read_concurrency` ETS directly from the caller.
+    * **`insert` is lock-free** — a fresh unique id can never race an existing
+      key, so inserts (the hot cost/event/op-creation paths) run concurrently
+      straight against ETS.
+    * **`put`/`update`/`delete`/`update_matching` serialize *per collection*
+      via `GiTF.Archive.Writer` under a `PartitionSupervisor`** — same
+      collection → same partition (atomic read-modify-write + index diffs),
+      different collections → parallel. Each mutation is a few microsecond ETS
+      ops with **no disk I/O** in the critical section.
+    * **Persistence is asynchronous** — writers mark a collection dirty in a
+      lock-free ETS set; a debounced persister flushes dirty collections to
+      disk (atomic tmp+rename) off the write path. `flush/0` forces a
+      synchronous flush; the store also flushes on graceful shutdown. The ETS
+      heir keeps data alive across an Archive process restart.
+
+  This replaces the previous design (a single global `mkdir` lock held across a
+  full-store read + synchronous disk write on *every* mutation), which
+  serialized all writes and made each write O(total store size).
   """
 
   use GenServer
@@ -19,10 +35,18 @@ defmodule GiTF.Archive do
 
   @name __MODULE__
   @indexes_enabled true
-  @lock_stale_seconds 120
-  @lock_steal_attempts 500
   @backup_interval_seconds 300
   @backup_generations 3
+
+  # Lock-free set of collections with un-persisted changes.
+  @dirty_table :gitf_archive_dirty
+
+  # Debounce window for the async disk flush. Short enough to bound crash-loss,
+  # long enough to batch bursts of writes into one disk write per collection.
+  @flush_interval_ms 1_000
+
+  # PartitionSupervisor name for the per-collection write serializers.
+  @writers GiTF.Archive.Writers
 
   # -- Client API ------------------------------------------------------------
 
@@ -38,14 +62,13 @@ defmodule GiTF.Archive do
     record = ensure_id(collection, record)
     record = ensure_timestamps(record)
 
-    with_lock(
-      fn data ->
-        col = Map.get(data, collection, %{})
-        col = Map.put(col, record.id, record)
-        Map.put(data, collection, col)
-      end,
-      collection
-    )
+    # Lock-free: a freshly-generated unique id cannot collide with an existing
+    # key, so the insert + index add + dirty-mark run directly against ETS from
+    # the caller with no serialization. This is the hot path (costs/events/ops).
+    ensure_table(collection)
+    :ets.insert(table_name(collection), {record.id, record})
+    Indexes.on_put(collection, nil, record)
+    mark_dirty(collection)
 
     {:ok, record}
   end
@@ -74,17 +97,7 @@ defmodule GiTF.Archive do
   @spec put(atom(), map()) :: {:ok, map()}
   def put(collection, record) do
     record = ensure_updated_at(record)
-
-    with_lock(
-      fn data ->
-        col = Map.get(data, collection, %{})
-        col = Map.put(col, record.id, record)
-        Map.put(data, collection, col)
-      end,
-      collection
-    )
-
-    {:ok, record}
+    route_write(collection, {:put, collection, record})
   end
 
   @doc """
@@ -123,69 +136,13 @@ defmodule GiTF.Archive do
   @spec update(atom(), String.t(), (map() -> any())) ::
           {:ok, map()} | {:ok, map(), map()} | {:error, term()}
   def update(collection, id, update_fn) when is_function(update_fn, 1) do
-    with_lock(
-      fn data ->
-        col = Map.get(data, collection, %{})
-
-        case Map.get(col, id) do
-          nil ->
-            {data, {:error, :not_found}}
-
-          record ->
-            try do
-              case update_fn.(record) do
-                {:error, reason} ->
-                  {data, {:error, reason}}
-
-                {:ok, updated, metadata} when is_map(updated) ->
-                  updated = ensure_updated_at(updated)
-                  col = Map.put(col, id, updated)
-                  new_data = Map.put(data, collection, col)
-                  {new_data, {:ok, updated, metadata}}
-
-                {:ok, updated} when is_map(updated) ->
-                  updated = ensure_updated_at(updated)
-                  col = Map.put(col, id, updated)
-                  new_data = Map.put(data, collection, col)
-                  {new_data, {:ok, updated}}
-
-                updated when is_map(updated) ->
-                  updated = ensure_updated_at(updated)
-                  col = Map.put(col, id, updated)
-                  new_data = Map.put(data, collection, col)
-                  {new_data, {:ok, updated}}
-
-                other ->
-                  {data, {:error, {:bad_update_fn_return, other}}}
-              end
-            rescue
-              e ->
-                Logger.error(
-                  "Archive.update closure for #{inspect(collection)}/#{id} raised: " <>
-                    Exception.format(:error, e, __STACKTRACE__)
-                )
-
-                {data, {:error, {:exception, e}}}
-            end
-        end
-      end,
-      collection
-    )
+    route_write(collection, {:update, collection, id, update_fn})
   end
 
   @doc "Deletes a record by collection and ID."
   @spec delete(atom(), String.t()) :: :ok
   def delete(collection, id) do
-    with_lock(
-      fn data ->
-        col = Map.get(data, collection, %{})
-        col = Map.delete(col, id)
-        Map.put(data, collection, col)
-      end,
-      collection
-    )
-
-    :ok
+    route_write(collection, {:delete, collection, id})
   end
 
   @doc "Returns all records in a collection."
@@ -208,10 +165,15 @@ defmodule GiTF.Archive do
     all(collection) |> Enum.find(fun)
   end
 
-  @doc "Counts records in a collection."
+  @doc "Counts records in a collection. O(1) — ETS tracks table size."
   @spec count(atom()) :: non_neg_integer()
   def count(collection) do
-    all(collection) |> length()
+    case :ets.info(table_name(collection), :size) do
+      size when is_integer(size) -> size
+      _ -> 0
+    end
+  rescue
+    ArgumentError -> 0
   end
 
   @doc "Counts records matching a filter function."
@@ -263,56 +225,155 @@ defmodule GiTF.Archive do
         |> put_in([:op_dependencies, dep.id], dep)
       end)
   """
+  @doc """
+  Forces a synchronous flush of all pending (dirty) collections to disk.
+
+  Historically this was `transact(fn data -> data end)` — a no-op mutation used
+  only as a flush barrier before shutdown/exfil. With asynchronous persistence
+  it is now an explicit synchronous flush. The `fun` argument is accepted for
+  backwards compatibility and ignored (there are no multi-collection
+  transactions in the codebase).
+  """
   @spec transact((map() -> map())) :: :ok
-  def transact(fun) when is_function(fun, 1) do
-    with_lock(fun)
-    :ok
+  def transact(_fun \\ nil) do
+    flush()
+  end
+
+  @doc "Synchronously flush all dirty collections to disk. Returns `:ok`."
+  @spec flush() :: :ok
+  def flush do
+    GenServer.call(@name, :flush, 30_000)
+  catch
+    :exit, _ -> :ok
   end
 
   @doc "Updates all matching records with an update function. Returns count updated."
   @spec update_matching(atom(), (map() -> boolean()), (map() -> map())) :: non_neg_integer()
   def update_matching(collection, filter_fun, update_fun) do
-    # Perform filter + update inside the lock to avoid TOCTOU races
-    ref = make_ref()
-    Process.put(ref, 0)
+    route_write(collection, {:update_matching, collection, filter_fun, update_fun})
+  end
 
-    with_lock(fn data ->
-      col = Map.get(data, collection, %{})
-      matching = col |> Map.values() |> Enum.filter(filter_fun)
-      Process.put(ref, length(matching))
+  # -- Write routing + low-level mutation (applied by Archive.Writer) --------
 
-      if matching == [] do
-        data
-      else
-        updated_col =
-          Enum.reduce(matching, col, fn record, acc ->
-            updated = update_fun.(record) |> ensure_updated_at()
-            Map.put(acc, record.id, updated)
-          end)
+  # Route a mutation to the per-collection writer partition. Same collection →
+  # same partition → serialized (atomic RMW + index diff); different
+  # collections → parallel.
+  defp route_write(collection, op) do
+    GenServer.call({:via, PartitionSupervisor, {@writers, collection}}, {:apply, op})
+  catch
+    # If the writer pool isn't up yet (very early boot / tests without the
+    # supervisor), apply inline — correctness holds, we just lose the
+    # cross-process serialization until the pool exists.
+    :exit, _ -> apply_write(op)
+  end
 
-        Map.put(data, collection, updated_col)
-      end
-    end)
+  @doc false
+  # Applies a single mutation against ETS + indexes + the dirty set. Called by
+  # `GiTF.Archive.Writer` (serialized per collection). NOT part of the public
+  # API — use insert/put/update/delete/update_matching.
+  def apply_write({:put, collection, record}) do
+    ensure_table(collection)
+    old = get(collection, record.id)
+    :ets.insert(table_name(collection), {record.id, record})
+    Indexes.on_put(collection, old, record)
+    mark_dirty(collection)
+    {:ok, record}
+  end
 
-    Process.delete(ref) || 0
+  def apply_write({:update, collection, id, update_fn}) do
+    case get(collection, id) do
+      nil ->
+        {:error, :not_found}
+
+      record ->
+        try do
+          case update_fn.(record) do
+            {:error, reason} -> {:error, reason}
+            {:ok, updated, meta} when is_map(updated) -> commit_update(collection, record, updated, {:meta, meta})
+            {:ok, updated} when is_map(updated) -> commit_update(collection, record, updated, nil)
+            updated when is_map(updated) -> commit_update(collection, record, updated, nil)
+            other -> {:error, {:bad_update_fn_return, other}}
+          end
+        rescue
+          e ->
+            Logger.error(
+              "Archive.update closure for #{inspect(collection)}/#{id} raised: " <>
+                Exception.format(:error, e, __STACKTRACE__)
+            )
+
+            {:error, {:exception, e}}
+        end
+    end
+  end
+
+  def apply_write({:delete, collection, id}) do
+    case get(collection, id) do
+      nil ->
+        :ok
+
+      old ->
+        :ets.delete(table_name(collection), id)
+        Indexes.on_delete(collection, old)
+        mark_dirty(collection)
+        :ok
+    end
+  end
+
+  def apply_write({:update_matching, collection, filter_fun, update_fun}) do
+    matching = collection |> all() |> Enum.filter(filter_fun)
+
+    for old <- matching do
+      updated = update_fun.(old) |> ensure_updated_at()
+      :ets.insert(table_name(collection), {updated.id, updated})
+      Indexes.on_put(collection, old, updated)
+    end
+
+    if matching != [], do: mark_dirty(collection)
+    length(matching)
+  end
+
+  # Writes `updated`, diffs the index against `old`, marks dirty, returns the
+  # caller-facing result (defaulting to `{:ok, updated}`).
+  defp commit_update(collection, old, updated_raw, meta_tag) do
+    updated = ensure_updated_at(updated_raw)
+    :ets.insert(table_name(collection), {updated.id, updated})
+    Indexes.on_put(collection, old, updated)
+    mark_dirty(collection)
+
+    case meta_tag do
+      {:meta, meta} -> {:ok, updated, meta}
+      nil -> {:ok, updated}
+    end
+  end
+
+  # Mark a collection as having un-persisted changes (lock-free).
+  defp mark_dirty(collection) do
+    :ets.insert(@dirty_table, {collection})
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # -- GenServer callbacks ---------------------------------------------------
 
   @impl true
   def init(opts) do
+    # Flush any un-persisted writes on graceful shutdown (SIGTERM / app stop).
+    Process.flag(:trap_exit, true)
+
     data_dir = Keyword.fetch!(opts, :data_dir)
     File.mkdir_p!(data_dir)
 
     # Legacy path kept for migration detection
     data_path = Path.join(data_dir, "section.etf")
-    lock_path = Path.join(data_dir, ".lock")
 
     # Archive paths in persistent_term so API functions can access them
     # without going through the GenServer process
     :persistent_term.put({__MODULE__, :data_path}, data_path)
     :persistent_term.put({__MODULE__, :data_dir}, data_dir)
-    :persistent_term.put({__MODULE__, :lock_path}, lock_path)
+
+    # Lock-free dirty set: collections with writes not yet flushed to disk.
+    ensure_dirty_table()
 
     # Create per-collection ETS tables from disk data
     init_store()
@@ -320,31 +381,122 @@ defmodule GiTF.Archive do
     # Run migrations after store is initialized
     GiTF.Migrations.migrate!()
 
-    {:ok, %{data_dir: data_dir, data_path: data_path, lock_path: lock_path}}
+    schedule_flush()
+
+    {:ok, %{data_dir: data_dir, data_path: data_path}}
+  end
+
+  @impl true
+  def handle_call(:flush, _from, state) do
+    flush_dirty()
+    {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_info(:flush, state) do
+    flush_dirty()
+    schedule_flush()
+    {:noreply, state}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, _state) do
+    # Best-effort final flush so a graceful stop doesn't drop the debounce
+    # window's worth of writes. Skipped when the periodic flush is disabled
+    # (tests) so stopping the store can't write into a temp dir a test is
+    # concurrently tearing down — those tests flush explicitly instead.
+    if async_flush_enabled?(), do: flush_dirty()
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp async_flush_enabled? do
+    case Application.get_env(:gitf, :archive_flush_interval_ms, @flush_interval_ms) do
+      ms when is_integer(ms) and ms > 0 -> true
+      _ -> false
+    end
+  end
+
+  defp schedule_flush do
+    # Interval is configurable; <= 0 disables the periodic timer (used in tests,
+    # which flush explicitly + rely on the terminate flush) so a background disk
+    # write can't race a test's temp-dir teardown.
+    if async_flush_enabled?() do
+      Process.send_after(
+        self(),
+        :flush,
+        Application.get_env(:gitf, :archive_flush_interval_ms, @flush_interval_ms)
+      )
+    end
+  end
+
+  defp ensure_dirty_table do
+    case :ets.info(@dirty_table) do
+      :undefined -> :ets.new(@dirty_table, [:named_table, :public, :set, write_concurrency: true])
+      _ -> :ok
+    end
+  rescue
+    ArgumentError -> :ok
+  end
+
+  # Persist every collection currently marked dirty. Clear each dirty mark
+  # BEFORE serializing its ETS: a write landing during serialization re-marks
+  # the collection (writers mark dirty AFTER the ETS op), so it is captured on
+  # the next flush — no lost write, no lock held across disk I/O.
+  defp flush_dirty do
+    dirty = :ets.tab2list(@dirty_table) |> Enum.map(&elem(&1, 0))
+
+    for col <- dirty do
+      :ets.delete(@dirty_table, col)
+      persist_collection(col)
+    end
+
+    if dirty != [], do: maybe_update_manifest()
+    :ok
+  rescue
+    e ->
+      Logger.warning("Archive flush_dirty failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp persist_collection(col) do
+    binary = :ets.tab2list(table_name(col)) |> Map.new() |> :erlang.term_to_binary()
+    path = collection_path(col)
+    tmp = path <> ".tmp"
+
+    with :ok <- File.write(tmp, binary),
+         :ok <- File.rename(tmp, path) do
+      maybe_backup_collection(col, binary)
+    else
+      {:error, reason} ->
+        Logger.error("Archive write failed for #{col}: #{inspect(reason)}")
+        # Re-mark dirty so the next flush retries rather than silently dropping.
+        mark_dirty(col)
+
+        GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{
+          collection: col,
+          reason: reason,
+          cache_disk_divergent: true
+        })
+    end
+  rescue
+    e ->
+      Logger.error("Archive persist_collection #{col} raised: #{Exception.message(e)}")
+      mark_dirty(col)
+      :ok
   end
 
   # -- Path helpers -----------------------------------------------------------
 
   defp data_path, do: :persistent_term.get({__MODULE__, :data_path})
   defp data_dir, do: :persistent_term.get({__MODULE__, :data_dir})
-  defp lock_path, do: :persistent_term.get({__MODULE__, :lock_path})
   defp collection_path(col), do: Path.join(data_dir(), "#{col}.etf")
   defp manifest_path, do: Path.join(data_dir(), "manifest.etf")
 
-  # -- File I/O (lock-free reads, mkdir-locked writes) -----------------------
-
-  defp read_data do
-    cols = known_collections()
-
-    if MapSet.size(cols) == 0 do
-      %{}
-    else
-      for col <- cols, into: %{} do
-        records = :ets.tab2list(table_name(col)) |> Map.new()
-        {col, records}
-      end
-    end
-  end
+  # -- File I/O (lock-free reads; async persistence — see flush_dirty/0) -----
 
   # Reads old monolithic section.etf — used only for migration
   defp read_data_from_disk do
@@ -450,33 +602,6 @@ defmodule GiTF.Archive do
       data ->
         data
     end
-  end
-
-  # -- Per-collection write --------------------------------------------------
-
-  defp write_dirty(data, dirty_collections) do
-    for col <- dirty_collections do
-      col_data = Map.get(data, col, %{})
-      binary = :erlang.term_to_binary(col_data)
-      path = collection_path(col)
-      tmp = path <> ".tmp"
-
-      with :ok <- File.write(tmp, binary),
-           :ok <- File.rename(tmp, path) do
-        maybe_backup_collection(col, binary)
-      else
-        {:error, reason} ->
-          Logger.error("Archive write failed for #{col}: #{inspect(reason)}")
-
-          GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{
-            collection: col,
-            reason: reason,
-            cache_disk_divergent: true
-          })
-      end
-    end
-
-    maybe_update_manifest()
   end
 
   # -- Per-collection backups ------------------------------------------------
@@ -733,11 +858,17 @@ defmodule GiTF.Archive do
             not String.contains?(file, ".pre_migration"),
             file != "manifest.etf",
             file != "section.etf",
-            do: file |> String.replace_suffix(".etf", "") |> String.to_atom()
+            {:ok, col} <- [safe_collection_atom(file)],
+            do: col
 
       {:error, _} ->
         []
     end
+  end
+
+  # A collection name comes from a filename on disk — bound atom creation.
+  defp safe_collection_atom(file) do
+    file |> String.replace_suffix(".etf", "") |> GiTF.SafeAtom.intern()
   end
 
   defp migrate_from_monolithic do
@@ -794,149 +925,6 @@ defmodule GiTF.Archive do
     ArgumentError -> :ok
   end
 
-  defp sync_ets(data, changed_collection) do
-    if changed_collection do
-      col_data = Map.get(data, changed_collection, %{})
-      ensure_table(changed_collection)
-      :ets.delete_all_objects(table_name(changed_collection))
-      Indexes.clear_collection(changed_collection)
-
-      for {id, record} <- col_data do
-        :ets.insert(table_name(changed_collection), {id, record})
-        Indexes.on_put(changed_collection, nil, record)
-      end
-    else
-      # transact — may touch multiple collections
-      for {col, records} <- data, is_atom(col) do
-        ensure_table(col)
-        :ets.delete_all_objects(table_name(col))
-        Indexes.clear_collection(col)
-
-        for {id, record} <- records do
-          :ets.insert(table_name(col), {id, record})
-          Indexes.on_put(col, nil, record)
-        end
-      end
-    end
-  end
-
-  # `mutate_fn` may return either the new data map, or a `{new_data, result}`
-  # tuple. In the latter case, `with_lock` returns `result`; otherwise it
-  # returns `:ok`. This lets callers smuggle values (e.g. the updated record,
-  # transition metadata, error tags) out of the lock closure without using
-  # the process dictionary (which is not reentrancy-safe).
-  defp with_lock(mutate_fn, collection \\ nil) do
-    acquire_lock()
-
-    try do
-      data = read_data()
-
-      case mutate_fn.(data) do
-        {new_data, result} when is_map(new_data) ->
-          dirty = if collection, do: MapSet.new([collection]), else: diff_collections(data, new_data)
-          sync_ets(new_data, collection)
-          write_dirty(new_data, dirty)
-          result
-
-        new_data when is_map(new_data) ->
-          dirty = if collection, do: MapSet.new([collection]), else: diff_collections(data, new_data)
-          sync_ets(new_data, collection)
-          write_dirty(new_data, dirty)
-          :ok
-      end
-    after
-      release_lock()
-    end
-  end
-
-  defp diff_collections(old, new) do
-    all_keys = MapSet.union(MapSet.new(Map.keys(old)), MapSet.new(Map.keys(new)))
-
-    all_keys
-    |> Enum.filter(fn k -> Map.get(old, k) != Map.get(new, k) end)
-    |> MapSet.new()
-  end
-
-  defp acquire_lock, do: acquire_lock(0)
-
-  defp acquire_lock(attempts) do
-    lock = lock_path()
-
-    case File.mkdir(lock) do
-      :ok ->
-        write_pid_file(lock)
-        :ok
-
-      {:error, :eexist} ->
-        cond do
-          lock_owner_dead?(lock) ->
-            # Dead process fast-path — steal immediately
-            steal_lock(lock)
-            acquire_lock(0)
-
-          lock_stale?(lock) ->
-            # Stale lock from a crashed process — steal it
-            steal_lock(lock)
-            acquire_lock(0)
-
-          attempts >= @lock_steal_attempts ->
-            # ~5s of waiting (500 * 10ms) — force steal
-            steal_lock(lock)
-            acquire_lock(0)
-
-          true ->
-            Process.sleep(10)
-            acquire_lock(attempts + 1)
-        end
-    end
-  end
-
-  defp release_lock do
-    lock = lock_path()
-    pid_file = Path.join(lock, "pid")
-    File.rm(pid_file)
-    File.rmdir(lock)
-  end
-
-  defp write_pid_file(lock_dir) do
-    pid_file = Path.join(lock_dir, "pid")
-    File.write(pid_file, :erlang.pid_to_list(self()))
-  end
-
-  defp lock_owner_dead?(lock_dir) do
-    pid_file = Path.join(lock_dir, "pid")
-
-    case File.read(pid_file) do
-      {:ok, pid_str} ->
-        try do
-          pid = :erlang.list_to_pid(String.to_charlist(pid_str))
-          not Process.alive?(pid)
-        rescue
-          _ -> false
-        end
-
-      {:error, _} ->
-        # No PID file — can't determine, fall through to stale check
-        false
-    end
-  end
-
-  defp steal_lock(lock_dir) do
-    pid_file = Path.join(lock_dir, "pid")
-    File.rm(pid_file)
-    File.rmdir(lock_dir)
-  end
-
-  defp lock_stale?(lock_path) do
-    case File.stat(lock_path, time: :posix) do
-      {:ok, %{mtime: mtime}} ->
-        System.os_time(:second) - mtime > @lock_stale_seconds
-
-      {:error, _} ->
-        # Lock disappeared between check and stat — not stale
-        false
-    end
-  end
 
   # -- Private helpers -------------------------------------------------------
 
