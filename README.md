@@ -2,7 +2,11 @@
 
 Multi-agent orchestration system for AI coding assistants. Coordinate multiple AI instances working on a shared codebase with automatic task delegation, isolated git worktrees, inter-agent messaging, cost tracking, and a real-time web dashboard.
 
-**Status: Dark Factory Complete (98%)** - Fully autonomous operation with self-healing, quality assurance, and intelligent model selection.
+**Status: Dark Factory — lights-out hardened.** Fully autonomous operation with self-healing, behavioral quality gates, and intelligent model selection, hardened for unattended multi-day runs:
+
+- **Safe to run unattended** — killable AI subprocesses with hard wall-clock caps, a fail-closed factory-wide daily spend ceiling, terminal escalation on stalled approvals, kernel-sandboxed ghost execution, and non-destructive mission-failure (never `reset --hard` a repo with human work).
+- **Trustable quality gate** — beyond unit tests: modality-aware behavioral verification drives each change through its real interface (CLI / HTTP / …) against holdout scenarios judged by an LLM, gating publish.
+- **Aramaki admission layer** (opt-in) — watches GitHub issues, admits labeled work within budget/capacity, and reports progress back on the issue (comment, label, link PR, close on merge).
 
 Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any future provider via the `GiTF.Plugin.Model` behaviour.
 
