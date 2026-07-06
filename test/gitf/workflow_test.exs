@@ -369,5 +369,20 @@ defmodule GiTF.WorkflowTest do
       assert {:error, {:invalid_workflow_name, "evil/../escape"}} =
                Workflow.resolve("evil/../escape")
     end
+
+    test "resolves the bundled `standard` from the compile-time embed when no vault file exists" do
+      # Simulate the escript case: point the vault at an empty dir so no
+      # sector/global/priv file resolves on disk. The embedded default must
+      # still load, otherwise every mission silently falls back to legacy
+      # phase advancement.
+      empty = Path.join(System.tmp_dir!(), "gitf-empty-vault-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(empty, ".gitf"))
+      File.write!(Path.join([empty, ".gitf", "config.toml"]), "")
+      prior = System.get_env("GITF_PATH")
+      System.put_env("GITF_PATH", empty)
+      on_exit(fn -> if prior, do: System.put_env("GITF_PATH", prior), else: System.delete_env("GITF_PATH") end)
+
+      assert {:ok, %Workflow{phases: [_ | _]}} = Workflow.resolve("standard")
+    end
   end
 end

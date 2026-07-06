@@ -75,6 +75,29 @@ defmodule GiTF.Workflow do
 
   @workflows_subdir "Workflows"
 
+  # Bundled default workflows, embedded at COMPILE time. An escript has no
+  # extractable priv/ dir on disk, so `:code.priv_dir/1` resolves to a path
+  # that doesn't exist — meaning `standard` (and any shipped template) would
+  # never load and every mission would silently fall back to legacy phase
+  # advancement. Embedding the raw YAML sidesteps that entirely.
+  @workflows_priv_dir Path.join([__DIR__, "..", "..", "priv", "workflows"])
+  for path <- Path.wildcard(Path.join(@workflows_priv_dir, "*.yaml")) do
+    @external_resource path
+  end
+
+  @bundled_workflows (case File.ls(@workflows_priv_dir) do
+                        {:ok, files} ->
+                          files
+                          |> Enum.filter(&String.ends_with?(&1, ".yaml"))
+                          |> Map.new(fn f ->
+                            {Path.basename(f, ".yaml"),
+                             File.read!(Path.join(@workflows_priv_dir, f))}
+                          end)
+
+                        _ ->
+                          %{}
+                      end)
+
   # -- Public API ------------------------------------------------------------
 
   @doc """
@@ -150,9 +173,21 @@ defmodule GiTF.Workflow do
       candidates = candidate_paths(gitf_root, name, sector_id)
 
       case Enum.find(candidates, &File.exists?/1) do
-        nil -> {:error, {:workflow_not_found, name, candidates}}
+        nil -> load_bundled(name, candidates)
         path -> load(path)
       end
+    end
+  end
+
+  # Fallback to a compile-time-embedded default when no vault/priv file exists
+  # on disk (the escript case). Keeps `standard` resolvable everywhere.
+  defp load_bundled(name, candidates) do
+    with {:ok, body} <- Map.fetch(@bundled_workflows, name),
+         {:ok, parsed} <- YamlElixir.read_from_string(body),
+         {:ok, workflow} <- Schema.validate(parsed, "bundled:#{name}.yaml") do
+      {:ok, workflow}
+    else
+      _ -> {:error, {:workflow_not_found, name, candidates}}
     end
   end
 
