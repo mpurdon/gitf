@@ -39,6 +39,9 @@ config :gitf, :timeouts,
   # Ghost worker heartbeat / staleness
   heartbeat_interval_ms: 15_000,
   stale_threshold_seconds: 120,
+  # Hard wall-clock ceiling per ghost op — a backstop against a trickling
+  # LLM call that never goes idle-stale. Ops can raise per-workspace.
+  max_wallclock_seconds: 3_600,
   verify_beacon_initial_ms: 10_000,
   checkpoint_interval_ms: 30_000,
   task_skill_freshness_seconds: 3600,
@@ -110,6 +113,16 @@ config :gitf, :outcome_refinement_enabled, false
 # config or GITF_GITHUB_WEBHOOK_SECRET env var.
 config :gitf, :webhooks_enabled, true
 config :gitf, :github_webhook_secret, nil
+
+# Aramaki — the PM / admission layer above the factory. Opt-in: when enabled it
+# ingests labeled GitHub issues, admits them within capacity, and reports back
+# on the issue. `trigger_label` is the untrusted-input safety gate; `bot_login`
+# lets Aramaki ignore its own GitHub activity (loop prevention).
+config :gitf, :aramaki,
+  enabled: false,
+  trigger_label: "gitf:build",
+  max_concurrent: 5,
+  bot_login: nil
 
 # Visual capture (screenshots via headless browser). When enabled,
 # GiTF.Visual.Capture.screenshot/3 wraps `npx playwright screenshot`.

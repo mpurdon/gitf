@@ -120,10 +120,14 @@ defmodule GiTF.Knowledge.Retrieval do
       candidates ->
         with {:ok, query_vec} <- Embedding.embed(model, query),
              prepared <- ensure_embeddings(candidates, model) do
-          ranked =
-            Embedding.top_k(query_vec, prepared, & &1[:embedding], top_k)
+          semantic =
+            Embedding.top_k(query_vec, prepared, & &1[:embedding], length(prepared))
             |> Enum.filter(fn {score, _} -> score >= min_sim end)
 
+          lexical =
+            GiTF.Knowledge.BM25.rank(query, prepared, &page_lexical_text/1)
+
+          ranked = fuse(semantic, lexical, top_k)
           {:ok, ranked}
         else
           {:error, reason} ->
@@ -141,6 +145,54 @@ defmodule GiTF.Knowledge.Retrieval do
   end
 
   # -- Internals -------------------------------------------------------------
+
+  # Reciprocal Rank Fusion of the semantic and lexical rankings. RRF is
+  # parameter-light and robust to the two scorers being on different scales
+  # (cosine ∈ [-1,1] vs unbounded BM25): a page's fused score is the sum of
+  # 1/(k + rank) across whichever rankings it appears in. The returned score
+  # is the page's best semantic similarity (for callers/telemetry that
+  # threshold on it), falling back to the RRF score when it's lexical-only.
+  @rrf_k 60
+
+  defp fuse(semantic, lexical, top_k) do
+    sem_scores = Map.new(semantic, fn {score, page} -> {page[:id], score} end)
+
+    rrf =
+      %{}
+      |> add_rrf(semantic)
+      |> add_rrf(lexical)
+
+    pages_by_id =
+      (semantic ++ lexical)
+      |> Map.new(fn {_score, page} -> {page[:id], page} end)
+
+    rrf
+    |> Enum.sort_by(fn {_id, rrf_score} -> rrf_score end, :desc)
+    |> Enum.take(top_k)
+    |> Enum.map(fn {id, rrf_score} ->
+      page = Map.fetch!(pages_by_id, id)
+      display_score = Map.get(sem_scores, id, rrf_score)
+      {display_score, page}
+    end)
+  end
+
+  defp add_rrf(acc, ranking) do
+    ranking
+    |> Enum.with_index()
+    |> Enum.reduce(acc, fn {{_score, page}, rank}, m ->
+      Map.update(m, page[:id], 1.0 / (@rrf_k + rank), &(&1 + 1.0 / (@rrf_k + rank)))
+    end)
+  end
+
+  # Cheap lexical text: title + tags + humanised slug. Deliberately avoids a
+  # disk read of the body on the hot path — the body is already represented
+  # semantically by the embedding; BM25 here adds the exact-token signal
+  # (function names, acronyms, error codes) that lives in titles/tags.
+  defp page_lexical_text(page) do
+    slug_words = (page[:slug] || "") |> String.replace(["-", "_", "/"], " ")
+    tags = (page[:tags] || []) |> Enum.join(" ")
+    "#{page[:title]} #{tags} #{slug_words}"
+  end
 
   defp candidates(:any, _include_global) do
     Archive.all(:knowledge_pages)
