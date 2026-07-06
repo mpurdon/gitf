@@ -92,6 +92,9 @@ defmodule GiTF.Application do
 
     foundation = [
       GiTF.Readiness,
+      # Cluster-wide process groups (:pg) — the discovery primitive for
+      # distributing the factory across BEAM nodes. Correct single-node.
+      GiTF.Distributed.pg_child_spec(),
       {Phoenix.PubSub, name: GiTF.PubSub},
       # Config.Provider must start before Archive (migrations / Archive may read config)
       Supervisor.child_spec(

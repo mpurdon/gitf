@@ -1,52 +1,124 @@
 defmodule GiTF.Distributed do
   @moduledoc """
-  Foundation for distributed GiTF operations.
+  Cluster-aware primitives for scaling GiTF across BEAM nodes.
 
-  Provides node discovery, role management, and cluster-aware execution primitives.
-  Allows the GiTF to scale across multiple machines (e.g. "Majors" vs "Workers").
+  The process-per-ghost / DynamicSupervisor model is inherently distributable;
+  the thing that blocks it today is *discovery* — the local `Registry` only
+  knows about processes on its own node. This module provides the missing
+  piece: cluster-wide **process groups** via Erlang's built-in `:pg` (no
+  external dependency). `:pg` is location-transparent — a group's members can
+  live on any connected node, and it degrades to trivially-correct behaviour on
+  a single node (every member is local).
+
+  Together with a formation library (`libcluster`) for node discovery and a
+  partitioned/shared Archive, this is the foundation a distributed factory
+  needs. Registrations here are the migration target for the node-local
+  `Registry` usage (mission/ghost/lock lookup).
   """
 
   require Logger
 
-  @doc """
-  Returns the current node name.
-  """
+  @scope GiTF.PG
+
+  # -- Nodes -----------------------------------------------------------------
+
+  @doc "This node's name."
   def node_name, do: Node.self()
 
-  @doc """
-  Returns true if the node is connected to a cluster.
-  """
+  @doc "Whether this node is connected to any peers."
   def clustered?, do: Node.list() != []
 
-  @doc """
-  Connects to a remote node.
-  """
-  def connect(node_name) do
-    Node.connect(node_name)
+  @doc "Connect to a peer node."
+  def connect(node), do: Node.connect(node)
+
+  @doc "All nodes in the cluster, including self."
+  def members, do: [Node.self() | Node.list()]
+
+  # -- Cluster-wide process groups (:pg) -------------------------------------
+
+  @doc "Child spec that starts the `:pg` scope this module uses."
+  def pg_child_spec do
+    %{id: __MODULE__.PG, start: {:pg, :start_link, [@scope]}}
   end
 
   @doc """
-  Returns a list of all nodes in the cluster (including self).
+  Registers `pid` (default `self()`) in the cluster-wide group `key`. The
+  membership is visible from every connected node and is removed automatically
+  when `pid` dies.
   """
-  def members do
-    [Node.self() | Node.list()]
+  @spec register(term(), pid()) :: :ok
+  def register(key, pid \\ self()) do
+    :pg.join(@scope, key, pid)
   end
 
+  @doc "Removes `pid` from group `key`."
+  @spec unregister(term(), pid()) :: :ok | :not_joined
+  def unregister(key, pid \\ self()) do
+    :pg.leave(@scope, key, pid)
+  end
+
+  @doc "All pids registered under `key`, across the whole cluster."
+  @spec whereis(term()) :: [pid()]
+  def whereis(key), do: :pg.get_members(@scope, key)
+
+  @doc "Pids registered under `key` on this node only."
+  @spec whereis_local(term()) :: [pid()]
+  def whereis_local(key), do: :pg.get_local_members(@scope, key)
+
+  @doc "A single pid for `key` (first member), or nil."
+  @spec whereis_one(term()) :: pid() | nil
+  def whereis_one(key) do
+    case whereis(key) do
+      [pid | _] -> pid
+      [] -> nil
+    end
+  end
+
+  # -- Cluster-aware execution -----------------------------------------------
+
   @doc """
-  Executes a function on all nodes in the cluster.
-  Returns a map of {node, result}.
+  Runs `module.fun(args)` on every node, returning `%{node => result}`. Uses
+  `:erpc.multicall` (supervised, typed errors) rather than the legacy `:rpc`.
   """
+  @spec broadcast_exec(module(), atom(), list()) :: %{node() => term()}
   def broadcast_exec(module, fun, args \\ []) do
-    {results, _} = :rpc.multicall(members(), module, fun, args)
-    Enum.zip(members(), results) |> Enum.into(%{})
+    members()
+    |> Enum.map(fn node ->
+      result =
+        try do
+          :erpc.call(node, module, fun, args)
+        catch
+          kind, reason -> {:error, {kind, reason}}
+        end
+
+      {node, result}
+    end)
+    |> Map.new()
   end
 
   @doc """
-  Spawns a task on the least loaded node.
-  (Simple implementation: random node for now, can be improved with load metrics)
+  Spawns `fun` on the least-loaded node (fewest running processes), so cluster
+  work spreads instead of piling onto one node. Falls back to the local node
+  when process counts can't be read.
   """
-  def spawn_on_cluster(fun) do
-    target = Enum.random(members())
-    Node.spawn(target, fun)
+  @spec spawn_on_cluster((-> any())) :: pid()
+  def spawn_on_cluster(fun) when is_function(fun, 0) do
+    Node.spawn(least_loaded_node(), fun)
+  end
+
+  defp least_loaded_node do
+    members()
+    |> Enum.map(fn node -> {node, process_count(node)} end)
+    |> Enum.min_by(fn {_node, count} -> count end, fn -> {Node.self(), 0} end)
+    |> elem(0)
+  end
+
+  defp process_count(node) do
+    case :erpc.call(node, :erlang, :system_info, [:process_count]) do
+      n when is_integer(n) -> n
+      _ -> :infinity
+    end
+  catch
+    _, _ -> :infinity
   end
 end
