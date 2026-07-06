@@ -84,6 +84,24 @@ defmodule GiTF.GhostsTest do
       # Wait for process to finish
       Process.sleep(500)
     end
+
+    test "refuses to spawn (terminal) when the sector directory is gone", ctx do
+      # A persisted op whose sector repo was deleted out from under it must not
+      # spawn a doomed worker (which floods "Could not cd" and churns a pool
+      # slot). The spawn should fail terminally without creating a ghost.
+      File.rm_rf!(ctx.sector.path)
+
+      assert {:error, :sector_path_missing} =
+               Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
+                 claude_executable: "/bin/echo",
+                 prompt: "should never run"
+               )
+
+      # No ghost was created and the op was left unassigned — nothing to churn.
+      assert Ghosts.list() == []
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      assert op.status != "assigned"
+    end
   end
 
   describe "list/1" do

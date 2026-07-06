@@ -44,6 +44,14 @@ defmodule GiTF.Application do
     # Derive store dir from gitf_root unless explicitly overridden (tests do this).
     store_dir = Application.get_env(:gitf, :store_dir, Path.join(gitf_root, ".gitf/store"))
 
+    # Make store resolution observable — otherwise it's impossible to tell from
+    # the logs whether `-w`/GITF_PATH took effect or the daemon fell back to the
+    # home-dir global store (a real source of "why is this data here?" confusion).
+    Logger.info(
+      "GiTF store: gitf_root=#{gitf_root} store_dir=#{store_dir} " <>
+        "(GITF_PATH=#{System.get_env("GITF_PATH") || "unset"})"
+    )
+
     setup_file_logging(gitf_root)
 
     # Keys must load before any supervised child may use them

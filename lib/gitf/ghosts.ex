@@ -49,7 +49,8 @@ defmodule GiTF.Ghosts do
   defp do_spawn(op_id, sector_id, gitf_root, opts) do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
-    with {:check_ready, :ok} <- {:check_ready, check_not_already_assigned(op_id)},
+    with {:sector_ready, :ok} <- {:sector_ready, check_sector_available(sector_id)},
+         {:check_ready, :ok} <- {:check_ready, check_not_already_assigned(op_id)},
          {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
          {:llm_health, :ok} <- {:llm_health, check_llm_available()},
          {:create_ghost, {:ok, ghost}} <- {:create_ghost, create_ghost_record(name, op_id)},
@@ -118,7 +119,8 @@ defmodule GiTF.Ghosts do
   defp spawn_detached_cli(op_id, sector_id, gitf_root, opts) do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
-    with {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
+    with {:sector_ready, :ok} <- {:sector_ready, check_sector_available(sector_id)},
+         {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
          {:llm_health, :ok} <- {:llm_health, check_llm_available()},
          {:create_ghost, {:ok, ghost}} <- {:create_ghost, create_ghost_record(name, op_id)},
          {:assign, :ok} <- {:assign, assign_job(op_id, ghost.id)},
@@ -372,6 +374,24 @@ defmodule GiTF.Ghosts do
 
   # Per-provider circuit breakers handle routing/fallback — no global gate needed
   defp check_llm_available, do: :ok
+
+  # A ghost's worktree lives under the sector's path; if that directory is gone
+  # (e.g. a temp sector deleted out from under a persisted op), spawning would
+  # create a doomed worker that floods "Could not cd" and churns a pool slot.
+  # Treat a missing sector path as a terminal, non-retryable spawn error so the
+  # caller can fail the op instead of re-attempting forever.
+  defp check_sector_available(sector_id) do
+    case Archive.get(:sectors, sector_id) do
+      %{path: path} when is_binary(path) ->
+        if File.dir?(path), do: :ok, else: {:error, :sector_path_missing}
+
+      nil ->
+        {:error, :sector_not_found}
+
+      _ ->
+        :ok
+    end
+  end
 
   defp create_ghost_record(name, op_id) do
     # Get op to determine model assignment

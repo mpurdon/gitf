@@ -1566,16 +1566,34 @@ defmodule GiTF.Major do
               other -> {nil, other}
             end
 
-          Logger.warning(
-            "Failed to auto-spawn ghost for op #{op.id} (step: #{inspect(step)}): #{inspect(raw_reason)}"
-          )
-
           GiTF.Telemetry.emit([:gitf, :ghost, :spawn_failed], %{}, %{
             op_id: op.id,
             sector_id: op.sector_id,
             step: step,
             reason: inspect(raw_reason)
           })
+
+          if raw_reason in [:sector_path_missing, :sector_not_found] do
+            # Unrecoverable: the op's sector directory is gone. Re-spawning would
+            # only flood "Could not cd" and churn a pool slot every cycle, so
+            # fail the op terminally instead of leaving it to be re-attempted.
+            Logger.error(
+              "Op #{op.id} sector #{op.sector_id} unavailable (#{raw_reason}); failing op terminally"
+            )
+
+            GiTF.Ops.fail(op.id)
+
+            GiTF.Link.send(
+              "major",
+              "major",
+              "sector_unavailable",
+              "Op #{op.id} failed: sector #{op.sector_id} directory is gone (#{raw_reason})"
+            )
+          else
+            Logger.warning(
+              "Failed to auto-spawn ghost for op #{op.id} (step: #{inspect(step)}): #{inspect(raw_reason)}"
+            )
+          end
 
           state
       end
