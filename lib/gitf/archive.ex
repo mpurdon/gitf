@@ -210,22 +210,6 @@ defmodule GiTF.Archive do
   end
 
   @doc """
-  Executes multiple mutations in a single lock/read/write cycle.
-
-  The function receives the full store data and must return the modified data.
-  This prevents orphaned records from crashes between separate lock cycles.
-
-  ## Example
-
-      Archive.transact(fn data ->
-        op = get_in(data, [:ops, op_id])
-        dep = %{id: GiTF.ID.generate(:jdp), op_id: op_id, depends_on_id: other_id}
-        data
-        |> put_in([:ops, op_id], %{op | status: "blocked"})
-        |> put_in([:op_dependencies, dep.id], dep)
-      end)
-  """
-  @doc """
   Forces a synchronous flush of all pending (dirty) collections to disk.
 
   Historically this was `transact(fn data -> data end)` — a no-op mutation used
