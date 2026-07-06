@@ -43,13 +43,21 @@ defmodule GiTF.Override do
   end
 
   defp is_critical?(mission) do
-    ops = Map.get(mission, :ops, [])
+    any_op_risk?(mission, [:critical])
+  end
 
-    ops
+  # The documented default: high- OR critical-risk changes need human
+  # approval. Used by the standard path; the trusted/dark-factory relaxations
+  # above deliberately gate on `is_critical?` (critical only) instead.
+  defp high_or_critical_risk?(mission) do
+    any_op_risk?(mission, [:high, :critical])
+  end
+
+  defp any_op_risk?(mission, levels) do
+    mission
+    |> Map.get(:ops, [])
     |> Enum.reject(& &1[:phase_job])
-    |> Enum.any?(fn op ->
-      Map.get(op, :risk_level) == :critical
-    end)
+    |> Enum.any?(fn op -> Map.get(op, :risk_level) in levels end)
   end
 
   defp requires_approval_standard?(mission) do
@@ -65,7 +73,7 @@ defmodule GiTF.Override do
           end
       end
 
-    sector_requires? or is_critical?(mission)
+    sector_requires? or high_or_critical_risk?(mission)
   end
 
   @doc """
@@ -151,9 +159,30 @@ defmodule GiTF.Override do
 
     with {:ok, _} <- GiTF.Missions.store_artifact(mission_id, "approval", artifact) do
       update_request_status(mission_id, "approved", approved_by)
+      # A genuine human approval also clears any operator gate on the
+      # mission's current phase (e.g. the security-patch hard gate). Auto-
+      # timeout/escalation approvals must NOT clear it — that would defeat a
+      # "never auto-merge" gate.
+      maybe_clear_current_gate(mission_id, approved_by)
       Logger.info("Quest #{mission_id} approved by #{approved_by}")
       {:ok, artifact}
     end
+  end
+
+  defp maybe_clear_current_gate(mission_id, approved_by) do
+    if is_binary(approved_by) and String.starts_with?(approved_by, "auto") do
+      :ok
+    else
+      case GiTF.Archive.get(:missions, mission_id) do
+        %{current_phase: phase} when is_binary(phase) ->
+          GiTF.Missions.clear_gate(mission_id, phase)
+
+        _ ->
+          :ok
+      end
+    end
+  rescue
+    _ -> :ok
   end
 
   @doc """

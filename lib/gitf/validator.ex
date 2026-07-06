@@ -58,9 +58,11 @@ defmodule GiTF.Validator do
   @doc "Runs a custom shell command in the shell worktree."
   @spec run_custom_validation(map(), String.t()) :: :ok | {:error, String.t()}
   def run_custom_validation(shell, command) do
+    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(command, cd: shell.worktree_path)
+
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-c", command],
+        System.cmd(cmd, cmd_args,
           cd: shell.worktree_path,
           stderr_to_stdout: true,
           env: [{"MIX_ENV", "test"}]
@@ -96,7 +98,7 @@ defmodule GiTF.Validator do
           # API mode: use generate_text (no tools needed for validation)
           case GiTF.Runtime.Models.generate_text(prompt, model: "haiku") do
             {:ok, output} -> parse_verdict(output)
-            {:error, _} -> {:ok, :skip}
+            {:error, reason} -> inconclusive("validator API call failed: #{inspect(reason)}")
           end
         else
           # CLI mode: spawn headless and collect
@@ -104,8 +106,8 @@ defmodule GiTF.Validator do
             {:ok, port} ->
               collect_validation_result(port)
 
-            {:error, _reason} ->
-              {:ok, :skip}
+            {:error, reason} ->
+              inconclusive("validator spawn failed: #{inspect(reason)}")
           end
         end
 
@@ -190,12 +192,12 @@ defmodule GiTF.Validator do
         output = IO.iodata_to_binary(acc)
         parse_verdict(output)
 
-      {^port, {:exit_status, _}} ->
-        {:ok, :skip}
+      {^port, {:exit_status, code}} ->
+        inconclusive("validator process exited non-zero (#{code})")
     after
       timeout ->
         safe_close_port(port)
-        {:ok, :skip}
+        inconclusive("validator timed out after #{timeout}ms")
     end
   end
 
@@ -211,8 +213,16 @@ defmodule GiTF.Validator do
         {:error, :validation_failed, %{reasoning: reasoning, issues: issues}}
 
       _ ->
-        {:ok, :skip}
+        inconclusive("validator output had no parseable verdict")
     end
+  end
+
+  # A validation we could not complete must NOT be treated as a pass — that
+  # would turn a broken validator into silently-disabled validation. Surface
+  # it as an inconclusive error so the caller blocks/retries (fail-safe).
+  defp inconclusive(reason) do
+    Logger.warning("Validation inconclusive: #{reason}")
+    {:error, :validation_inconclusive, %{reason: reason}}
   end
 
   defp extract_json(text) do

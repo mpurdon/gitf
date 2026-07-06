@@ -279,7 +279,8 @@ defmodule GiTF.Togusa do
     ~r/### LEARNED: (\S+) \(from failure\)/
     |> Regex.scan(content)
     |> Enum.map(fn [_, name] ->
-      key = name |> String.downcase() |> String.to_atom()
+      # Names scraped from AI-generated markdown — bound atom creation.
+      key = GiTF.SafeAtom.intern!(String.downcase(name), :unknown_mode)
       %{key: key, name: name, description: "", severity: :high}
     end)
   end

@@ -266,31 +266,31 @@ defmodule GiTF.ArchiveTest do
     end
   end
 
-  # ── transact/1 ─────────────────────────────────────────────────────────
+  # ── transact/1 (now a synchronous flush barrier) ───────────────────────
 
-  describe "transact/1" do
-    test "mutates two collections atomically" do
+  describe "transact/1 and flush/0" do
+    test "writes to multiple collections are visible immediately (ETS-first)" do
       {:ok, op} = Archive.insert(:ops, %{status: "pending"})
+      {:ok, _} = Archive.update(:ops, op.id, fn o -> %{o | status: "blocked"} end)
+      {:ok, _} = Archive.insert(:op_dependencies, %{id: "dep-abc123", op_id: op.id})
 
-      :ok = Archive.transact(fn data ->
-        # Update op status
-        data = put_in(data, [:ops, op.id, :status], "blocked")
-        # Insert a dependency in another collection
-        dep = %{id: "dep-abc123", op_id: op.id, depends_on: "op-other"}
-        deps = Map.get(data, :op_dependencies, %{})
-        Map.put(data, :op_dependencies, Map.put(deps, dep.id, dep))
-      end)
-
+      # Reads are lock-free ETS — no flush needed for in-memory visibility.
       assert Archive.get(:ops, op.id).status == "blocked"
       assert Archive.get(:op_dependencies, "dep-abc123").op_id == op.id
     end
 
-    test "changes visible in subsequent reads" do
-      :ok = Archive.transact(fn data ->
-        Map.put(data, :events, %{"evt-001" => %{id: "evt-001", type: "test"}})
-      end)
+    test "flush/0 persists pending writes to disk", %{store_dir: store_dir} do
+      {:ok, _} = Archive.insert(:events, %{id: "evt-001", type: "test"})
+      refute File.exists?(Path.join(store_dir, "events.etf")), "persistence should be async"
 
-      assert Archive.get(:events, "evt-001").type == "test"
+      assert :ok = Archive.flush()
+      assert File.exists?(Path.join(store_dir, "events.etf"))
+    end
+
+    test "transact/1 is a flush barrier (backwards-compat)" do
+      {:ok, _} = Archive.insert(:events, %{id: "evt-002", type: "t"})
+      assert :ok = Archive.transact(fn data -> data end)
+      assert Archive.get(:events, "evt-002").type == "t"
     end
   end
 
@@ -320,6 +320,7 @@ defmodule GiTF.ArchiveTest do
   describe "backup recovery" do
     test "recovers from corrupted primary via .bak", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-survive", name: "survivor"})
+      :ok = Archive.flush()
 
       # Force a backup by writing the .bak file for the missions collection
       col_path = Path.join(store_dir, "missions.etf")
@@ -338,6 +339,7 @@ defmodule GiTF.ArchiveTest do
 
     test "recovers from .bak.2 when .bak is also corrupted", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-deep", name: "deep"})
+      :ok = Archive.flush()
 
       col_path = Path.join(store_dir, "missions.etf")
       {:ok, good_binary} = File.read(col_path)
@@ -356,6 +358,7 @@ defmodule GiTF.ArchiveTest do
 
     test "recovers from .bak.3 when .bak and .bak.2 are corrupted", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-deepest", name: "deepest"})
+      :ok = Archive.flush()
 
       col_path = Path.join(store_dir, "missions.etf")
       {:ok, good_binary} = File.read(col_path)
@@ -378,6 +381,8 @@ defmodule GiTF.ArchiveTest do
     test "data survives stop and restart from same dir", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:ops, %{id: "op-persist", status: "saved"})
       {:ok, _} = Archive.insert(:missions, %{id: "msn-persist", name: "durable"})
+      # Async persistence: flush explicitly so the restart reads it from disk.
+      :ok = Archive.flush()
 
       GiTF.Test.StoreHelper.stop_store()
 
@@ -488,6 +493,7 @@ defmodule GiTF.ArchiveTest do
     test "corrupted collection recovers from backup, others intact", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-safe", name: "safe"})
       {:ok, _} = Archive.insert(:ops, %{id: "op-safe", status: "running"})
+      :ok = Archive.flush()
 
       # Create a backup for ops collection
       ops_path = Path.join(store_dir, "ops.etf")
@@ -520,6 +526,9 @@ defmodule GiTF.ArchiveTest do
 
       # Verify index works before crash
       assert [op.id] == GiTF.Archive.Indexes.lookup(:ops, :status, "running")
+
+      # Async persistence: flush so the restart below recovers from disk.
+      :ok = Archive.flush()
 
       # Stop and restart Archive so init_store creates tables owned by Archive
       # (tables created via ensure_table in insert are owned by the test process)
@@ -575,9 +584,11 @@ defmodule GiTF.ArchiveTest do
   # ── New format persistence ─────────────────────────────────────────────
 
   describe "per-collection file persistence" do
-    test "per-collection files exist on disk after insert", %{store_dir: store_dir} do
+    test "per-collection files exist on disk after insert + flush", %{store_dir: store_dir} do
       {:ok, _} = Archive.insert(:missions, %{id: "msn-disk", name: "on_disk"})
       {:ok, _} = Archive.insert(:ops, %{id: "op-disk", status: "saved"})
+      # Persistence is asynchronous; force it for a deterministic disk check.
+      :ok = Archive.flush()
 
       assert File.exists?(Path.join(store_dir, "missions.etf"))
       assert File.exists?(Path.join(store_dir, "ops.etf"))

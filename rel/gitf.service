@@ -1,0 +1,55 @@
+# systemd unit for the GiTF "Dark Factory" release.
+#
+# Install:
+#   sudo useradd --system --home /var/lib/gitf --shell /usr/sbin/nologin gitf
+#   sudo mkdir -p /opt/gitf /var/lib/gitf /etc/gitf
+#   sudo tar xf gitf-release.tar.gz -C /opt/gitf          # or copy _build/prod/rel/gitf
+#   sudo chown -R gitf:gitf /opt/gitf /var/lib/gitf
+#   # put secrets (SECRET_KEY_BASE, LIVE_VIEW_SIGNING_SALT, SESSION_SIGNING_SALT,
+#   # provider API keys, GITF_GITHUB_WEBHOOK_SECRET) in /etc/gitf/gitf.env
+#   sudo cp rel/gitf.service /etc/systemd/system/gitf.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gitf
+
+[Unit]
+Description=GiTF Dark Factory (autonomous coding orchestrator)
+Documentation=https://github.com/mpurdon/gitf
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gitf
+Group=gitf
+
+Environment=MIX_ENV=prod
+Environment=GITF_HOME=/var/lib/gitf
+Environment=GITF_PORT=4000
+# Bind loopback by default; front with a reverse proxy or set GITF_HOST in the
+# env file to expose. Never expose the dashboard directly to the internet.
+Environment=GITF_HOST=127.0.0.1
+# Operator-provided secrets + provider keys. The leading '-' makes it optional
+# so the unit still loads if the file is absent (the release will then refuse
+# to boot in prod without SECRET_KEY_BASE, which is the desired fail-closed).
+EnvironmentFile=-/etc/gitf/gitf.env
+
+WorkingDirectory=/opt/gitf
+ExecStart=/opt/gitf/bin/gitf start
+ExecStop=/opt/gitf/bin/gitf stop
+
+# Auto-restart on crash; back off to avoid tight restart loops.
+Restart=on-failure
+RestartSec=5
+# Give the Cowboy connection drainer + in-flight ghosts time to finish.
+TimeoutStopSec=45
+
+# Resource + hardening. NOTE: ProtectHome is deliberately NOT set — sector
+# repos are often under /home and ghosts must read/write their worktrees.
+# Operators who keep all sectors under GITF_HOME can add ProtectHome=true.
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ReadWritePaths=/var/lib/gitf
+
+[Install]
+WantedBy=multi-user.target

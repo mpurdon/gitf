@@ -66,7 +66,11 @@ defmodule GiTF.Runtime.Loadout.DynamicTools do
   defp build_mcp_schema(nil), do: nil
 
   defp build_mcp_schema(%{"properties" => props}) when is_map(props) do
-    Enum.map(props, fn {key, spec} ->
+    # Property names come from third-party MCP servers — atomizing them
+    # unbounded is an atom-table DoS. Intern safely; drop a param whose name
+    # can't be safely interned (a malformed/hostile schema entry) rather than
+    # crash the node.
+    Enum.flat_map(props, fn {key, spec} ->
       type =
         case spec["type"] do
           "string" -> :string
@@ -76,7 +80,10 @@ defmodule GiTF.Runtime.Loadout.DynamicTools do
           _ -> :string
         end
 
-      {String.to_atom(key), [type: type, doc: spec["description"] || ""]}
+      case GiTF.SafeAtom.intern(key) do
+        {:ok, atom} -> [{atom, [type: type, doc: spec["description"] || ""]}]
+        :error -> []
+      end
     end)
   end
 

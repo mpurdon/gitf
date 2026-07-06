@@ -196,9 +196,11 @@ defmodule GiTF.Audit do
   @validation_timeout_ms 120_000
 
   defp run_validation_command(shell, command) do
+    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(command, cd: shell.worktree_path)
+
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-c", command],
+        System.cmd(cmd, cmd_args,
           cd: shell.worktree_path,
           stderr_to_stdout: true
         )
@@ -295,45 +297,68 @@ defmodule GiTF.Audit do
 
   defp run_quality_checks(op_id, shell, sector) do
     language = detect_language(sector)
+    wp = shell.worktree_path
 
-    # Run static analysis
-    static_result =
-      case Quality.analyze_static(op_id, shell.worktree_path, language) do
-        {:ok, report} ->
-          %{static_score: report.score, static_issues: length(report.issues)}
+    # The three analyzers are independent, I/O-bound shell-outs (each with its
+    # own timeout). Run them concurrently under the supervised task pool —
+    # bounded (3), crash-isolated (async_stream_nolink), per-task timeout — so a
+    # verification pays max(static, security, perf) instead of their sum.
+    [static_result, security_result, performance_result] =
+      [
+        fn -> quality_static(op_id, wp, language) end,
+        fn -> quality_security(op_id, wp, language) end,
+        fn -> quality_performance(op_id, wp, sector) end
+      ]
+      |> then(fn thunks ->
+        Task.Supervisor.async_stream_nolink(GiTF.TaskSupervisor, thunks, fn f -> f.() end,
+          max_concurrency: 3,
+          timeout: 190_000,
+          on_timeout: :kill_task,
+          ordered: true
+        )
+      end)
+      |> Enum.map(fn
+        {:ok, result} -> result
+        _ -> %{}
+      end)
 
-        {:error, reason} ->
-          Logger.warning("Static analysis failed for op #{op_id}: #{inspect(reason)}")
-          %{static_score: 0, static_issues: 0, static_error: inspect(reason)}
-      end
-
-    # Run security scan
-    security_result =
-      case Quality.analyze_security(op_id, shell.worktree_path, language) do
-        {:ok, report} ->
-          %{security_score: report.score, security_findings: length(report.issues)}
-
-        {:error, reason} ->
-          Logger.warning("Security scan failed for op #{op_id}: #{inspect(reason)}")
-          %{security_score: 0, security_findings: 0, security_error: inspect(reason)}
-      end
-
-    # Run performance benchmarks (if configured)
-    performance_result =
-      case Quality.analyze_performance(op_id, shell.worktree_path, sector) do
-        {:ok, report} ->
-          %{performance_score: report.score, performance_metrics: length(report.issues)}
-
-        {:error, _} ->
-          %{performance_score: nil, performance_metrics: 0}
-      end
-
-    # Calculate composite score
     composite = Quality.calculate_composite_score(op_id)
 
     Map.merge(static_result, security_result)
     |> Map.merge(performance_result)
     |> Map.put(:quality_score, composite)
+  end
+
+  defp quality_static(op_id, worktree_path, language) do
+    case Quality.analyze_static(op_id, worktree_path, language) do
+      {:ok, report} ->
+        %{static_score: report.score, static_issues: length(report.issues)}
+
+      {:error, reason} ->
+        Logger.warning("Static analysis failed for op #{op_id}: #{inspect(reason)}")
+        %{static_score: 0, static_issues: 0, static_error: inspect(reason)}
+    end
+  end
+
+  defp quality_security(op_id, worktree_path, language) do
+    case Quality.analyze_security(op_id, worktree_path, language) do
+      {:ok, report} ->
+        %{security_score: report.score, security_findings: length(report.issues)}
+
+      {:error, reason} ->
+        Logger.warning("Security scan failed for op #{op_id}: #{inspect(reason)}")
+        %{security_score: 0, security_findings: 0, security_error: inspect(reason)}
+    end
+  end
+
+  defp quality_performance(op_id, worktree_path, sector) do
+    case Quality.analyze_performance(op_id, worktree_path, sector) do
+      {:ok, report} ->
+        %{performance_score: report.score, performance_metrics: length(report.issues)}
+
+      {:error, _} ->
+        %{performance_score: nil, performance_metrics: 0}
+    end
   end
 
   @known_languages ~w(elixir javascript typescript python rust go ruby java)a

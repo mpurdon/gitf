@@ -105,5 +105,15 @@ defmodule GiTF.Sandbox.SandboxExecTest do
 
       assert profile =~ File.cwd!()
     end
+
+    test "profile permits AI-CLI home config dirs (so the CLI can run)" do
+      {_cmd, ["-p", profile | _rest], _opts} =
+        SandboxExec.wrap_command("claude", [], cd: "/tmp/work")
+
+      home = System.user_home()
+      assert profile =~ ~s[(allow file-read* file-write* (subpath "#{home}/.claude"))]
+      # Broad read of home so node/git/config resolve.
+      assert profile =~ ~s[(allow file-read* (subpath "#{home}"))]
+    end
   end
 end

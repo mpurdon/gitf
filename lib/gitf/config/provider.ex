@@ -11,7 +11,12 @@ defmodule GiTF.Config.Provider do
 
   use GenServer
 
-  @table :gitf_config
+  # Config lives in :persistent_term, not ETS: it is read on nearly every
+  # operation from many processes and changes only on an operator reload. ETS
+  # copied the whole config map to the caller on every read; persistent_term
+  # returns the shared term without that per-read copy. (The trade-off — a
+  # global GC scan on write — is irrelevant for a rarely-reloaded config.)
+  @pt_key {__MODULE__, :config}
 
   # -- Public API ------------------------------------------------------------
 
@@ -24,18 +29,38 @@ defmodule GiTF.Config.Provider do
   @doc "Gets a config value by path (list of keys)."
   @spec get(list(atom())) :: term()
   def get(path) when is_list(path) do
-    case :ets.lookup(@table, :config) do
-      [{:config, config}] -> get_in(config, path)
-      [] -> nil
+    case :persistent_term.get(@pt_key, nil) do
+      nil -> nil
+      config -> get_in(config, path)
     end
-  rescue
-    ArgumentError -> nil
   end
 
   @doc "Gets a config value with a default."
   @spec get(list(atom()), term()) :: term()
   def get(path, default) do
     get(path) || default
+  end
+
+  @doc "Returns the whole current config map (or `%{}`)."
+  @spec all() :: map()
+  def all, do: :persistent_term.get(@pt_key, %{})
+
+  @doc """
+  Overrides the config value at `path` in place. Intended for tests/tooling
+  (replaces the previous direct-ETS pokes now that config lives in
+  persistent_term). Returns `:ok`.
+  """
+  @spec put(list(atom()), term()) :: :ok
+  def put(path, value) when is_list(path) do
+    :persistent_term.put(@pt_key, put_in(all(), path, value))
+    :ok
+  end
+
+  @doc "Replaces the entire config map. Intended for tests/tooling."
+  @spec replace(map()) :: :ok
+  def replace(config) when is_map(config) do
+    :persistent_term.put(@pt_key, config)
+    :ok
   end
 
   @doc """
@@ -65,23 +90,18 @@ defmodule GiTF.Config.Provider do
 
   @impl true
   def init(opts) do
-    :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
     gitf_root = Keyword.get(opts, :gitf_root)
     config = load_config(gitf_root)
-    :ets.insert(@table, {:config, config})
+    :persistent_term.put(@pt_key, config)
     {:ok, %{gitf_root: gitf_root}}
   end
 
   @impl true
   def handle_call(:reload, _from, state) do
-    old_config =
-      case :ets.lookup(@table, :config) do
-        [{:config, c}] -> c
-        [] -> %{}
-      end
+    old_config = :persistent_term.get(@pt_key, %{})
 
     new_config = load_config(state.gitf_root)
-    :ets.insert(@table, {:config, new_config})
+    :persistent_term.put(@pt_key, new_config)
 
     changed_keys = diff_top_keys(old_config, new_config)
 

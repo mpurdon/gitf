@@ -94,9 +94,24 @@ defmodule GiTF.Transcript do
     %{
       input_tokens: Map.get(usage, "input_tokens", 0),
       output_tokens: Map.get(usage, "output_tokens", 0),
-      cache_read_tokens: Map.get(usage, "cache_read_tokens", 0),
-      cache_write_tokens: Map.get(usage, "cache_write_tokens", 0),
+      cache_read_tokens: cache_read(usage),
+      cache_write_tokens: cache_write(usage),
       model: Map.get(entry, "model")
     }
+  end
+
+  # The Claude CLI stream-json `result` usage object uses the Anthropic API
+  # key names (`cache_read_input_tokens`, `cache_creation_input_tokens`).
+  # Earlier code read `cache_read_tokens`/`cache_write_tokens`, which never
+  # exist — so cached spend was silently counted as $0. Read the real keys,
+  # falling back to the legacy names for any provider that emits them.
+  defp cache_read(usage) do
+    Map.get(usage, "cache_read_input_tokens") ||
+      Map.get(usage, "cache_read_tokens", 0)
+  end
+
+  defp cache_write(usage) do
+    Map.get(usage, "cache_creation_input_tokens") ||
+      Map.get(usage, "cache_write_tokens", 0)
   end
 end

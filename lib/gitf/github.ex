@@ -203,6 +203,22 @@ defmodule GiTF.GitHub do
     end
   end
 
+  @doc "Adds a label to an issue (creating the label on the repo if needed)."
+  @spec add_label(GiTF.Schema.Sector.t(), integer(), String.t()) :: :ok | {:error, term()}
+  def add_label(sector, issue_number, label) do
+    with {:ok, client} <- client(sector) do
+      case Req.post(client,
+             url:
+               "/repos/#{sector.github_owner}/#{sector.github_repo}/issues/#{issue_number}/labels",
+             json: %{labels: [label]}
+           ) do
+        {:ok, %{status: status}} when status in [200, 201] -> :ok
+        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
   @doc "Lists repositories for the authenticated user."
   @spec list_repos(keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_repos(opts \\ []) do

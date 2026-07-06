@@ -470,8 +470,16 @@ defmodule GiTF.Sync do
                cd: repo_path,
                stderr_to_stdout: true
              ) do
-          {_out, 0} -> {:ok, :theirs}
-          {out, _} -> {:error, String.trim(out)}
+          {_out, 0} ->
+            Logger.warning(
+              "Merge conflict on branch #{branch} auto-resolved with -X theirs " <>
+                "(ghost's version preferred). Review if unexpected."
+            )
+
+            {:ok, :theirs}
+
+          {out, _} ->
+            {:error, String.trim(out)}
         end
     end
   end
@@ -511,15 +519,30 @@ defmodule GiTF.Sync do
 
     if File.exists?(merge_head) do
       Logger.warning("Stale MERGE_HEAD found in #{repo_path}, aborting interrupted merge")
-      GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+
+      case GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true) do
+        {_, 0} ->
+          :ok
+
+        {out, _} ->
+          # If the abort fails the repo stays wedged and the next sync merges
+          # into a broken state — this must be visible, not swallowed.
+          Logger.error("Failed to abort stale merge in #{repo_path}: #{String.trim(out)}")
+      end
     end
 
     if File.dir?(rebase_merge) or File.dir?(rebase_apply) do
       Logger.warning("Stale rebase state found in #{repo_path}, aborting interrupted rebase")
-      GiTF.Git.safe_cmd(["rebase", "--abort"], cd: repo_path, stderr_to_stdout: true)
+
+      case GiTF.Git.safe_cmd(["rebase", "--abort"], cd: repo_path, stderr_to_stdout: true) do
+        {_, 0} -> :ok
+        {out, _} -> Logger.error("Failed to abort stale rebase in #{repo_path}: #{String.trim(out)}")
+      end
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.error("cleanup_stale_merge_state crashed for #{repo_path}: #{Exception.message(e)}")
+      :ok
   end
 
   defp rollback_merge(repo_path, original_head) do

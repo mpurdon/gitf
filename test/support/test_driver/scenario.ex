@@ -55,17 +55,12 @@ defmodule GiTF.TestDriver.Scenario do
           GiTF.Config.Provider.start_link([])
         end
 
-        original_config =
-          try do
-            [{:config, c}] = :ets.lookup(:gitf_config, :config)
-            c
-          rescue
-            _ -> nil
-          end
+        # Config lives in persistent_term (GiTF.Config.Provider); use its public
+        # override API rather than poking ETS directly.
+        original_config = GiTF.Config.Provider.all()
 
-        if original_config do
-          updated = put_in(original_config, [:plugins, :models, :default], "claude")
-          :ets.insert(:gitf_config, {:config, updated})
+        if original_config != %{} do
+          GiTF.Config.Provider.put([:plugins, :models, :default], "claude")
         end
 
         # Hide real Claude from the Validator's find_executable lookup.
@@ -93,13 +88,13 @@ defmodule GiTF.TestDriver.Scenario do
           Recorder.stop()
           Harness.teardown(env)
           System.put_env("PATH", original_path)
-          # Restore original config (may fail if Config.Provider was stopped)
+          # Restore original config.
           try do
-            if original_config do
-              :ets.insert(:gitf_config, {:config, original_config})
+            if original_config != %{} do
+              GiTF.Config.Provider.replace(original_config)
             end
           rescue
-            ArgumentError -> :ok
+            _ -> :ok
           end
         end)
 

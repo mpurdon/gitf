@@ -91,6 +91,13 @@ defmodule GiTF.Missions do
         issue_ref: issue_ref,
         cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"],
         workflow_id: workflow_id,
+        # Provenance for Aramaki (the admission layer). `source` identifies the
+        # intake channel (e.g. "github_issue"); `source_issue` carries the
+        # linkage used to report progress back; `aramaki_priority` orders the
+        # admission queue. All nil for operator-created missions.
+        source: attrs[:source] || attrs["source"],
+        source_issue: attrs[:source_issue] || attrs["source_issue"],
+        aramaki_priority: attrs[:aramaki_priority] || attrs["aramaki_priority"],
         # Tournament fields — `impl_variants` is set by the implementation
         # phase when GiTF.Tournament.enabled? to the list of variant ids
         # (`["v1", "v2", ...]`) the mission is running in parallel.
@@ -381,13 +388,33 @@ defmodule GiTF.Missions do
           })
         end
 
-        Archive.update(:missions, mission_id, fn m ->
-          m
-          |> Map.put(:current_phase, "completed")
-          |> Map.put(:status, "completed")
-          |> Map.delete(:failure_reason)
-        end)
+        result =
+          Archive.update(:missions, mission_id, fn m ->
+            m
+            |> Map.put(:current_phase, "completed")
+            |> Map.put(:status, "completed")
+            |> Map.delete(:failure_reason)
+          end)
+
+        # Report back on the source GitHub issue (no-op for non-issue missions).
+        notify_aramaki_terminal(mission, :completed)
+        result
     end
+  end
+
+  # Best-effort Aramaki lifecycle notification on a terminal mission state.
+  # Only meaningful for missions that came from a GitHub issue.
+  defp notify_aramaki_terminal(mission, outcome) do
+    if Map.get(mission, :source) == "github_issue" do
+      case outcome do
+        :completed -> GiTF.Aramaki.Lifecycle.on_merged(mission)
+        {:failed, reason} -> GiTF.Aramaki.Lifecycle.on_failed(mission, reason || "unknown")
+      end
+    end
+
+    :ok
+  rescue
+    _ -> :ok
   end
 
   @doc """
@@ -523,12 +550,16 @@ defmodule GiTF.Missions do
           })
         end
 
-        Archive.update(:missions, mission_id, fn m ->
-          m
-          |> Map.put(:current_phase, "completed")
-          |> Map.put(:status, "failed")
-          |> Map.put(:failure_reason, reason)
-        end)
+        result =
+          Archive.update(:missions, mission_id, fn m ->
+            m
+            |> Map.put(:current_phase, "completed")
+            |> Map.put(:status, "failed")
+            |> Map.put(:failure_reason, reason)
+          end)
+
+        notify_aramaki_terminal(mission, {:failed, reason})
+        result
     end
   end
 
@@ -608,7 +639,9 @@ defmodule GiTF.Missions do
     case Archive.get(:sectors, sid) do
       %{path: path} when is_binary(path) ->
         if File.dir?(path) do
-          GiTF.Git.rollback(path)
+          # Non-destructive: never reset --hard / clean -fd a shared repo that
+          # may hold human WIP. Aborts an in-progress merge or stashes changes.
+          GiTF.Git.safe_rollback(path, sid)
         end
 
       _ ->
@@ -933,6 +966,29 @@ defmodule GiTF.Missions do
     Archive.update(:missions, mission_id, fn mission ->
       phase_jobs = Map.get(mission, :phase_jobs, %{})
       Map.put(mission, :phase_jobs, Map.put(phase_jobs, phase, op_id))
+    end)
+  end
+
+  @doc """
+  Whether an operator has cleared the `await_operator` gate on `phase_id`
+  for this mission. Takes the mission map (as held by the Advancer).
+  """
+  @spec gate_cleared?(map(), String.t()) :: boolean()
+  def gate_cleared?(mission, phase_id) when is_map(mission) do
+    phase_id in Map.get(mission, :cleared_gates, [])
+  end
+
+  @doc """
+  Records operator clearance of the `await_operator` gate on `phase_id`,
+  letting the pipeline advance past that phase. Idempotent.
+
+  Returns `{:ok, mission}` or `{:error, :not_found}`.
+  """
+  @spec clear_gate(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def clear_gate(mission_id, phase_id) do
+    Archive.update(:missions, mission_id, fn mission ->
+      cleared = Map.get(mission, :cleared_gates, [])
+      Map.put(mission, :cleared_gates, Enum.uniq([phase_id | cleared]))
     end)
   end
 

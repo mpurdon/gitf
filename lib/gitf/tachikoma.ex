@@ -130,6 +130,7 @@ defmodule GiTF.Tachikoma do
     # Check for zombie missions every 5 patrols (~2.5 min)
     if rem(count, 5) == 0 do
       check_zombie_missions()
+      check_stalled_missions()
     end
 
     # Prune stale worktree metadata every 10 patrols (~5 min)
@@ -458,19 +459,22 @@ defmodule GiTF.Tachikoma do
     if active_quests != [] do
       case GenServer.whereis(GiTF.Major) do
         nil ->
-          # Major is dead — attempt auto-restart
+          # Major is down. Do NOT restart it here — Major is supervised by
+          # GiTF.Core.Supervisor (:rest_for_one), which restarts it (and
+          # cascades to its dependents) far more safely than a watchdog
+          # reaching in to start_link a sibling ever could. Just alert.
           Logger.warning(
-            "Major is not running but #{length(active_quests)} mission(s) are active, attempting restart"
+            "Major is not running but #{length(active_quests)} mission(s) are active; supervisor should be restarting it"
           )
 
-          maybe_restart_major()
+          alert_major_down("not running")
 
           [
             %{
               name: "major_heartbeat",
               status: :error,
               message:
-                "Major is not running but #{length(active_quests)} mission(s) are active (restart attempted)"
+                "Major is not running but #{length(active_quests)} mission(s) are active (supervisor restart expected)"
             }
           ]
 
@@ -489,15 +493,15 @@ defmodule GiTF.Tachikoma do
               ]
 
             :exit, _ ->
-              # Major process is dead (stale PID) — attempt restart
-              Logger.warning("Major process is dead, attempting restart")
-              maybe_restart_major()
+              # Stale/dead PID — the supervisor restarts Major; we only alert.
+              Logger.warning("Major process is dead; supervisor should be restarting it")
+              alert_major_down("process dead")
 
               [
                 %{
                   name: "major_heartbeat",
                   status: :error,
-                  message: "Major process is dead (restart attempted)"
+                  message: "Major process is dead (supervisor restart expected)"
                 }
               ]
           end
@@ -506,48 +510,76 @@ defmodule GiTF.Tachikoma do
       []
     end
   rescue
-    _ -> []
+    e ->
+      # The watchdog must not silently report "healthy" when its OWN health
+      # logic throws — that is exactly how a watchdog goes blind.
+      Logger.warning("Tachikoma: check_major_heartbeat crashed: #{Exception.message(e)}")
+
+      [%{name: "major_heartbeat", status: :warn, message: "heartbeat check itself failed"}]
   end
 
-  defp maybe_restart_major do
-    case GiTF.gitf_dir() do
-      {:ok, gitf_root} ->
-        # Clean up stale supervisor child entry if it exists
-        try do
-          Supervisor.terminate_child(GiTF.Supervisor, GiTF.Major)
-          Supervisor.delete_child(GiTF.Supervisor, GiTF.Major)
-        catch
-          :exit, _ -> :ok
-        end
+  defp alert_major_down(detail) do
+    GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+      type: :major_down,
+      message: "Major is down (#{detail}); relying on GiTF.Core.Supervisor to restart it"
+    })
+  rescue
+    _ -> :ok
+  end
 
-        case GiTF.Major.start_link(gitf_root: gitf_root) do
-          {:ok, pid} ->
-            Logger.info("Tachikoma: auto-restarted Major (pid: #{inspect(pid)})")
-            GiTF.Major.start_session()
+  # Pre-implementation phases whose stall is invisible to check_zombie_missions
+  # (which only inspects implementation-phase missions with impl ops). A
+  # provider outage during triage/design/etc. would otherwise strand a mission
+  # until the next BEAM restart's startup sweep. NOTE: "pending" is excluded on
+  # purpose — a never-started mission is an admission decision for the operator
+  # (or Aramaki), not something the watchdog should silently auto-start.
+  @early_phases ~w(triage research requirements design review planning)
+  @stalled_mission_threshold_seconds 300
 
-            GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-              type: :major_auto_restarted,
-              message: "Tachikoma auto-restarted Major after detecting it was dead"
-            })
+  defp check_stalled_missions do
+    now = DateTime.utc_now()
 
-          {:error, {:already_started, _pid}} ->
-            Logger.debug("Tachikoma: Major already restarted by another process")
+    GiTF.Missions.list()
+    |> Enum.filter(fn m -> Map.get(m, :current_phase) in @early_phases end)
+    |> Enum.filter(fn m -> mission_stale?(m, now) and not mission_has_live_ghost?(m) end)
+    |> Enum.each(fn mission ->
+      Logger.warning(
+        "Tachikoma: re-kicking stalled mission #{mission.id} " <>
+          "(phase #{mission.current_phase}, no live ghost) — likely stranded by an outage"
+      )
 
-          {:error, reason} ->
-            Logger.error("Tachikoma: failed to restart Major: #{inspect(reason)}")
-
-            GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-              type: :major_restart_failed,
-              message: "Tachikoma failed to restart Major: #{inspect(reason)}"
-            })
-        end
-
-      {:error, _} ->
-        Logger.error("Tachikoma: cannot restart Major — no gitf root found")
-    end
+      try do
+        GiTF.Major.Orchestrator.advance_quest(mission.id)
+      rescue
+        e -> Logger.warning("Tachikoma: re-kick of #{mission.id} failed: #{Exception.message(e)}")
+      end
+    end)
   rescue
     e ->
-      Logger.error("Tachikoma: Major restart crashed: #{Exception.message(e)}")
+      Logger.warning("Tachikoma: check_stalled_missions failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp mission_stale?(mission, now) do
+    ts = Map.get(mission, :updated_at) || Map.get(mission, :inserted_at)
+
+    case ts do
+      %DateTime{} = t -> DateTime.diff(now, t, :second) > @stalled_mission_threshold_seconds
+      # No timestamp: treat as stale so it gets re-kicked rather than stranded.
+      _ -> true
+    end
+  end
+
+  defp mission_has_live_ghost?(mission) do
+    GiTF.Ops.list(mission_id: mission.id)
+    |> Enum.any?(fn op ->
+      case op[:ghost_id] && GiTF.Ghost.Worker.lookup(op.ghost_id) do
+        {:ok, pid} -> Process.alive?(pid)
+        _ -> false
+      end
+    end)
+  rescue
+    _ -> false
   end
 
   defp check_zombie_missions do
@@ -595,7 +627,12 @@ defmodule GiTF.Tachikoma do
             try do
               GiTF.Major.Orchestrator.advance_quest(mission.id)
             rescue
-              _ -> :ok
+              e ->
+                Logger.warning(
+                  "Tachikoma: advance_quest for resolved mission #{mission.id} crashed: #{Exception.message(e)}"
+                )
+
+                :ok
             end
 
           all_failed_unresolved? ->
@@ -628,7 +665,12 @@ defmodule GiTF.Tachikoma do
             try do
               GiTF.Major.Orchestrator.advance_quest(mission.id)
             rescue
-              _ -> :ok
+              e ->
+                Logger.warning(
+                  "Tachikoma: advance_quest for stuck mission #{mission.id} crashed: #{Exception.message(e)}"
+                )
+
+                :ok
             end
         end
       end
@@ -746,7 +788,9 @@ defmodule GiTF.Tachikoma do
         :ok
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Tachikoma: disk/backup prune failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp to_integer_safe(nil), do: nil
@@ -892,6 +936,10 @@ defmodule GiTF.Tachikoma do
     seven_day_cutoff = DateTime.shift(DateTime.utc_now(), day: -7)
     pruned_snapshots = prune_by_age(:context_snapshots, seven_day_cutoff)
 
+    # Prune ghost checkpoint backups (>7 days) — retention was previously
+    # unwired, so :backups grew without bound.
+    pruned_backups = prune_by_age(:backups, seven_day_cutoff)
+
     # Cap pattern collections at max records
     max_patterns = GiTF.Config.get(:pattern_retention_max) || 200
 
@@ -906,14 +954,15 @@ defmodule GiTF.Tachikoma do
 
     total =
       length(pruned_links) + length(pruned_runs) + pruned_costs + pruned_audits +
-        pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_patterns + compacted
+        pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_backups +
+        pruned_patterns + compacted
 
     if total > 0 do
       Logger.info(
         "Archive pruned: #{length(pruned_links)} links, #{length(pruned_runs)} runs, " <>
           "#{pruned_costs} costs, #{pruned_audits} audits, #{pruned_debriefs} debriefs, " <>
           "#{pruned_transitions} transitions, #{pruned_snapshots} snapshots, " <>
-          "#{pruned_patterns} patterns, #{compacted} artifacts compacted"
+          "#{pruned_backups} backups, #{pruned_patterns} patterns, #{compacted} artifacts compacted"
       )
     end
   rescue
@@ -971,7 +1020,7 @@ defmodule GiTF.Tachikoma do
   defp prune_by_age(collection, cutoff) do
     to_delete =
       GiTF.Archive.filter(collection, fn r ->
-        inserted = r[:inserted_at] || r[:recorded_at] || r[:completed_at]
+        inserted = r[:inserted_at] || r[:recorded_at] || r[:completed_at] || r[:saved_at]
         inserted != nil and DateTime.compare(inserted, cutoff) == :lt
       end)
 

@@ -112,14 +112,24 @@ defmodule GiTF.Telemetry do
   # Wrapped in try/rescue so event store failures never crash the handler.
 
   defp persist_to_event_store(event, measurements, metadata) do
-    try do
-      case map_event(event, measurements, metadata) do
-        nil -> :ok
-        {type, entity_id, data, meta} -> GiTF.EventStore.record(type, entity_id, data, meta)
-      end
-    rescue
-      _ -> :ok
+    case map_event(event, measurements, metadata) do
+      nil ->
+        :ok
+
+      {type, entity_id, data, meta} ->
+        # Persist OFF the telemetry handler: handlers run in the emitting
+        # process (a ghost/Major), so doing the store write inline couples a
+        # cheap fan-out observability call to the store. Fire-and-forget under
+        # the Task supervisor — a failed persist never touches the emitter, and
+        # recording an event can't recurse into the handler synchronously.
+        Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+          GiTF.EventStore.record(type, entity_id, data, meta)
+        end)
+
+        :ok
     end
+  rescue
+    _ -> :ok
   end
 
   defp map_event([:gitf, :ghost, :spawned], measurements, meta) do

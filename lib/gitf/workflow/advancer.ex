@@ -73,10 +73,46 @@ defmodule GiTF.Workflow.Advancer do
             ctx = %{artifact: GiTF.Missions.get_artifact(mission.id, phase_id), mission: mission}
 
             case verdict do
-              :fail -> handle_fail(mission, workflow, phase_config, ctx)
-              v -> advance_via(workflow, phase_id, v, ctx)
+              :fail ->
+                handle_fail(mission, workflow, phase_config, ctx)
+
+              v ->
+                # An operator gate blocks advancing PAST this phase until a
+                # human clears it. Without this, `gate: await_operator` was
+                # parsed but never enforced (review_plan silently bypassed;
+                # security-patch could auto-merge).
+                if gate_blocks?(phase_config, mission, ctx) do
+                  {:wait, phase_id}
+                else
+                  advance_via(workflow, phase_id, v, ctx)
+                end
             end
         end
+    end
+  end
+
+  # Does an operator-approval gate hold this phase? True when the gate's
+  # `when` expression is active and the operator has not cleared the gate.
+  defp gate_blocks?(%Phase{gate: nil}, _mission, _ctx), do: false
+
+  defp gate_blocks?(%Phase{gate: %{when: when_expr, action: :await_operator}, id: phase_id}, mission, ctx) do
+    gate_active?(when_expr, ctx) and not GiTF.Missions.gate_cleared?(mission, phase_id)
+  end
+
+  defp gate_blocks?(_phase, _mission, _ctx), do: false
+
+  defp gate_active?(when_expr, ctx) do
+    case GiTF.Workflow.Expr.eval(when_expr, ctx) do
+      {:ok, active?} ->
+        active?
+
+      {:error, reason} ->
+        # A gate-condition eval error is a config bug, not a risk signal.
+        # Blocking on it would stall every mission through this phase, so
+        # fail-open (advance) and log — the expression is validated at load.
+        require Logger
+        Logger.warning("Gate `when` eval failed (#{inspect(reason)}); not blocking")
+        false
     end
   end
 

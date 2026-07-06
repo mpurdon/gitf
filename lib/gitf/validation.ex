@@ -513,6 +513,50 @@ defmodule GiTF.Validation do
 
   # Find a shell with an on-disk worktree from the mission's
   # implementation ops, preferring the most recent.
+  @doc """
+  Runs the sector's behavioral verification suite (holdout scenarios driven
+  through the artifact's real interface) against the implementation worktree.
+
+  Returns `:ok` when there is no profile, or all scenarios pass; `{:error,
+  reason}` when any scenario fails or verification cannot complete (fail-safe
+  — this only runs for sectors that explicitly opted in with a profile). The
+  caller treats an error like the diff cross-check: override "pass" → fail and
+  route back into the fix loop.
+  """
+  @spec verify_behavior(map()) :: :ok | {:error, String.t()}
+  def verify_behavior(mission) do
+    if GiTF.Verification.profile?(mission.sector_id) do
+      case find_implementation_shell(mission) do
+        %{worktree_path: path} -> run_behavioral(mission.sector_id, path)
+        # No worktree to exercise — the diff cross-check already gated; don't
+        # hard-fail on a missing worktree.
+        _ -> :ok
+      end
+    else
+      :ok
+    end
+  rescue
+    e -> {:error, "behavioral verification error: #{Exception.message(e)}"}
+  end
+
+  defp run_behavioral(sector_id, path) do
+    case GiTF.Verification.run(sector_id, path) do
+      {:ok, %{passed: true}} ->
+        :ok
+
+      {:ok, %{passed: false, failures: failures}} ->
+        summary =
+          failures
+          |> Enum.map_join("; ", fn f -> "#{f.name}: #{f.reasoning}" end)
+          |> String.slice(0, 500)
+
+        {:error, "behavioral verification failed — #{summary}"}
+
+      :no_profile ->
+        :ok
+    end
+  end
+
   defp find_implementation_shell(mission) do
     ghost_ids =
       mission.ops

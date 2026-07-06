@@ -292,12 +292,34 @@ defmodule GiTF.Major.Janitor do
     # so do it here. The rest (Ops.fail, Run notification, retry scheduling,
     # archive update) needs Major's state (retry_pending, max_retries) and must
     # schedule :delayed_retry on Major's mailbox — let Major own that chain.
+    #
+    # Kill the OS subprocess FIRST (the worker may be wedged and unable to do
+    # it in terminate/2), then terminate the worker via its supervisor rather
+    # than Process.exit(pid, :kill). A brutal kill is an abnormal exit that a
+    # :transient worker RESTARTS — spawning a second subprocess for the same
+    # op that races this recovery's fail+retry (a double-spend). Supervisor
+    # termination does not trigger a restart.
+    kill_ghost_os_process(ghost.id)
+
     case GiTF.Ghost.Worker.lookup(ghost.id) do
-      {:ok, pid} -> Process.exit(pid, :kill)
+      {:ok, pid} -> GiTF.SectorSupervisor.terminate_child(pid)
       :error -> :ok
     end
 
     GenServer.cast(GiTF.Major, {:hard_stall_recovery, ghost.id, ghost.op_id, seconds_since})
+  end
+
+  # Kill the OS subprocess recorded for a ghost (SIGTERM→SIGKILL), if any.
+  defp kill_ghost_os_process(ghost_id) do
+    case GiTF.Archive.get(:ghosts, ghost_id) do
+      %{pid: os_pid} when not is_nil(os_pid) ->
+        GiTF.Runtime.OsProc.terminate(os_pid, [])
+
+      _ ->
+        :ok
+    end
+  rescue
+    _ -> :ok
   end
 
   # Scale stall timeout based on op complexity:

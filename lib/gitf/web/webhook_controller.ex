@@ -113,6 +113,20 @@ defmodule GiTF.Web.WebhookController do
     end
   end
 
+  defp handle_github_event("issues", payload) do
+    # Aramaki (admission layer) is opt-in; only route issue events when on.
+    if GiTF.Aramaki.enabled?() do
+      case GiTF.Aramaki.Intake.dispatch(payload) do
+        {:ok, kind, _} -> Logger.info("GitHub webhook: issue → #{kind}")
+        {:error, reason} -> Logger.warning("GitHub webhook: issue intake failed: #{inspect(reason)}")
+      end
+    else
+      Logger.debug("GitHub webhook: issues event ignored (Aramaki disabled)")
+    end
+
+    :ok
+  end
+
   defp handle_github_event(event, _payload) do
     Logger.debug("GitHub webhook: unhandled event=#{event}")
     :ok

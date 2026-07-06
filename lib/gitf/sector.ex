@@ -14,6 +14,26 @@ defmodule GiTF.Sector do
   require Logger
 
   @doc """
+  Finds the sector whose GitHub remote matches `owner/repo` (a repository
+  `full_name`). Returns `{:ok, sector}` or `:error`. Used by Aramaki to route
+  an inbound issue to the sector that tracks its repo.
+  """
+  @spec by_github(String.t()) :: {:ok, map()} | :error
+  def by_github(full_name) when is_binary(full_name) do
+    match =
+      Archive.all(:sectors)
+      |> Enum.find(fn s ->
+        owner = Map.get(s, :github_owner)
+        repo = Map.get(s, :github_repo)
+        owner && repo && "#{owner}/#{repo}" == full_name
+      end)
+
+    if match, do: {:ok, match}, else: :error
+  end
+
+  def by_github(_), do: :error
+
+  @doc """
   Registers a sector with the section.
 
   For a local path, validates that the directory exists. For a remote URL,
@@ -338,9 +358,12 @@ defmodule GiTF.Sector do
   end
 
   # Determines sync strategy based on whether the GitHub repo's default branch
-  # is protected. Protected → PR, unprotected → direct merge.
-  defp detect_sync_strategy(nil, _), do: "auto_merge"
-  defp detect_sync_strategy(_, nil), do: "auto_merge"
+  # is protected. Protected → PR, unprotected → direct merge. FAIL-SAFE: every
+  # ambiguous case avoids pushing to main. With no GitHub remote we can't open
+  # a PR, so leave branches for the operator ("manual"); when the repo is on
+  # GitHub but details are unreadable, open a reviewable PR ("pr_branch").
+  defp detect_sync_strategy(nil, _), do: "manual"
+  defp detect_sync_strategy(_, nil), do: "manual"
 
   defp detect_sync_strategy(owner, repo) do
     case GiTF.GitHub.client(%{github_owner: owner, github_repo: repo}) do
@@ -351,14 +374,14 @@ defmodule GiTF.Sector do
             check_branch_protection(client, owner, repo, branch)
 
           _ ->
-            "auto_merge"
+            "pr_branch"
         end
 
       {:error, _} ->
-        "auto_merge"
+        "pr_branch"
     end
   rescue
-    _ -> "auto_merge"
+    _ -> "manual"
   end
 
   # When in doubt, prefer PRs — they're safe and reviewable.

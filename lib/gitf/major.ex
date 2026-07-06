@@ -308,6 +308,26 @@ defmodule GiTF.Major do
     {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
+  # A verification Task (async_nolink) crashed — no result message will come,
+  # only this DOWN. Route it to the same fail-safe retry path as an explicit
+  # verification error. Must precede the general ghost/session DOWN clause.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{pending_verifications: pv} = state)
+      when is_map_key(pv, ref) do
+    {ghost_id, op_id} = Map.fetch!(pv, ref)
+
+    Logger.error("Verification task for op #{op_id} crashed: #{inspect(reason)} — retrying")
+
+    state = %{state | pending_verifications: Map.delete(pv, ref)}
+
+    link_msg = %{
+      from: ghost_id,
+      subject: "verification_error",
+      body: "Verification task crashed: #{inspect(reason)}"
+    }
+
+    {:noreply, maybe_retry_job(link_msg, state)}
+  end
+
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) when is_pid(pid) do
     # Check if this is a ghost worker dying — look up via Registry
     ghost_id =
@@ -653,9 +673,12 @@ defmodule GiTF.Major do
           end
 
         _ ->
-          # Implementation ops go through verification
+          # Implementation ops go through verification. async_nolink (not
+          # async): a crash inside verify_job must NOT propagate through a link
+          # and take the orchestrator down — it arrives as a {:DOWN, ref, ...}
+          # we handle as a verification error.
           task =
-            Task.async(fn ->
+            Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
               case GiTF.Audit.verify_job(op_id) do
                 {:ok, :pass, _result} -> {:verification_passed, link_msg.from, op_id}
                 {:ok, :fail, result} -> {:verification_failed, link_msg.from, op_id, result}
@@ -1034,7 +1057,7 @@ defmodule GiTF.Major do
     end
   end
 
-  # Exponential backoff: 30s * 2^attempt with jitter
+  # Exponential backoff: 30s * 4^attempt with jitter, capped at 10min
   # attempt 0 → ~30s, attempt 1 → ~2min, attempt 2 → ~8min
   defp retry_backoff_ms(attempt) do
     base = :timer.seconds(30)
@@ -1372,10 +1395,33 @@ defmodule GiTF.Major do
     _ -> true
   end
 
+  # Refuse to spawn when free disk is below this floor — a new ghost creates a
+  # worktree and writes logs/artifacts, and running out of disk mid-mission
+  # corrupts the archive and wedges git.
+  @min_free_disk_mb 500
+
   defp check_quest_budget(mission_id) do
-    case GiTF.Budget.check(mission_id) do
-      {:ok, _remaining} -> :ok
-      {:error, :budget_exceeded, _spent} -> {:error, :budget_exceeded}
+    # Disk floor first (cheapest, hardest failure): out-of-disk corrupts state.
+    with :ok <- check_disk_floor(),
+         # Factory-wide daily ceiling next: it bounds total spend across all
+         # missions and unbounded concurrency, which the per-mission cap cannot.
+         {:ok, _global} <- GiTF.Budget.global_check(),
+         {:ok, _remaining} <- GiTF.Budget.check(mission_id) do
+      :ok
+    else
+      {:error, :low_disk, free_mb} ->
+        Logger.warning("Free disk #{free_mb} MB below #{@min_free_disk_mb} MB floor — blocking spawn")
+        {:error, :low_disk}
+
+      {:error, :daily_budget_exceeded, spent} ->
+        Logger.warning(
+          "Factory daily budget exceeded ($#{Float.round(spent, 2)} in last 24h) — blocking spawn for #{mission_id}"
+        )
+
+        {:error, :daily_budget_exceeded}
+
+      {:error, :budget_exceeded, _spent} ->
+        {:error, :budget_exceeded}
     end
   rescue
     e ->
@@ -1386,6 +1432,45 @@ defmodule GiTF.Major do
       )
 
       {:error, :budget_check_failed}
+  end
+
+  # Returns :ok when free disk is above the floor, or {:error, :low_disk,
+  # free_mb} when below. Fail-open on an unmeasurable disk (budget is the
+  # primary gate; blocking all spawns because `df` failed is too broad).
+  defp check_disk_floor do
+    case free_disk_mb() do
+      nil -> :ok
+      mb when mb >= @min_free_disk_mb -> :ok
+      mb -> {:error, :low_disk, mb}
+    end
+  end
+
+  defp free_disk_mb do
+    path =
+      case GiTF.gitf_dir() do
+        {:ok, root} -> Path.join(root, ".gitf")
+        _ -> File.cwd!()
+      end
+
+    case System.cmd("df", ["-Pk", path],
+           stderr_to_stdout: true,
+           env: [{"LC_ALL", "C"}, {"LANG", "C"}]
+         ) do
+      {output, 0} ->
+        output
+        |> String.split("\n", trim: true)
+        |> List.last()
+        |> String.split()
+        |> case do
+          [_fs, _blocks, _used, avail_kb | _] -> String.to_integer(avail_kb) |> div(1024)
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
   end
 
   # -- Private: file overlap guard ---------------------------------------------

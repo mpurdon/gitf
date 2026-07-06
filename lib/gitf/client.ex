@@ -180,6 +180,9 @@ defmodule GiTF.Client do
   defp atomize(data) when is_list(data), do: Enum.map(data, &atomize/1)
   defp atomize(data), do: data
 
+  # Bounded interning: decoded API/JSON bodies are external input, so an
+  # unbounded String.to_atom here is an atom-table DoS. Keep the string key
+  # when it can't be safely interned — callers reading known keys still work.
   defp safe_atom(k) when is_atom(k), do: k
-  defp safe_atom(k) when is_binary(k), do: String.to_atom(k)
+  defp safe_atom(k) when is_binary(k), do: GiTF.SafeAtom.intern!(k)
 end

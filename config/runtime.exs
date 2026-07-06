@@ -15,46 +15,55 @@ gitf_home = System.get_env("GITF_HOME") || Path.join(System.user_home!(), ".gitf
 config :llm_db, data_dir: Path.join(gitf_home, "llm_db")
 
 # Feature flags. Env var names match the Application key with a GITF_ prefix.
-# TODO: replace with the Flag Registry (see plans/flag-registry.md) once it
-# lands; this is the stopgap until the registry + CLI exist.
-case System.get_env("GITF_TRIAGE_ENABLED") do
-  v when v in ["false", "0"] -> config :gitf, :triage_enabled, false
-  v when v in ["true", "1"] -> config :gitf, :triage_enabled, true
-  _ -> :ok
+# Data-driven so every flag the startup log (Application.log_feature_flags/0)
+# knows about is actually parseable here — previously several were logged but
+# never read, so setting them did nothing. Keep this list in sync with that
+# log. (Stopgap until the full Flag Registry + CLI lands.)
+boolean_flags = [
+  {"GITF_TRIAGE_ENABLED", :triage_enabled},
+  {"GITF_SKILLS_ENABLED", :skills_enabled},
+  {"GITF_SKILL_REFINEMENT_ENABLED", :skill_refinement_enabled},
+  {"GITF_SKILL_AUTO_COMMIT_ENABLED", :skill_auto_commit_enabled},
+  {"GITF_OUTCOMES_ENABLED", :outcomes_enabled},
+  {"GITF_OUTCOME_REFINEMENT_ENABLED", :outcome_refinement_enabled},
+  {"GITF_OUTCOME_AUTONOMY_TIERS_ENABLED", :outcome_autonomy_tiers_enabled},
+  {"GITF_VAULT_WRITER_ENABLED", :vault_writer_enabled},
+  {"GITF_KNOWLEDGE_CONTEXT_ENABLED", :knowledge_context_enabled},
+  {"GITF_KNOWLEDGE_COMPILE_ENABLED", :knowledge_compile_enabled},
+  {"GITF_WORKFLOW_DSL_ENABLED", :workflow_dsl_enabled},
+  {"GITF_WORKFLOW_INFERENCE_ENABLED", :workflow_inference_enabled},
+  {"GITF_LSP_ENABLED", :lsp_enabled},
+  {"GITF_LSP_VALIDATION_ENABLED", :lsp_validation_enabled},
+  {"GITF_WEBHOOKS_ENABLED", :webhooks_enabled},
+  {"GITF_VISUAL_CAPTURE_ENABLED", :visual_capture_enabled},
+  {"GITF_SANDBOX_ENABLED", :sandbox_enabled}
+]
+
+for {env_var, key} <- boolean_flags do
+  case System.get_env(env_var) do
+    v when v in ["false", "0"] -> config :gitf, key, false
+    v when v in ["true", "1"] -> config :gitf, key, true
+    _ -> :ok
+  end
 end
 
-case System.get_env("GITF_OUTCOMES_ENABLED") do
-  v when v in ["false", "0"] -> config :gitf, :outcomes_enabled, false
-  v when v in ["true", "1"] -> config :gitf, :outcomes_enabled, true
-  _ -> :ok
-end
+# Integer-valued flag: number of parallel implementation attempts (tournament).
+case System.get_env("GITF_PARALLEL_IMPL_ATTEMPTS") do
+  nil ->
+    :ok
 
-case System.get_env("GITF_OUTCOME_REFINEMENT_ENABLED") do
-  v when v in ["false", "0"] -> config :gitf, :outcome_refinement_enabled, false
-  v when v in ["true", "1"] -> config :gitf, :outcome_refinement_enabled, true
-  _ -> :ok
-end
+  "" ->
+    :ok
 
-case System.get_env("GITF_WEBHOOKS_ENABLED") do
-  v when v in ["false", "0"] -> config :gitf, :webhooks_enabled, false
-  v when v in ["true", "1"] -> config :gitf, :webhooks_enabled, true
-  _ -> :ok
+  raw ->
+    case Integer.parse(raw) do
+      {n, _} when n >= 1 -> config :gitf, :parallel_impl_attempts, n
+      _ -> :ok
+    end
 end
 
 if secret = System.get_env("GITF_GITHUB_WEBHOOK_SECRET") do
   config :gitf, :github_webhook_secret, secret
-end
-
-case System.get_env("GITF_VISUAL_CAPTURE_ENABLED") do
-  v when v in ["false", "0"] -> config :gitf, :visual_capture_enabled, false
-  v when v in ["true", "1"] -> config :gitf, :visual_capture_enabled, true
-  _ -> :ok
-end
-
-case System.get_env("GITF_LSP_ENABLED") do
-  v when v in ["false", "0"] -> config :gitf, :lsp_enabled, false
-  v when v in ["true", "1"] -> config :gitf, :lsp_enabled, true
-  _ -> :ok
 end
 
 if exe = System.get_env("LSP_EXECUTABLE") do

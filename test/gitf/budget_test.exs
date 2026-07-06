@@ -34,6 +34,47 @@ defmodule GiTF.BudgetTest do
     %{sector: sector, mission: mission, ghost: ghost, op: op}
   end
 
+  describe "global_check/0 (factory-wide daily cap)" do
+    test "ok with remaining under the cap", %{ghost: ghost} do
+      {:ok, _} =
+        Costs.record(ghost.id, %{
+          input_tokens: 1000,
+          output_tokens: 500,
+          model: "claude-sonnet-4-20250514"
+        })
+
+      assert {:ok, remaining} = Budget.global_check()
+      assert remaining > 0
+      assert remaining <= Budget.daily_budget()
+    end
+
+    test "blocks once rolling-24h spend exceeds the daily cap", %{ghost: ghost} do
+      # Enormous output spend to clear the $100 default cap in one record.
+      {:ok, _} =
+        Costs.record(ghost.id, %{
+          input_tokens: 0,
+          output_tokens: 200_000_000,
+          model: "claude-sonnet-4-20250514"
+        })
+
+      assert {:error, :daily_budget_exceeded, spent} = Budget.global_check()
+      assert spent >= Budget.daily_budget()
+    end
+
+    test "global_spent sums across all missions' costs", %{ghost: ghost} do
+      assert Budget.global_spent() == 0.0
+
+      {:ok, _} =
+        Costs.record(ghost.id, %{
+          input_tokens: 1_000_000,
+          output_tokens: 0,
+          model: "claude-sonnet-4-20250514"
+        })
+
+      assert Budget.global_spent() > 0.0
+    end
+  end
+
   describe "spent_for/1" do
     test "returns 0 when no costs recorded", %{mission: mission} do
       assert Budget.spent_for(mission.id) == 0.0

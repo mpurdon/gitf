@@ -46,3 +46,8 @@ section.log
 .claude/
 hive
 hive.log
+
+# Build artifacts + crash/debug output (added during hardening)
+crash_output*.log
+*.escript
+erl_crash.dump
