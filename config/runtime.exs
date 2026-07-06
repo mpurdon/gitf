@@ -105,6 +105,14 @@ if config_env() == :prod do
   live_view_salt = require_secret.("LIVE_VIEW_SIGNING_SALT")
   session_salt = require_secret.("SESSION_SIGNING_SALT")
 
+  # A local escript daemon is single-user on the host, so trust loopback and let
+  # the CLI/HTTP API work without an API key. A release (a real deployment,
+  # possibly behind a proxy where all traffic appears as 127.0.0.1) keeps the
+  # bypass OFF — see prod.exs. Operators can still force either via config.
+  unless System.get_env("RELEASE_NAME") do
+    config :gitf, :local_ip_bypass, true
+  end
+
   check_origin =
     case System.get_env("GITF_CHECK_ORIGIN") do
       nil -> true
