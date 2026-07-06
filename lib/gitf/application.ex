@@ -61,6 +61,12 @@ defmodule GiTF.Application do
 
     setup_file_logging(gitf_root)
 
+    # Config.Provider is a supervised child (starts later), but Keys.load/0 runs
+    # here — before the tree — and reads [:llm, :keys]. Preload the config into
+    # persistent_term now so provider API keys (e.g. google_api_key) actually
+    # land in :req_llm; otherwise those reads see an empty config.
+    GiTF.Config.Provider.preload(gitf_root)
+
     # Keys must load before any supervised child may use them
     GiTF.Runtime.Keys.load()
 

@@ -46,6 +46,19 @@ defmodule GiTF.Config.Provider do
   def all, do: :persistent_term.get(@pt_key, %{})
 
   @doc """
+  Loads the config into `:persistent_term` immediately, without waiting for the
+  supervised GenServer to start. Some boot-time work runs before the foundation
+  supervision tree comes up (notably `GiTF.Runtime.Keys.load/0`, which reads
+  `[:llm, :keys]`); without this those reads see an empty config. Idempotent —
+  `init/1` re-loads the same config when the GenServer later starts.
+  """
+  @spec preload(String.t() | nil) :: :ok
+  def preload(gitf_root) do
+    :persistent_term.put(@pt_key, load_config(gitf_root))
+    :ok
+  end
+
+  @doc """
   Overrides the config value at `path` in place. Intended for tests/tooling
   (replaces the previous direct-ETS pokes now that config lives in
   persistent_term). Returns `:ok`.

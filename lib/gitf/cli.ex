@@ -2838,6 +2838,7 @@ defmodule GiTF.CLI do
     Format.info("  API:       #{url}/api/v1/health")
     Format.info("  MCP:       #{sock}")
     print_feature_flags_banner()
+    warn_if_cli_mode_daemon()
     Format.info("Press Ctrl+C to stop.")
 
     # Block the main process. The BEAM's exit handler (Ctrl+C -> 'a')
@@ -5013,6 +5014,22 @@ defmodule GiTF.CLI do
   # Logger output is bound to `section.log` via setup_file_logging/0, so
   # Logger.info would not reach the terminal. Stopgap until the flag
   # registry lands — see plans/flag-registry.md.
+  # CLI-mode ghosts are detached OS processes that report completion via a
+  # separate `gitf ghost complete` invocation — which writes to its own Archive
+  # instance and can't reach the running daemon's in-memory store. The daemon
+  # also doesn't monitor detached OS pids, so a finished ghost stays "working"
+  # and its mission stalls at that phase. API mode uses supervised in-process
+  # workers the daemon monitors directly, so it completes properly.
+  defp warn_if_cli_mode_daemon do
+    if GiTF.Runtime.ModelResolver.execution_mode() == :cli do
+      Format.warn(
+        "Execution mode is CLI, but a long-running daemon does not monitor " <>
+          "detached ghosts — missions can stall at a phase whose ghost finished. " <>
+          "Prefer API mode for `server` (unset --mode / GITF_EXECUTION_MODE, or use --mode api)."
+      )
+    end
+  end
+
   defp print_feature_flags_banner do
     flags = [
       {:triage_enabled, "GITF_TRIAGE_ENABLED", false}
