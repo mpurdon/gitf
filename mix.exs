@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.65.8"
+  @version "0.65.9"
 
   def project do
     [
@@ -69,6 +69,8 @@ defmodule GiTF.MixProject do
       {:toml, "~> 0.7"},
       {:yaml_elixir, "~> 2.11"},
       {:req, "~> 0.5"},
+      # Gemini Live API (bidirectional voice) — studio voice sessions (M4)
+      {:gemini_ex, "~> 0.14"},
       {:floki, "~> 0.36"},
       {:ratatouille, "~> 0.5"},
       {:telemetry, "~> 1.2"},

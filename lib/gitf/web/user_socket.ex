@@ -3,6 +3,7 @@ defmodule GiTF.Web.UserSocket do
 
   ## Channels
   channel("game:control", GiTF.Web.GameChannel)
+  channel("studio_voice:*", GiTF.Web.StudioVoiceChannel)
 
   # Socket params are passed from the client and can
   # be used to verify and authenticate a user. After

@@ -55,6 +55,17 @@ case System.get_env("GITF_ARAMAKI_ENABLED") do
   _ -> :ok
 end
 
+# Planning-studio voice (nested under :studio, same reason as above).
+case System.get_env("GITF_STUDIO_VOICE_ENABLED") do
+  v when v in ["true", "1"] -> config :gitf, :studio, voice_enabled: true
+  v when v in ["false", "0"] -> config :gitf, :studio, voice_enabled: false
+  _ -> :ok
+end
+
+if model = System.get_env("GITF_STUDIO_VOICE_MODEL") do
+  config :gitf, :studio, voice_model: model
+end
+
 # Integer-valued flag: number of parallel implementation attempts (tournament).
 case System.get_env("GITF_PARALLEL_IMPL_ATTEMPTS") do
   nil ->
