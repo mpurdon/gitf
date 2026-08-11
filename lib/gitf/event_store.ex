@@ -35,6 +35,10 @@ defmodule GiTF.EventStore do
     :quest_created,
     :quest_completed,
     :quest_failed,
+    :project_created,
+    :project_activated,
+    :project_paused,
+    :project_completed,
     :link_sent,
     :backup,
     :error

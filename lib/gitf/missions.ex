@@ -97,6 +97,9 @@ defmodule GiTF.Missions do
         # admission queue. All nil for operator-created missions.
         source: attrs[:source] || attrs["source"],
         source_issue: attrs[:source_issue] || attrs["source_issue"],
+        # For project-sourced missions: %{project_id, item_id} linking back to
+        # the roadmap item this mission executes.
+        source_project: attrs[:source_project] || attrs["source_project"],
         aramaki_priority: attrs[:aramaki_priority] || attrs["aramaki_priority"],
         # Tournament fields — `impl_variants` is set by the implementation
         # phase when GiTF.Tournament.enabled? to the list of variant ids
@@ -402,13 +405,29 @@ defmodule GiTF.Missions do
     end
   end
 
-  # Best-effort Aramaki lifecycle notification on a terminal mission state.
-  # Only meaningful for missions that came from a GitHub issue.
+  # Best-effort Aramaki notification on a terminal mission state. GitHub-issue
+  # missions report back to their issue; project missions advance their
+  # roadmap item (and unblock dependents / pause the project on failure).
+  #
+  # Called from BOTH terminal paths — `complete_quest`/`fail_quest` (legacy,
+  # fast-path, no-work) and `mark_user_visible_completed` (standard workflow,
+  # where complete_quest never runs — see Phases.Scoring.terminal). The
+  # `aramaki_notified` flag dedupes missions that traverse both.
   defp notify_aramaki_terminal(mission, outcome) do
-    if Map.get(mission, :source) == "github_issue" do
-      case outcome do
-        :completed -> GiTF.Aramaki.Lifecycle.on_merged(mission)
-        {:failed, reason} -> GiTF.Aramaki.Lifecycle.on_failed(mission, reason || "unknown")
+    source = Map.get(mission, :source)
+
+    if source in ["github_issue", "project"] and !Map.get(mission, :aramaki_notified, false) do
+      Archive.update(:missions, mission.id, &Map.put(&1, :aramaki_notified, true))
+
+      case source do
+        "github_issue" ->
+          case outcome do
+            :completed -> GiTF.Aramaki.Lifecycle.on_merged(mission)
+            {:failed, reason} -> GiTF.Aramaki.Lifecycle.on_failed(mission, reason || "unknown")
+          end
+
+        "project" ->
+          GiTF.Project.on_mission_terminal(mission, outcome)
       end
     end
 
@@ -431,12 +450,22 @@ defmodule GiTF.Missions do
   """
   @spec mark_user_visible_completed(String.t()) :: {:ok, map()} | {:error, term()}
   def mark_user_visible_completed(mission_id) do
-    Archive.update(:missions, mission_id, fn m ->
-      m
-      |> Map.put(:status, "completed")
-      |> Map.put(:post_processing_status, "pending")
-      |> Map.delete(:failure_reason)
-    end)
+    result =
+      Archive.update(:missions, mission_id, fn m ->
+        m
+        |> Map.put(:status, "completed")
+        |> Map.put(:post_processing_status, "pending")
+        |> Map.delete(:failure_reason)
+      end)
+
+    # This is the terminal moment on the standard workflow path (complete_quest
+    # never runs there) — report to Aramaki now so issue-sourced missions close
+    # their issue and project missions unblock their roadmap dependents.
+    with {:ok, mission} <- result do
+      notify_aramaki_terminal(mission, :completed)
+    end
+
+    result
   end
 
   @doc """

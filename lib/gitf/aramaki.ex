@@ -36,6 +36,10 @@ defmodule GiTF.Aramaki do
 
   @tick_interval_ms 30_000
 
+  # Intake channels whose pending missions Aramaki owns (and will auto-start).
+  # Operator-created missions (source nil) are deliberately NOT auto-started.
+  @owned_sources ~w(github_issue project)
+
   # -- Client ----------------------------------------------------------------
 
   def start_link(opts \\ []) do
@@ -48,10 +52,15 @@ defmodule GiTF.Aramaki do
     Application.get_env(:gitf, :aramaki, []) |> Keyword.get(:enabled, false) == true
   end
 
-  @doc "Force an admission tick now (used by tests + webhook nudges)."
+  @doc """
+  Force an admission pass now (used by tests, webhook nudges, and project
+  advancement). Uses the `{:consider, _}` path so it does NOT reschedule the
+  periodic timer — only the timer's own `:tick` does that, otherwise every
+  nudge would add another recurring timer.
+  """
   @spec tick() :: :ok
   def tick do
-    if pid = Process.whereis(__MODULE__), do: send(pid, :tick)
+    if pid = Process.whereis(__MODULE__), do: send(pid, {:consider, :manual})
     :ok
   end
 
@@ -65,14 +74,16 @@ defmodule GiTF.Aramaki do
 
   @impl true
   def handle_info(:tick, state) do
+    advance_projects()
     admit_pending()
     schedule_tick()
     {:noreply, state}
   end
 
   def handle_info({:consider, _mission_id}, state) do
-    # An intake just created a pending mission — try to admit immediately
-    # rather than waiting for the next tick.
+    # An intake just created a pending mission (or a project mission finished,
+    # possibly unblocking dependents) — act now rather than on the next tick.
+    advance_projects()
     admit_pending()
     {:noreply, state}
   end
@@ -129,20 +140,80 @@ defmodule GiTF.Aramaki do
     end
   end
 
-  # Pending missions that Aramaki owns (source == github_issue and still
-  # pending). We deliberately do NOT auto-start arbitrary pending missions —
+  # -- Project advancement -----------------------------------------------------
+
+  @doc """
+  Creates pending missions for every ready roadmap item of every active
+  project (an item is ready when all its `depends_on` items completed). The
+  missions then flow through the same capacity-gated `admit_pending/0` as
+  issue-sourced work. Returns the number of missions created.
+  """
+  @spec advance_projects() :: non_neg_integer()
+  def advance_projects do
+    GiTF.Project.by_status("active")
+    |> Enum.reduce(0, fn project, created ->
+      created + advance_project(project)
+    end)
+  rescue
+    e ->
+      Logger.warning("Aramaki.advance_projects crashed: #{Exception.message(e)}")
+      0
+  end
+
+  defp advance_project(project) do
+    # Heal items whose mission finished without the terminal notification
+    # (restart/crash windows), then work from the healed record — which may
+    # have left the project paused (item failure) or completed.
+    :ok = GiTF.Project.reconcile(project)
+    project = GiTF.Project.get(project.id) || project
+
+    ready = if project.status == "active", do: GiTF.Project.ready_items(project), else: []
+
+    Enum.reduce(ready, 0, fn item, created ->
+      attrs = %{
+        goal: GiTF.Project.mission_goal(project, item),
+        name: "#{project.name}: #{String.slice(item.title, 0, 50)}",
+        sector_id: project.sector_id,
+        workflow_id: item.workflow_id,
+        source: "project",
+        source_project: %{project_id: project.id, item_id: item.id},
+        aramaki_priority: Map.get(project, :aramaki_priority, 2)
+      }
+
+      case GiTF.Missions.create(attrs) do
+        {:ok, mission} ->
+          {:ok, _} = GiTF.Project.attach_mission(project.id, item.id, mission.id)
+
+          Logger.info(
+            "Aramaki: project #{project.id} item #{item.id} → pending mission #{mission.id}"
+          )
+
+          created + 1
+
+        {:error, reason} ->
+          Logger.warning(
+            "Aramaki: mission create failed for project #{project.id} item #{item.id}: #{inspect(reason)}"
+          )
+
+          created
+      end
+    end)
+  end
+
+  # Pending missions that Aramaki owns (came in through an owned intake
+  # channel). We deliberately do NOT auto-start arbitrary pending missions —
   # only ones that came through Aramaki's admission gate.
   defp pending_aramaki_missions do
     GiTF.Archive.all(:missions)
     |> Enum.filter(fn m ->
-      Map.get(m, :status) == "pending" and Map.get(m, :source) == "github_issue"
+      Map.get(m, :status) == "pending" and Map.get(m, :source) in @owned_sources
     end)
   end
 
   defp active_count do
     GiTF.Archive.all(:missions)
     |> Enum.count(fn m ->
-      Map.get(m, :source) == "github_issue" and
+      Map.get(m, :source) in @owned_sources and
         Map.get(m, :status) in GiTF.Missions.active_statuses()
     end)
   end

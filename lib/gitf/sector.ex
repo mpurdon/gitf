@@ -55,6 +55,63 @@ defmodule GiTF.Sector do
   end
 
   @doc """
+  Creates a brand-new (greenfield) sector: makes `<gitf_root>/<name>`,
+  initializes a git repository on `main` with an initial empty commit, and
+  registers it like any local sector. Used by project planning when the
+  target codebase doesn't exist yet.
+
+  Accepts the same options as `add/2`. Returns `{:ok, sector}` or
+  `{:error, reason}`.
+  """
+  @spec create_new(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def create_new(name, opts \\ []) do
+    with :ok <- validate_new_sector_name(name),
+         {:ok, gitf_root} <- GiTF.gitf_dir(),
+         path = Path.join(gitf_root, name),
+         :ok <- ensure_path_absent(path),
+         :ok <- File.mkdir_p(path),
+         :ok <- init_git_repo(path) do
+      # Factory-created repo: no human WIP to protect and no remote to push,
+      # so local auto-merge is safe — and project DAGs REQUIRE it (a roadmap
+      # item's `depends_on` means "that work is in the tree", which manual
+      # sync would leave stranded on ghost/* branches between waves).
+      add(
+        path,
+        opts
+        |> Keyword.put_new(:name, name)
+        |> Keyword.put_new(:sync_strategy, "auto_merge")
+      )
+    end
+  end
+
+  defp validate_new_sector_name(name) do
+    cond do
+      !is_binary(name) or name == "" -> {:error, :invalid_name}
+      !Regex.match?(~r/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, name) -> {:error, :invalid_name}
+      match?({:ok, _}, get(name)) -> {:error, :name_taken}
+      true -> :ok
+    end
+  end
+
+  defp ensure_path_absent(path) do
+    if File.exists?(path), do: {:error, {:path_exists, path}}, else: :ok
+  end
+
+  defp init_git_repo(path) do
+    with {_, 0} <- GiTF.Git.safe_cmd(["init", "-b", "main"], cd: path),
+         {_, 0} <-
+           GiTF.Git.safe_cmd(
+             ["-c", "user.name=gitf", "-c", "user.email=gitf@localhost", "commit",
+              "--allow-empty", "-m", "chore: initialize sector"],
+             cd: path
+           ) do
+      :ok
+    else
+      {output, code} -> {:error, {:git_init_failed, code, String.slice(to_string(output), 0, 200)}}
+    end
+  end
+
+  @doc """
   Returns all registered sectors.
   """
   @spec list() :: [map()]
