@@ -653,6 +653,41 @@ defmodule GiTF.Dashboard.Layouts do
             },
             destroyed() { if (this.sortable) { this.sortable.destroy(); } }
           };
+          // Keep a chat/log container pinned to its newest entry.
+          Hooks.ScrollBottom = {
+            mounted() { this.el.scrollTop = this.el.scrollHeight; },
+            updated() { this.el.scrollTop = this.el.scrollHeight; }
+          };
+          // Planning-studio voice: lazy-loads studio_voice.js on first use and
+          // bridges mic/audio via window.GitfStudioVoice (Phoenix Channel).
+          Hooks.StudioVoice = {
+            mounted() {
+              this.handleEvent("voice_toggle", async ({ on, session_id }) => {
+                try {
+                  if (on) {
+                    if (!window.GitfStudioVoice) {
+                      await new Promise((resolve, reject) => {
+                        const s = document.createElement("script");
+                        s.src = "/assets/studio_voice.js";
+                        s.onload = resolve; s.onerror = reject;
+                        document.head.appendChild(s);
+                      });
+                    }
+                    await window.GitfStudioVoice.start(session_id, {
+                      onError: (e) => this.pushEvent("voice_client_error", e || {}),
+                    });
+                    this.pushEvent("voice_started", {});
+                  } else if (window.GitfStudioVoice) {
+                    await window.GitfStudioVoice.stop();
+                    this.pushEvent("voice_stopped", {});
+                  }
+                } catch (e) {
+                  this.pushEvent("voice_client_error", { reason: String(e) });
+                }
+              });
+            },
+            destroyed() { if (window.GitfStudioVoice) { window.GitfStudioVoice.stop(); } }
+          };
           let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
             params: { _csrf_token: csrfToken },
             hooks: Hooks

@@ -124,6 +124,16 @@ config :gitf, :aramaki,
   max_concurrent: 5,
   bot_login: nil
 
+# Planning studio (dashboard /studio). Voice sessions are opt-in: they open a
+# bidirectional stream to the configured provider (default Gemini Live via
+# gemini_ex) and stream mic audio — enable deliberately.
+config :gitf, :studio,
+  voice_enabled: false,
+  voice_adapter: GiTF.Studio.Voice.GeminiLive,
+  voice_model: "gemini-2.5-flash-native-audio-preview-12-2025",
+  # nil → fast tier via ModelResolver
+  mockup_model: nil
+
 # Visual capture (screenshots via headless browser). When enabled,
 # GiTF.Visual.Capture.screenshot/3 wraps `npx playwright screenshot`.
 # Requires `npm install -g playwright` and `npx playwright install

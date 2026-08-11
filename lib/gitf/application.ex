@@ -181,6 +181,8 @@ defmodule GiTF.Application do
           {GiTF.MCPServer.SocketListener, []},
           {GiTF.ViewModel, []},
           {GiTF.PubSubBridge, []},
+          # Planning-studio sessions (one GenServer per open studio conversation)
+          {DynamicSupervisor, name: GiTF.Studio.SessionSupervisor, strategy: :one_for_one},
           # Graceful shutdown: drain in-flight HTTP requests before stopping
           # cowboy listeners. Must come after endpoints in the sibling list.
           {Plug.Cowboy.Drainer, refs: [GiTF.Web.Endpoint.HTTP]}

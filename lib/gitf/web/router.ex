@@ -71,6 +71,8 @@ defmodule GiTF.Web.Router do
     pipe_through(:dashboard)
 
     live("/", OverviewLive)
+    live("/studio", StudioLive)
+    live("/studio/:session_id", StudioLive)
     live("/missions/new", MissionNewLive)
     live("/missions/:id/diagnostics", MissionDiagnosticsLive)
     live("/missions/:id/design", DesignLive)
