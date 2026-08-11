@@ -74,6 +74,19 @@ defmodule GiTF.Client do
   def fail_ghost(id, reason \\ "unknown"),
     do: post("/api/v1/ghosts/#{id}/fail", %{reason: reason}) |> unwrap_ok()
 
+  # Projects
+  def create_project(attrs), do: post("/api/v1/projects", attrs) |> unwrap_data()
+  def list_projects(opts \\ []), do: get("/api/v1/projects", params: opts) |> unwrap_data()
+  def get_project(id), do: get("/api/v1/projects/#{id}") |> unwrap_data()
+
+  def approve_project(id, opts \\ %{}),
+    do: post("/api/v1/projects/#{id}/approve", opts) |> unwrap_data()
+
+  def pause_project(id, reason \\ nil),
+    do: post("/api/v1/projects/#{id}/pause", %{reason: reason}) |> unwrap_data()
+
+  def resume_project(id), do: post("/api/v1/projects/#{id}/resume") |> unwrap_data()
+
   # Sectors
   def add_sector(path_or_url, opts \\ []) do
     post("/api/v1/sectors", %{path: path_or_url, opts: Map.new(opts)}) |> unwrap_data()

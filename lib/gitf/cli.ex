@@ -384,7 +384,8 @@ defmodule GiTF.CLI do
 
   @handlers [
     GiTF.CLI.MissionHandler,
-    GiTF.CLI.GhostHandler
+    GiTF.CLI.GhostHandler,
+    GiTF.CLI.ProjectHandler
   ]
 
   defp handler_helpers do
@@ -4028,6 +4029,56 @@ defmodule GiTF.CLI do
                 mission_id: [
                   value_name: "QUEST_ID",
                   help: "Quest identifier",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ]
+          ]
+        ],
+        project: [
+          name: "project",
+          about: "Plan and run multi-mission projects (Aramaki)",
+          subcommands: [
+            new: [
+              name: "new",
+              about: "Discuss what to build, then hand the roadmap to Aramaki"
+            ],
+            list: [
+              name: "list",
+              about: "List projects"
+            ],
+            show: [
+              name: "show",
+              about: "Show a project's brief and roadmap progress",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Project identifier",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            pause: [
+              name: "pause",
+              about: "Pause an active project",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Project identifier",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            resume: [
+              name: "resume",
+              about: "Resume a paused project",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Project identifier",
                   required: true,
                   parser: :string
                 ]

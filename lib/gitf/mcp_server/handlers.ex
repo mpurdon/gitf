@@ -399,6 +399,78 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("create_mission", _), do: {:error, "Missing required parameter: goal"}
 
+  # -- Projects ----------------------------------------------------------------
+
+  def call("create_project", %{"name" => _, "roadmap" => _} = args) do
+    with :ok <- require_confirm(args) do
+      attrs =
+        args
+        |> Map.take(["name", "brief", "roadmap", "sector_id"])
+        |> Map.put("source", "api")
+
+      case GiTF.Project.create(attrs) do
+        {:ok, project} -> {:ok, json_text(serialize_project(project))}
+        {:error, reason} -> {:error, log_and_sanitize("create_project", reason)}
+      end
+    end
+  end
+
+  def call("create_project", _), do: {:error, "Missing required parameters: name, roadmap"}
+
+  def call("list_projects", args) do
+    projects =
+      case args["status"] do
+        nil -> GiTF.Project.list()
+        status -> Enum.filter(GiTF.Project.list(), &(&1.status == status))
+      end
+
+    {:ok, json_text(Enum.map(projects, &serialize_project/1))}
+  end
+
+  def call("show_project", %{"id" => id}) do
+    case GiTF.Project.get(id) do
+      nil -> {:error, "Project not found: #{id}"}
+      project -> {:ok, json_text(serialize_project(project))}
+    end
+  end
+
+  def call("approve_project", %{"id" => id} = args) do
+    with :ok <- require_confirm(args),
+         {:ok, _} <- resolve_project_sector(id, args),
+         {:ok, project} <- GiTF.Project.activate(id) do
+      {:ok, json_text(serialize_project(project))}
+    else
+      {:error, reason} -> {:error, log_and_sanitize("approve_project", reason)}
+    end
+  end
+
+  def call("update_project_roadmap", %{"id" => id, "roadmap" => items} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Project.update_roadmap(id, items) do
+        {:ok, project} -> {:ok, json_text(serialize_project(project))}
+        {:error, reason} -> {:error, log_and_sanitize("update_project_roadmap", reason)}
+      end
+    end
+  end
+
+  def call("pause_project", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Project.pause(id, args["reason"]) do
+        {:ok, project} -> {:ok, json_text(serialize_project(project))}
+        {:error, reason} -> {:error, log_and_sanitize("pause_project", reason)}
+      end
+    end
+  end
+
+  def call("resume_project", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Project.resume(id) do
+        {:ok, project} -> {:ok, json_text(serialize_project(project))}
+        {:error, reason} -> {:error, log_and_sanitize("resume_project", reason)}
+      end
+    end
+  end
+
   def call("start_mission", %{"id" => id} = args) do
     with :ok <- require_confirm(args) do
       opts =
@@ -1181,6 +1253,34 @@ defmodule GiTF.MCPServer.Handlers do
 
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}
+
+  defp resolve_project_sector(id, %{"create_sector" => name}) when is_binary(name) do
+    with {:ok, sector} <- GiTF.Sector.create_new(name) do
+      GiTF.Project.assign_sector(id, sector.id)
+    end
+  end
+
+  defp resolve_project_sector(id, %{"sector_id" => sector_id}) when is_binary(sector_id) do
+    GiTF.Project.assign_sector(id, sector_id)
+  end
+
+  defp resolve_project_sector(_id, _args), do: {:ok, :unchanged}
+
+  defp serialize_project(p) do
+    %{
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      source: p.source,
+      sector_id: p.sector_id,
+      brief: p.brief,
+      roadmap:
+        Enum.map(p.roadmap, fn item ->
+          Map.take(item, [:id, :title, :goal, :depends_on, :status, :mission_id, :workflow_id])
+        end),
+      paused_reason: p[:paused_reason]
+    }
+  end
 
   # Wraps a read-handler body in try/rescue so an unexpected crash is logged
   # with handler name + args and returned as a structured error that does not

@@ -155,6 +155,15 @@ defmodule GiTF.Web.Router do
     post("/ghosts/:id/complete", ApiController, :complete_bee)
     post("/ghosts/:id/fail", ApiController, :fail_bee)
 
+    # Projects (Aramaki multi-mission initiatives)
+    post("/projects", ApiController, :create_project)
+    get("/projects", ApiController, :list_projects)
+    get("/projects/:id", ApiController, :show_project)
+    post("/projects/:id/approve", ApiController, :approve_project)
+    post("/projects/:id/pause", ApiController, :pause_project)
+    post("/projects/:id/resume", ApiController, :resume_project)
+    put("/projects/:id/roadmap", ApiController, :update_project_roadmap)
+
     # Sectors
     post("/sectors", ApiController, :add_sector)
     get("/sectors", ApiController, :list_sectors)

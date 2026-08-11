@@ -575,6 +575,108 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
+  # -- Projects ----------------------------------------------------------------
+
+  def create_project(conn, params) do
+    attrs =
+      params
+      |> Map.take(["name", "brief", "roadmap", "sector_id", "source", "aramaki_priority"])
+      |> Map.put_new("source", "api")
+
+    case GiTF.Project.create(attrs) do
+      {:ok, project} -> json(conn, %{data: serialize_project(project)})
+      {:error, reason} -> error(conn, 422, reason)
+    end
+  end
+
+  def list_projects(conn, params) do
+    projects =
+      case params["status"] do
+        nil -> GiTF.Project.list()
+        status -> Enum.filter(GiTF.Project.list(), &(&1.status == status))
+      end
+
+    json(conn, %{data: Enum.map(projects, &serialize_project/1)})
+  end
+
+  def show_project(conn, %{"id" => id}) do
+    case GiTF.Project.get(id) do
+      nil -> error(conn, 404, :not_found)
+      project -> json(conn, %{data: serialize_project(project)})
+    end
+  end
+
+  @doc false
+  # Approve a draft project: optionally resolve its sector first — either an
+  # existing one (`sector_id`) or a greenfield repo (`create_sector: "name"`)
+  # — then activate so Aramaki starts advancing the roadmap.
+  def approve_project(conn, %{"id" => id} = params) do
+    with {:ok, _} <- resolve_project_sector(id, params),
+         {:ok, project} <- GiTF.Project.activate(id) do
+      json(conn, %{data: serialize_project(project)})
+    else
+      {:error, :not_found} -> error(conn, 404, :not_found)
+      {:error, reason} -> error(conn, 422, reason)
+    end
+  end
+
+  def pause_project(conn, %{"id" => id} = params) do
+    case GiTF.Project.pause(id, params["reason"]) do
+      {:ok, project} -> json(conn, %{data: serialize_project(project)})
+      {:error, :not_found} -> error(conn, 404, :not_found)
+      {:error, reason} -> error(conn, 422, reason)
+    end
+  end
+
+  def resume_project(conn, %{"id" => id}) do
+    case GiTF.Project.resume(id) do
+      {:ok, project} -> json(conn, %{data: serialize_project(project)})
+      {:error, :not_found} -> error(conn, 404, :not_found)
+      {:error, reason} -> error(conn, 422, reason)
+    end
+  end
+
+  def update_project_roadmap(conn, %{"id" => id, "roadmap" => items}) do
+    case GiTF.Project.update_roadmap(id, items) do
+      {:ok, project} -> json(conn, %{data: serialize_project(project)})
+      {:error, :not_found} -> error(conn, 404, :not_found)
+      {:error, reason} -> error(conn, 422, reason)
+    end
+  end
+
+  def update_project_roadmap(conn, _params), do: error(conn, 422, :missing_roadmap)
+
+  defp resolve_project_sector(id, %{"create_sector" => name}) when is_binary(name) do
+    with {:ok, sector} <- GiTF.Sector.create_new(name) do
+      GiTF.Project.assign_sector(id, sector.id)
+    end
+  end
+
+  defp resolve_project_sector(id, %{"sector_id" => sector_id}) when is_binary(sector_id) do
+    GiTF.Project.assign_sector(id, sector_id)
+  end
+
+  defp resolve_project_sector(_id, _params), do: {:ok, :unchanged}
+
+  defp serialize_project(p) do
+    %{
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      source: p.source,
+      sector_id: p.sector_id,
+      brief: p.brief,
+      roadmap:
+        Enum.map(p.roadmap, fn item ->
+          Map.take(item, [:id, :title, :goal, :depends_on, :status, :mission_id, :workflow_id])
+        end),
+      aramaki_priority: p[:aramaki_priority],
+      paused_reason: p[:paused_reason],
+      inserted_at: to_string(p[:inserted_at]),
+      updated_at: to_string(p[:updated_at])
+    }
+  end
+
   # -- Helpers -----------------------------------------------------------------
 
   defp error(conn, status, reason) do

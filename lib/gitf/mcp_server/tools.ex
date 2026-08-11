@@ -197,6 +197,123 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "create_project",
+        description:
+          "[WRITE] Create a draft project: a multi-mission initiative with a brief and a dependency-DAG roadmap. " <>
+            "Aramaki turns roadmap items into missions in dependency order once the project is approved. " <>
+            "Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            name: %{type: "string", description: "Project name"},
+            brief: %{
+              type: "object",
+              description:
+                "Planning brief: vision (string), constraints/decisions/open_questions (string arrays)"
+            },
+            roadmap: %{
+              type: "array",
+              description: "Roadmap items (the dependency DAG)",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "string", description: "Stable item id (auto-generated if omitted)"},
+                  title: %{type: "string", description: "Short item title"},
+                  goal: %{
+                    type: "string",
+                    description: "Full mission goal text for an AI agent to execute"
+                  },
+                  depends_on: %{
+                    type: "array",
+                    items: %{type: "string"},
+                    description: "Ids of items that must complete first"
+                  }
+                },
+                required: ["title", "goal"]
+              }
+            },
+            sector_id: %{type: "string", description: "Target sector (may be set at approval instead)"},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["name", "roadmap", "confirm"]
+        }
+      },
+      %{
+        name: "list_projects",
+        description: "[READ] List projects (optionally by status: draft|active|paused|completed|failed).",
+        inputSchema: %{
+          type: "object",
+          properties: %{status: %{type: "string", description: "Filter by status"}}
+        }
+      },
+      %{
+        name: "show_project",
+        description: "[READ] Show a project: brief, roadmap DAG with per-item status and mission ids.",
+        inputSchema: %{
+          type: "object",
+          properties: %{id: %{type: "string", description: "Project ID"}},
+          required: ["id"]
+        }
+      },
+      %{
+        name: "approve_project",
+        description:
+          "[WRITE] Approve a draft project so Aramaki starts running it. Optionally assign an existing " <>
+            "sector (sector_id) or create a greenfield one (create_sector). Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Project ID"},
+            sector_id: %{type: "string", description: "Existing sector to run in"},
+            create_sector: %{
+              type: "string",
+              description: "Name for a new empty sector (git init) to run in"
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
+        name: "update_project_roadmap",
+        description:
+          "[WRITE] Replace a DRAFT project's roadmap (same item shape as create_project). Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Project ID"},
+            roadmap: %{type: "array", description: "Replacement roadmap items", items: %{type: "object"}},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "roadmap", "confirm"]
+        }
+      },
+      %{
+        name: "pause_project",
+        description: "[WRITE] Pause an active project (no new missions created). Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Project ID"},
+            reason: %{type: "string", description: "Why (recorded on the project)"},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
+        name: "resume_project",
+        description: "[WRITE] Resume a paused project. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Project ID"},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
         name: "start_mission",
         description:
           "[WRITE] Start a mission (or restart a stalled one). Kicks off the phase pipeline from research. Requires confirm: true.",

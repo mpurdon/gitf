@@ -38,6 +38,7 @@ defmodule GiTF.CLI.Chat do
     :mission,
     :model,
     :system_prompt,
+    :profile,
     context: nil,
     tools: [],
     pending_images: [],
@@ -53,6 +54,25 @@ defmodule GiTF.CLI.Chat do
   Returns `{:ok, plan}` on success or `{:error, reason}` if cancelled/failed.
   """
   def start(mission, opts \\ []) do
+    start_with_profile(mission_profile(mission), Keyword.put(opts, :mission, mission))
+  end
+
+  @doc """
+  Start an interactive chat with an arbitrary profile — the engine (provider
+  fallback, tool loop, select UX, image attach) is shared; the profile supplies
+  what differs between chats:
+
+    * `:label` — banner line
+    * `:system_prompt` / `:initial_message`
+    * `:tools` — full ReqLLM tool list (include `ask_choice`, see `core_tools/0`)
+    * `:submit_tool` — tool name that ends the interview (e.g. `"submit_plan"`)
+    * `:done_message` — user message injected by `/done`
+    * `:on_submit` — `fn state, args -> {state, accepted?} end`; set
+      `state.plan` and `done: true` when accepting
+
+  Returns `{:ok, state.plan}` or `{:error, :cancelled}`.
+  """
+  def start_with_profile(profile, opts \\ []) do
     # Ensure API keys from .gitf/config.toml are loaded into env vars
     GiTF.Runtime.Keys.load()
 
@@ -60,7 +80,7 @@ defmodule GiTF.CLI.Chat do
       ModelResolver.setup_ollama_env()
     end
 
-    # Planning chat always uses the API (needs tool calling for ask_choice/submit_plan).
+    # Interactive chat always uses the API (needs tool calling for ask_choice/submit).
     # In CLI mode, warn and use API anyway; in ollama mode, use local models via API.
     if ModelResolver.execution_mode() == :cli do
       IO.puts(
@@ -71,30 +91,26 @@ defmodule GiTF.CLI.Chat do
     end
 
     model = opts[:model] || ModelResolver.resolve("opus")
-    codebase = build_codebase_context(mission)
-    system_prompt = build_system_prompt(mission, codebase)
-    tools = build_tools()
 
     context =
       ReqLLM.Context.new([
-        ReqLLM.Context.system(system_prompt),
-        ReqLLM.Context.user(
-          "I want to: #{mission.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need."
-        )
+        ReqLLM.Context.system(profile.system_prompt),
+        ReqLLM.Context.user(profile.initial_message)
       ])
 
     state = %__MODULE__{
-      mission: mission,
+      mission: opts[:mission],
+      profile: profile,
       model: model,
-      system_prompt: system_prompt,
+      system_prompt: profile.system_prompt,
       context: context,
-      tools: tools
+      tools: profile.tools
     }
 
     provider = ModelResolver.provider(model)
 
     IO.puts("")
-    IO.puts(color(:cyan) <> "Planning: " <> reset() <> mission.goal)
+    IO.puts(color(:cyan) <> profile.label_prefix <> ": " <> reset() <> profile.label)
     IO.puts(dim("Provider: #{provider} · Model: #{ModelResolver.model_id(model)}"))
     IO.puts(dim("Commands: /image <path>  /paste  /done  /quit  /help"))
     IO.puts("")
@@ -105,6 +121,26 @@ defmodule GiTF.CLI.Chat do
       %{plan: plan} when plan != nil -> {:ok, plan}
       _ -> {:error, :cancelled}
     end
+  end
+
+  @doc "The tools every chat profile needs (the `ask_choice` select prompt)."
+  def core_tools, do: build_core_tools()
+
+  defp mission_profile(mission) do
+    codebase = build_codebase_context(mission)
+
+    %{
+      label_prefix: "Planning",
+      label: mission.goal,
+      system_prompt: build_system_prompt(mission, codebase),
+      initial_message:
+        "I want to: #{mission.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need.",
+      tools: build_tools(),
+      submit_tool: "submit_plan",
+      done_message:
+        "I'm satisfied. Please submit the implementation plan now using the submit_plan tool.",
+      on_submit: &do_submit_plan/2
+    }
   end
 
   # -- Chat loop --------------------------------------------------------------
@@ -126,9 +162,7 @@ defmodule GiTF.CLI.Chat do
 
       "/done" ->
         state
-        |> append_user(
-          "I'm satisfied. Please submit the implementation plan now using the submit_plan tool."
-        )
+        |> append_user(state.profile.done_message)
         |> call_and_handle()
         |> chat_loop()
 
@@ -541,13 +575,13 @@ defmodule GiTF.CLI.Chat do
   defp handle_tool_calls(state, tool_calls) do
     {state, tool_results} =
       Enum.reduce(tool_calls, {state, []}, fn tc, {s, results} ->
-        case tc.name do
-          "ask_choice" ->
+        cond do
+          tc.name == "ask_choice" ->
             answer = do_ask_choice(tc.arguments)
             {s, results ++ [{tc, answer}]}
 
-          "submit_plan" ->
-            {s, accepted?} = do_submit_plan(s, tc.arguments)
+          tc.name == s.profile.submit_tool ->
+            {s, accepted?} = s.profile.on_submit.(s, tc.arguments)
 
             if accepted? do
               {s, results ++ [{tc, "Plan accepted."}]}
@@ -556,7 +590,7 @@ defmodule GiTF.CLI.Chat do
               {s, results ++ [{tc, "Plan rejected. User feedback: #{feedback}"}]}
             end
 
-          _ ->
+          true ->
             {s, results ++ [{tc, "Unknown tool: #{tc.name}"}]}
         end
       end)
@@ -789,6 +823,10 @@ defmodule GiTF.CLI.Chat do
   # -- Tool definitions -------------------------------------------------------
 
   defp build_tools do
+    build_core_tools() ++ [submit_plan_tool()]
+  end
+
+  defp build_core_tools do
     [
       ReqLLM.Tool.new!(
         name: "ask_choice",
@@ -827,9 +865,13 @@ defmodule GiTF.CLI.Chat do
           "required" => ["question", "options"]
         },
         callback: fn _args -> {:ok, "handled"} end
-      ),
-      ReqLLM.Tool.new!(
-        name: "submit_plan",
+      )
+    ]
+  end
+
+  defp submit_plan_tool do
+    ReqLLM.Tool.new!(
+      name: "submit_plan",
         description:
           "Submit the final implementation plan. Call after gathering enough information from the user.",
         parameter_schema: %{
@@ -864,8 +906,7 @@ defmodule GiTF.CLI.Chat do
           "required" => ["name", "summary", "ops"]
         },
         callback: fn _args -> {:ok, "handled"} end
-      )
-    ]
+    )
   end
 
   # -- Codebase context -------------------------------------------------------
