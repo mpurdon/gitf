@@ -225,6 +225,9 @@ defmodule GiTF.Init do
 
     with :ok <- File.mkdir_p(global_dir) do
       if File.exists?(global_path) do
+        # Heal pre-existing installs written before write_config chmodded:
+        # the file can hold provider API keys.
+        File.chmod(global_path, 0o600)
         :ok
       else
         Config.write_config(global_path, Config.global_default_config())

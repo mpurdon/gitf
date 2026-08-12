@@ -146,6 +146,36 @@ defmodule GiTF.CLI do
     Map.get(Map.get(r, section, %{}), key)
   end
 
+  defp prompt_api_key do
+    IO.write("API key: ")
+
+    case :io.get_password() do
+      pw when is_list(pw) ->
+        IO.puts("")
+        pw |> List.to_string() |> String.trim()
+
+      _ ->
+        safe_gets("") |> String.trim()
+    end
+  rescue
+    _ -> safe_gets("API key: ") |> String.trim()
+  end
+
+  # Round-trip an authenticated request so a typo'd key fails at login time,
+  # not on the first real command.
+  defp verify_login(url, key) do
+    System.put_env("GITF_SERVER", url)
+    System.put_env("GITF_API_KEY", key)
+
+    case GiTF.Client.list_quests() do
+      {:ok, _} ->
+        Format.success("Authenticated against #{url}.")
+
+      {:error, reason} ->
+        Format.warn("Saved, but verification failed: #{reason}")
+    end
+  end
+
   defp safe_gets(prompt) do
     case IO.gets(prompt) do
       :eof -> ""
@@ -238,7 +268,7 @@ defmodule GiTF.CLI do
   defp expand_defaults(argv), do: argv
 
   # Commands that manage their own store lifecycle or don't need the store.
-  @no_auto_store [[:version], [:server], [:daemon], [:completions], [:quickref]]
+  @no_auto_store [[:version], [:server], [:daemon], [:completions], [:quickref], [:login]]
 
   defp maybe_ensure_store(subcommand_path) do
     if subcommand_path not in @no_auto_store do
@@ -2822,6 +2852,49 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:login], result) do
+    url = result_get(result, :args, :url)
+    key = result_get(result, :options, :key) || prompt_api_key()
+
+    if key in [nil, ""] do
+      Format.error("No API key provided.")
+      System.halt(1)
+    end
+
+    global_path = GiTF.global_config_path()
+
+    existing =
+      case GiTF.Config.read_config(global_path) do
+        {:ok, map} -> map
+        _ -> %{}
+      end
+
+    server =
+      existing
+      |> Map.get("server", %{})
+      |> Map.put("api_key", key)
+      |> then(fn s -> if url, do: Map.put(s, "url", url), else: s end)
+
+    case Map.get(server, "url") do
+      u when is_binary(u) and u != "" ->
+        updated = Map.put(existing, "server", server)
+
+        case GiTF.Config.write_config(global_path, updated) do
+          :ok ->
+            Format.success("Credentials saved to #{global_path} (mode 0600).")
+            verify_login(Map.get(server, "url"), key)
+
+          {:error, reason} ->
+            Format.error("Failed to write config: #{inspect(reason)}")
+            System.halt(1)
+        end
+
+      _ ->
+        Format.error("No server URL known. Usage: gitf login <url> [--key KEY]")
+        System.halt(1)
+    end
+  end
+
   defp dispatch([:daemon], result), do: dispatch([:server], result)
 
   defp dispatch([:server], result) do
@@ -4928,6 +5001,27 @@ defmodule GiTF.CLI do
         version: [
           name: "version",
           about: "Print the GiTF version"
+        ],
+        login: [
+          name: "login",
+          about: "Store the remote server URL and API key for authenticated CLI access",
+          args: [
+            url: [
+              value_name: "URL",
+              help: "Server URL (e.g. https://gitf.tailnet.ts.net)",
+              required: false,
+              parser: :string
+            ]
+          ],
+          options: [
+            key: [
+              short: "-k",
+              long: "--key",
+              help: "API key (prompted interactively when omitted)",
+              parser: :string,
+              required: false
+            ]
+          ]
         ],
         verify: [
           name: "verify",

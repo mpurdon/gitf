@@ -76,7 +76,11 @@ defmodule GiTF.Config do
   @spec write_config(String.t(), map() | nil) :: :ok | {:error, term()}
   def write_config(path, config \\ nil) do
     content = encode_toml(config || default_config())
-    File.write(path, content)
+
+    with :ok <- File.write(path, content) do
+      # config.toml can hold provider API keys — owner-only, like the MCP socket.
+      File.chmod(path, 0o600)
+    end
   end
 
   @doc """

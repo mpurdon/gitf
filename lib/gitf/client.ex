@@ -18,34 +18,47 @@ defmodule GiTF.Client do
     end
   end
 
+  @doc """
+  Returns the API key to authenticate against the remote server, or nil.
+
+  Resolution: `GITF_API_KEY` env → `[server] api_key` in config.toml
+  (set by `gitf login`).
+  """
+  def api_key do
+    case System.get_env("GITF_API_KEY") do
+      key when is_binary(key) and key != "" -> key
+      _ -> GiTF.Config.get(:api_key)
+    end
+  end
+
   # -- HTTP primitives ---------------------------------------------------------
 
   def get(path, opts \\ []) do
     url = build_url(path)
     params = Keyword.get(opts, :params, [])
 
-    Req.get(url, params: params)
+    Req.get(url, params: params, headers: auth_headers())
     |> handle_response()
   end
 
   def post(path, body \\ %{}, _opts \\ []) do
     url = build_url(path)
 
-    Req.post(url, json: body)
+    Req.post(url, json: body, headers: auth_headers())
     |> handle_response()
   end
 
   def put(path, body \\ %{}, _opts \\ []) do
     url = build_url(path)
 
-    Req.put(url, json: body)
+    Req.put(url, json: body, headers: auth_headers())
     |> handle_response()
   end
 
   def delete(path, _opts \\ []) do
     url = build_url(path)
 
-    Req.delete(url)
+    Req.delete(url, headers: auth_headers())
     |> handle_response()
   end
 
@@ -142,9 +155,22 @@ defmodule GiTF.Client do
     base <> path
   end
 
+  defp auth_headers do
+    case api_key() do
+      key when is_binary(key) and key != "" -> [{"x-api-key", key}]
+      _ -> []
+    end
+  end
+
   defp handle_response({:ok, %Req.Response{status: status, body: body}})
        when status in 200..299 do
     {:ok, body}
+  end
+
+  defp handle_response({:ok, %Req.Response{status: status}}) when status in [401, 403] do
+    {:error,
+     "Authentication failed (#{status}). Run `gitf login <server-url>` to store an " <>
+       "API key, or set GITF_API_KEY."}
   end
 
   defp handle_response({:ok, %Req.Response{status: 404}}) do
