@@ -39,6 +39,23 @@ sudo tailscale up          # prints an auth URL; open it on your phone/laptop
 sudo tailscale serve --bg 4000   # HTTPS dashboard at https://<host>.<tailnet>.ts.net
 ```
 
+### Optional: the real domain, still private
+
+`tailscale serve` gives you `https://<host>.<tailnet>.ts.net` with zero
+setup. To use **ghostinthefactory.com** instead — still without exposing
+anything:
+
+1. Publish a public DNS A record `factory.ghostinthefactory.com` → the
+   box's Tailscale IP (`tailscale ip -4`). Publishing a 100.x address is
+   harmless; only your tailnet can route to it.
+2. Run Caddy on the box with a **DNS-01** Let's Encrypt challenge (needs an
+   API token for your DNS provider) — real certificate, zero inbound ports.
+3. Set `GITF_CHECK_ORIGIN=https://factory.ghostinthefactory.com` in
+   `/etc/gitf/gitf.env` and restart.
+
+Do this before creating the GitHub OAuth app for SSO, so the callback URL
+(`https://factory.ghostinthefactory.com/auth/callback`) never churns.
+
 ## 3. Install the release
 
 Grab `gitf-release-arm64` from the latest `main` CI run (or build locally in
