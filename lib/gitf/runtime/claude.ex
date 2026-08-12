@@ -91,28 +91,29 @@ defmodule GiTF.Runtime.Claude do
 
       # Ghost CLIs run AI-authored code with --dangerously-skip-permissions.
       # Sandbox the spawn (kernel-level: sandbox-exec on macOS, bubblewrap on
-      # Linux) so that damage is confined to the worktree + tmp. Falls back to
-      # a direct spawn with a loud warning if no real sandbox is available,
-      # rather than silently failing to launch.
-      {exe, exe_args} = sandbox_wrap(claude_path, args, working_dir, opts)
+      # Linux) so that damage is confined to the worktree + tmp. Without
+      # `sandbox_required`, falls back to a direct spawn with a loud warning
+      # when no real sandbox is available; with it, refuses to spawn.
+      with {:ok, {exe, exe_args}} <- sandbox_wrap(claude_path, args, working_dir, opts) do
+        port =
+          Port.open({:spawn_executable, exe}, [
+            :binary,
+            :exit_status,
+            :use_stdio,
+            :stderr_to_stdout,
+            args: exe_args,
+            cd: working_dir,
+            env: env
+          ])
 
-      port =
-        Port.open({:spawn_executable, exe}, [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          args: exe_args,
-          cd: working_dir,
-          env: env
-        ])
-
-      {:ok, port}
+        {:ok, port}
+      end
     end
   end
 
-  # Returns `{executable_path, args}` to spawn, wrapped in the configured
-  # sandbox when one is available and enabled; otherwise the command unchanged.
+  # Returns `{:ok, {executable_path, args}}` wrapped in the configured sandbox
+  # when one is available and enabled; the command unchanged when falling back
+  # is permitted; `{:error, :sandbox_required_but_unavailable}` when it isn't.
   defp sandbox_wrap(cmd, args, working_dir, opts) do
     if sandbox_enabled?() and GiTF.Sandbox.available?() and GiTF.Sandbox.name() != "local" do
       risk = Keyword.get(opts, :risk_level, :low)
@@ -120,20 +121,27 @@ defmodule GiTF.Runtime.Claude do
 
       case System.find_executable(sb_cmd) do
         nil ->
-          Logger.warning("Sandbox #{sb_cmd} not on PATH — spawning ghost UNSANDBOXED")
-          {cmd, args}
+          unsandboxed_or_refuse(cmd, args, "Sandbox #{sb_cmd} not on PATH")
 
         sb_path ->
-          {sb_path, sb_args}
+          {:ok, {sb_path, sb_args}}
       end
     else
-      unless sandbox_enabled?() do
-        :ok
+      if sandbox_enabled?() do
+        unsandboxed_or_refuse(cmd, args, "No kernel sandbox available")
       else
-        Logger.warning("No kernel sandbox available — spawning ghost UNSANDBOXED")
+        {:ok, {cmd, args}}
       end
+    end
+  end
 
-      {cmd, args}
+  defp unsandboxed_or_refuse(cmd, args, reason) do
+    if GiTF.Sandbox.required?() do
+      Logger.error("#{reason} and sandbox_required is set — refusing to spawn ghost")
+      {:error, :sandbox_required_but_unavailable}
+    else
+      Logger.warning("#{reason} — spawning ghost UNSANDBOXED")
+      {:ok, {cmd, args}}
     end
   end
 

@@ -553,7 +553,8 @@ defmodule GiTF.Ghosts do
 
   defp spawn_model_detached(ghost_id, op_id, shell, gitf_root) do
     # Detached CLI spawn always uses the Claude plugin (not API plugins)
-    with {:ok, model_path} <- GiTF.Runtime.Claude.find_executable(),
+    with :ok <- GiTF.Sandbox.check_policy(),
+         {:ok, model_path} <- GiTF.Runtime.Claude.find_executable(),
          {:ok, prompt} <- build_job_prompt(op_id),
          {:ok, plugin} <- {:ok, GiTF.Runtime.Claude} do
       cmd_line = build_detached_command(plugin, model_path, prompt)

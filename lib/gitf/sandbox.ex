@@ -1,3 +1,8 @@
+defmodule GiTF.Sandbox.PolicyError do
+  @moduledoc "Raised when `sandbox_required` is set but no kernel sandbox is effective."
+  defexception message: "sandbox required but unavailable"
+end
+
 defmodule GiTF.Sandbox do
   @moduledoc """
   Behaviour for command execution sandboxing.
@@ -35,6 +40,48 @@ defmodule GiTF.Sandbox do
   end
 
   @doc """
+  Whether a working kernel sandbox is mandatory (config
+  `[:gitf, :sandbox_required]` / env `GITF_SANDBOX_REQUIRED`, default false).
+
+  When true, spawn sites refuse to run AI-authored commands unsandboxed
+  instead of falling back with a warning. Set this on any server deployment:
+  the fail-open default exists for interactive dev machines, where a missing
+  `bwrap` should degrade rather than block, but on a daemon it turns a
+  missing package into silent unconfined execution.
+  """
+  @spec required?() :: boolean()
+  def required? do
+    Application.get_env(:gitf, :sandbox_required, false) == true
+  end
+
+  @doc """
+  True when commands will actually run inside a kernel sandbox: sandboxing is
+  enabled, a non-local adapter selected itself, and its binary is on PATH.
+  """
+  @spec effective?() :: boolean()
+  def effective? do
+    enabled?() and available?() and name() != "local" and
+      case wrap_command("true", [], []) do
+        {sb_cmd, _args, _opts} -> System.find_executable(sb_cmd) != nil
+      end
+  rescue
+    _ -> false
+  end
+
+  @doc """
+  `:ok` when spawning is permitted under the current policy —
+  either a sandbox is effective, or one isn't required.
+  """
+  @spec check_policy() :: :ok | {:error, :sandbox_required_but_unavailable}
+  def check_policy do
+    if required?() and not effective?() do
+      {:error, :sandbox_required_but_unavailable}
+    else
+      :ok
+    end
+  end
+
+  @doc """
   Returns `{cmd, args}` for running `sh -c command` through the configured
   kernel sandbox, or the unsandboxed `{"sh", ["-c", command]}` when no real
   sandbox is enabled/available. Intended for `System.cmd/3`.
@@ -51,11 +98,26 @@ defmodule GiTF.Sandbox do
       {sb_cmd, sb_args, _} = wrap_command("sh", ["-c", command], cd: cwd, risk_level: risk)
 
       case System.find_executable(sb_cmd) do
-        nil -> {"sh", ["-c", command]}
+        nil -> unsandboxed_shell(command)
         _ -> {sb_cmd, sb_args}
       end
     else
-      {"sh", ["-c", command]}
+      unsandboxed_shell(command)
+    end
+  end
+
+  # Unsandboxed fallback is only permitted when policy allows it; under
+  # `sandbox_required` this raises so the surrounding op fails loudly rather
+  # than running AI-authored commands unconfined.
+  defp unsandboxed_shell(command) do
+    case check_policy() do
+      :ok ->
+        {"sh", ["-c", command]}
+
+      {:error, :sandbox_required_but_unavailable} ->
+        raise GiTF.Sandbox.PolicyError,
+              "sandbox_required is set but no kernel sandbox is effective " <>
+                "(adapter: #{name()}) — refusing to run shell command unsandboxed"
     end
   end
 

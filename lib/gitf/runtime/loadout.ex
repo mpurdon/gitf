@@ -235,6 +235,18 @@ defmodule GiTF.Runtime.Loadout do
     command = args["command"] || args[:command]
     timeout = args["timeout_ms"] || args[:timeout_ms] || @bash_timeout_ms
 
+    case GiTF.Sandbox.check_policy() do
+      :ok -> run_bash_command(command, timeout, working_dir)
+      {:error, :sandbox_required_but_unavailable} ->
+        {:ok,
+         "Error: refused to run command — sandbox_required is set but no kernel " <>
+           "sandbox is available on this host. Install bubblewrap (Linux) or fix " <>
+           "the sandbox configuration."}
+    end
+  end
+
+  defp run_bash_command(command, timeout, working_dir) do
+
     task =
       Task.async(fn ->
         # Use Sandbox to wrap the command if available

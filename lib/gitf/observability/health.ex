@@ -18,7 +18,8 @@ defmodule GiTF.Observability.Health do
       {:model_api, check_model_api()},
       {:git, check_git()},
       {:major, check_major()},
-      {:sync_queue, check_sync_queue()}
+      {:sync_queue, check_sync_queue()},
+      {:sandbox, check_sandbox()}
     ]
 
     status = if Enum.all?(checks, fn {_, s} -> s == :ok end), do: :healthy, else: :degraded
@@ -196,6 +197,17 @@ defmodule GiTF.Observability.Health do
 
       :error ->
         :warning
+    end
+  rescue
+    _ -> :warning
+  end
+
+  # Failing means sandbox_required is set but no kernel sandbox is effective —
+  # ghosts would be refused, so the operator should see it before missions do.
+  defp check_sandbox do
+    case GiTF.Sandbox.check_policy() do
+      :ok -> :ok
+      {:error, _} -> :error
     end
   rescue
     _ -> :warning
