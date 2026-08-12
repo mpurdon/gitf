@@ -15,15 +15,74 @@ defmodule GiTF.Web.ApiController do
         _ -> 0
       end
 
-    json(conn, %{
+    alive = GiTF.Observability.Health.alive?()
+    activity = activity_snapshot()
+
+    conn
+    |> put_status(if(alive, do: 200, else: 503))
+    |> json(%{
       data: %{
-        status: "ok",
+        status: if(alive, do: "ok", else: "unhealthy"),
         node: to_string(node()),
         uptime_seconds: GiTF.Observability.Metrics.uptime_seconds(),
         boot_time: DateTime.from_unix!(boot_time) |> to_string(),
-        version: GiTF.version()
+        version: GiTF.version(),
+        active_ghosts: activity.active_ghosts,
+        active_missions: activity.active_missions,
+        idle: activity.idle
       }
     })
+  end
+
+  @doc """
+  Full diagnostic health: every check from `Observability.Health.check/0`,
+  503 when any is failing. The cheap liveness probe stays on `/health`.
+  """
+  def deep_health(conn, _params) do
+    report = GiTF.Observability.Health.check()
+
+    conn
+    |> put_status(if(report.status == :healthy, do: 200, else: 503))
+    |> json(%{data: report})
+  end
+
+  def version(conn, _params) do
+    json(conn, %{
+      data: %{
+        version: GiTF.version(),
+        elixir: System.version(),
+        otp: to_string(:erlang.system_info(:otp_release))
+      }
+    })
+  end
+
+  # Idle detection for the idle-stop timer: the box may power down only when
+  # no ghost is running and no mission is in a non-terminal state (queued,
+  # active, or awaiting approval — sleeping mid-approval would still be safe,
+  # but surprising).
+  defp activity_snapshot do
+    active_ghosts =
+      try do
+        GiTF.Major.status() |> Map.get(:active_ghosts, %{}) |> map_size()
+      catch
+        _, _ -> 0
+      end
+
+    active_missions =
+      try do
+        GiTF.Archive.filter(:missions, fn q ->
+          q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
+        end)
+        |> length()
+      rescue
+        _ -> 0
+      end
+
+    %{
+      active_ghosts: active_ghosts,
+      active_missions: active_missions,
+      idle: active_ghosts == 0 and active_missions == 0
+    }
   end
 
   # -- Readiness ---------------------------------------------------------------

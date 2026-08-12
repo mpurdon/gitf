@@ -291,14 +291,19 @@ defmodule GiTF.Application do
 
   # Start the web endpoint, retrying briefly if the port is still releasing
   # from a previous Ctrl+C abort.
+  #
+  # On bind failure the behavior splits by mode: an interactive CLI invocation
+  # boots this same app while a server may legitimately hold the port, so it
+  # skips the endpoint and carries on — but a daemon that boots "healthy" with
+  # nothing listening is the worst failure mode under a service manager, so
+  # server/release boots fail hard instead.
   defp endpoint_child do
     port = Application.get_env(:gitf, GiTF.Web.Endpoint)[:http][:port] || 4000
     try_bind_port(port, 3)
   end
 
-  defp try_bind_port(_port, 0) do
-    Logger.info("Port still in use after retries, skipping web endpoint.")
-    []
+  defp try_bind_port(port, 0) do
+    fail_or_skip(port, "Port #{port} still in use after retries")
   end
 
   defp try_bind_port(port, retries) do
@@ -313,22 +318,38 @@ defmodule GiTF.Application do
           Process.sleep(1000)
           try_bind_port(port, retries - 1)
         else
-          Logger.info(
-            "Port #{port} already in use, skipping web endpoint. " <>
-              "A GiTF server may already be running."
+          fail_or_skip(
+            port,
+            "Port #{port} already in use. A GiTF server may already be running"
           )
-
-          []
         end
 
       {:error, :eacces} ->
-        Logger.warning("Permission denied for port #{port}. Try a port above 1024.")
-        []
+        fail_or_skip(port, "Permission denied for port #{port} — try a port above 1024")
 
       {:error, reason} ->
-        Logger.warning("Cannot bind to port #{port}: #{inspect(reason)}. Skipping web endpoint.")
-        []
+        fail_or_skip(port, "Cannot bind to port #{port}: #{inspect(reason)}")
     end
+  end
+
+  defp fail_or_skip(port, message) do
+    if daemon_mode?() do
+      raise "#{message}. Refusing to boot a daemon without its web endpoint — " <>
+              "stop the other process or set GITF_PORT to a free port (currently #{port})."
+    else
+      Logger.info("#{message}. Skipping web endpoint.")
+      []
+    end
+  end
+
+  # A release boot (`bin/gitf start`, systemd, Docker) or an explicit
+  # `gitf server`/`gitf daemon` invocation is a daemon; anything else is an
+  # interactive CLI run that tolerates a missing endpoint.
+  defp daemon_mode? do
+    System.get_env("RELEASE_NAME") != nil or
+      Enum.any?(:init.get_plain_arguments(), fn arg ->
+        List.to_string(arg) in ["server", "daemon"]
+      end)
   end
 
   # Background services — skip in test to avoid conflicts
@@ -489,6 +510,40 @@ defmodule GiTF.Application do
     # Configure Elixir Logger to forward metadata keys
     Logger.configure(metadata: [:ghost_id, :op_id, :mission_id, :sector_id, :component])
 
-    :logger.remove_handler(:default)
+    if stdout_logging?() do
+      configure_stdout_handler()
+    else
+      # Interactive CLI: keep stdout clean for command output; logs go to the
+      # file handler above.
+      :logger.remove_handler(:default)
+    end
+  end
+
+  # Whether the default stdout handler should stay attached. Under a service
+  # manager an empty stdout means empty `journalctl`/`docker logs` — the
+  # operator's primary debugging surface — so releases default to keeping it.
+  # GITF_LOG_STDOUT overrides in either direction.
+  defp stdout_logging? do
+    case System.get_env("GITF_LOG_STDOUT") do
+      nil -> System.get_env("RELEASE_NAME") != nil
+      value -> String.downcase(value) in ["1", "true", "yes", "on"]
+    end
+  end
+
+  defp configure_stdout_handler do
+    formatter =
+      case System.get_env("GITF_LOG_FORMAT") do
+        json when json in ["json", "JSON"] ->
+          {GiTF.LogFormatter.JSON, %{}}
+
+        _ ->
+          {GiTF.LogFormatter,
+           %{
+             template: [:time, ~c" ", :level, ~c" ", :msg, ~c" ", :mfa, ~c"\n"],
+             single_line: true
+           }}
+      end
+
+    :logger.update_handler_config(:default, :formatter, formatter)
   end
 end

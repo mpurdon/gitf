@@ -104,7 +104,9 @@ defmodule GiTF.Web.Router do
   scope "/api/v1", GiTF.Web do
     pipe_through(:api_public)
     get("/health", ApiController, :health)
+    get("/health/deep", ApiController, :deep_health)
     get("/ready", ApiController, :ready)
+    get("/version", ApiController, :version)
   end
 
   # Inbound webhooks — HMAC-verified by controller.
