@@ -1,0 +1,7 @@
+[Unit]
+Description=Power off the box when the GiTF factory has been idle
+After=gitf.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gitf-idle-stop

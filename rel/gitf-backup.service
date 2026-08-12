@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync the GiTF store to S3
+After=gitf.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gitf-backup

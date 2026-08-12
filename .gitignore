@@ -51,3 +51,8 @@ hive.log
 crash_output*.log
 *.escript
 erl_crash.dump
+
+# Terraform local state (infra/aws)
+infra/aws/.terraform/
+infra/aws/*.tfstate*
+infra/aws/lambda/wake.zip

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Installs the GiTF release under systemd on a Linux host.
+#
+# Usage: sudo rel/install-systemd.sh <release-tarball.tar.gz>
+#
+# Idempotent: safe to re-run for upgrades (stops the service, replaces
+# /opt/gitf, restarts). Creates the gitf user, directories, env file with
+# generated secrets, and installs the daemon + idle-stop + backup units.
+set -euo pipefail
+
+TARBALL="${1:?usage: install-systemd.sh <release-tarball.tar.gz>}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+[[ $EUID -eq 0 ]] || { echo "run as root (sudo)"; exit 1; }
+
+# User + directories. HOME must live on the data volume: the store is under
+# $GITF_HOME/.gitf, but ~/.config/gitf (global config, mcp.sock, llm_db)
+# resolves via the user's home, so they need to be the same tree.
+id -u gitf >/dev/null 2>&1 || useradd --system --create-home --home /var/lib/gitf --shell /usr/sbin/nologin gitf
+mkdir -p /opt/gitf /var/lib/gitf /etc/gitf
+
+# Release payload
+if systemctl is-active --quiet gitf; then systemctl stop gitf; fi
+rm -rf /opt/gitf.new
+mkdir -p /opt/gitf.new
+tar xf "$TARBALL" -C /opt/gitf.new
+rm -rf /opt/gitf.old
+[[ -d /opt/gitf/bin ]] && mv /opt/gitf /opt/gitf.old && mkdir /opt/gitf
+cp -a /opt/gitf.new/. /opt/gitf/
+rm -rf /opt/gitf.new
+chown -R gitf:gitf /opt/gitf /var/lib/gitf
+
+# Env file + secrets (only fills in what's missing)
+if [[ ! -f /etc/gitf/gitf.env ]]; then
+  install -m 0600 "$HERE/env.example" /etc/gitf/gitf.env
+fi
+"$HERE/../bin/gen-secrets" /etc/gitf/gitf.env
+
+# Units
+install -m 0644 "$HERE/gitf.service" /etc/systemd/system/gitf.service
+install -m 0644 "$HERE/gitf-idle-stop.service" /etc/systemd/system/gitf-idle-stop.service
+install -m 0644 "$HERE/gitf-idle-stop.timer" /etc/systemd/system/gitf-idle-stop.timer
+install -m 0644 "$HERE/gitf-backup.service" /etc/systemd/system/gitf-backup.service
+install -m 0644 "$HERE/gitf-backup.timer" /etc/systemd/system/gitf-backup.timer
+install -m 0755 "$HERE/gitf-idle-stop.sh" /usr/local/bin/gitf-idle-stop
+install -m 0755 "$HERE/gitf-backup.sh" /usr/local/bin/gitf-backup
+
+systemctl daemon-reload
+systemctl enable --now gitf
+systemctl enable --now gitf-idle-stop.timer
+# Backups only make sense with a bucket configured; enable but let the script
+# no-op when GITF_BACKUP_BUCKET is unset.
+systemctl enable --now gitf-backup.timer
+
+echo
+echo "GiTF installed. Check: journalctl -u gitf -f"
+echo "API key for 'gitf login': grep GITF_API_KEY /etc/gitf/gitf.env"
