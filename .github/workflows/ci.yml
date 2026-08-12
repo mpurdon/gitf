@@ -1,0 +1,95 @@
+# arm64-only CI: dev Macs, these runners, and the Graviton deploy target all
+# share the architecture. Jobs run inside the same Debian bookworm builder
+# image as the Dockerfile, for two reasons:
+#   - ex_termbox's waf build needs Python < 3.12 (bookworm has 3.11; the
+#     ubuntu-24.04 runner image has 3.12)
+#   - a release built against bookworm's older glibc runs on both Debian 12
+#     and the Ubuntu 24.04 AMI (the reverse would not)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  BUILDER_IMAGE: hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential git python3
+          mix local.hex --force
+          mix local.rebar --force
+
+      - uses: actions/checkout@v4
+
+      - name: Trust the checkout directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-test-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-test-
+
+      - name: Compile (warnings are errors)
+        run: |
+          mix deps.get
+          mix compile --warnings-as-errors
+
+      - name: Run the unit suite
+        run: mix test
+
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim
+    env:
+      MIX_ENV: prod
+      RELEASE_TAR: "1"
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential git python3
+          mix local.hex --force
+          mix local.rebar --force
+
+      - uses: actions/checkout@v4
+
+      - name: Trust the checkout directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-prod-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-prod-
+
+      - name: Build release tarball
+        run: |
+          mix deps.get --only prod
+          mix release --overwrite
+
+      - name: Upload release tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitf-release-arm64
+          path: _build/prod/gitf-*.tar.gz
+          if-no-files-found: error
+          retention-days: 30

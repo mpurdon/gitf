@@ -15,4 +15,9 @@ if File.exists?(Path.join(brew_bin, "git")) do
   end
 end
 
-ExUnit.start()
+# Heavy/environment-dependent suites are opt-in: a bare `mix test` runs the
+# fast unit suite. Re-include deliberately, e.g. `mix test --include simulator`
+# or `mix gitf.test.e2e`.
+ExUnit.start(
+  exclude: [:simulator, :integration, :dashboard, :llm, :e2e, :sandbox, :macos_only, :lsp_live]
+)
