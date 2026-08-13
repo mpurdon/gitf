@@ -37,6 +37,11 @@ defmodule GiTF.Backup do
     |> Map.take(@backup_keys)
     |> Map.put(:ghost_id, ghost_id)
     |> Map.put(:saved_at, DateTime.utc_now() |> DateTime.truncate(:second))
+    # Strictly monotonic recency: saved_at is second-precision, so two
+    # checkpoints in the same second (heartbeat save racing a crash save)
+    # would tie and "most recent" became whichever ETS happened to list
+    # first — a ghost could resume from the OLDER checkpoint.
+    |> Map.put(:seq, System.unique_integer([:monotonic]))
     |> then(&Archive.insert(@collection, &1))
   end
 
@@ -109,10 +114,14 @@ defmodule GiTF.Backup do
 
   # -- Private ---------------------------------------------------------------
 
+  # Recency = the monotonic seq stamped at save time; saved_at (second
+  # precision) is only the fallback ordering for pre-seq legacy records.
   defp latest_checkpoint(ghost_id) do
     Archive.filter(@collection, &(&1.ghost_id == ghost_id))
-    |> Enum.sort_by(& &1.saved_at, {:desc, DateTime})
-    |> List.first()
+    |> Enum.max_by(
+      &{Map.get(&1, :seq, -1), DateTime.to_unix(&1.saved_at)},
+      fn -> nil end
+    )
   end
 
   defp format_field(_label, nil), do: nil

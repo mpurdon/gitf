@@ -727,6 +727,33 @@ defmodule GiTF.Archive do
 
   defp known_collections, do: :persistent_term.get({__MODULE__, :collections}, MapSet.new())
 
+  @doc false
+  # Test support: delete every collection + index table and clear the
+  # registry, regardless of table ownership (tables are :public) or whether
+  # an heir transfer is still in flight. `StoreHelper.stop_store/0` calls
+  # this so a stopped store cannot leak records into the next test's
+  # "fresh" Archive — the mechanism behind the historical cross-file flakes.
+  def purge_all_tables do
+    for col <- known_collections() do
+      tab = table_name(col)
+      if :ets.info(tab) != :undefined, do: :ets.delete(tab)
+    end
+
+    # Tables the heir tracks that never made it into the current registry
+    # (created by a since-restarted instance).
+    for tab <- GiTF.Archive.TableHeir.registered_tables(),
+        :ets.info(tab) != :undefined do
+      :ets.delete(tab)
+      GiTF.Archive.TableHeir.unregister(tab)
+    end
+
+    clear_collection_registry()
+    Indexes.delete_tables()
+    :ok
+  rescue
+    _ -> :ok
+  end
+
   defp register_collection(col) do
     cols = known_collections()
     unless MapSet.member?(cols, col), do: :persistent_term.put({__MODULE__, :collections}, MapSet.put(cols, col))

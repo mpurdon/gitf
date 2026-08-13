@@ -30,6 +30,12 @@ defmodule GiTF.Test.StoreHelper do
 
     # Brief pause to ensure the process is fully down
     Process.sleep(10)
+
+    # A stopped Archive's ETS tables live on (heir-preserved, or still owned
+    # by a lingering test process), and the next Archive's init only sweeps
+    # tables its registry knows about — records from this store would leak
+    # into the next test's "fresh" one. Purge everything.
+    GiTF.Archive.purge_all_tables()
   end
 
   @doc """

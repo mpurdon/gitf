@@ -63,20 +63,32 @@ defmodule GiTF.Major.Janitor do
 
   @impl true
   def handle_continue(:prime_recovery, state) do
-    # Eager recovery on startup, mirroring what Major's init used to do.
-    # Stuck-op recovery first so any orphaned ops are cleared before we
-    # process backlogged links.
-    safe(&recover_stuck_jobs/0, "stuck op recovery (startup)")
-    send(self(), :recover_missed_waggles)
+    if autonomous?() do
+      # Eager recovery on startup, mirroring what Major's init used to do.
+      # Stuck-op recovery first so any orphaned ops are cleared before we
+      # process backlogged links.
+      safe(&recover_stuck_jobs/0, "stuck op recovery (startup)")
+      send(self(), :recover_missed_waggles)
 
-    schedule(:schedule_waggle_recovery, :waggle_recovery_interval_ms, 30_000)
-    schedule(:check_stalls, :stall_check_interval_ms, 2 * 60 * 1_000)
-    schedule(:recover_stuck, :stuck_recovery_interval_ms, 5 * 60 * 1_000)
-    schedule(:check_debriefs, :debrief_interval_ms, 5 * 60 * 1_000)
-    schedule(:advance_stuck_phases, :phase_advancement_interval_ms, 3 * 60 * 1_000)
-    schedule(:janitor_run, :janitor_interval_ms, 15 * 60 * 1_000)
+      schedule(:schedule_waggle_recovery, :waggle_recovery_interval_ms, 30_000)
+      schedule(:check_stalls, :stall_check_interval_ms, 2 * 60 * 1_000)
+      schedule(:recover_stuck, :stuck_recovery_interval_ms, 5 * 60 * 1_000)
+      schedule(:check_debriefs, :debrief_interval_ms, 5 * 60 * 1_000)
+      schedule(:advance_stuck_phases, :phase_advancement_interval_ms, 3 * 60 * 1_000)
+      schedule(:janitor_run, :janitor_interval_ms, 15 * 60 * 1_000)
+    end
 
     {:noreply, state}
+  end
+
+  # The test env sets this false: the Core supervisor restarts whenever a
+  # test swaps the Archive, and each restart re-primed recovery — which then
+  # asynchronously advanced missions *other tests* had created (completing
+  # them, starting debrief reviews, spawning ghosts) and made global-count
+  # assertions flaky. The module was always designed for tests to drive its
+  # functions directly; this flag just makes the timers honor that.
+  defp autonomous? do
+    Application.get_env(:gitf, :janitor_autonomous, true)
   end
 
   @impl true
