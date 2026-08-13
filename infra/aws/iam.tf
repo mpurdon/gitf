@@ -39,6 +39,28 @@ data "aws_iam_policy_document" "gitf" {
     resources = ["*"]
   }
 
+  # DNS-01 certificate challenges (Caddy route53 module): the dashboard cert
+  # is issued for a name that resolves to a tailnet-only address, so HTTP-01
+  # can never work — the CA talks to Route53 instead.
+  statement {
+    sid = "Dns01ChallengeZone"
+    actions = [
+      "route53:ChangeResourceRecordSets",
+      "route53:ListResourceRecordSets"
+    ]
+    resources = [aws_route53_zone.main.arn]
+  }
+
+  statement {
+    sid = "Dns01ChallengeGlobal"
+    actions = [
+      "route53:ListHostedZones",
+      "route53:ListHostedZonesByName",
+      "route53:GetChange"
+    ]
+    resources = ["*"]
+  }
+
   statement {
     sid = "BackupBucket"
     actions = [

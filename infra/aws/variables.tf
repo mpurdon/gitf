@@ -27,3 +27,27 @@ variable "snapshot_retain_days" {
   type        = number
   default     = 7
 }
+
+variable "domain" {
+  description = "Public domain for the factory (Route53 hosted zone is created for it)"
+  type        = string
+  default     = "ghostinthefactory.com"
+}
+
+variable "factory_tailnet_ip" {
+  description = "Tailscale IP of the instance (100.x.y.z). Set after `tailscale up` to create the factory.<domain> A record; the name only resolves usefully inside the tailnet."
+  type        = string
+  default     = null
+}
+
+variable "monthly_budget_usd" {
+  description = "Monthly account-wide spend budget (alerts at 50/80/100% actual + forecasted overrun)"
+  type        = number
+  default     = 100
+}
+
+variable "budget_email" {
+  description = "Where AWS Budgets sends spend alerts"
+  type        = string
+  default     = "mdjpurdon@gmail.com"
+}

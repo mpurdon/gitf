@@ -8,7 +8,17 @@
 # See docs/deploy-aws.md for the full runbook.
 
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.10" # S3-native state locking (use_lockfile)
+
+  # State lives in the GhostInTheFactory-Production account (515020252848).
+  # Run terraform with AWS_PROFILE=gitf-prod (or gitf once SSO is set up).
+  backend "s3" {
+    bucket       = "gitf-terraform-state-515020252848"
+    key          = "gitf/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
 
   required_providers {
     aws = {

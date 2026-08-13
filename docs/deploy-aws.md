@@ -9,23 +9,32 @@ idle-stop so a quiet factory costs ~$3/month. Companion assets:
 
 ## Prerequisites
 
-- AWS account + credentials with admin (or equivalent) in the target region
-- Terraform ≥ 1.5
+- AWS account + credentials with admin (or equivalent) in the target region.
+  The real deployment lives in **GhostInTheFactory-Production (515020252848)**,
+  a member account of the purdonmoi org (managed in the
+  `purdonmoi-organizations` repo). Local profiles: `gitf` (IAM Identity
+  Center, `aws sso login --profile gitf`, role AccountAdmin) or `gitf-prod`
+  (OrganizationAccountAccessRole hop from the management account).
+- Terraform ≥ 1.10 (S3-native state locking). State lives in
+  `s3://gitf-terraform-state-515020252848`.
 - A [Tailscale](https://tailscale.com) account (free tier is fine)
 
 ## 1. Provision
 
 ```sh
 cd infra/aws
-terraform init
-terraform apply
+AWS_PROFILE=gitf terraform init
+AWS_PROFILE=gitf terraform apply
 ```
 
 Creates: a `t4g.small` Ubuntu 24.04 arm64 instance (no inbound security
 group, IMDSv2, stop-on-shutdown), a 40 GB gp3 data volume mounted at
 `/var/lib/gitf`, an instance role (SSM Session Manager, `/gitf/*` Parameter
-Store reads, Bedrock invoke, backup-bucket access), daily DLM snapshots of
-the data volume, a versioned S3 backup bucket, and the wake Lambda.
+Store reads, Bedrock invoke, Route53 DNS-01, backup-bucket access), daily
+DLM snapshots of the data volume, a versioned S3 backup bucket, the wake
+Lambda, the `ghostinthefactory.com` hosted zone, and a monthly AWS Budget
+(default $100, alerts at 50/80/100% to the owner's email — the EC2 side is
+capped by design; this watches for LLM spend escaping the factory's caps).
 
 Cloud-init installs git, bubblewrap, gh, awscli, and Tailscale, and writes
 the AWS-specific values (the backup bucket name) to `/etc/gitf/aws.env`.
@@ -47,12 +56,18 @@ sudo tailscale serve --bg 4000   # HTTPS dashboard at https://<host>.<tailnet>.t
 setup. To use **ghostinthefactory.com** instead — still without exposing
 anything:
 
-1. Publish a public DNS A record `factory.ghostinthefactory.com` → the
-   box's Tailscale IP (`tailscale ip -4`). Publishing a 100.x address is
-   harmless; only your tailnet can route to it.
-2. Run Caddy on the box with a **DNS-01** Let's Encrypt challenge (needs an
-   API token for your DNS provider) — real certificate, zero inbound ports.
-3. Set `GITF_CHECK_ORIGIN=https://factory.ghostinthefactory.com` in
+1. Delegate the domain once: terraform created a Route53 hosted zone; set
+   the four `terraform output zone_name_servers` values as the NS records
+   at the registrar.
+2. Publish the dashboard record: after `tailscale up`, re-apply with the
+   box's Tailscale IP — `terraform apply -var factory_tailnet_ip=$(tailscale
+   ip -4)` creates `factory.ghostinthefactory.com` → 100.x.y.z. Publishing
+   a 100.x address is harmless; only your tailnet can route to it.
+3. Run Caddy (built with the route53 DNS module) on the box with a
+   **DNS-01** Let's Encrypt challenge — real certificate, zero inbound
+   ports, and no resident API token: the instance role already carries the
+   needed Route53 permissions.
+4. Set `GITF_CHECK_ORIGIN=https://factory.ghostinthefactory.com` in
    `/etc/gitf/gitf.env` and restart.
 
 Do this before creating the GitHub OAuth app for SSO, so the callback URL
