@@ -93,7 +93,7 @@ defmodule GiTF.Runtime.OsProc do
 
   def alive?(os_pid) when is_integer(os_pid) and os_pid > 0 do
     case System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
-      {_, 0} -> true
+      {_, 0} -> not zombie?(os_pid)
       _ -> false
     end
   rescue
@@ -103,6 +103,22 @@ defmodule GiTF.Runtime.OsProc do
   def alive?(_), do: false
 
   # -- Private ---------------------------------------------------------------
+
+  # `kill -0` succeeds for zombies, but a zombie is only an unreaped exit
+  # record: it can't run, produce output, or be killed harder. Every caller
+  # (stall recovery, the reaper, tests) should treat it as dead — counting
+  # zombies as alive makes recovery loop forever on unkillable ghosts, e.g.
+  # in containers where no init reaps orphans.
+  defp zombie?(os_pid) do
+    case System.cmd("ps", ["-o", "stat=", "-p", Integer.to_string(os_pid)],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} -> out |> String.trim() |> String.starts_with?("Z")
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
 
   defp signal(os_pid, sig) do
     System.cmd("kill", ["-#{sig}", Integer.to_string(os_pid)], stderr_to_stdout: true)
