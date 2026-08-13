@@ -45,6 +45,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       git \
       bubblewrap \
+      procps \
       curl \
       ca-certificates \
       openssl \

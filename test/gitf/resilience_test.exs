@@ -18,7 +18,13 @@ defmodule GiTF.ResilienceTest do
   describe "handle_failure/3" do
     test "falls back to alternative model" do
       context = %{model: "claude-haiku"}
-      expected_fallback = GiTF.Runtime.ModelResolver.fallback("claude-haiku")
+
+      # handle_failure's contract: the resolver's fallback when one exists,
+      # otherwise the general tier (the resolver returns nil on hosts with no
+      # provider config — e.g. CI).
+      expected_fallback =
+        GiTF.Runtime.ModelResolver.fallback("claude-haiku") ||
+          GiTF.Runtime.ModelResolver.resolve("general")
 
       {:ok, result} = Resilience.handle_failure(:model_api, :timeout, context)
 

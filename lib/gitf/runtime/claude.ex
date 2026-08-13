@@ -48,8 +48,8 @@ defmodule GiTF.Runtime.Claude do
   """
   @spec spawn_interactive(String.t(), keyword()) :: {:ok, port()} | {:error, term()}
   def spawn_interactive(working_dir, opts \\ []) do
-    with {:ok, claude_path} <- find_executable(),
-         :ok <- validate_directory(working_dir) do
+    with :ok <- validate_directory(working_dir),
+         {:ok, claude_path} <- find_executable() do
       args = build_interactive_args(opts)
 
       GiTF.Runtime.Terminal.prepare_handoff()
@@ -81,8 +81,11 @@ defmodule GiTF.Runtime.Claude do
   """
   @spec spawn_headless(String.t(), String.t(), keyword()) :: {:ok, port()} | {:error, term()}
   def spawn_headless(working_dir, prompt, opts \\ []) do
-    with {:ok, claude_path} <- find_executable(),
-         :ok <- validate_directory(working_dir) do
+    # Directory first: its error doesn't depend on what's installed on the
+    # host, so callers (and tests) get a stable error regardless of whether
+    # the claude binary is present.
+    with :ok <- validate_directory(working_dir),
+         {:ok, claude_path} <- find_executable() do
       args = build_headless_args(prompt, opts)
 
       # Always clear CLAUDECODE to prevent "nested session" errors when

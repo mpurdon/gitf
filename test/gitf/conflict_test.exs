@@ -17,7 +17,9 @@ defmodule GiTF.ConflictTest do
 
     File.mkdir_p!(tmp_dir)
 
-    System.cmd("git", ["init"], cd: tmp_dir)
+    # Pin the branch name: tests below `checkout main`, and a bare `git init`
+    # names the initial branch per host config ('master' in CI).
+    System.cmd("git", ["init", "-b", "main"], cd: tmp_dir)
     System.cmd("git", ["config", "user.email", "test@test.com"], cd: tmp_dir)
     System.cmd("git", ["config", "user.name", "Test"], cd: tmp_dir)
     File.write!(Path.join(tmp_dir, "README.md"), "# Test")

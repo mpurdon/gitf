@@ -60,8 +60,14 @@ defmodule GiTF.Skills.InstallTest do
     end
 
     test "does not crash on filesystem errors", %{worktree: _wt} do
-      # Try to install into a path under a non-existent root
-      bad_path = "/nonexistent_root_that_should_not_exist_xyz/wt"
+      # A path whose parent is a regular FILE fails mkdir with ENOTDIR even
+      # for root — a nonexistent absolute root does not (root can create it,
+      # which is exactly what happened in the CI container).
+      blocker = Path.join(System.tmp_dir!(), "gitf-blocker-#{System.unique_integer([:positive])}")
+      File.write!(blocker, "not a dir")
+      on_exit(fn -> File.rm(blocker) end)
+
+      bad_path = Path.join(blocker, "wt")
       {:ok, skill} = Skills.create(%{name: "n", description: "d", body: "b", scope: :global})
 
       assert [] = Install.install_into_worktree([skill], bad_path)

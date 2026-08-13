@@ -354,6 +354,19 @@ defmodule GiTF.WorkflowTest do
     test "rejects writes outside the vault Workflows tree", %{dir: dir} do
       w = %Workflow{name: "outside", phases: [%Workflow.Phase{id: "a", next: "end"}]}
 
+      # Pin the vault to a known workspace so the test doesn't depend on the
+      # surrounding checkout having a .gitf (it doesn't in CI).
+      vault_ws = Path.join(System.tmp_dir!(), "gitf-vault-ws-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(vault_ws, ".gitf"))
+      File.write!(Path.join(vault_ws, ".gitf/config.toml"), "")
+      prior = System.get_env("GITF_PATH")
+      System.put_env("GITF_PATH", vault_ws)
+
+      on_exit(fn ->
+        if prior, do: System.put_env("GITF_PATH", prior), else: System.delete_env("GITF_PATH")
+        File.rm_rf!(vault_ws)
+      end)
+
       # Path is under the test temp dir which is not the vault — refuse.
       assert {:error, {:workflow_path_outside_vault, _}} =
                Workflow.write(w, Path.join(dir, "outside.yaml"))
