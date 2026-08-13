@@ -1,5 +1,7 @@
 # -- Build Stage -------------------------------------------------------------
-FROM hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim AS builder
+# NOTE: hexpm rotates snapshot-dated tags — keep in sync with the CI
+# workflow's container image when bumping.
+FROM hexpm/elixir:1.18.4-erlang-27.2.4-debian-bookworm-20260803-slim AS builder
 
 WORKDIR /app
 

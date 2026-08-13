@@ -17,8 +17,11 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-24.04-arm
+    # NOTE: hexpm only publishes snapshot-dated tags and rotates old ones out
+    # of Docker Hub — when this pull starts 404ing, bump the date (and keep
+    # the Dockerfile's builder stage on the same tag).
     container:
-      image: hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim
+      image: hexpm/elixir:1.18.4-erlang-27.2.4-debian-bookworm-20260803-slim
     steps:
       - name: Install build dependencies
         run: |
