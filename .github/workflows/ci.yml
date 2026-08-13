@@ -47,6 +47,10 @@ jobs:
       - name: Compile (warnings are errors)
         run: |
           mix deps.get
+          # ex_termbox bundles waf 2.0.14, whose Python uses the 'rU' open
+          # mode removed in Python 3.11 — patch the bundled waflib before
+          # anything compiles it. Idempotent, so cached deps are fine.
+          sed -i "s/'rU'/'r'/g" deps/ex_termbox/c_src/termbox/.waf3-*/waflib/*.py
           mix compile --warnings-as-errors
 
       - name: Run the unit suite
