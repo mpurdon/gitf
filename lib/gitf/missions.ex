@@ -25,6 +25,15 @@ defmodule GiTF.Missions do
   @spec active_statuses() :: [String.t()]
   def active_statuses, do: @active_statuses
 
+  # Broader than @active_statuses: also covers queued/awaiting_approval etc.
+  # "Non-terminal" means the mission still wants the factory or an operator —
+  # the notion liveness and idle-stop decisions need.
+  @terminal_statuses [nil | ~w(completed failed cancelled paused paused_budget)]
+
+  @doc "True when the mission is not in a terminal or paused state."
+  @spec non_terminal?(map()) :: boolean()
+  def non_terminal?(mission), do: Map.get(mission, :status) not in @terminal_statuses
+
   # -- Public API --------------------------------------------------------------
 
   @doc """

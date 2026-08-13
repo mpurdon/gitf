@@ -101,15 +101,23 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   end
 
   # System alerts (approvals, stalls, budget) carry their own severity:
-  # critical/high bypass batching — an approval request that waits for the
-  # 30s digest window defeats the point of pushing it to a phone.
-  def handle_cast({:notification, :alert, %{severity: severity} = payload}, state)
-      when severity in [:critical, :high] do
-    do_send(state.token, state.chat_id, format_notification(:alert, payload))
-    {:noreply, state}
+  # urgent ones bypass batching — an approval request that waits for the
+  # 30s digest window defeats the point of pushing it to a phone. Urgency is
+  # Alerts' call, so reclassifying a type there changes behavior here too.
+  def handle_cast({:notification, :alert, payload} = msg, state) do
+    if GiTF.Observability.Alerts.urgent?(payload[:severity]) do
+      do_send(state.token, state.chat_id, format_notification(:alert, payload))
+      {:noreply, state}
+    else
+      handle_batched_notification(msg, state)
+    end
   end
 
-  def handle_cast({:notification, event, payload}, state) do
+  def handle_cast({:notification, _event, _payload} = msg, state) do
+    handle_batched_notification(msg, state)
+  end
+
+  defp handle_batched_notification({:notification, event, payload}, state) do
     event_str = to_string(event)
 
     if event_str in state.urgent_events do
@@ -161,6 +169,11 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  @doc false
+  def forward_alert(_event, _measurements, metadata, _config) do
+    GenServer.cast(__MODULE__, {:notification, :alert, metadata})
+  end
 
   # -- Private ---------------------------------------------------------------
 
@@ -275,12 +288,12 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   defp attach_telemetry(config) do
     # System alerts ([:gitf, :alert, :raised]) are always forwarded — this is
     # the channel's reason to exist. Approval requests and stalls arrive here.
+    # Captured MFA rather than an anonymous fn: telemetry warns about (and
+    # slow-paths) closure handlers.
     :telemetry.attach(
       "section-telegram-alerts",
       [:gitf, :alert, :raised],
-      fn _event, _measurements, metadata, _config ->
-        GenServer.cast(__MODULE__, {:notification, :alert, metadata})
-      end,
+      &__MODULE__.forward_alert/4,
       %{}
     )
 

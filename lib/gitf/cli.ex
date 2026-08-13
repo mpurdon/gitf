@@ -149,7 +149,14 @@ defmodule GiTF.CLI do
   defp prompt_api_key do
     IO.write("API key: ")
 
-    case :io.get_password() do
+    hidden =
+      try do
+        :io.get_password()
+      rescue
+        _ -> :unavailable
+      end
+
+    case hidden do
       pw when is_list(pw) ->
         IO.puts("")
         pw |> List.to_string() |> String.trim()
@@ -157,22 +164,24 @@ defmodule GiTF.CLI do
       _ ->
         safe_gets("") |> String.trim()
     end
-  rescue
-    _ -> safe_gets("API key: ") |> String.trim()
   end
 
   # Round-trip an authenticated request so a typo'd key fails at login time,
-  # not on the first real command.
+  # not on the first real command. Direct Req call with explicit credentials —
+  # mutating GITF_SERVER/GITF_API_KEY in the process env to steer Client
+  # would silently redirect everything else in this CLI run too.
   defp verify_login(url, key) do
-    System.put_env("GITF_SERVER", url)
-    System.put_env("GITF_API_KEY", key)
+    base = String.trim_trailing(url, "/")
 
-    case GiTF.Client.list_quests() do
-      {:ok, _} ->
+    case Req.get("#{base}/api/v1/missions", headers: [{"x-api-key", key}]) do
+      {:ok, %{status: status}} when status in 200..299 ->
         Format.success("Authenticated against #{url}.")
 
+      {:ok, %{status: status}} ->
+        Format.warn("Saved, but verification failed: server returned #{status}")
+
       {:error, reason} ->
-        Format.warn("Saved, but verification failed: #{reason}")
+        Format.warn("Saved, but verification failed: #{inspect(reason)}")
     end
   end
 

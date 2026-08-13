@@ -16,25 +16,29 @@ defmodule GiTF.LogFormatter do
   """
   @spec format(:logger.log_event(), :logger.formatter_config()) :: String.t()
   def format(event, config) do
-    formatted = :logger_formatter.format(event, config)
+    event
+    |> :logger_formatter.format(config)
+    |> chardata_to_binary()
+    |> GiTF.Redaction.redact()
+  end
 
-    binary =
-      case :unicode.characters_to_binary(formatted) do
-        bin when is_binary(bin) ->
-          bin
+  @doc false
+  @spec chardata_to_binary(:unicode.chardata()) :: String.t()
+  def chardata_to_binary(chardata) do
+    case :unicode.characters_to_binary(chardata) do
+      bin when is_binary(bin) ->
+        bin
 
-        {:incomplete, partial, _} ->
-          partial
+      {:incomplete, partial, _} ->
+        partial
 
-        {:error, _, _} ->
-          try do
-            IO.iodata_to_binary(formatted)
-          rescue
-            _ -> "(log encoding failed)"
-          end
-      end
-
-    GiTF.Redaction.redact(binary)
+      {:error, _, _} ->
+        try do
+          IO.iodata_to_binary(chardata)
+        rescue
+          _ -> "(log encoding failed)"
+        end
+    end
   end
 end
 
@@ -88,28 +92,27 @@ defmodule GiTF.LogFormatter.JSON do
 
   defp format_time(_), do: DateTime.utc_now() |> DateTime.to_iso8601()
 
+  # Individual clauses stay plain — the function-level rescue in format/2 is
+  # the single safety net protecting the logger handler.
   defp format_msg({:string, chardata}, _meta), do: to_string_safe(chardata)
 
   defp format_msg({:report, report}, %{report_cb: cb}) when is_function(cb, 1) do
     {format, args} = cb.(report)
     :io_lib.format(format, args) |> to_string_safe()
-  rescue
-    _ -> inspect(report)
   end
 
   defp format_msg({:report, report}, _meta), do: inspect(report)
 
   defp format_msg({format, args}, _meta) do
     :io_lib.format(format, args) |> to_string_safe()
-  rescue
-    _ -> inspect({format, args})
   end
 
+  # Metadata values may be atoms/integers, not just chardata.
+  defp to_string_safe(value) when is_binary(value), do: value
+  defp to_string_safe(value) when is_atom(value) or is_number(value), do: to_string(value)
+
   defp to_string_safe(value) do
-    case :unicode.characters_to_binary(value) do
-      bin when is_binary(bin) -> bin
-      _ -> inspect(value)
-    end
+    GiTF.LogFormatter.chardata_to_binary(value)
   rescue
     _ -> inspect(value)
   end

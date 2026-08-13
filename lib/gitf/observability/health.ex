@@ -37,9 +37,24 @@ defmodule GiTF.Observability.Health do
     check_store() == :ok
   end
 
+  @doc "Missions still wanting the factory or an operator (non-terminal)."
+  @spec active_missions() :: [map()]
+  def active_missions do
+    Archive.filter(:missions, &GiTF.Missions.non_terminal?/1)
+  rescue
+    _ -> []
+  end
+
   @doc "Get liveness status — detects zombie state (alive but unproductive)"
   @spec alive?() :: boolean()
-  def alive? do
+  def alive?, do: alive?(active_missions())
+
+  @doc """
+  Liveness with a precomputed non-terminal mission list, so callers that
+  already scanned (the health endpoint) don't scan twice.
+  """
+  @spec alive?([map()]) :: boolean()
+  def alive?(active_quests) do
     # Check critical processes exist
     major_alive = Process.whereis(GiTF.Major) != nil
     store_ok = check_store() == :ok
@@ -48,11 +63,6 @@ defmodule GiTF.Observability.Health do
       false
     else
       # Check for zombie: active missions exist but no op activity for 30+ minutes
-      active_quests =
-        Archive.filter(:missions, fn q ->
-          q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
-        end)
-
       if active_quests == [] do
         true
       else

@@ -74,6 +74,16 @@ defmodule GiTF.Major do
     GenServer.call(@name, :status)
   end
 
+  @doc """
+  Number of currently active ghosts. Cheap variant of `status/0` for hot
+  callers (the health endpoint) — replies with an integer instead of copying
+  Major's state map out of the scheduler process.
+  """
+  @spec active_ghost_count() :: non_neg_integer()
+  def active_ghost_count do
+    GenServer.call(@name, :active_ghost_count)
+  end
+
   @doc "Blocks until the Major's Claude session exits."
   @spec await_session_end() :: :ok
   def await_session_end do
@@ -183,6 +193,10 @@ defmodule GiTF.Major do
        :max_ghosts,
        :effective_max_ghosts
      ]), state}
+  end
+
+  def handle_call(:active_ghost_count, _from, state) do
+    {:reply, map_size(state.active_ghosts), state}
   end
 
   def handle_call(:await_session_end, from, state) do

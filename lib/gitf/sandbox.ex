@@ -56,14 +56,14 @@ defmodule GiTF.Sandbox do
 
   @doc """
   True when commands will actually run inside a kernel sandbox: sandboxing is
-  enabled, a non-local adapter selected itself, and its binary is on PATH.
+  enabled and a non-local adapter is available. Resolves the adapter once
+  (selection is cached — see `adapter/0`), so this is cheap enough for
+  per-spawn and per-tool-call policy checks.
   """
   @spec effective?() :: boolean()
   def effective? do
-    enabled?() and available?() and name() != "local" and
-      case wrap_command("true", [], []) do
-        {sb_cmd, _args, _opts} -> System.find_executable(sb_cmd) != nil
-      end
+    ad = adapter()
+    enabled?() and ad.name() != "local" and ad.available?()
   rescue
     _ -> false
   end
@@ -94,13 +94,9 @@ defmodule GiTF.Sandbox do
     cwd = Keyword.get(opts, :cd, File.cwd!())
     risk = Keyword.get(opts, :risk_level, :low)
 
-    if enabled?() and available?() and name() != "local" do
+    if effective?() do
       {sb_cmd, sb_args, _} = wrap_command("sh", ["-c", command], cd: cwd, risk_level: risk)
-
-      case System.find_executable(sb_cmd) do
-        nil -> unsandboxed_shell(command)
-        _ -> {sb_cmd, sb_args}
-      end
+      {sb_cmd, sb_args}
     else
       unsandboxed_shell(command)
     end
@@ -141,38 +137,52 @@ defmodule GiTF.Sandbox do
     "'" <> String.replace(arg, "'", "'\\''") <> "'"
   end
 
+  # Auto-selection probes PATH (find_executable per candidate adapter), and
+  # policy checks run per spawn/tool-call — so the selected adapter is cached
+  # for the life of the node. An explicit :sandbox_adapter config (used by
+  # tests) always wins and is never cached.
   defp adapter do
-    configured = Application.get_env(:gitf, :sandbox_adapter)
+    case Application.get_env(:gitf, :sandbox_adapter) do
+      nil ->
+        case :persistent_term.get({__MODULE__, :adapter}, nil) do
+          nil ->
+            selected = select_adapter()
+            :persistent_term.put({__MODULE__, :adapter}, selected)
+            selected
 
-    cond do
+          cached ->
+            cached
+        end
+
       configured ->
         configured
+    end
+  end
 
-      true ->
-        # Prefer the OS-native sandbox adapter first:
-        # - macOS -> sandbox-exec
-        # - Linux -> bubblewrap
-        # Fall back to Docker, then Local.
-        case :os.type() do
-          {:unix, :darwin} ->
-            cond do
-              GiTF.Sandbox.SandboxExec.available?() -> GiTF.Sandbox.SandboxExec
-              GiTF.Sandbox.Docker.available?() -> GiTF.Sandbox.Docker
-              true -> GiTF.Sandbox.Local
-            end
-
-          {:unix, :linux} ->
-            cond do
-              GiTF.Sandbox.Bubblewrap.available?() -> GiTF.Sandbox.Bubblewrap
-              GiTF.Sandbox.Docker.available?() -> GiTF.Sandbox.Docker
-              true -> GiTF.Sandbox.Local
-            end
-
-          _ ->
-            if GiTF.Sandbox.Docker.available?(),
-              do: GiTF.Sandbox.Docker,
-              else: GiTF.Sandbox.Local
+  # Prefer the OS-native sandbox adapter first:
+  # - macOS -> sandbox-exec
+  # - Linux -> bubblewrap
+  # Fall back to Docker, then Local.
+  defp select_adapter do
+    case :os.type() do
+      {:unix, :darwin} ->
+        cond do
+          GiTF.Sandbox.SandboxExec.available?() -> GiTF.Sandbox.SandboxExec
+          GiTF.Sandbox.Docker.available?() -> GiTF.Sandbox.Docker
+          true -> GiTF.Sandbox.Local
         end
+
+      {:unix, :linux} ->
+        cond do
+          GiTF.Sandbox.Bubblewrap.available?() -> GiTF.Sandbox.Bubblewrap
+          GiTF.Sandbox.Docker.available?() -> GiTF.Sandbox.Docker
+          true -> GiTF.Sandbox.Local
+        end
+
+      _ ->
+        if GiTF.Sandbox.Docker.available?(),
+          do: GiTF.Sandbox.Docker,
+          else: GiTF.Sandbox.Local
     end
   end
 end

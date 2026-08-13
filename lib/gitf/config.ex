@@ -164,6 +164,19 @@ defmodule GiTF.Config do
     _ -> nil
   end
 
+  @doc """
+  The API key shared by the HTTP server and remote CLI: `GITF_API_KEY` env,
+  falling back to `[server] api_key` in config.toml. Single resolution chain
+  so client and server can never disagree about which key is live.
+  """
+  @spec api_key() :: String.t() | nil
+  def api_key do
+    case System.get_env("GITF_API_KEY") do
+      key when is_binary(key) and key != "" -> key
+      _ -> get(:api_key)
+    end
+  end
+
   defp config_path(:api_key), do: [:server, :api_key]
   defp config_path(:max_ghosts), do: [:major, :max_ghosts]
   defp config_path(:budget_usd), do: [:costs, :budget_usd]

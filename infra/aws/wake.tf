@@ -38,7 +38,7 @@ resource "aws_iam_role_policy" "wake" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = ["ec2:StartInstances", "ec2:DescribeInstances"]
+      Action   = ["ec2:StartInstances"]
       Resource = "*"
       Condition = {
         StringEquals = { "ec2:Region" = var.region }

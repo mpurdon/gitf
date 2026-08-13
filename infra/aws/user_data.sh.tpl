@@ -8,11 +8,14 @@ set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 # ---- Data volume ------------------------------------------------------------
-# Wait for the second NVMe device (the /dev/sdf attachment), format on first
-# boot only, mount at /var/lib/gitf via fstab.
+# Wait for the non-root disk (the /dev/sdf attachment; NVMe enumeration order
+# is not guaranteed, so identify the root disk via the mounted rootfs rather
+# than assuming it is nvme0n1). Format on first boot only, mount via fstab.
+ROOT_DISK=$(lsblk -no PKNAME "$(findmnt -no SOURCE /)" | head -1)
 DATA_DEV=""
 for _ in $(seq 1 60); do
-  DATA_DEV=$(lsblk -dno NAME,TYPE | awk '$2=="disk" && $1!="nvme0n1" {print "/dev/"$1; exit}')
+  DATA_DEV=$(lsblk -dno NAME,TYPE | awk -v root="$ROOT_DISK" \
+    '$2=="disk" && $1!=root {print "/dev/"$1; exit}')
   [ -n "$DATA_DEV" ] && break
   sleep 2
 done
@@ -47,18 +50,13 @@ apt-get update && apt-get install -y gh
 # Tailscale (the operator runs `tailscale up` interactively afterwards)
 curl -fsSL https://tailscale.com/install.sh | sh
 
-# ---- GiTF env seed ----------------------------------------------------------
+# ---- GiTF host overrides ----------------------------------------------------
+# AWS-provisioned values only. The operator-owned /etc/gitf/gitf.env comes
+# from rel/env.example via install-systemd.sh — one canonical template, so
+# defaults can't diverge between cloud-init and the installer. Every gitf
+# systemd unit loads both files (EnvironmentFile=).
 mkdir -p /etc/gitf
-if [ ! -f /etc/gitf/gitf.env ]; then
-  cat >/etc/gitf/gitf.env <<EOF
-GITF_PORT=4000
-GITF_HOST=127.0.0.1
-GITF_SANDBOX_REQUIRED=1
-GITF_LOG_STDOUT=1
-GITF_LOG_FORMAT=json
-GITF_IDLE_STOP_MINUTES=30
-GITF_IDLE_STOP_GRACE_MINUTES=15
+cat >/etc/gitf/aws.env <<EOF
 GITF_BACKUP_BUCKET=${backup_bucket}
 EOF
-  chmod 0600 /etc/gitf/gitf.env
-fi
+chmod 0600 /etc/gitf/aws.env

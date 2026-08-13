@@ -7,9 +7,8 @@
 # Credentials come from the instance IAM role — nothing to configure here.
 set -euo pipefail
 
-ENV_FILE=/etc/gitf/gitf.env
-[[ -f $ENV_FILE ]] && set -a && . "$ENV_FILE" && set +a
-
+# Configuration arrives via the unit's EnvironmentFile= (gitf.env/aws.env) —
+# run through `systemctl start gitf-backup.service`, not directly.
 BUCKET="${GITF_BACKUP_BUCKET:-}"
 [[ -n "$BUCKET" ]] || exit 0
 

@@ -37,7 +37,8 @@ boolean_flags = [
   {"GITF_WEBHOOKS_ENABLED", :webhooks_enabled},
   {"GITF_VISUAL_CAPTURE_ENABLED", :visual_capture_enabled},
   {"GITF_SANDBOX_ENABLED", :sandbox_enabled},
-  {"GITF_SANDBOX_REQUIRED", :sandbox_required}
+  {"GITF_SANDBOX_REQUIRED", :sandbox_required},
+  {"GITF_LOG_STDOUT", :log_stdout}
 ]
 
 for {env_var, key} <- boolean_flags do

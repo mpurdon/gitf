@@ -8,6 +8,7 @@ import json
 import os
 
 import boto3
+from botocore.exceptions import ClientError
 
 
 def handler(event, _context):
@@ -16,20 +17,20 @@ def handler(event, _context):
         return {"statusCode": 403, "body": "forbidden"}
 
     instance_id = os.environ["INSTANCE_ID"]
-    ec2 = boto3.client("ec2")
 
-    state = ec2.describe_instances(InstanceIds=[instance_id])["Reservations"][0][
-        "Instances"
-    ][0]["State"]["Name"]
-
-    if state in ("stopped", "stopping"):
-        ec2.start_instances(InstanceIds=[instance_id])
-        message = "starting"
-    else:
-        message = state
+    # start_instances is idempotent (a no-op on running instances) and its
+    # response already carries the state — no describe round-trip needed.
+    try:
+        resp = boto3.client("ec2").start_instances(InstanceIds=[instance_id])
+        state = resp["StartingInstances"][0]["CurrentState"]["Name"]
+        status = 200
+    except ClientError as err:
+        # e.g. IncompatibleInstanceState while the instance is still stopping.
+        state = err.response.get("Error", {}).get("Code", "error")
+        status = 409
 
     return {
-        "statusCode": 200,
+        "statusCode": status,
         "headers": {"content-type": "application/json"},
-        "body": json.dumps({"instance": instance_id, "state": message}),
+        "body": json.dumps({"instance": instance_id, "state": state}),
     }

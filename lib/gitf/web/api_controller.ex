@@ -15,8 +15,8 @@ defmodule GiTF.Web.ApiController do
         _ -> 0
       end
 
-    alive = GiTF.Observability.Health.alive?()
     activity = activity_snapshot()
+    alive = GiTF.Observability.Health.alive?(activity.missions)
 
     conn
     |> put_status(if(alive, do: 200, else: 503))
@@ -59,30 +59,29 @@ defmodule GiTF.Web.ApiController do
   # Idle detection for the idle-stop timer: the box may power down only when
   # no ghost is running and no mission is in a non-terminal state (queued,
   # active, or awaiting approval — sleeping mid-approval would still be safe,
-  # but surprising).
+  # but surprising). A failed lookup must read as NOT idle: zero is the one
+  # answer that powers the box off, so it can't double as an error value.
   defp activity_snapshot do
-    active_ghosts =
-      try do
-        GiTF.Major.status() |> Map.get(:active_ghosts, %{}) |> map_size()
-      catch
-        _, _ -> 0
-      end
+    missions = GiTF.Observability.Health.active_missions()
 
-    active_missions =
-      try do
-        GiTF.Archive.filter(:missions, fn q ->
-          q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
-        end)
-        |> length()
-      rescue
-        _ -> 0
-      end
+    case ghost_count() do
+      {:ok, ghosts} ->
+        %{
+          missions: missions,
+          active_ghosts: ghosts,
+          active_missions: length(missions),
+          idle: ghosts == 0 and missions == []
+        }
 
-    %{
-      active_ghosts: active_ghosts,
-      active_missions: active_missions,
-      idle: active_ghosts == 0 and active_missions == 0
-    }
+      :error ->
+        %{missions: missions, active_ghosts: nil, active_missions: length(missions), idle: false}
+    end
+  end
+
+  defp ghost_count do
+    {:ok, GiTF.Major.active_ghost_count()}
+  catch
+    _, _ -> :error
   end
 
   # -- Readiness ---------------------------------------------------------------

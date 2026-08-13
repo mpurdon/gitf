@@ -4,4 +4,6 @@ After=gitf.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/etc/gitf/gitf.env
+EnvironmentFile=-/etc/gitf/aws.env
 ExecStart=/usr/local/bin/gitf-idle-stop

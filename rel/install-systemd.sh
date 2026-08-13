@@ -16,19 +16,25 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # User + directories. HOME must live on the data volume: the store is under
 # $GITF_HOME/.gitf, but ~/.config/gitf (global config, mcp.sock, llm_db)
 # resolves via the user's home, so they need to be the same tree.
-id -u gitf >/dev/null 2>&1 || useradd --system --create-home --home /var/lib/gitf --shell /usr/sbin/nologin gitf
+# The recursive chown of the data volume runs on first install only — on
+# upgrades it would walk every sector repo and the whole store.
+if ! id -u gitf >/dev/null 2>&1; then
+  useradd --system --create-home --home /var/lib/gitf --shell /usr/sbin/nologin gitf
+  chown -R gitf:gitf /var/lib/gitf
+fi
 mkdir -p /opt/gitf /var/lib/gitf /etc/gitf
 
-# Release payload
+# Release payload: unpack to a staging dir, then swap with two renames —
+# no second full copy, and the old tree survives as /opt/gitf.old.
 if systemctl is-active --quiet gitf; then systemctl stop gitf; fi
 rm -rf /opt/gitf.new
 mkdir -p /opt/gitf.new
 tar xf "$TARBALL" -C /opt/gitf.new
+chown -R gitf:gitf /opt/gitf.new
 rm -rf /opt/gitf.old
-[[ -d /opt/gitf/bin ]] && mv /opt/gitf /opt/gitf.old && mkdir /opt/gitf
-cp -a /opt/gitf.new/. /opt/gitf/
-rm -rf /opt/gitf.new
-chown -R gitf:gitf /opt/gitf /var/lib/gitf
+[[ -d /opt/gitf/bin ]] && mv /opt/gitf /opt/gitf.old
+rm -rf /opt/gitf
+mv /opt/gitf.new /opt/gitf
 
 # Env file + secrets (only fills in what's missing)
 if [[ ! -f /etc/gitf/gitf.env ]]; then

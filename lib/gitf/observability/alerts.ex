@@ -84,57 +84,60 @@ defmodule GiTF.Observability.Alerts do
   """
   @spec notify([{atom(), String.t()}], atom()) :: :ok
   def notify(alerts, channel \\ :auto) do
-    Enum.each(alerts, fn {type, message} ->
-      if duplicate?(type, message) do
-        Logger.debug("Alert suppressed (dedup): #{type}")
-      else
-        record_alert(type, message)
-
-        GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-          type: type,
-          message: message,
-          severity: severity(type)
-        })
-
-        send_notification(:log, type, message)
-
-        case channel do
-          :auto ->
-            if webhook_url() && meets_severity_threshold?(type) do
-              Task.start(fn -> send_notification(:webhook, type, message) end)
-            end
-
-          other ->
-            send_notification(other, type, message)
-        end
-      end
-    end)
+    Enum.each(alerts, fn {type, message} -> raise_alert(type, message, channel, []) end)
   end
 
-  @doc "Dispatch a single alert directly to the configured webhook (and log), with dedup."
-  @spec dispatch_webhook(atom(), String.t()) :: :ok
-  def dispatch_webhook(type, message) do
-    if duplicate?(type, message) do
+  @doc """
+  Dispatch a single alert (log + telemetry + severity-gated webhook), with
+  dedup.
+
+  Options:
+
+    * `:dedup_key` — dedup on this value instead of the message text, so
+      recurring callers (e.g. the stall check) can keep useful detail like
+      elapsed time in the message without defeating suppression.
+  """
+  @spec dispatch_webhook(atom(), String.t(), keyword()) :: :ok
+  def dispatch_webhook(type, message, opts \\ []) do
+    raise_alert(type, message, :auto, opts)
+  end
+
+  # The one path every alert takes: dedup, record, telemetry (what messaging
+  # channels like Telegram subscribe to), log, severity-gated webhook.
+  defp raise_alert(type, message, channel, opts) do
+    dedup_key = Keyword.get(opts, :dedup_key, message)
+
+    if duplicate?(type, dedup_key) do
       Logger.debug("Alert suppressed (dedup): #{type}")
     else
-      record_alert(type, message)
-      Logger.warning("[ALERT] #{type}: #{message}")
+      record_alert(type, dedup_key)
 
-      # Same event notify/2 emits — this is what messaging channels
-      # (e.g. Telegram) subscribe to, so single-shot alerts reach them too.
       GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
         type: type,
         message: message,
         severity: severity(type)
       })
 
-      if webhook_url() && meets_severity_threshold?(type) do
-        Task.start(fn -> send_notification(:webhook, type, message) end)
+      send_notification(:log, type, message)
+
+      case channel do
+        :auto ->
+          if webhook_url() && meets_severity_threshold?(type) do
+            Task.start(fn -> send_notification(:webhook, type, message) end)
+          end
+
+        other ->
+          send_notification(other, type, message)
       end
     end
 
     :ok
   end
+
+  @doc "Whether this severity should interrupt the operator rather than batch."
+  @spec urgent?(atom()) :: boolean()
+  def urgent?(severity) when severity in [:critical, :high], do: true
+  def urgent?(_), do: false
 
   @doc """
   Attach a telemetry handler that forwards [:gitf, :alert, :raised] events

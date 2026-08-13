@@ -245,13 +245,7 @@ defmodule GiTF.Web.Router do
   end
 
   defp valid_api_key?(key) do
-    configured =
-      case System.get_env("GITF_API_KEY") do
-        env_key when is_binary(env_key) and env_key != "" -> env_key
-        _ -> GiTF.Config.get(:api_key)
-      end
-
-    case configured do
+    case GiTF.Config.api_key() do
       nil -> false
       configured_key -> Plug.Crypto.secure_compare(key, configured_key)
     end

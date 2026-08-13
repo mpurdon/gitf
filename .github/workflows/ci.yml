@@ -1,10 +1,12 @@
 # arm64-only CI: dev Macs, these runners, and the Graviton deploy target all
-# share the architecture. Jobs run inside the same Debian bookworm builder
+# share the architecture. The job runs inside the same Debian bookworm builder
 # image as the Dockerfile, for two reasons:
 #   - ex_termbox's waf build needs Python < 3.12 (bookworm has 3.11; the
 #     ubuntu-24.04 runner image has 3.12)
 #   - a release built against bookworm's older glibc runs on both Debian 12
 #     and the Ubuntu 24.04 AMI (the reverse would not)
+# Test and release build share one job (and one container, cache, and dep
+# fetch); the release steps only run on pushes to main.
 name: CI
 
 on:
@@ -12,11 +14,8 @@ on:
     branches: [main]
   pull_request:
 
-env:
-  BUILDER_IMAGE: hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim
-
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-24.04-arm
     container:
       image: hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim
@@ -39,8 +38,8 @@ jobs:
           path: |
             deps
             _build
-          key: mix-test-${{ hashFiles('mix.lock') }}
-          restore-keys: mix-test-
+          key: mix-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-
 
       - name: Compile (warnings are errors)
         run: |
@@ -50,43 +49,20 @@ jobs:
       - name: Run the unit suite
         run: mix test
 
-  release:
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04-arm
-    container:
-      image: hexpm/elixir:1.18.1-erlang-27.2-debian-bookworm-20241202-slim
-    env:
-      MIX_ENV: prod
-      RELEASE_TAR: "1"
-    steps:
-      - name: Install build dependencies
-        run: |
-          apt-get update
-          apt-get install -y build-essential git python3
-          mix local.hex --force
-          mix local.rebar --force
-
-      - uses: actions/checkout@v4
-
-      - name: Trust the checkout directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache deps and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: mix-prod-${{ hashFiles('mix.lock') }}
-          restore-keys: mix-prod-
-
       - name: Build release tarball
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          MIX_ENV: prod
+          RELEASE_TAR: "1"
         run: |
-          mix deps.get --only prod
+          # The cache restores tarballs from earlier versions (the version
+          # bumps every commit) — clear them so the artifact glob below only
+          # matches the fresh build.
+          rm -f _build/prod/gitf-*.tar.gz
           mix release --overwrite
 
       - name: Upload release tarball
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: gitf-release-arm64

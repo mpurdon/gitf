@@ -15,9 +15,8 @@
 # - Touch /etc/gitf/idle-stop-disabled to suspend without config edits.
 set -euo pipefail
 
-ENV_FILE=/etc/gitf/gitf.env
-[[ -f $ENV_FILE ]] && set -a && . "$ENV_FILE" && set +a
-
+# Configuration arrives via the unit's EnvironmentFile= (gitf.env/aws.env) —
+# run through `systemctl start gitf-idle-stop.service`, not directly.
 IDLE_MINUTES="${GITF_IDLE_STOP_MINUTES:-0}"
 GRACE_MINUTES="${GITF_IDLE_STOP_GRACE_MINUTES:-15}"
 PORT="${GITF_PORT:-4000}"
@@ -34,7 +33,16 @@ uptime_s=$(cut -d. -f1 /proc/uptime)
 
 body=$(curl -fsS --max-time 10 "http://127.0.0.1:${PORT}/api/v1/health" 2>/dev/null || true)
 
-if ! grep -q '"idle":true' <<<"$body"; then
+# Parse the idle flag properly with jq (installed by provisioning); the grep
+# fallback keeps hand-installed boxes working but is coupled to the exact
+# JSON serialization.
+if command -v jq >/dev/null 2>&1; then
+  idle=$(jq -r '.data.idle' <<<"$body" 2>/dev/null || echo "false")
+else
+  idle=$(grep -q '"idle":true' <<<"$body" && echo "true" || echo "false")
+fi
+
+if [[ "$idle" != "true" ]]; then
   # Busy, unreachable, or unhealthy: reset the countdown.
   rm -f "$STATE"
   exit 0

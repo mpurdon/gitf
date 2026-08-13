@@ -31,6 +31,9 @@ Environment=GITF_HOST=127.0.0.1
 # so the unit still loads if the file is absent (the release will then refuse
 # to boot in prod without SECRET_KEY_BASE, which is the desired fail-closed).
 EnvironmentFile=-/etc/gitf/gitf.env
+# Host-provisioned overrides (e.g. GITF_BACKUP_BUCKET written by cloud-init
+# on AWS) — kept separate so gitf.env stays owned by the operator/installer.
+EnvironmentFile=-/etc/gitf/aws.env
 
 WorkingDirectory=/opt/gitf
 ExecStart=/opt/gitf/bin/gitf start

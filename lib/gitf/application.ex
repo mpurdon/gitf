@@ -344,13 +344,28 @@ defmodule GiTF.Application do
 
   # A release boot (`bin/gitf start`, systemd, Docker) or an explicit
   # `gitf server`/`gitf daemon` invocation is a daemon; anything else is an
-  # interactive CLI run that tolerates a missing endpoint.
+  # interactive CLI run that tolerates a missing endpoint. This is THE mode
+  # predicate — stdout logging keys off it too, so the two never disagree.
   defp daemon_mode? do
     System.get_env("RELEASE_NAME") != nil or
-      Enum.any?(:init.get_plain_arguments(), fn arg ->
-        List.to_string(arg) in ["server", "daemon"]
-      end)
+      first_subcommand() in ["server", "daemon"]
   end
+
+  # The first positional escript argument, skipping global flags and their
+  # values — matching a literal "server"/"daemon" anywhere in argv would trip
+  # on mission goals or ids that merely contain those words.
+  defp first_subcommand do
+    :init.get_plain_arguments()
+    |> Enum.map(&List.to_string/1)
+    |> skip_global_flags()
+  end
+
+  defp skip_global_flags([flag, _value | rest]) when flag in ["-w", "--workspace"],
+    do: skip_global_flags(rest)
+
+  defp skip_global_flags(["-" <> _ | rest]), do: skip_global_flags(rest)
+  defp skip_global_flags([first | _]), do: first
+  defp skip_global_flags([]), do: nil
 
   # Background services — skip in test to avoid conflicts
   defp background_children do
@@ -521,13 +536,11 @@ defmodule GiTF.Application do
 
   # Whether the default stdout handler should stay attached. Under a service
   # manager an empty stdout means empty `journalctl`/`docker logs` — the
-  # operator's primary debugging surface — so releases default to keeping it.
-  # GITF_LOG_STDOUT overrides in either direction.
+  # operator's primary debugging surface — so daemon boots default to keeping
+  # it. GITF_LOG_STDOUT overrides in either direction (parsed by the shared
+  # boolean_flags loop in runtime.exs).
   defp stdout_logging? do
-    case System.get_env("GITF_LOG_STDOUT") do
-      nil -> System.get_env("RELEASE_NAME") != nil
-      value -> String.downcase(value) in ["1", "true", "yes", "on"]
-    end
+    Application.get_env(:gitf, :log_stdout, daemon_mode?())
   end
 
   defp configure_stdout_handler do

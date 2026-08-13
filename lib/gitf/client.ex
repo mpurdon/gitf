@@ -19,46 +19,23 @@ defmodule GiTF.Client do
   end
 
   @doc """
-  Returns the API key to authenticate against the remote server, or nil.
-
-  Resolution: `GITF_API_KEY` env → `[server] api_key` in config.toml
-  (set by `gitf login`).
+  Returns the API key to authenticate against the remote server, or nil
+  (`GITF_API_KEY` env → `[server] api_key` in config.toml, set by
+  `gitf login`).
   """
-  def api_key do
-    case System.get_env("GITF_API_KEY") do
-      key when is_binary(key) and key != "" -> key
-      _ -> GiTF.Config.get(:api_key)
-    end
-  end
+  defdelegate api_key, to: GiTF.Config
 
   # -- HTTP primitives ---------------------------------------------------------
 
-  def get(path, opts \\ []) do
-    url = build_url(path)
-    params = Keyword.get(opts, :params, [])
+  def get(path, opts \\ []), do: request(:get, path, params: Keyword.get(opts, :params, []))
+  def post(path, body \\ %{}, _opts \\ []), do: request(:post, path, json: body)
+  def put(path, body \\ %{}, _opts \\ []), do: request(:put, path, json: body)
+  def delete(path, _opts \\ []), do: request(:delete, path, [])
 
-    Req.get(url, params: params, headers: auth_headers())
-    |> handle_response()
-  end
-
-  def post(path, body \\ %{}, _opts \\ []) do
-    url = build_url(path)
-
-    Req.post(url, json: body, headers: auth_headers())
-    |> handle_response()
-  end
-
-  def put(path, body \\ %{}, _opts \\ []) do
-    url = build_url(path)
-
-    Req.put(url, json: body, headers: auth_headers())
-    |> handle_response()
-  end
-
-  def delete(path, _opts \\ []) do
-    url = build_url(path)
-
-    Req.delete(url, headers: auth_headers())
+  # Single place that owns URL building, auth, and response handling, so a
+  # new verb or cross-cutting option (timeout, retry) is a one-line change.
+  defp request(method, path, req_opts) do
+    Req.request([method: method, url: build_url(path), headers: auth_headers()] ++ req_opts)
     |> handle_response()
   end
 

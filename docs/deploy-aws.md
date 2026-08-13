@@ -27,9 +27,11 @@ group, IMDSv2, stop-on-shutdown), a 40 GB gp3 data volume mounted at
 Store reads, Bedrock invoke, backup-bucket access), daily DLM snapshots of
 the data volume, a versioned S3 backup bucket, and the wake Lambda.
 
-Cloud-init installs git, bubblewrap, gh, awscli, and Tailscale, and seeds
-`/etc/gitf/gitf.env` with the operational defaults (`GITF_SANDBOX_REQUIRED=1`,
-JSON logs, idle-stop settings, the backup bucket name).
+Cloud-init installs git, bubblewrap, gh, awscli, and Tailscale, and writes
+the AWS-specific values (the backup bucket name) to `/etc/gitf/aws.env`.
+The operator-owned `/etc/gitf/gitf.env` comes from `rel/env.example` when
+you run the installer in step 3 — one canonical template; the systemd units
+load both files.
 
 ## 2. Join the tailnet
 

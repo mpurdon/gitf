@@ -112,40 +112,38 @@ defmodule GiTF.Runtime.Claude do
   end
 
   # Returns `{:ok, {executable_path, args}}` wrapped in the configured sandbox
-  # when one is available and enabled; the command unchanged when falling back
-  # is permitted; `{:error, :sandbox_required_but_unavailable}` when it isn't.
+  # when one is effective; the command unchanged when falling back is
+  # permitted; `{:error, :sandbox_required_but_unavailable}` when it isn't.
+  # Effectiveness and the refuse/fallback policy are both `GiTF.Sandbox`'s
+  # call — no local re-derivation.
   defp sandbox_wrap(cmd, args, working_dir, opts) do
-    if sandbox_enabled?() and GiTF.Sandbox.available?() and GiTF.Sandbox.name() != "local" do
-      risk = Keyword.get(opts, :risk_level, :low)
-      {sb_cmd, sb_args, _opts} = GiTF.Sandbox.wrap_command(cmd, args, cd: working_dir, risk_level: risk)
-
-      case System.find_executable(sb_cmd) do
-        nil ->
-          unsandboxed_or_refuse(cmd, args, "Sandbox #{sb_cmd} not on PATH")
-
-        sb_path ->
-          {:ok, {sb_path, sb_args}}
-      end
+    with true <- GiTF.Sandbox.effective?(),
+         {sb_cmd, sb_args, _opts} <-
+           GiTF.Sandbox.wrap_command(cmd, args,
+             cd: working_dir,
+             risk_level: Keyword.get(opts, :risk_level, :low)
+           ),
+         sb_path when is_binary(sb_path) <- System.find_executable(sb_cmd) do
+      {:ok, {sb_path, sb_args}}
     else
-      if sandbox_enabled?() do
-        unsandboxed_or_refuse(cmd, args, "No kernel sandbox available")
-      else
-        {:ok, {cmd, args}}
-      end
+      _ ->
+        case GiTF.Sandbox.check_policy() do
+          :ok ->
+            if GiTF.Sandbox.enabled?() do
+              Logger.warning("No effective kernel sandbox — spawning ghost UNSANDBOXED")
+            end
+
+            {:ok, {cmd, args}}
+
+          {:error, :sandbox_required_but_unavailable} = error ->
+            Logger.error(
+              "sandbox_required is set and no kernel sandbox is effective — refusing to spawn ghost"
+            )
+
+            error
+        end
     end
   end
-
-  defp unsandboxed_or_refuse(cmd, args, reason) do
-    if GiTF.Sandbox.required?() do
-      Logger.error("#{reason} and sandbox_required is set — refusing to spawn ghost")
-      {:error, :sandbox_required_but_unavailable}
-    else
-      Logger.warning("#{reason} — spawning ghost UNSANDBOXED")
-      {:ok, {cmd, args}}
-    end
-  end
-
-  defp sandbox_enabled?, do: GiTF.Sandbox.enabled?()
 
   @doc """
   Stops a Claude port process gracefully.
