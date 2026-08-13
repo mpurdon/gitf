@@ -38,9 +38,15 @@ defmodule GiTF.Observability.Alerts do
   @severity_map %{
     budget_paused: :critical,
     budget_auto_failed: :critical,
+    # A pending approval blocks the mission until a human acts — the single
+    # most important thing to push to the operator's phone.
+    approval_requested: :critical,
+    approval_timed_out: :high,
     failure_rate_high: :high,
     validation_failed: :high,
     cost_spike: :high,
+    ghost_stalled: :high,
+    ghost_hard_stalled: :high,
     quest_stuck: :medium,
     quality_drop: :medium,
     budget_escalated: :low
@@ -113,6 +119,14 @@ defmodule GiTF.Observability.Alerts do
     else
       record_alert(type, message)
       Logger.warning("[ALERT] #{type}: #{message}")
+
+      # Same event notify/2 emits — this is what messaging channels
+      # (e.g. Telegram) subscribe to, so single-shot alerts reach them too.
+      GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+        type: type,
+        message: message,
+        severity: severity(type)
+      })
 
       if webhook_url() && meets_severity_threshold?(type) do
         Task.start(fn -> send_notification(:webhook, type, message) end)

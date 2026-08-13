@@ -100,6 +100,15 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
     {:noreply, state}
   end
 
+  # System alerts (approvals, stalls, budget) carry their own severity:
+  # critical/high bypass batching — an approval request that waits for the
+  # 30s digest window defeats the point of pushing it to a phone.
+  def handle_cast({:notification, :alert, %{severity: severity} = payload}, state)
+      when severity in [:critical, :high] do
+    do_send(state.token, state.chat_id, format_notification(:alert, payload))
+    {:noreply, state}
+  end
+
   def handle_cast({:notification, event, payload}, state) do
     event_str = to_string(event)
 
@@ -232,8 +241,21 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
       :ghost_failed -> "Ghost #{payload[:ghost_id]} failed: #{payload[:error]}"
       :quest_completed -> "Quest #{payload[:mission_id]} completed!"
       :link_msg -> payload[:text] || "New link_msg message"
+      :alert -> format_alert(payload)
       _ -> "GiTF event: #{event} #{inspect(payload)}"
     end
+  end
+
+  defp format_alert(payload) do
+    marker =
+      case payload[:severity] do
+        :critical -> "🔴"
+        :high -> "🟠"
+        :medium -> "🟡"
+        _ -> "ℹ️"
+      end
+
+    "#{marker} *#{payload[:type]}*\n#{payload[:message]}"
   end
 
   defp flush_batch(_token, _chat_id, []), do: :ok
@@ -251,6 +273,17 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   end
 
   defp attach_telemetry(config) do
+    # System alerts ([:gitf, :alert, :raised]) are always forwarded — this is
+    # the channel's reason to exist. Approval requests and stalls arrive here.
+    :telemetry.attach(
+      "section-telegram-alerts",
+      [:gitf, :alert, :raised],
+      fn _event, _measurements, metadata, _config ->
+        GenServer.cast(__MODULE__, {:notification, :alert, metadata})
+      end,
+      %{}
+    )
+
     events_config = get_in(config, [:notify, :events]) || []
 
     telemetry_events =

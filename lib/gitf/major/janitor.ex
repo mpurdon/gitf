@@ -277,6 +277,13 @@ defmodule GiTF.Major.Janitor do
             {:stall_warning, ghost.id, seconds_since}
           )
 
+          # Stable message (no elapsed-seconds) so the alert dedup window
+          # suppresses the repeat firings of the 2-minute check.
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :ghost_stalled,
+            "Ghost #{ghost.id} stalled (op #{ghost.op_id || "?"}) — no checkpoint past threshold"
+          )
+
         true ->
           :ok
       end
@@ -286,6 +293,11 @@ defmodule GiTF.Major.Janitor do
   defp handle_hard_stall(ghost, seconds_since) do
     Logger.warning(
       "Hard-stall: ghost #{ghost.id} unresponsive for #{seconds_since}s, failing op"
+    )
+
+    GiTF.Observability.Alerts.dispatch_webhook(
+      :ghost_hard_stalled,
+      "Ghost #{ghost.id} hard-stalled (op #{ghost.op_id || "?"}) — killed and failed for retry"
     )
 
     # Killing the worker is a cheap side-effect that doesn't touch Major state,

@@ -60,6 +60,36 @@ defmodule GiTF.ObservabilityTest do
     end
   end
 
+  describe "Alerts severity and dispatch" do
+    test "operator-blocking and stall alerts are webhook-eligible" do
+      # These must clear the default :medium webhook floor — approval
+      # requests silently rating :low was exactly the wiring gap.
+      assert Alerts.severity(:approval_requested) == :critical
+      assert Alerts.severity(:ghost_stalled) == :high
+      assert Alerts.severity(:ghost_hard_stalled) == :high
+    end
+
+    test "dispatch_webhook emits the telemetry event messaging channels consume" do
+      ref = make_ref()
+      test_pid = self()
+
+      :telemetry.attach(
+        "test-alert-#{inspect(ref)}",
+        [:gitf, :alert, :raised],
+        fn _event, _measurements, metadata, _ -> send(test_pid, {:alert_raised, metadata}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("test-alert-#{inspect(ref)}") end)
+
+      unique_msg = "approval needed #{System.unique_integer([:positive])}"
+      Alerts.dispatch_webhook(:approval_requested, unique_msg)
+
+      assert_receive {:alert_raised, %{type: :approval_requested, severity: :critical} = meta}
+      assert meta.message == unique_msg
+    end
+  end
+
   describe "Health.check/0" do
     test "returns health status" do
       health = Health.check()

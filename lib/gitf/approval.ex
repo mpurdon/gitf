@@ -50,7 +50,8 @@ defmodule GiTF.Approval do
 
       Observability.Alerts.dispatch_webhook(
         :approval_requested,
-        "Quest #{mission.id} awaiting human approval: #{String.slice(mission.goal, 0, 80)}"
+        "Quest #{mission.id} awaiting human approval: #{String.slice(mission.goal, 0, 80)}" <>
+          approvals_link()
       )
 
       {:ok, "awaiting_approval"}
@@ -255,6 +256,18 @@ defmodule GiTF.Approval do
           Enum.any?(ops, fn op -> Map.get(op, :risk_level) == :high end) -> :high
           true -> :normal
         end
+    end
+  end
+
+  # Deep link into the approvals dashboard when the operator has configured
+  # the server's own URL ([server] url); alerts stay plain text otherwise.
+  defp approvals_link do
+    case GiTF.Config.server_url() do
+      url when is_binary(url) and url != "" ->
+        "\n#{String.trim_trailing(url, "/")}/dashboard/approvals"
+
+      _ ->
+        ""
     end
   end
 end

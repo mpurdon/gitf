@@ -104,6 +104,31 @@ curl "$(terraform output -raw wake_url)"                  # starts it again (~60
   daily EBS snapshots. Restore = new volume from snapshot, or
   `aws s3 sync` back into `/var/lib/gitf/.gitf/store`.
 
+## 6. Alerting to your phone
+
+Approval requests (critical), ghost stalls (high), and budget events reach
+you through two channels; enable either or both in the **gitf user's**
+`~/.config/gitf/config.toml` on the box:
+
+```toml
+[observability]
+# Any URL that accepts a JSON POST (ntfy.sh topic, Slack webhook, ...)
+webhook_url = "https://ntfy.sh/<your-private-topic>"
+
+[plugins.channels.telegram]
+token = "<bot token from @BotFather>"
+chat_id = "<your chat id>"
+```
+
+Telegram sends critical/high alerts immediately (lower severities are
+batched into digests) and also accepts commands (`/ghost list`,
+`/mission show <id>`). Set `[server] url` to your dashboard URL
+(e.g. `https://factory.ghostinthefactory.com`) and approval alerts carry a
+deep link to `/dashboard/approvals`.
+
+This is what makes idle-stop trustworthy: the box can sleep because
+anything needing you pings your phone first.
+
 ## Webhooks (optional, off by default here)
 
 A zero-inbound box can't receive GitHub webhooks. Either poll, or expose
