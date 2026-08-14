@@ -53,7 +53,11 @@ defmodule GiTF.Plugin.Builtin.Models.ReqLLMProvider do
       |> Keyword.drop([:model, :system_prompt, :output_format])
       |> Keyword.take([:max_tokens, :temperature])
 
-    case ReqLLM.generate_text(model, messages, generate_opts) do
+    # Route through LLMClient, never ReqLLM directly: LLMClient owns provider
+    # routing (arn:aws:bedrock:* → BedrockDirect SigV4), API-key injection,
+    # and the circuit breaker. Calling ReqLLM here bypassed all three — in
+    # bedrock mode this path demanded a Google API key on a keyless box.
+    case GiTF.Runtime.LLMClient.generate_text(model, messages, generate_opts) do
       {:ok, response} ->
         {:ok, ReqLLM.Response.text(response) || ""}
 
@@ -268,7 +272,10 @@ defmodule GiTF.Plugin.Builtin.Models.ReqLLMProvider do
 
   # -- Private -----------------------------------------------------------------
 
-  defp resolve_model_spec(nil), do: ModelResolver.resolve("sonnet")
+  # "general" respects the execution mode's tier map; "sonnet" is a legacy
+  # alias that app-config default_models pins to a Google model even in
+  # bedrock/ollama mode.
+  defp resolve_model_spec(nil), do: ModelResolver.resolve("general")
   defp resolve_model_spec(model), do: ModelResolver.resolve(model)
 
   defp infer_cost_tier(model) do
