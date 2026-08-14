@@ -147,9 +147,18 @@ general  = "arn:aws:bedrock:us-east-1:<account>:inference-profile/us.anthropic.c
 fast     = "arn:aws:bedrock:us-east-1:<account>:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0"
 ```
 
-Find the ARNs with `aws bedrock list-inference-profiles`. Model access was
-granted by default in this account — verify with a one-line
-`aws bedrock-runtime converse` from the box before blaming the factory.
+Find the ARNs with `aws bedrock list-inference-profiles`. Two access gates
+to know about (both bit us on day one):
+
+- **Anthropic use-case form**: a new account gets a handful of grace
+  invocations, then every Anthropic model returns
+  `ResourceNotFoundException: Model use case details have not been
+  submitted` account-wide. One-time console form (Bedrock → Model access
+  → Anthropic), ~15 min to propagate.
+- **Per-model availability**: newest models (e.g. claude-sonnet-5) can
+  return `403: not available for this account` until access is granted,
+  while older tiers work. Verify with a one-line
+  `aws bedrock-runtime converse` from the box before blaming the factory.
 
 ## 4. Authenticate the CLI from your machine
 
