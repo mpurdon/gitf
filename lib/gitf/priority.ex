@@ -172,8 +172,21 @@ defmodule GiTF.Priority do
         Map.get(mission, :inserted_at) ||
         DateTime.utc_now()
 
-    DateTime.diff(DateTime.utc_now(), reference, :second) / 60
+    DateTime.diff(DateTime.utc_now(), coerce_datetime(reference), :second) / 60
   end
+
+  # Missions fetched over the REST API (remote CLI mode) carry timestamps as
+  # strings; local-mode missions carry DateTime structs. Accept both.
+  defp coerce_datetime(%DateTime{} = dt), do: dt
+
+  defp coerce_datetime(value) when is_binary(value) do
+    case DateTime.from_iso8601(String.replace(value, " ", "T")) do
+      {:ok, dt, _offset} -> dt
+      _ -> DateTime.utc_now()
+    end
+  end
+
+  defp coerce_datetime(_), do: DateTime.utc_now()
 
   defp count_decay_bumps(wait_minutes, thresholds) do
     Enum.count(thresholds, &(wait_minutes >= &1))
