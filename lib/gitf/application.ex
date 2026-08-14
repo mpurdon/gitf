@@ -468,7 +468,8 @@ defmodule GiTF.Application do
       end
 
     warnings =
-      if GiTF.Runtime.ModelResolver.api_mode?() do
+      if GiTF.Runtime.ModelResolver.api_mode?() and
+           GiTF.Runtime.ModelResolver.execution_mode() not in [:bedrock, :ollama] do
         has_google = (Provider.get([:llm, :keys, :google]) || "") != ""
         has_anthropic = (Provider.get([:llm, :keys, :anthropic]) || "") != ""
         env_google = System.get_env("GOOGLE_API_KEY") || System.get_env("GEMINI_API_KEY")
