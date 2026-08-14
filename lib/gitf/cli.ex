@@ -1941,7 +1941,9 @@ defmodule GiTF.CLI do
 
       {:error, :not_in_gitf} ->
         IO.puts(GiTF.CLI.Errors.format_error(:store_not_initialized))
-        Format.info("Hint: use `gitf init` or `gitf init --quick` to create a workspace.")
+        Format.info(
+          "Hint: run any gitf command with `-w <path>` (or GITF_PATH set) and accept the initialize prompt to create a workspace."
+        )
     end
   end
 

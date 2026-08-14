@@ -6,35 +6,32 @@ Multi-agent orchestration system for AI coding assistants. Coordinate multiple A
 
 - **Safe to run unattended** — killable AI subprocesses with hard wall-clock caps, a fail-closed factory-wide daily spend ceiling, terminal escalation on stalled approvals, kernel-sandboxed ghost execution, and non-destructive mission-failure (never `reset --hard` a repo with human work).
 - **Trustable quality gate** — beyond unit tests: modality-aware behavioral verification drives each change through its real interface (CLI / HTTP / …) against holdout scenarios judged by an LLM, gating publish.
-- **Aramaki admission layer** (opt-in) — watches GitHub issues, admits labeled work within budget/capacity, and reports progress back on the issue (comment, label, link PR, close on merge).
+- **Deployable as a service** — a systemd release with idle-stop economics, S3 backups, and a Terraform stack for a single always-cheap Graviton EC2 box behind Tailscale (see [Deployment](#deployment)).
 
-Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any future provider via the `GiTF.Plugin.Model` behaviour.
+Built in Elixir, leveraging OTP supervision trees for process management, Phoenix PubSub for messaging, and an ETS-first archive with ETF persistence.
 
-Built in Elixir, leveraging OTP supervision trees for process management, Phoenix PubSub for messaging, and an ETF-backed archive for persistence.
+## How it executes work
+
+**No AI coding CLI is required.** The default execution mode is `api`: ghosts run an agentic loop over direct HTTP (via ReqLLM) to a model provider. CLI mode — spawning `claude`, `copilot`, or `kimi` binaries — remains available as an alternative.
+
+| Mode | How | Providers |
+|------|-----|-----------|
+| `api` (default) | Direct HTTP, agentic loop in-process | Google Gemini (default), Anthropic, OpenAI, Groq, Mistral, Together, Fireworks |
+| `bedrock` | SigV4 to AWS Bedrock (no resident API key) | Anthropic models via Bedrock |
+| `ollama` | Local models over the OpenAI-compatible API | qwen2.5-coder etc. |
+| `cli` | Spawns a local coding CLI per ghost | `claude`, `copilot`, `kimi` (pluggable via `GiTF.Plugin.Model`) |
+
+Select with `--mode api|cli|ollama|bedrock` on any command, `GITF_EXECUTION_MODE`, or `[llm] execution_mode` in config. Models are resolved per task tier (thinking / general / fast) with provider priority, circuit breaking, and rate limiting.
 
 ## Getting Started
 
 ### 1. Install prerequisites
 
-You need three things on your machine:
-
 | Dependency | Version | Install |
 |------------|---------|---------|
-| **Elixir** | 1.15+ | `brew install elixir` or [elixir-lang.org/install](https://elixir-lang.org/install.html) |
+| **Elixir** | 1.18+ | `brew install elixir` or [elixir-lang.org/install](https://elixir-lang.org/install.html) |
 | **Git** | 2.25+ | `brew install git` or [git-scm.com](https://git-scm.com) |
-| **AI CLI** | latest | At least one: `claude`, `copilot`, or `kimi` |
-
-Verify everything is ready:
-
-```bash
-elixir --version   # should print 1.15+
-git --version      # should print 2.25+
-
-# At least one of these:
-claude --version   # Claude Code CLI
-copilot --version  # GitHub Copilot CLI
-kimi --version     # Kimi CLI
-```
+| **An LLM API key** | — | e.g. Google Gemini or Anthropic — or a local coding CLI if you prefer `cli` mode |
 
 ### 2. Build the GiTF CLI
 
@@ -43,232 +40,191 @@ git clone git@github.com:mpurdon/gitf.git
 cd gitf
 mix deps.get
 mix escript.build
+cp gitf /usr/local/bin/   # optional
 ```
 
-This produces a `./gitf` binary. Optionally move it to your PATH:
+### 3. Create a workspace and add a repo
+
+Run any command against the directory you want as your factory — GiTF offers to initialize it:
 
 ```bash
-cp gitf /usr/local/bin/
-```
-
-### 3. Create a workspace
-
-The quickest way -- auto-discovers any git repos in the target directory:
-
-```bash
-gitf init ~/my-factory --quick
-```
-
-Or step by step:
-
-```bash
-gitf init ~/my-factory
+gitf -w ~/my-factory medic       # "No gitf project found. Initialize at ...? [y/n]"
 cd ~/my-factory
 gitf sector add /path/to/your/repo --name myproject
 ```
 
-### 4. Start the Major
+Put your API key in the global config (`~/.config/gitf/config.toml`, created for you):
 
-```bash
-cd ~/my-factory
-gitf major
+```toml
+[llm.keys]
+google = "..."      # or anthropic = "..."
 ```
 
-Tell the Major what you want built. It will analyze your request, break it into ops, spawn ghosts (parallel AI instances), and coordinate them to completion.
+`gitf medic` verifies everything is ready. `gitf onboard` can auto-detect and register a project with sensible defaults.
+
+### 4. Run work
+
+```bash
+gitf run "fix the flaky retry test"     # quick-run a focused task, skips the full pipeline
+gitf mission "add rate limiting to the API"   # full Research → Plan → Implement pipeline
+gitf major                              # interactive Major coordinator session
+```
+
+The Major analyzes the request, breaks it into ops, spawns ghosts (parallel AI instances in isolated git worktrees), and coordinates them to completion.
 
 ### 5. Monitor progress
 
 ```bash
-gitf                    # Launch the interactive "Dark Factory" Dashboard (TUI)
+gitf                    # Interactive "Dark Factory" TUI dashboard
 gitf watch              # Live terminal progress (simple view)
-gitf mission list       # See active missions
-gitf ghost list         # See running ghosts
-gitf costs summary      # Check token spend
-gitf dashboard          # Web UI at localhost:4040 (legacy)
+gitf mission list       # Active missions
+gitf ghost list         # Running ghosts
+gitf costs summary      # Token spend
 ```
 
-Run `gitf medic` at any time to verify your system health.
+## The daemon
 
-## "Dark Factory" Capabilities
-
-GiTF operates autonomously to deliver high-quality code:
-
-*   **Research → Plan → Implement**: A structured pipeline ensures thoughtful execution.
-*   **Multi-Model Intelligence**: Dynamically selects the best AI model (Opus vs Sonnet vs Haiku) for each task to balance cost and quality.
-*   **Context Management**: Automatically monitors token usage and "transfers" work to fresh agents before context limits are reached.
-*   **Autonomous Quality Assurance**: The **Tachikoma** watchdog continuously verifies work, running tests and checks before marking ops as complete.
-*   **Self-Healing**: Detects and recovers from stuck processes, deadlocks, and orphaned resources automatically.
-
-## Model Providers
-
-GiTF uses a plugin system to support multiple AI model providers. The active provider is resolved per-session via config or CLI flags.
-
-| Provider | Binary | Streaming | Cost Tracking | Session Resume |
-|----------|--------|-----------|---------------|----------------|
-| **Claude Code** | `claude` | JSONL | Yes | Yes |
-| **Copilot CLI** | `copilot` | Plain text | No (subscription) | No |
-| **Kimi CLI** | `kimi` | JSONL | Yes | Yes |
-
-Set the default provider in `.gitf/config.toml`:
-
-```toml
-[plugins.models]
-default = "claude"   # or "copilot" or "kimi"
-```
-
-## CLI Reference
-
-### Workspace
+For anything beyond one-shot CLI usage, run GiTF as a long-lived service:
 
 ```bash
-gitf init [PATH] [--quick] [--force]   # Initialize a workspace
-gitf medic [--fix]                      # Run health checks
-gitf                                    # Start interactive TUI dashboard
-gitf watch                              # Live progress monitor
-gitf version                            # Print version
+gitf daemon             # (alias: gitf server)  web + REST + MCP + factory
 ```
 
-### Projects (Sectors)
+One process serves, on port 4000 (`-p`/`GITF_PORT`):
+
+- **Web dashboard** — `http://localhost:4000/dashboard`: overview, missions (plan / design / diagnostics), ghosts, ops, approvals, costs, model performance, providers, sectors, shells, workflows editor, merge queue, timeline, rollback, autonomy, health, settings — and the **Planning Studio** (`/dashboard/studio`), a live split-pane where a conversation with the planner builds the project board in real time, with optional voice input (Gemini Live, off by default).
+- **REST API** — `/api/v1`: missions (including the plan/confirm/reject/revise loop), ops, ghosts, projects, sectors, costs, plus public `health`, `ready`, `version`, an authenticated Prometheus `metrics` endpoint, and HMAC-verified GitHub/Sentry webhook receivers.
+- **MCP server** — a Unix socket at `~/.config/gitf/mcp.sock` (daemon mode) or stdio via `gitf mcp-serve`, so Claude Code and other MCP clients can drive the factory as tools.
+
+Authentication is an `x-api-key` header checked against `GITF_API_KEY` (or `[server] api_key`). Point a remote CLI at a daemon once with:
 
 ```bash
-gitf sector add <path> [--name NAME]    # Register a git repo
-  [--sync-strategy manual|auto_merge|pr_branch]
-  [--validation-command "mix test"]
-  [--github-owner OWNER] [--github-repo REPO]
-gitf sector list                        # List registered projects
-gitf sector remove <name>               # Unregister a project
-gitf sector rename <old> <new>          # Rename a sector
+gitf login https://factory.example.com --key YOUR_KEY
 ```
 
-### Orchestration
+after which every `gitf` command on that machine transparently drives the remote factory.
+
+## Projects (Aramaki)
+
+Missions are single objectives; **projects** are DAG-scheduled roadmaps of many missions:
 
 ```bash
-gitf major                              # Start Major coordinator session
-gitf ghost list                         # List all ghosts
-gitf ghost spawn --op ID --sector ID    # Spawn a worker ghost
-gitf ghost stop --id ID                 # Stop a running ghost
-gitf ghost revive --id ID               # Revive a dead ghost's worktree
-gitf ghost done --id ID                 # Mark a ghost as completed
-gitf ghost fail --id ID --reason "..."  # Mark a ghost as failed
+gitf project new        # interactive planning discussion → roadmap → approve → execute
+gitf project list / show <id> / pause <id> / resume <id>
 ```
 
-### Work Tracking
+Aramaki can also watch GitHub issues (opt-in, `GITF_ARAMAKI_ENABLED`): it admits work labeled `gitf:build` within budget/capacity and reports progress back on the issue.
+
+## Workflows
+
+Mission phase pipelines are data, not code: YAML workflows with per-phase handlers, model tiers, timeouts, and pass/fail routing. Eight templates ship in `priv/workflows/` (`standard`, `bug-fix`, `refactor`, `perf`, `security-patch`, `dep-upgrade`, `doc-only`, `spike`); user-supplied workflows are picked up per sector.
 
 ```bash
-gitf mission new <name>                 # Create a mission
-gitf mission list                       # List missions
-gitf mission show <id>                  # Show mission details with ops
-
-gitf ops list                           # List all ops
-gitf ops show <id>                      # Show op details
-gitf ops create --mission ID --title T --sector ID  # Create an op
+gitf workflow list / show <name> / validate
 ```
 
-### Op Dependencies
+There's a visual editor at `/dashboard/workflows`.
+
+## Safety machinery
+
+On by default:
+
+- **Sandboxed execution** — AI-authored commands run under `bwrap` (Linux), `sandbox-exec` (macOS), or Docker. `GITF_SANDBOX_REQUIRED=1` makes this fail-closed: no sandbox, no execution (the server deployment ships with this on).
+- **Spend control** — per-mission budgets plus a fail-closed factory-wide daily ceiling (`daily_budget_usd`); breach pauses the factory rather than burning on.
+- **Kill discipline** — every OS subprocess is signal-killed with grace periods, child reaping, and zombie detection; wall-clock caps bound every ghost.
+- **Non-destructive failure** — mission failure and `gitf rollback` use `git revert`, never `reset --hard`.
+
+## Alerting
+
+Severity-mapped alerts (budget pauses, stalled ghosts, approval requests, cost spikes…) with deduplication go to a JSON webhook (`[observability] webhook_url` — ntfy.sh, Slack, …) and/or the built-in **Telegram channel plugin**, which also accepts inbound commands (`/ghost list`, `/mission show 1`). OpenTelemetry export and a Prometheus endpoint cover metrics.
+
+## The intelligence layer (default off)
+
+Beyond the core pipeline, GiTF has an opt-in learning loop — each piece is a feature flag, off until you enable it:
+
+| Capability | Flag |
+|------------|------|
+| Skill library — capture lessons as reusable skills, injected by embedding similarity | `GITF_SKILLS_ENABLED` |
+| Outcome tracking + refinement — did merged work actually survive? | `GITF_OUTCOMES_ENABLED` |
+| Autonomy tiers — sectors earn reduced approval requirements from outcome history | `GITF_OUTCOME_AUTONOMY_TIERS_ENABLED` |
+| Knowledge engine — a wiki compiled from debriefs, injected into context (BM25 + embeddings) | `GITF_KNOWLEDGE_CONTEXT_ENABLED` |
+| LSP-backed validation of generated code | `GITF_LSP_VALIDATION_ENABLED` |
+| Workflow inference — pick the right workflow per mission automatically | `GITF_WORKFLOW_INFERENCE_ENABLED` |
+| Implementation tournaments — N parallel variants, best one merges | `GITF_PARALLEL_IMPL_ATTEMPTS=N` |
+| Aramaki GitHub admission | `GITF_ARAMAKI_ENABLED` |
+
+All flags are logged at boot.
+
+## Deployment
+
+GiTF ships as a proper release:
 
 ```bash
-gitf ops deps add --op ID --depends-on ID    # Add dependency
-gitf ops deps remove --op ID --depends-on ID # Remove dependency
-gitf ops deps list --op ID                   # Show dependencies
+RELEASE_TAR=1 MIX_ENV=prod mix release     # or grab gitf-release-arm64 from CI
+sudo rel/install-systemd.sh gitf-*.tar.gz  # idempotent: user, /opt/gitf, /etc/gitf, units
 ```
 
-### Messaging (Links)
-
-```bash
-gitf link list [--to RECIPIENT]         # List messages
-gitf link show <id>                     # Read a message
-gitf link send -f FROM -t TO -s SUBJ -b BODY  # Send a message
-```
-
-### Cost Tracking
-
-```bash
-gitf costs summary                      # Aggregate cost report
-gitf costs record --ghost ID --input N --output N  # Record costs manually
-gitf budget --mission ID                # Check mission budget status
-```
-
-### Git Worktrees (Shells)
-
-```bash
-gitf shell list                         # List active worktrees
-gitf shell clean                        # Remove orphaned worktrees
-```
-
-### Advanced
-
-```bash
-gitf brief --major                      # Output Major context prompt
-gitf brief --ghost <id>                 # Output Ghost context prompt
-gitf transfer create --ghost ID         # Create context-preserving transfer
-gitf transfer show --ghost ID           # Show transfer context
-gitf conflict check [--ghost ID]        # Check for merge conflicts
-gitf audit --ghost ID                   # Validate a ghost's completed work
-gitf tachikoma [--no-fix]               # Start health patrol
-```
-
-### Plugins
-
-```bash
-gitf plugin list                        # List loaded plugins
-gitf plugin load <path>                 # Load a plugin from file
-gitf plugin unload <type> <name>        # Unload a plugin
-gitf plugin reload <type> <name>        # Hot-reload a plugin
-```
-
-### GitHub Integration
-
-```bash
-gitf github pr --ghost ID              # Create PR for a ghost's work
-gitf github issues --sector ID         # List issues for a project
-gitf github sync --sector ID           # Sync GitHub issues
-```
+The systemd bundle includes the daemon unit, an **idle-stop** timer (a quiet factory powers the box off), and an **S3 backup** timer. [`docs/deploy-aws.md`](docs/deploy-aws.md) is the full runbook for the reference AWS deployment — one Graviton EC2 instance with zero inbound ports (Tailscale is the front door), Terraform in [`infra/aws/`](infra/aws/), a wake Lambda for restarting the stopped box from a phone, and idle-stop economics that put a quiet month at ~$3.
 
 ## Configuration
 
-The config lives at `.gitf/config.toml`:
+Config is layered: global `~/.config/gitf/config.toml` (keys, budgets, thresholds) with per-project overrides in `<workspace>/.gitf/config.toml`. The important global keys:
 
 ```toml
-[gitf]
-version = "0.1.0"
+[costs]
+budget_usd = 10.0            # per-mission
+daily_budget_usd = 100.0     # factory-wide rolling 24h, fail-closed
+warn_threshold_usd = 5.0
+
+[llm.keys]
+google = ""                  # provider API keys
+anthropic = ""
 
 [major]
 max_ghosts = 5
-
-[costs]
-warn_threshold_usd = 5.0
-budget_usd = 10.0
-
-[plugins.models]
-default = "claude"
+dark_factory = false
 
 [github]
 token = ""
+
+[observability]
+webhook_url = ""             # alert webhook (ntfy.sh, Slack, ...)
+
+[server]
+url = ""                     # set by `gitf login` for remote CLI use
 ```
 
-You can also set the `GITF_PATH` environment variable to point to your workspace from anywhere.
+Most settings are also editable live at `/dashboard/settings`. Any command accepts `-w <path>` to target a workspace without `cd`.
+
+## CLI Reference
+
+`gitf quickref` prints the up-to-date card. The full command tree (all support `--help`):
+
+```
+Core        run · mission · major · ghost · ops · sector · project · shell
+Monitor     (bare gitf = TUI) · dashboard · watch · costs · budget · models · monitor
+Quality     verify · accept · validate · quality · scope · audit-adjacent: intel
+Daemon      daemon (alias server) · login · mcp-serve
+Knowledge   knowledge · vault · workflow
+Health      medic · heal · tachikoma · deadlock · optimize · drift · conflict · rollback
+Misc        onboard · brief · transfer · link_msg · github · completions · quickref · version
+```
 
 ## Development
 
 ```bash
-# Run tests
-mix test
-
-# Run tests (excluding e2e)
-mix test --exclude e2e
-
-# Format code
+mix test                      # heavy suites (simulator, e2e, llm, ...) are tag-excluded by default
 mix format
-
-# Build escript
-MIX_ENV=prod mix escript.build
+mix escript.build             # dev CLI binary
+RELEASE_TAR=1 MIX_ENV=prod mix release   # deployable tarball (CI builds arm64)
 ```
 
 ## Further Reading
 
-- [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) -- Detailed system design, workflows, and schema.
-- [`specs/GLOSSARY.md`](specs/GLOSSARY.md) -- Full terminology reference.
-- [`specs/DELEGATION.md`](specs/DELEGATION.md) -- Major delegation principle and enforcement.
+- [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) — Detailed system design, workflows, and schema.
+- [`specs/GLOSSARY.md`](specs/GLOSSARY.md) — Full terminology reference.
+- [`specs/DELEGATION.md`](specs/DELEGATION.md) — Major delegation principle and enforcement.
+- [`docs/deploy-aws.md`](docs/deploy-aws.md) — AWS deployment runbook.
 
 ## License
 

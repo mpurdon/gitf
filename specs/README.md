@@ -5,9 +5,9 @@
 ## Quick Start
 
 ```bash
-gitf init ~/my-factory --git
+gitf -w ~/my-factory medic     # accept the "Initialize at ...?" prompt
 cd ~/my-factory
-gitf sector add myproject https://github.com/you/repo.git
+gitf sector add /path/to/your/repo --name myproject
 gitf major
 ```
 
@@ -89,7 +89,6 @@ default = "claude"
 
 | Command | Description |
 |---------|-------------|
-| `gitf init` | Initialize a new workspace |
 | `gitf major` | Start Major session |
 | `gitf sector add` | Add a project |
 | `gitf sector list` | List projects |
