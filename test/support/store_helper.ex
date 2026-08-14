@@ -36,6 +36,11 @@ defmodule GiTF.Test.StoreHelper do
     # tables its registry knows about — records from this store would leak
     # into the next test's "fresh" one. Purge everything.
     GiTF.Archive.purge_all_tables()
+
+    # Keyless test envs route real LLM failures into the provider circuit;
+    # a breaker left open by one test makes a later test's provider
+    # preflight report :all_providers_down. Close them all.
+    GiTF.Runtime.ProviderCircuit.reset_all()
   end
 
   @doc """

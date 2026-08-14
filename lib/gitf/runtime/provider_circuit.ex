@@ -174,6 +174,19 @@ defmodule GiTF.Runtime.ProviderCircuit do
   end
 
   @doc """
+  Resets every open provider circuit to closed. Test support: keyless test
+  environments route real failures into the circuit, and leaked open
+  breakers make later tests see `:all_providers_down`.
+  """
+  @spec reset_all() :: :ok
+  def reset_all do
+    Enum.each(open_providers(), &reset_provider/1)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  @doc """
   Resets a provider's circuit breaker to closed.
   """
   @spec reset_provider(String.t()) :: :ok
