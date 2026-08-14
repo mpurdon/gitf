@@ -16,7 +16,10 @@ defmodule GiTF.MCPServer.SocketListener do
   use GenServer
   require Logger
 
-  @default_socket_dir Path.join([System.user_home!(), ".config", "gitf"])
+  # Resolved at call time, never in a module attribute: a compile-time
+  # System.user_home!() bakes the BUILD machine's HOME into the release
+  # (the first prod boot crashed trying to mkdir /github/home — CI's HOME).
+  defp default_socket_dir, do: Path.join([System.user_home!(), ".config", "gitf"])
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -33,7 +36,7 @@ defmodule GiTF.MCPServer.SocketListener do
 
   @doc "Returns the socket path."
   def socket_path do
-    System.get_env("GITF_MCP_SOCK") || Path.join(@default_socket_dir, "mcp.sock")
+    System.get_env("GITF_MCP_SOCK") || Path.join(default_socket_dir(), "mcp.sock")
   end
 
   @doc "Returns the PID file path for the socket."

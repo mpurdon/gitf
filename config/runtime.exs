@@ -142,10 +142,12 @@ if config_env() == :prod do
       list -> String.split(list, ",", trim: true)
     end
 
+  # NB: compile-env keys (:code_reloader, :debug_errors, …) must NOT be set
+  # here unless config/prod.exs sets the same value at compile time — the
+  # release refuses to boot on any mismatch.
   config :gitf, GiTF.Web.Endpoint,
     http: [ip: ip, port: port],
     server: true,
-    code_reloader: false,
     debug_errors: false,
     check_origin: check_origin,
     secret_key_base: secret,

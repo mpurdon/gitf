@@ -15,6 +15,11 @@ config :gitf, GiTF.Web.Endpoint,
   debug_errors: false,
   check_origin: true
 
+# Must be set at compile time too: Phoenix marks :debug_errors compile-env,
+# and the release refuses to boot if runtime.exs sets it without a matching
+# compile-time value (first prod boot failed exactly this way).
+config :gitf, GiTF.Dashboard.Endpoint, debug_errors: false
+
 # Logger level is set in config/runtime.exs via LOG_LEVEL env var so it can
 # be tuned without rebuilding the release.
 

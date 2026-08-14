@@ -15,13 +15,13 @@ BUCKET="${GITF_BACKUP_BUCKET:-}"
 GITF_HOME="${GITF_HOME:-/var/lib/gitf}"
 HOST_PREFIX="s3://${BUCKET}/$(hostname)"
 
-aws s3 sync "${GITF_HOME}/.gitf/store" "${HOST_PREFIX}/store" --only-show-errors
+aws s3 sync "${GITF_HOME}/.gitf/store" "${HOST_PREFIX}/store" --sse AES256 --only-show-errors
 
 # Global config dir holds config.toml (keys redacted? no — may hold provider
 # keys) — keep it in the same private bucket; exclude the socket and pidfile.
 if [[ -d "${GITF_HOME}/.config/gitf" ]]; then
   aws s3 sync "${GITF_HOME}/.config/gitf" "${HOST_PREFIX}/config" \
-    --exclude "mcp.sock*" --exclude "llm_db/*" --only-show-errors
+    --sse AES256 --exclude "mcp.sock*" --exclude "llm_db/*" --only-show-errors
 fi
 
 logger -t gitf-backup "store synced to ${HOST_PREFIX}"

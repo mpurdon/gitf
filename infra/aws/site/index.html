@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghost in the Factory</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    min-height: 100svh;
+    display: grid;
+    place-items: center;
+    background: #0b0e11;
+    color: #d7dde3;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  main { text-align: center; padding: 2rem; }
+  h1 {
+    font-size: clamp(1.4rem, 4vw, 2.4rem);
+    font-weight: 500;
+    letter-spacing: 0.08em;
+  }
+  h1 span { color: #57d9a3; }
+  p {
+    margin-top: 1rem;
+    color: #5c6975;
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+  }
+  .cursor {
+    display: inline-block;
+    width: 0.6ch;
+    background: #57d9a3;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>ghost in the <span>factory</span><span class="cursor">&nbsp;</span></h1>
+  <p>the lights are off. the machines are working.</p>
+</main>
+</body>
+</html>
