@@ -51,6 +51,21 @@ defmodule GiTF.Application do
     # Derive store dir from gitf_root unless explicitly overridden (tests do this).
     store_dir = Application.get_env(:gitf, :store_dir, Path.join(gitf_root, ".gitf/store"))
 
+    # A homedir store the daemon creates itself has no .gitf/config.toml —
+    # but `GiTF.gitf_dir/0` (and therefore Major's preflight disk check)
+    # treats a config-less .gitf as "not a workspace", which silently blocks
+    # every ghost spawn ("Spawn gate: system degraded (disk)" on first prod
+    # boot). Seed the project config whenever we own the store dir.
+    if store_dir == Path.join(gitf_root, ".gitf/store") do
+      config_path = Path.join([gitf_root, ".gitf", "config.toml"])
+
+      unless File.exists?(config_path) do
+        File.mkdir_p!(Path.dirname(config_path))
+        File.write!(config_path, GiTF.Config.project_default_config())
+        File.chmod(config_path, 0o600)
+      end
+    end
+
     # Make store resolution observable — otherwise it's impossible to tell from
     # the logs whether `-w`/GITF_PATH took effect or the daemon fell back to the
     # home-dir global store (a real source of "why is this data here?" confusion).
