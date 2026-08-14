@@ -55,6 +55,14 @@ data "aws_subnets" "default" {
   }
 }
 
+# Pin one subnet deterministically (sorted, so the choice is stable across
+# runs). Both the instance and the data volume derive their placement from
+# this — never from each other — so replacing the instance can never cascade
+# into destroying the data volume.
+data "aws_subnet" "gitf" {
+  id = sort(data.aws_subnets.default.ids)[0]
+}
+
 # Ubuntu 24.04 LTS arm64 — deliberately matches the ubuntu-24.04-arm CI
 # runners that build the release tarball, so glibc/OpenSSL versions line up.
 # Ubuntu 24.04 also ships bubblewrap with the AppArmor profile that permits

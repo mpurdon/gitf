@@ -33,10 +33,18 @@ fi
 
 # ---- Packages ---------------------------------------------------------------
 apt-get update
+# NB: no `awscli` here — Ubuntu 24.04 dropped the apt package; the official
+# v2 installer below replaces it.
 apt-get install -y \
-  git bubblewrap curl ca-certificates openssl libncurses6 locales unzip jq awscli
+  git bubblewrap curl ca-certificates openssl libncurses6 locales unzip jq
 
 locale-gen en_US.UTF-8
+
+# AWS CLI v2 (official arm64 installer; idempotent via --update)
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip
+unzip -qo /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install --update
+rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # GitHub CLI (official apt repo)
 install -dm 0755 /etc/apt/keyrings

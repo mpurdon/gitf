@@ -17,7 +17,7 @@ resource "aws_security_group" "gitf" {
 resource "aws_instance" "gitf" {
   ami                    = data.aws_ami.ubuntu_arm64.id
   instance_type          = var.instance_type
-  subnet_id              = data.aws_subnets.default.ids[0]
+  subnet_id              = data.aws_subnet.gitf.id
   vpc_security_group_ids = [aws_security_group.gitf.id]
   iam_instance_profile   = aws_iam_instance_profile.gitf.name
 
@@ -55,7 +55,7 @@ resource "aws_instance" "gitf" {
 # (~/.gitf/store), the global config (~/.config/gitf), and sector repos all
 # live on it.
 resource "aws_ebs_volume" "data" {
-  availability_zone = aws_instance.gitf.availability_zone
+  availability_zone = data.aws_subnet.gitf.availability_zone
   size              = var.data_volume_gb
   type              = "gp3"
 
