@@ -130,7 +130,7 @@ defmodule GiTF.Major.IdleSweeper do
   defp recently_maintained?(nil), do: false
 
   defp recently_maintained?(run) do
-    minutes_ago = DateTime.diff(DateTime.utc_now(), run.maintained_at, :second) / 60
+    minutes_ago = GiTF.Clock.awake_elapsed(run.maintained_at) / 60
     minutes_ago < @cooldown_minutes
   end
 

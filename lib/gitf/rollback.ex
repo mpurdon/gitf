@@ -135,7 +135,7 @@ defmodule GiTF.Rollback do
   defp guard_within_window(%{"merged_at" => merged_at}) when not is_nil(merged_at) do
     case to_datetime(merged_at) do
       {:ok, dt} ->
-        age = DateTime.diff(DateTime.utc_now(), dt, :second)
+        age = GiTF.Clock.awake_elapsed(dt)
         if age <= revert_window_seconds(), do: :ok, else: {:error, :stale_window}
 
       _ ->

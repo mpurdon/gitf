@@ -1108,7 +1108,7 @@ defmodule GiTF.Tachikoma do
       |> Enum.filter(fn op ->
         case op[:updated_at] do
           %DateTime{} = t ->
-            DateTime.diff(DateTime.utc_now(), t, :millisecond) > @retry_cooldown_ms
+            GiTF.Clock.awake_elapsed(t) * 1000 > @retry_cooldown_ms
 
           _ ->
             true

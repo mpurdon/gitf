@@ -289,7 +289,9 @@ defmodule GiTF.Major.Orchestrator do
   defp quest_timed_out?(mission) do
     case mission[:inserted_at] do
       %DateTime{} = started ->
-        hours = DateTime.diff(DateTime.utc_now(), started, :second) / 3600
+        # Awake hours, not wall hours — idle-stop sleeps must not count
+        # toward a mission's age (a wake was force-completing the queue).
+        hours = GiTF.Clock.awake_elapsed(started) / 3600
         phase = Map.get(mission, :current_phase, "pending")
         status = Map.get(mission, :status, "pending")
         # Don't timeout missions that are completed or awaiting approval.
@@ -1177,7 +1179,7 @@ defmodule GiTF.Major.Orchestrator do
         |> List.first()
 
       if phase_start do
-        age = DateTime.diff(DateTime.utc_now(), phase_start.inserted_at, :second)
+        age = GiTF.Clock.awake_elapsed(phase_start.inserted_at)
         timeout = phase_timeout_for(mission.sector_id, phase)
 
         if age > timeout do

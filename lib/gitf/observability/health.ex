@@ -151,7 +151,7 @@ defmodule GiTF.Observability.Health do
     stuck =
       Enum.count(missions, fn q ->
         q.status == "active" &&
-          DateTime.diff(DateTime.utc_now(), q.updated_at) > 1800
+          GiTF.Clock.awake_elapsed(q.updated_at) > 1800
       end)
 
     if stuck == 0, do: :ok, else: :warning

@@ -155,6 +155,17 @@ defmodule GiTF.Shell do
   """
   @spec cleanup_orphans() :: {:ok, non_neg_integer()}
   def cleanup_orphans do
+    # Never sweep right after boot: on wake from idle-stop, wall-clock ages
+    # are all inflated and mission state may still be recovering — a sweep
+    # here deleted in-flight missions' branches.
+    if GiTF.Clock.in_boot_grace?() do
+      {:ok, 0}
+    else
+      do_cleanup_orphans()
+    end
+  end
+
+  defp do_cleanup_orphans do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     active_shells = Archive.filter(:shells, fn c -> c.status == "active" end)
@@ -206,13 +217,18 @@ defmodule GiTF.Shell do
   @branch_protection_ttl_seconds 86_400
 
   defp sync_pending_branches do
-    cutoff = DateTime.utc_now() |> DateTime.add(-@branch_protection_ttl_seconds, :second)
     active_phases = ~w(implementation validation sync simplify scoring)
 
     # Find active mission IDs (archived missions don't contain :ops)
     active_mission_ids =
       Archive.filter(:missions, fn m ->
-        recent? = DateTime.compare(m[:updated_at] || m[:inserted_at] || cutoff, cutoff) == :gt
+        # Awake age, not wall age: a mission untouched across an idle-stop
+        # sleep is not stale — the factory was off, not the mission.
+        recent? =
+          case m[:updated_at] || m[:inserted_at] do
+            %DateTime{} = t -> GiTF.Clock.awake_elapsed(t) < @branch_protection_ttl_seconds
+            _ -> true
+          end
         active? = m[:status] in ["active", "running"] or m[:phase] in active_phases
         recent? and active?
       end)

@@ -225,7 +225,16 @@ defmodule GiTF.Debrief do
   """
   @spec expired?(map()) :: boolean()
   def expired?(review) do
-    DateTime.compare(DateTime.utc_now(), review.expires_at) == :gt
+    # Awake-time window: a review must not expire during an idle-stop
+    # sleep. Falls back to the stored wall-clock deadline when the review
+    # predates started_at tracking.
+    case review[:started_at] do
+      %DateTime{} = started ->
+        GiTF.Clock.awake_elapsed(started) > @review_duration_seconds
+
+      _ ->
+        DateTime.compare(DateTime.utc_now(), review.expires_at) == :gt
+    end
   end
 
   # -- Private ---------------------------------------------------------------

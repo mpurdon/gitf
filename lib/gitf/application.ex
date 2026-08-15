@@ -432,6 +432,9 @@ defmodule GiTF.Application do
         []
       else
         [
+          # Clock first: awake-time deadlines degrade to wall-clock until
+          # its heartbeat state is loaded.
+          {GiTF.Clock, []},
           {GiTF.Observability, []},
           {GiTF.Tachikoma, []},
           {GiTF.Sync.Queue, []},

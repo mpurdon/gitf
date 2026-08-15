@@ -197,8 +197,11 @@ defmodule GiTF.Approval do
         false
 
       request ->
-        hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
-        hours_elapsed > timeout_hours()
+        # Awake time, not wall time: the box idle-stops, and an approval
+        # must not "time out" during hours nobody could have acted. The
+        # boot grace stops a wake from immediately auto-deciding.
+        hours_elapsed = GiTF.Clock.awake_elapsed(request.requested_at) / 3600
+        hours_elapsed > timeout_hours() and not GiTF.Clock.in_boot_grace?()
     end
   end
 
@@ -232,8 +235,10 @@ defmodule GiTF.Approval do
         false
 
       request ->
-        hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
-        hours_elapsed > critical_escalation_hours()
+        # Awake time + boot grace, same reasoning as timed_out?/1 — an
+        # idle weekend must not terminally fail critical missions.
+        hours_elapsed = GiTF.Clock.awake_elapsed(request.requested_at) / 3600
+        hours_elapsed > critical_escalation_hours() and not GiTF.Clock.in_boot_grace?()
     end
   end
 

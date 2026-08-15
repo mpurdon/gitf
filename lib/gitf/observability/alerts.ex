@@ -215,7 +215,7 @@ defmodule GiTF.Observability.Alerts do
     stuck =
       Enum.filter(data.missions, fn q ->
         q.status == "active" &&
-          DateTime.diff(DateTime.utc_now(), q.updated_at) > threshold_seconds
+          GiTF.Clock.awake_elapsed(q.updated_at) > threshold_seconds
       end)
 
     if length(stuck) > 0 do
