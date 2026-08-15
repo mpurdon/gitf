@@ -43,7 +43,9 @@ section.log
 .mcp.json
 
 # Claude Code local config.
-.claude/
+# Local Claude session state stays out; shared commands/skills are versioned.
+.claude/*
+!.claude/commands/
 hive
 hive.log
 
