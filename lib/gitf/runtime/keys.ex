@@ -130,13 +130,36 @@ defmodule GiTF.Runtime.Keys do
   # -- AWS credentials loading -------------------------------------------------
 
   defp load_aws_credentials(toml_keys) do
-    # Skip if AWS creds are already in the environment
+    # Env creds short-circuit the loader — but SSO-exported creds expire
+    # (~1h) and, left in place, permanently shadow both a re-export and
+    # the EC2 instance-role path. Clear known-expired ones and reload.
+    if env_creds_expired?() do
+      Enum.each(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"], &System.delete_env/1)
+      :persistent_term.erase({__MODULE__, :aws_env_expiry})
+      Logger.info("AWS env credentials expired — clearing and reloading from profile/IMDS")
+    end
+
     if System.get_env("AWS_ACCESS_KEY_ID") != nil or
          System.get_env("AWS_BEARER_TOKEN_BEDROCK") != nil do
       0
     else
       profile = resolve_aws_profile(toml_keys)
       load_aws_profile(profile)
+    end
+  end
+
+  @doc """
+  True when the AWS env credentials were loaded by us with a known expiry
+  that has passed (5-minute early margin). Static user-provided keys have
+  no recorded expiry and never report expired.
+  """
+  def env_creds_expired? do
+    case :persistent_term.get({__MODULE__, :aws_env_expiry}, nil) do
+      %DateTime{} = exp ->
+        DateTime.diff(exp, DateTime.utc_now(), :second) < 300
+
+      _ ->
+        false
     end
   end
 
@@ -203,11 +226,21 @@ defmodule GiTF.Runtime.Keys do
               var = String.trim(var)
               value = String.trim(value)
 
-              if var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"] do
-                System.put_env(var, value)
-                true
-              else
-                false
+              cond do
+                var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"] ->
+                  System.put_env(var, value)
+                  true
+
+                var == "AWS_CREDENTIAL_EXPIRATION" ->
+                  case DateTime.from_iso8601(value) do
+                    {:ok, dt, _} -> :persistent_term.put({__MODULE__, :aws_env_expiry}, dt)
+                    _ -> :ok
+                  end
+
+                  false
+
+                true ->
+                  false
               end
 
             _ ->

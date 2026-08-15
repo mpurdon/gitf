@@ -184,9 +184,29 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
            json: %{chat_id: chat_id, text: text, parse_mode: "Markdown"},
            receive_timeout: 10_000
          ) do
-      {:ok, %{status: 200}} -> :ok
-      {:ok, resp} -> {:error, {:telegram_api, resp.status}}
-      {:error, reason} -> {:error, reason}
+      {:ok, %{status: 200}} ->
+        :ok
+
+      {:ok, %{status: 400}} ->
+        # Legacy-Markdown rejects unbalanced _ * [ — and ghost errors,
+        # model IDs, and paths contain them routinely. The alert must
+        # arrive: retry once as plain text.
+        case Req.post(url, json: %{chat_id: chat_id, text: text}, receive_timeout: 10_000) do
+          {:ok, %{status: 200}} ->
+            :ok
+
+          other ->
+            Logger.warning("Telegram send failed even without parse_mode: #{inspect(other)}")
+            {:error, :telegram_send_failed}
+        end
+
+      {:ok, resp} ->
+        Logger.warning("Telegram send failed: HTTP #{resp.status} #{inspect(resp.body)}")
+        {:error, {:telegram_api, resp.status}}
+
+      {:error, reason} ->
+        Logger.warning("Telegram send failed: #{inspect(reason)}")
+        {:error, reason}
     end
   rescue
     e -> {:error, Exception.message(e)}
@@ -206,6 +226,14 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
           [] -> state
           _ -> %{state | last_update_id: List.last(updates)["update_id"]}
         end
+
+      {:ok, %{status: 401}} ->
+        Logger.error("Telegram poll: bot token rejected (401) — inbound commands are dead until the token is fixed")
+        state
+
+      {:ok, %{status: 409}} ->
+        Logger.error("Telegram poll: another instance is polling this bot token (409) — updates are being stolen")
+        state
 
       _ ->
         state

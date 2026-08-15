@@ -76,11 +76,19 @@ defmodule GiTF.GitHub.CLI do
   """
   @spec main_branch_runs(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, error_class()}
   def main_branch_runs(repo_path, limit \\ 5) when is_binary(repo_path) and is_integer(limit) do
+    # Resolve the actual default branch — hardcoding "main" made master
+    # repos read as eternally-green (gh returns [] with exit 0).
+    branch =
+      case GiTF.Sync.detect_main_branch(repo_path) do
+        {:ok, b} -> b
+        _ -> "main"
+      end
+
     args = [
       "run",
       "list",
       "--branch",
-      "main",
+      branch,
       "--limit",
       Integer.to_string(limit),
       "--json",
@@ -131,9 +139,19 @@ defmodule GiTF.GitHub.CLI do
       end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {output, 0}} -> {:ok, String.trim(output)}
-      {:ok, {output, _}} -> {:error, String.slice(output, 0, 200)}
-      nil -> {:error, "gh pr create timed out after #{div(timeout, 1_000)}s"}
+      {:ok, {output, 0}} ->
+        # stderr is merged in, and gh prints notices/upgrade nags there —
+        # extract the PR URL rather than trusting the whole blob.
+        case Regex.run(~r{https://github\.com/[^/\s]+/[^/\s]+/pull/\d+}, output) do
+          [url] -> {:ok, url}
+          _ -> {:error, "gh pr create succeeded but no PR URL in output: #{String.slice(output, 0, 200)}"}
+        end
+
+      {:ok, {output, _}} ->
+        {:error, String.slice(output, 0, 200)}
+
+      nil ->
+        {:error, "gh pr create timed out after #{div(timeout, 1_000)}s"}
     end
   end
 
@@ -167,17 +185,63 @@ defmodule GiTF.GitHub.CLI do
     lower = String.downcase(output)
 
     cond do
-      String.contains?(lower, "not found") -> :permanent
+      String.contains?(lower, "authentication") -> auth_aware_permanent()
+      String.contains?(lower, "authorization") -> auth_aware_permanent()
+      String.contains?(lower, "not found") -> auth_aware_permanent()
+      String.contains?(lower, "could not resolve to") -> auth_aware_permanent()
+      String.contains?(lower, "http 404") -> auth_aware_permanent()
       String.contains?(lower, "no pull requests") -> :permanent
-      String.contains?(lower, "could not resolve to") -> :permanent
-      String.contains?(lower, "authentication") -> :permanent
-      String.contains?(lower, "authorization") -> :permanent
-      String.contains?(lower, "http 404") -> :permanent
       true -> :transient
     end
   end
 
   defp classify_output(_), do: :transient
+
+  # GitHub 404s private repos when the token is expired/scope-less, so a
+  # "not found" is only trustworthy while auth works. With broken auth,
+  # classify :transient (retry after the operator fixes the token) and
+  # alert — the old behavior permanently stopped outcome tracking.
+  defp auth_aware_permanent do
+    if gh_auth_ok?() do
+      :permanent
+    else
+      GiTF.Observability.Alerts.dispatch_webhook(
+        :github_auth_broken,
+        "gh auth check failed — GitHub 404s may be auth errors; outcome tracking degraded until the token is fixed",
+        dedup_key: "github_auth_broken"
+      )
+
+      :transient
+    end
+  end
+
+  # Cached for 5 minutes — one subprocess per window, not per classify.
+  defp gh_auth_ok? do
+    case :persistent_term.get({__MODULE__, :auth_ok}, nil) do
+      {ok?, checked_at} ->
+        if System.monotonic_time(:second) - checked_at < 300 do
+          ok?
+        else
+          check_and_cache_auth()
+        end
+
+      nil ->
+        check_and_cache_auth()
+    end
+  end
+
+  defp check_and_cache_auth do
+    ok? =
+      case System.cmd("gh", ["auth", "status"], stderr_to_stdout: true) do
+        {_, 0} -> true
+        _ -> false
+      end
+
+    :persistent_term.put({__MODULE__, :auth_ok}, {ok?, System.monotonic_time(:second)})
+    ok?
+  rescue
+    _ -> true
+  end
 
   defp normalize_reviews(reviews) when is_list(reviews) do
     Enum.map(reviews, fn r ->

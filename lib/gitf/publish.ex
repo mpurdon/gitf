@@ -323,11 +323,47 @@ defmodule GiTF.Publish do
 
     case GiTF.Sync.detect_main_branch(repo_path) do
       {:ok, main_branch} ->
-        GiTF.Git.safe_cmd(["push", "-u", "origin", branch],
-          cd: repo_path,
-          stderr_to_stdout: true
-        )
+        push_result =
+          GiTF.Git.safe_cmd(["push", "-u", "origin", branch],
+            cd: repo_path,
+            stderr_to_stdout: true
+          )
 
+        # Verify-then-use: a rejected push previously flowed straight into
+        # find_existing_pr, "found" the stale PR for this head, and marked
+        # the mission delivered without the work. Assert the push landed
+        # and that origin's tip matches ours before touching PR state.
+        with {_, 0} <- push_result,
+             :ok <- verify_branch_pushed(repo_path, branch) do
+          publish_pr_verified(mission, repo_path, branch, main_branch)
+        else
+          {output, code} when is_integer(code) ->
+            Logger.error("Quest #{mission.id} push failed (exit #{code}): #{String.slice(to_string(output), 0, 300)}")
+            %{"status" => "push_failed", "branch" => branch, "error" => to_string(output)}
+
+          {:error, reason} ->
+            Logger.error("Quest #{mission.id} push verification failed: #{reason}")
+            %{"status" => "push_failed", "branch" => branch, "error" => reason}
+        end
+
+      {:error, reason} ->
+        %{"status" => "push_failed", "branch" => branch, "error" => "no main branch: #{inspect(reason)}"}
+    end
+  end
+
+  # Origin's tip for the branch must equal our local tip — a push that
+  # "succeeded" against a pre-existing remote branch at an older SHA is
+  # not delivery.
+  defp verify_branch_pushed(repo_path, branch) do
+    with {:ok, local} <- GiTF.Git.rev_parse(repo_path, branch),
+         {:ok, remote} <- GiTF.Git.rev_parse(repo_path, "origin/#{branch}") do
+      if local == remote, do: :ok, else: {:error, "origin/#{branch} is at #{String.slice(remote, 0, 8)}, local at #{String.slice(local, 0, 8)}"}
+    else
+      _ -> {:error, "could not resolve #{branch} / origin/#{branch} after push"}
+    end
+  end
+
+  defp publish_pr_verified(mission, repo_path, branch, main_branch) do
         # Idempotent: if a PR already exists for this branch, reuse its
         # URL instead of hitting duplicate-PR error on recreate.
         result =
@@ -350,15 +386,11 @@ defmodule GiTF.Publish do
               end
           end
 
-        # Verify the URL we got back actually points at an OPEN PR.
-        # `gh pr view <url> --json state` will fail if the URL is bogus
-        # or the PR was closed/merged in the meantime — better to catch
-        # it here than ship a publish artifact whose pr_url is dead.
-        verify_pr_url(result, repo_path, mission.id)
-
-      {:error, reason} ->
-        %{"status" => "pr_failed", "branch" => branch, "error" => inspect(reason)}
-    end
+    # Verify the URL we got back actually points at an OPEN PR.
+    # `gh pr view <url> --json state` will fail if the URL is bogus
+    # or the PR was closed/merged in the meantime — better to catch
+    # it here than ship a publish artifact whose pr_url is dead.
+    verify_pr_url(result, repo_path, mission.id)
   end
 
   defp verify_pr_url(%{"status" => status} = result, _repo_path, _mission_id)
@@ -404,6 +436,18 @@ defmodule GiTF.Publish do
           "status" => "pr_failed",
           "branch" => Map.get(result, "branch"),
           "error" => "PR verify failed: #{String.slice(output, 0, 200)}",
+          "pr_url" => url
+        }
+
+      {:exit, reason} ->
+        # gh missing/broken raises inside the task — without this clause
+        # the whole publish crashed with a CaseClauseError.
+        Logger.warning("Quest #{mission_id}: PR verify task exited: #{inspect(reason)}")
+
+        %{
+          "status" => "pr_failed",
+          "branch" => Map.get(result, "branch"),
+          "error" => "PR verify could not run (gh unavailable?): #{inspect(reason)}",
           "pr_url" => url
         }
 

@@ -84,7 +84,9 @@ defmodule GiTF.Report do
       ops: Enum.map(report.ops, &format_op_for_display/1),
       files: report.files,
       file_summary: summarize_files(report.files),
-      pr_url: get_in(report, [:artifacts, :sync, "pr_url"]),
+      pr_url:
+        get_in(report, [:artifacts, :publish, "pr_url"]) ||
+          get_in(report, [:artifacts, :sync, "pr_url"]),
       sync_status: get_in(report, [:artifacts, :sync, "status"]),
       quality_score: get_in(report, [:artifacts, :scoring, "overall_score"]),
       summary: compute_display_summary(report.ops)
@@ -368,10 +370,13 @@ defmodule GiTF.Report do
 
   defp format_files_section(_), do: nil
 
-  defp format_artifacts_section(%{artifacts: %{sync: sync, scoring: scoring}}) do
+  defp format_artifacts_section(%{artifacts: %{sync: sync, scoring: scoring}} = report) do
+    publish = get_in(report, [:artifacts, :publish])
+
     lines =
       [
-        sync && sync["pr_url"] && "  PR: #{sync["pr_url"]}",
+        ((publish && publish["pr_url"]) || (sync && sync["pr_url"])) &&
+          "  PR: #{(publish && publish["pr_url"]) || sync["pr_url"]}",
         sync && sync["status"] && "  Sync: #{sync["status"]}",
         scoring && scoring["overall_score"] && "  Quality: #{scoring["overall_score"]}"
       ]

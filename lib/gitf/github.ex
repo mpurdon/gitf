@@ -26,12 +26,19 @@ defmodule GiTF.GitHub do
         body: "Automated PR from GiTF ghost.\n\nJob: #{op.id}\n#{op.description || ""}"
       }
 
+      # redirect: false — a renamed/transferred repo 301s, and Req would
+      # demote the POST to a GET of the PR *list*, yielding {:ok, nil}
+      # that callers logged as "PR created". 201 is the only creation.
       case Req.post(client,
              url: "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls",
-             json: body
+             json: body,
+             redirect: false
            ) do
-        {:ok, %{status: status, body: resp}} when status in [201, 200] ->
-          {:ok, resp["html_url"]}
+        {:ok, %{status: 201, body: %{"html_url" => url}}} when is_binary(url) ->
+          {:ok, url}
+
+        {:ok, %{status: status}} when status in [301, 307, 308] ->
+          {:error, "repository moved (HTTP #{status}) — cached owner/repo is stale; re-add or update the sector"}
 
         {:ok, %{status: 422, body: %{"errors" => [%{"message" => msg} | _]}}} ->
           {:error, "PR already exists or validation failed: #{msg}"}
@@ -274,16 +281,22 @@ defmodule GiTF.GitHub do
   @doc "Builds a Req client with GitHub auth."
   @spec client(GiTF.Schema.Sector.t()) :: {:ok, Req.Request.t()} | {:error, :no_github_config}
   def client(sector) do
-    if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) do
-      token = github_token()
+    cond do
+      !(Map.get(sector, :github_owner) && Map.get(sector, :github_repo)) ->
+        {:error, :no_github_config}
 
-      headers =
-        [accept: "application/vnd.github+json"]
-        |> maybe_add_auth(token)
+      github_token() in [nil, ""] ->
+        # An anonymous client silently 404s private repos ("issue not
+        # found" lies) and burns the 60/hr unauthenticated IP budget —
+        # fail loudly instead.
+        {:error, :no_github_token}
 
-      {:ok, Req.new(base_url: @api_base, headers: headers)}
-    else
-      {:error, :no_github_config}
+      true ->
+        headers =
+          [accept: "application/vnd.github+json"]
+          |> maybe_add_auth(github_token())
+
+        {:ok, Req.new(base_url: @api_base, headers: headers)}
     end
   end
 

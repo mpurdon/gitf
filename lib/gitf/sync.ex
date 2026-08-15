@@ -140,13 +140,19 @@ defmodule GiTF.Sync do
         :ok
 
       {push_output, _} ->
-        # Check if it's just "already up to date" or similar non-error
-        if String.contains?(push_output, "Everything up-to-date") do
-          :ok
-        else
-          Logger.warning("Git push output: #{String.slice(push_output, 0, 200)}")
-          # Continue anyway — branch might already be pushed
-          :ok
+        # "Everything up-to-date" is genuinely fine; anything else is only
+        # fine if origin's tip actually matches ours — verify rather than
+        # assume ("branch might already be pushed" shipped stale PRs).
+        cond do
+          String.contains?(push_output, "Everything up-to-date") ->
+            :ok
+
+          branch_matches_origin?(repo_path, branch) ->
+            :ok
+
+          true ->
+            Logger.error("Git push failed and origin/#{branch} does not match local: #{String.slice(push_output, 0, 200)}")
+            {:error, "push failed: #{String.slice(push_output, 0, 200)}"}
         end
     end
 
@@ -492,11 +498,26 @@ defmodule GiTF.Sync do
                 "(ghost's version preferred). Review if unexpected."
             )
 
+            GiTF.Observability.Alerts.dispatch_webhook(
+              :sync_conflict_theirs,
+              "Merge conflict on #{branch} auto-resolved by preferring the ghost's version — review the merge",
+              dedup_key: "theirs:#{branch}"
+            )
+
             {:ok, :theirs}
 
           {out, _} ->
             {:error, String.trim(out)}
         end
+    end
+  end
+
+  defp branch_matches_origin?(repo_path, branch) do
+    with {:ok, local} <- GiTF.Git.rev_parse(repo_path, branch),
+         {:ok, remote} <- GiTF.Git.rev_parse(repo_path, "origin/#{branch}") do
+      local == remote
+    else
+      _ -> false
     end
   end
 
@@ -507,10 +528,19 @@ defmodule GiTF.Sync do
   defp ensure_local_branches(repo_path, branches) do
     refspecs = Enum.map(branches, fn b -> "#{b}:#{b}" end)
 
-    GiTF.Git.safe_cmd(["fetch", "origin" | refspecs],
-      cd: repo_path,
-      stderr_to_stdout: true
-    )
+    case GiTF.Git.safe_cmd(["fetch", "origin" | refspecs],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {_, 0} ->
+        :ok
+
+      {out, _} ->
+        # A rejected/failed fetch means we'd merge against stale local
+        # branches — surface it instead of silently proceeding.
+        Logger.warning("ensure_local_branches fetch failed: #{String.slice(out, 0, 200)}")
+        :ok
+    end
   rescue
     _ -> :ok
   end

@@ -129,6 +129,8 @@ defmodule GiTF.Rollback do
 
   defp guard_has_merge_commit(_), do: {:error, :no_merge_commit}
 
+  # A revert that never reached origin is not a revert — allow retry.
+  defp guard_not_reverted(%{"reverted_at" => _, "revert_pushed" => false}), do: :ok
   defp guard_not_reverted(%{"reverted_at" => _}), do: {:error, :already_reverted}
   defp guard_not_reverted(_), do: :ok
 
@@ -211,7 +213,14 @@ defmodule GiTF.Rollback do
         true
 
       {output, _} ->
-        Logger.debug("Revert push failed (non-fatal): #{String.slice(output, 0, 200)}")
+        Logger.error("Revert push FAILED — origin still carries the bad merge: #{String.slice(output, 0, 200)}")
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :revert_push_failed,
+          "Revert committed locally but push to origin failed — origin still has the reverted merge",
+          dedup_key: "revert_push_failed:#{repo_path}"
+        )
+
         false
     end
   end

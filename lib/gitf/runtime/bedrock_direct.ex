@@ -74,6 +74,14 @@ defmodule GiTF.Runtime.BedrockDirect do
           {:ok, response}
         end
 
+      {:ok, %{status: 403, body: body}} ->
+        # Revoked/rotated role or expired token: drop the cached IMDS creds
+        # so the next call re-fetches instead of replaying dead credentials
+        # for the rest of the cache window.
+        :persistent_term.erase({__MODULE__, :imds_creds})
+        msg = if is_map(body), do: body["message"] || inspect(body), else: String.slice(to_string(body), 0, 300)
+        {:error, "Bedrock 403: #{msg}"}
+
       {:ok, %{status: status, body: %{"message" => msg}}} ->
         {:error, "Bedrock #{status}: #{msg}"}
 
@@ -334,7 +342,7 @@ defmodule GiTF.Runtime.BedrockDirect do
     session_token = System.get_env("AWS_SESSION_TOKEN")
 
     cond do
-      access_key && secret_key ->
+      access_key && secret_key && not GiTF.Runtime.Keys.env_creds_expired?() ->
         creds = %{
           access_key_id: access_key,
           secret_access_key: secret_key,
@@ -394,10 +402,12 @@ defmodule GiTF.Runtime.BedrockDirect do
            ) do
       data = if is_binary(body), do: Jason.decode!(body), else: body
 
+      # An unparseable Expiration must NOT invent an hour of validity —
+      # cache for 60s only so a real expiry can't outlive our belief.
       expires_at =
         case DateTime.from_iso8601(data["Expiration"] || "") do
           {:ok, dt, _} -> DateTime.to_unix(dt)
-          _ -> now + 3600
+          _ -> now + 360
         end
 
       creds = %{
