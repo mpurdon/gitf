@@ -334,12 +334,13 @@ defmodule GiTF.Application do
 
   # An escript invocation whose subcommand isn't server/daemon. Releases,
   # mix/iex, and tests are never one-shots — they keep the probe path (and
-  # LiveView tests need the endpoint in the tree).
+  # LiveView tests need the endpoint in the tree). Escript detection uses
+  # the -gitf_escript emulator flag baked in by mix.exs; :escript.script_name/0
+  # is NOT a valid probe (it succeeds under mix too — it just returns the
+  # head of the plain arguments).
   defp one_shot_cli? do
-    _ = :escript.script_name()
-    first_subcommand() not in ["server", "daemon"]
-  catch
-    _, _ -> false
+    :init.get_argument(:gitf_escript) != :error and
+      first_subcommand() not in ["server", "daemon"]
   end
 
   defp try_bind_port(port, 0) do

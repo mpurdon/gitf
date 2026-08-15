@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.65.49"
+  @version "0.65.50"
 
   def project do
     [
@@ -33,7 +33,11 @@ defmodule GiTF.MixProject do
   defp escript do
     [
       main_module: GiTF.CLI,
-      name: "gitf"
+      name: "gitf",
+      # Marks the runtime as an escript so Application.start can tell a
+      # one-shot CLI invocation apart from mix/iex/tests/releases —
+      # :escript.script_name/0 can't (it succeeds under mix too).
+      emu_args: "-gitf_escript true"
     ]
   end
 
