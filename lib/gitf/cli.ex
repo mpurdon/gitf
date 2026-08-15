@@ -5,6 +5,10 @@ defmodule GiTF.CLI do
   require GiTF.Ghost.Status, as: GhostStatus
   alias GiTF.CLI.Format
 
+  # Commands that must work while the remote server is unreachable
+  # (e.g. the factory box is idle-stopped).
+  @no_server_ping [[:self_update], [:login], [:version]]
+
   # -- Escript entry point ----------------------------------------------------
 
   @spec main([String.t()]) :: no_return()
@@ -97,7 +101,7 @@ defmodule GiTF.CLI do
       {:ok, subcommand_path, result} ->
         if !GiTF.Client.remote?(), do: maybe_ensure_store(subcommand_path)
 
-        if GiTF.Client.remote?() do
+        if GiTF.Client.remote?() and subcommand_path not in @no_server_ping do
           case GiTF.Client.ping() do
             :ok ->
               :ok
@@ -277,7 +281,15 @@ defmodule GiTF.CLI do
   defp expand_defaults(argv), do: argv
 
   # Commands that manage their own store lifecycle or don't need the store.
-  @no_auto_store [[:version], [:server], [:daemon], [:completions], [:quickref], [:login]]
+  @no_auto_store [
+    [:version],
+    [:server],
+    [:daemon],
+    [:completions],
+    [:quickref],
+    [:login],
+    [:self_update]
+  ]
 
   defp maybe_ensure_store(subcommand_path) do
     if subcommand_path not in @no_auto_store do
@@ -2872,6 +2884,10 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:self_update], result) do
+    GiTF.CLI.SelfUpdate.run(result)
+  end
+
   defp dispatch([:login], result) do
     url = result_get(result, :args, :url)
     key = result_get(result, :options, :key) || prompt_api_key()
@@ -5021,6 +5037,10 @@ defmodule GiTF.CLI do
         version: [
           name: "version",
           about: "Print the GiTF version"
+        ],
+        self_update: [
+          name: "self-update",
+          about: "Replace this escript with the latest GitHub Release build"
         ],
         login: [
           name: "login",

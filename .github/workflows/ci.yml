@@ -14,6 +14,11 @@ on:
     branches: [main]
   pull_request:
 
+# contents: write lets the job publish GitHub Releases (escript + tarball),
+# which feed `gitf self-update` and the Homebrew tap.
+permissions:
+  contents: write
+
 jobs:
   ci:
     runs-on: ubuntu-24.04-arm
@@ -78,3 +83,51 @@ jobs:
           path: _build/prod/gitf-*.tar.gz
           if-no-files-found: error
           retention-days: 30
+
+      # The escript is BEAM bytecode (arch-independent, needs Erlang >= the
+      # build OTP on the host). It ships via GitHub Releases so
+      # `gitf self-update` and the Homebrew tap can fetch it without auth.
+      - name: Build escript
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          MIX_ENV: prod
+        run: mix escript.build
+
+      - name: Read version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: version
+        run: echo "version=$(grep -o '@version "[^"]*"' mix.exs | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: gitf ${{ steps.version.outputs.version }}
+          files: |
+            gitf
+            _build/prod/gitf-*.tar.gz
+          make_latest: true
+
+      - name: Bump Homebrew formula
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "TAP_GITHUB_TOKEN not set; skipping formula bump"
+            exit 0
+          fi
+          SHA=$(sha256sum gitf | cut -d' ' -f1)
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/mpurdon/homebrew-gitf" /tmp/tap
+          sed -i \
+            -e "s|download/v[0-9.]*/gitf|download/v${VERSION}/gitf|" \
+            -e "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" \
+            -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
+            /tmp/tap/Formula/gitf.rb
+          cd /tmp/tap
+          git config user.name "Ghost-Factory"
+          git config user.email "factory@ghostinthefactory.com"
+          git commit -am "gitf ${VERSION}" || exit 0
+          git push
