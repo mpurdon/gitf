@@ -685,6 +685,7 @@ defmodule GiTF.Major.PhasePrompts do
       end
 
     lsp_diagnostics_block = render_lsp_diagnostics_block(lsp_diagnostics)
+    exec_validation_block = render_exec_validation_block(Keyword.get(opts, :exec_validation))
 
     """
     # Validation Phase
@@ -705,7 +706,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-    #{changed_files_block}#{lsp_diagnostics_block}
+    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's
@@ -751,6 +752,49 @@ defmodule GiTF.Major.PhasePrompts do
   end
 
   # Renders error-severity LSP diagnostics as ground-truth context.
+  # Result of running the sector's validation_command against the
+  # implementation worktree, injected as ground truth the LLM must honor.
+  defp render_exec_validation_block(nil), do: ""
+
+  defp render_exec_validation_block({:pass, command}) do
+    """
+
+    ## Execution validation: PASSED
+
+    The sector's validation command ran successfully in the implementation
+    worktree — the change compiles/passes its checks:
+
+        #{command}
+
+    This confirms mechanical soundness only; still review the diff against
+    the requirements.
+    """
+  end
+
+  defp render_exec_validation_block({:fail, command, output}) do
+    tail =
+      if String.length(output) > 4000,
+        do: "…(truncated)…\n" <> String.slice(output, -4000, 4000),
+        else: output
+
+    """
+
+    ## Execution validation: FAILED
+
+    The sector's validation command was executed in the implementation
+    worktree and FAILED. This is ground truth from a real execution — it
+    overrides anything the diff appears to show. Your verdict MUST be
+    `fail`, and you MUST include a gap quoting the relevant part of this
+    output:
+
+        #{command}
+
+    ```
+    #{tail}
+    ```
+    """
+  end
+
   # Skipped (empty string) when no errors — keeps the prompt slim.
   defp render_lsp_diagnostics_block([]), do: ""
 

@@ -988,12 +988,14 @@ defmodule GiTF.Major.Orchestrator do
 
   defp spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, variant_id, changed_files) do
     lsp_diagnostics = collect_lsp_diagnostics_for_validation(mission, changed_files)
+    exec_validation = run_exec_validation(mission, variant_id)
 
     prompt =
       PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
         diff_base: diff_base,
         changed_files: changed_files,
-        lsp_diagnostics: lsp_diagnostics
+        lsp_diagnostics: lsp_diagnostics,
+        exec_validation: exec_validation
       )
 
     # Branch the validation worktree from the variant's impl ghost tip so
@@ -1006,6 +1008,49 @@ defmodule GiTF.Major.Orchestrator do
 
     opts = [model: "general"] ++ base_opts ++ if variant_id, do: [variant: variant_id], else: []
     spawn_phase_ghost(mission, "validation", prompt, opts)
+  end
+
+  # Runs the sector's validation_command in the implementation ghost's
+  # worktree and returns ground truth for the validation prompt:
+  # {:pass, cmd} | {:fail, cmd, output} | nil (not configured / no
+  # worktree to run in). This is the ONLY place the command runs on the
+  # normal pipeline — GiTF.Validator.validate is otherwise reached just
+  # via the conflict-rebase path.
+  defp run_exec_validation(mission, variant_id) do
+    with %{validation_command: cmd} when is_binary(cmd) and cmd != "" <-
+           Archive.get(:sectors, mission.sector_id),
+         %{ghost_id: ghost_id} when is_binary(ghost_id) <- impl_op_for_variant(mission, variant_id),
+         %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, ghost_id),
+         %{worktree_path: _} = shell <- Archive.get(:shells, shell_id) do
+      Logger.info("Running validation command for #{mission.id}: #{cmd}")
+
+      case GiTF.Validator.run_custom_validation(shell, cmd) do
+        :ok ->
+          Logger.info("Validation command passed for #{mission.id}")
+          {:pass, cmd}
+
+        {:error, output} ->
+          Logger.warning("Validation command FAILED for #{mission.id}: #{String.slice(to_string(output), 0, 300)}")
+          {:fail, cmd, to_string(output)}
+      end
+    else
+      _ -> nil
+    end
+  rescue
+    e ->
+      Logger.warning("run_exec_validation crashed for #{mission.id}: #{Exception.message(e)}")
+      nil
+  end
+
+  defp impl_op_for_variant(mission, nil), do: GiTF.Validation.latest_completed_impl_op(mission)
+
+  defp impl_op_for_variant(mission, variant_id) do
+    mission.ops
+    |> Enum.filter(fn op ->
+      op[:phase_job] in [nil, false] and op.status == "done" and op[:variant] == variant_id
+    end)
+    |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
+    |> List.first()
   end
 
   # Returns the ghost-id-based branch for `variant_id`'s most recent
