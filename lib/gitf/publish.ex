@@ -80,9 +80,18 @@ defmodule GiTF.Publish do
           _ -> nil
         end
 
+      merge_message =
+        case mission.goal do
+          goal when is_binary(goal) and goal != "" ->
+            "gitf: #{String.slice(goal, 0, 72)} (#{mission.id})"
+
+          _ ->
+            nil
+        end
+
       with {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path),
            :ok <- GiTF.Git.checkout(repo_path, main_branch),
-           :ok <- GiTF.Git.sync(repo_path, quest_branch, no_ff: true),
+           :ok <- GiTF.Git.sync(repo_path, quest_branch, no_ff: true, message: merge_message),
            {:ok, merge_commit_sha} <- GiTF.Git.head_sha(repo_path) do
         Missions.store_artifact(mission.id, "sync", %{
           "status" => "success",

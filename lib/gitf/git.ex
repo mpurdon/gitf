@@ -202,13 +202,23 @@ defmodule GiTF.Git do
     end
   end
 
-  @doc "Syncs a branch into the current branch."
+  @doc """
+  Syncs a branch into the current branch.
+
+  Pass `:message` to control the merge-commit subject — the default
+  "Merge branch 'ghost/ghost-36f127'" is meaningless in repo history.
+  """
   @spec sync(String.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
   def sync(repo_path, branch, opts \\ []) do
-    args =
-      if Keyword.get(opts, :no_ff, false),
-        do: ["merge", "--no-ff", "--no-edit", branch],
-        else: ["merge", "--no-edit", branch]
+    base = if Keyword.get(opts, :no_ff, false), do: ["merge", "--no-ff"], else: ["merge"]
+
+    msg_args =
+      case Keyword.get(opts, :message) do
+        nil -> ["--no-edit"]
+        msg -> ["-m", msg]
+      end
+
+    args = base ++ msg_args ++ [branch]
 
     case safe_cmd(args, cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> :ok

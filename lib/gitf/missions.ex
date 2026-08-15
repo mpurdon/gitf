@@ -317,12 +317,22 @@ defmodule GiTF.Missions do
   end
 
   defp generate_name(goal) do
-    goal
-    |> String.slice(0, 50)
-    |> String.downcase()
-    |> String.replace(~r/[^a-z0-9\s-]/, "")
-    |> String.trim()
-    |> String.replace(~r/\s+/, "-")
+    slug =
+      goal
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9\s-]/, "")
+      |> String.trim()
+      |> String.replace(~r/\s+/, "-")
+
+    # Truncate on a word boundary — slicing first produced branch names like
+    # "sort-the-user-list-case-insensitively-currently-u".
+    if String.length(slug) <= 50 do
+      slug
+    else
+      slug
+      |> String.slice(0, 50)
+      |> String.replace(~r/-[^-]*$/, "")
+    end
   end
 
   @doc """

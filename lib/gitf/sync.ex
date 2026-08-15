@@ -416,7 +416,7 @@ defmodule GiTF.Sync do
 
     results =
       Enum.map(shells, fn shell ->
-        case merge_branch_with_fallback(repo_path, shell.branch) do
+        case merge_branch_with_fallback(repo_path, shell.branch, ghost_merge_message(shell)) do
           {:ok, strategy} ->
             if strategy != :plain do
               Logger.warning(
@@ -452,21 +452,37 @@ defmodule GiTF.Sync do
     end
   end
 
+  # Merge-commit subject for a ghost branch: the op's title beats the
+  # branch name ("Merge branch 'ghost/ghost-36f127'") in repo history.
+  defp ghost_merge_message(shell) do
+    with gid when is_binary(gid) <- Map.get(shell, :ghost_id),
+         %{op_id: op_id} when is_binary(op_id) <- GiTF.Archive.get(:ghosts, gid),
+         {:ok, %{title: title}} when is_binary(title) <- GiTF.Ops.get(op_id) do
+      "Merge ghost work: #{String.slice(title, 0, 72)}"
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
   # Attempts a plain three-way merge first. On conflict, aborts and retries
   # with `-X theirs` (prefer the ghost's version). Covers the common case of
   # parallel impl ghosts and fix ghosts editing the same file — the later
   # work usually subsumes the earlier and `theirs` gives the right answer.
   # Irreconcilable conflicts still fall through to the caller for rollback.
-  defp merge_branch_with_fallback(repo_path, branch) do
-    case GiTF.Git.sync(repo_path, branch, no_ff: true) do
+  defp merge_branch_with_fallback(repo_path, branch, message) do
+    case GiTF.Git.sync(repo_path, branch, no_ff: true, message: message) do
       :ok ->
         {:ok, :plain}
 
       {:error, _reason} ->
         GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
 
+        msg_args = if message, do: ["-m", message], else: ["--no-edit"]
+
         case GiTF.Git.safe_cmd(
-               ["merge", "--no-ff", "--no-edit", "-X", "theirs", branch],
+               ["merge", "--no-ff"] ++ msg_args ++ ["-X", "theirs", branch],
                cd: repo_path,
                stderr_to_stdout: true
              ) do
