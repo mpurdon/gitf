@@ -14,7 +14,8 @@ defmodule GiTF.CLI do
     [:login],
     [:version],
     [:completions],
-    [:quickref]
+    [:quickref],
+    [:wake]
   ]
 
   # -- Escript entry point ----------------------------------------------------
@@ -50,6 +51,33 @@ defmodule GiTF.CLI do
       [] -> :tui
       ["mcp-serve" | _] -> {:mcp_serve}
       _ -> {:cli, argv}
+    end
+  end
+
+  # The box takes ~60s from stopped to daemon-ready; poll health until it
+  # answers or three minutes pass. Used by dispatch([:wake]).
+  defp wait_for_wake do
+    deadline = System.monotonic_time(:second) + 180
+    wait_for_wake(deadline)
+  end
+
+  defp wait_for_wake(deadline) do
+    cond do
+      GiTF.Client.ping() == :ok ->
+        Format.success("Factory is up: #{GiTF.Client.server_url()}")
+
+      System.monotonic_time(:second) > deadline ->
+        Format.error(
+          "Factory did not come up within 3 minutes — check `aws ec2 describe-instances` " <>
+            "or the box's journal."
+        )
+
+        System.halt(1)
+
+      true ->
+        IO.write(".")
+        Process.sleep(5_000)
+        wait_for_wake(deadline)
     end
   end
 
@@ -2891,6 +2919,37 @@ defmodule GiTF.CLI do
     IO.puts("gitf #{GiTF.version()}")
   end
 
+  defp dispatch([:wake], _result) do
+    case GiTF.Config.Provider.get([:server, :wake_url]) do
+      url when is_binary(url) and url != "" ->
+        Format.info("Waking the factory...")
+
+        case Req.get(url, receive_timeout: 30_000) do
+          {:ok, %Req.Response{status: status}} when status in 200..299 ->
+            wait_for_wake()
+
+          {:ok, %Req.Response{status: status}} ->
+            Format.error("Wake endpoint returned HTTP #{status}.")
+            System.halt(1)
+
+          {:error, err} ->
+            Format.error("Could not reach wake endpoint: #{Exception.message(err)}")
+            System.halt(1)
+        end
+
+      _ ->
+        Format.error("No wake URL configured.")
+
+        Format.info(
+          "Get it with `terraform -chdir=infra/aws output -raw wake_url`, then add\n" <>
+            "  wake_url = \"https://...lambda-url...?token=...\"\n" <>
+            "to the [server] section of ~/.config/gitf/config.toml"
+        )
+
+        System.halt(1)
+    end
+  end
+
   defp dispatch([:self_update], result) do
     GiTF.CLI.SelfUpdate.run(result)
   end
@@ -5048,6 +5107,10 @@ defmodule GiTF.CLI do
         self_update: [
           name: "self-update",
           about: "Replace this escript with the latest GitHub Release build"
+        ],
+        wake: [
+          name: "wake",
+          about: "Start the remote factory box (via its wake URL) and wait until it's healthy"
         ],
         login: [
           name: "login",
