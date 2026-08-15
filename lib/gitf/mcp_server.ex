@@ -47,12 +47,33 @@ defmodule GiTF.MCPServer do
 
   # -- Stdio transport --------------------------------------------------------
 
-  @doc "Runs the MCP server loop, reading from stdin until EOF."
+  @doc """
+  Runs the MCP server loop, reading from stdin until EOF.
+
+  In remote mode (`[server] url` / `GITF_SERVER` set) every request is
+  forwarded to the daemon's `/api/v1/mcp` bridge so tools answer from the
+  factory's store, not this machine's local one. The daemon-side socket
+  listener always dispatches locally via `handle_rpc/1`.
+  """
   def run do
-    loop("")
+    dispatch = if GiTF.Client.remote?(), do: &remote_rpc/1, else: &handle_rpc/1
+    loop("", dispatch)
   end
 
-  defp loop(buffer) do
+  # Notifications (no id) expect no response; don't spend a round-trip on them.
+  defp remote_rpc(%{"jsonrpc" => "2.0", "id" => id} = msg) do
+    case GiTF.Client.mcp_rpc(msg) do
+      {:ok, response} ->
+        response
+
+      {:error, message} ->
+        %{jsonrpc: "2.0", id: id, error: %{code: -32000, message: "remote factory: #{message}"}}
+    end
+  end
+
+  defp remote_rpc(_), do: nil
+
+  defp loop(buffer, dispatch) do
     case IO.read(:stdio, :line) do
       :eof ->
         :ok
@@ -65,11 +86,11 @@ defmodule GiTF.MCPServer do
         {messages, remaining} = parse_messages(buffer)
 
         Enum.each(messages, fn msg ->
-          response = handle_rpc(msg)
+          response = dispatch.(msg)
           if response, do: write_stdout(Jason.encode!(response) <> "\n")
         end)
 
-        loop(remaining)
+        loop(remaining, dispatch)
     end
   end
 

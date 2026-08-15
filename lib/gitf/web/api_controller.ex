@@ -46,6 +46,17 @@ defmodule GiTF.Web.ApiController do
     |> json(%{data: report})
   end
 
+  @doc """
+  MCP JSON-RPC over HTTP: lets a remote `gitf mcp-serve` proxy tool calls to
+  this daemon's store instead of answering from its own local one.
+  """
+  def mcp(conn, _params) do
+    case GiTF.MCPServer.handle_rpc(conn.body_params) do
+      nil -> send_resp(conn, 204, "")
+      response -> json(conn, response)
+    end
+  end
+
   def version(conn, _params) do
     json(conn, %{
       data: %{

@@ -178,6 +178,9 @@ defmodule GiTF.Web.Router do
     # Costs
     get("/costs/summary", ApiController, :costs_summary)
     post("/costs/record", ApiController, :record_cost)
+
+    # MCP bridge (JSON-RPC over HTTP for remote `gitf mcp-serve`)
+    post("/mcp", ApiController, :mcp)
   end
 
   # Restrict API to localhost unless a valid API key is provided.

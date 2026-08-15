@@ -27,6 +27,28 @@ defmodule GiTF.Client do
 
   # -- HTTP primitives ---------------------------------------------------------
 
+  @doc """
+  Forwards a raw MCP JSON-RPC message to the remote daemon's `/api/v1/mcp`
+  bridge and returns the raw response map (nil for 204/no-content).
+  Unlike the REST helpers, the response is passed through untouched — the
+  JSON-RPC envelope, including its error shape, must reach the MCP client.
+  """
+  def mcp_rpc(message) do
+    case Req.request(
+           method: :post,
+           url: build_url("/api/v1/mcp"),
+           headers: auth_headers(),
+           json: message
+         ) do
+      {:ok, %Req.Response{status: 200, body: body}} when is_map(body) -> {:ok, body}
+      {:ok, %Req.Response{status: 204}} -> {:ok, nil}
+      {:ok, %Req.Response{status: 401}} -> {:error, "authentication failed (check api_key)"}
+      {:ok, %Req.Response{status: status}} -> {:error, "server returned HTTP #{status}"}
+      {:error, %Req.TransportError{reason: reason}} -> {:error, "connection failed: #{reason}"}
+      {:error, err} -> {:error, Exception.message(err)}
+    end
+  end
+
   def get(path, opts \\ []), do: request(:get, path, params: Keyword.get(opts, :params, []))
   def post(path, body \\ %{}, _opts \\ []), do: request(:post, path, json: body)
   def put(path, body \\ %{}, _opts \\ []), do: request(:put, path, json: body)
