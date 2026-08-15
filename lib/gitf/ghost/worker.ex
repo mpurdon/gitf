@@ -1991,6 +1991,14 @@ defmodule GiTF.Ghost.Worker do
   defp retry_same_model?({:api_error, %{reason: "timeout"}}, _state), do: true
   defp retry_same_model?({:api_error, %{reason: :timeout}}, _state), do: true
   defp retry_same_model?({:api_error, %{cause: %{reason: :timeout}}}, _state), do: true
+
+  # Some providers (BedrockDirect) surface errors as strings. A timeout must
+  # take the cheap same-model retry, not the fallback path — falling back
+  # respawns a different model from scratch and re-pays the whole phase's
+  # accumulated input tokens.
+  defp retry_same_model?({:api_error, reason}, _state) when is_binary(reason),
+    do: String.contains?(String.downcase(reason), "timeout")
+
   defp retry_same_model?(_reason, _state), do: false
 
   defp fallback_or_fail(reason, state) do
@@ -2046,7 +2054,7 @@ defmodule GiTF.Ghost.Worker do
 
       fallback = if current_model, do: GiTF.Runtime.ModelResolver.fallback(current_model)
 
-      if fallback do
+      if is_binary(fallback) and fallback != "" do
         # Update ghost record with fallback model atomically
         case Archive.update(:ghosts, state.ghost_id, fn ghost ->
                %{ghost | assigned_model: fallback}

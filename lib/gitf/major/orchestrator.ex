@@ -232,10 +232,11 @@ defmodule GiTF.Major.Orchestrator do
           timeout_h = max_quest_age_hours()
           Logger.warning("Quest #{mission_id} exceeded #{timeout_h}h max age, force-completing")
 
-          GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-            type: :quest_timeout,
-            message: "Quest #{mission_id} force-completed after #{timeout_h}h timeout"
-          })
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :quest_timeout,
+            "Quest #{mission_id} force-completed after #{timeout_h}h timeout",
+            dedup_key: "quest_timeout:#{mission_id}"
+          )
 
           fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
 
@@ -246,11 +247,11 @@ defmodule GiTF.Major.Orchestrator do
             "Quest #{mission_id} exceeded budget cap ($#{Float.round(cap, 2)}): spent $#{Float.round(spent, 4)} — failing"
           )
 
-          GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-            type: :budget_exceeded,
-            message:
-              "Quest #{mission_id} spent $#{Float.round(spent, 4)} (cap $#{Float.round(cap, 2)})"
-          })
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :budget_exceeded,
+            "Quest #{mission_id} spent $#{Float.round(spent, 4)} (cap $#{Float.round(cap, 2)})",
+            dedup_key: "budget_exceeded:#{mission_id}"
+          )
 
           fail_quest(mission_id, "Budget exceeded: spent $#{Float.round(spent, 4)} of $#{Float.round(cap, 2)} cap")
 
@@ -1497,10 +1498,11 @@ defmodule GiTF.Major.Orchestrator do
       # Nothing succeeded — fail the mission
       fail_quest(mission.id, "Implementation exhausted: all plans failed")
 
-      GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-        type: :quest_exhausted,
-        message: "Quest #{mission.id} failed: all implementation strategies exhausted"
-      })
+      GiTF.Observability.Alerts.dispatch_webhook(
+        :quest_exhausted,
+        "Quest #{mission.id} failed: all implementation strategies exhausted",
+        dedup_key: "quest_exhausted:#{mission.id}"
+      )
 
       {:ok, "completed"}
     end

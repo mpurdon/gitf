@@ -333,7 +333,15 @@ defmodule GiTF.Runtime.ModelResolver do
 
     if next_tier do
       models = GiTF.Runtime.ProviderManager.tier_models(current_provider)
-      Map.get(models, String.to_atom(next_tier))
+
+      # tier_models coerces unknown providers/tiers to "" — an empty spec is
+      # truthy, so without this guard it wins the || chain in fallback/1 and
+      # the ghost respawns with model "" (:invalid_format masking the real
+      # upstream failure).
+      case Map.get(models, String.to_atom(next_tier)) do
+        model when is_binary(model) and model != "" -> model
+        _ -> nil
+      end
     end
   end
 
@@ -414,9 +422,21 @@ defmodule GiTF.Runtime.ModelResolver do
   def provider(model_spec) do
     resolved = resolve(model_spec)
 
-    case String.split(resolved, ":", parts: 2) do
-      [provider, _model] -> provider
-      _ -> "google"
+    # Normalize to the @known_providers/tier_models key space (same mapping
+    # as ProviderCircuit.extract_provider/1): bedrock specs appear as ARNs
+    # or "amazon_bedrock:" prefixes, but the provider tables key "bedrock" —
+    # an unnormalized name makes tier_models return empty strings and every
+    # fallback resolve to "".
+    cond do
+      String.starts_with?(resolved, "arn:aws:bedrock:") ->
+        "bedrock"
+
+      true ->
+        case String.split(resolved, ":", parts: 2) do
+          ["amazon_bedrock", _model] -> "bedrock"
+          [provider, _model] -> provider
+          _ -> "google"
+        end
     end
   end
 

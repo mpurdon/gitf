@@ -41,7 +41,22 @@ defmodule GiTF.Observability.Alerts do
     # A pending approval blocks the mission until a human acts — the single
     # most important thing to push to the operator's phone.
     approval_requested: :critical,
+    # The factory stopped or is about to destroy/skip work without a human —
+    # for unattended operation these must always reach the operator.
+    factory_paused: :critical,
+    approval_escalation_failed: :critical,
+    quest_failed: :high,
     approval_timed_out: :high,
+    approval_timeout_critical: :high,
+    budget_blocked: :high,
+    budget_warning: :medium,
+    clarification_needed: :high,
+    outcome_rate_drop: :high,
+    zombie_detected: :high,
+    retries_exhausted: :high,
+    quest_timeout: :high,
+    budget_exceeded: :high,
+    quest_exhausted: :high,
     failure_rate_high: :high,
     validation_failed: :high,
     cost_spike: :high,
@@ -49,14 +64,24 @@ defmodule GiTF.Observability.Alerts do
     ghost_hard_stalled: :high,
     quest_stuck: :medium,
     quality_drop: :medium,
-    budget_escalated: :low
+    budget_escalated: :low,
+    # Good-news / informational types: kept below the webhook floor on
+    # purpose, mapped explicitly so the coverage test knows it's a decision.
+    quest_completed: :low,
+    clarification_auto_resolved: :low
   }
 
   @severity_order %{critical: 0, high: 1, medium: 2, low: 3}
 
-  @doc "Returns the severity for a given alert type."
+  @doc """
+  Returns the severity for a given alert type.
+
+  Unknown types default to :high, not :low: an alert someone bothered to
+  emit but forgot to map must fail LOUD — the :low default silently dropped
+  mission-failure and budget alerts below the webhook floor for months.
+  """
   @spec severity(atom()) :: :critical | :high | :medium | :low
-  def severity(type), do: Map.get(@severity_map, type, :low)
+  def severity(type), do: Map.get(@severity_map, type, :high)
 
   @doc "Check all alert rules and return triggered alerts"
   @spec check_alerts(keyword()) :: [{atom(), String.t()}]

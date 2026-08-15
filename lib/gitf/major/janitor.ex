@@ -157,23 +157,13 @@ defmodule GiTF.Major.Janitor do
   # -- Private: stuck op recovery --------------------------------------------
 
   defp recover_stuck_jobs do
-    stuck_jobs = GiTF.Archive.by_index(:ops, :status, "running")
+    stuck_jobs =
+      GiTF.Archive.by_index(:ops, :status, "running") ++
+        GiTF.Archive.by_index(:ops, :status, "assigned")
 
     Enum.each(stuck_jobs, fn op ->
-      worker_alive? =
-        case op.ghost_id do
-          nil ->
-            false
-
-          ghost_id ->
-            case GiTF.Ghost.Worker.lookup(ghost_id) do
-              {:ok, pid} -> Process.alive?(pid)
-              :error -> false
-            end
-        end
-
-      if !worker_alive? do
-        Logger.warning("Recovering stuck op #{op.id} (worker dead)")
+      if !worker_alive?(op.ghost_id) do
+        Logger.warning("Recovering stuck op #{op.id} (status #{op.status}, worker dead)")
         GiTF.Ops.fail(op.id)
 
         # Trigger retry via delayed_retry on Major (same path as link-based failures).
@@ -183,6 +173,26 @@ defmodule GiTF.Major.Janitor do
         end
       end
     end)
+
+    # A pending op must not carry a ghost assignment — one pointing at a dead
+    # ghost can neither be spawned (:already_assigned) nor picked up, the
+    # deadlock shape from unclean shutdowns. Reset clears the assignment (and
+    # reclaims the dead ghost's shell); the spawner then picks it up normally.
+    GiTF.Archive.by_index(:ops, :status, "pending")
+    |> Enum.filter(fn op -> op.ghost_id != nil and !worker_alive?(op.ghost_id) end)
+    |> Enum.each(fn op ->
+      Logger.warning("Clearing dead-ghost assignment on pending op #{op.id}")
+      GiTF.Ops.reset(op.id)
+    end)
+  end
+
+  defp worker_alive?(nil), do: false
+
+  defp worker_alive?(ghost_id) do
+    case GiTF.Ghost.Worker.lookup(ghost_id) do
+      {:ok, pid} -> Process.alive?(pid)
+      :error -> false
+    end
   end
 
   defp retry_exists?(op_id) do
@@ -202,13 +212,17 @@ defmodule GiTF.Major.Janitor do
     pending_timeout = timeout_cfg(:pending_timeout_seconds, 600)
     assigned_timeout = timeout_cfg(:assigned_timeout_seconds, 600)
 
-    # Timeout ops stuck in "pending" for too long
+    # Timeout ops stuck in "pending" WITH a ghost assignment — that state is
+    # never legitimate (recover_stuck_jobs clears the dead-ghost case; this
+    # catches a live-but-wedged ghost). Pending ops WITHOUT an assignment are
+    # excluded on purpose: a ready op can queue for a long time waiting on a
+    # free ghost slot, and cycling it would churn healthy queues.
     GiTF.Archive.by_index(:ops, :status, "pending")
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
-      if age > pending_timeout do
-        # Only fail if the op is supposed to be active (mission still running)
+      if age > pending_timeout and op.ghost_id != nil do
+        # Only reset if the op is supposed to be active (mission still running)
         quest_active? =
           case GiTF.Archive.get(:missions, op.mission_id) do
             %{status: s} when s in ["active", "implementation"] -> true
@@ -216,8 +230,7 @@ defmodule GiTF.Major.Janitor do
           end
 
         if quest_active? and GiTF.Ops.ready?(op.id) do
-          Logger.warning("Job #{op.id} stuck pending for #{age}s, resetting")
-          GiTF.Ops.fail(op.id)
+          Logger.warning("Job #{op.id} stuck pending+assigned for #{age}s, resetting")
           GiTF.Ops.reset(op.id, "Timed out in pending state after #{age}s")
         end
       end

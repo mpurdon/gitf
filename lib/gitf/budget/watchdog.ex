@@ -92,10 +92,11 @@ defmodule GiTF.Budget.Watchdog do
               "$#{spent} spent, new budget $#{new_budget} (escalation #{count + 1})"
           )
 
-          GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-            type: :budget_escalated,
-            message: "Quest #{mission_id} budget escalated to $#{new_budget} (#{count + 1}x)"
-          })
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :budget_escalated,
+            "Quest #{mission_id} budget escalated to $#{new_budget} (#{count + 1}x)",
+            dedup_key: "budget_escalated:#{mission_id}:#{count + 1}"
+          )
       end
 
       %{state | escalation_count: Map.put(state.escalation_count, mission_id, count + 1)}
@@ -152,10 +153,11 @@ defmodule GiTF.Budget.Watchdog do
 
     update_quest_status(mission.id, "paused_budget", %{paused_at: DateTime.utc_now()})
 
-    GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-      type: :budget_paused,
-      message: "Quest #{mission.id} paused at $#{spent} (budget exhausted after escalations)"
-    })
+    GiTF.Observability.Alerts.dispatch_webhook(
+      :budget_paused,
+      "Quest #{mission.id} paused at $#{spent} (budget exhausted after escalations)",
+      dedup_key: "budget_paused:#{mission.id}"
+    )
   end
 
   defp check_paused_quests do
@@ -207,11 +209,11 @@ defmodule GiTF.Budget.Watchdog do
 
           GiTF.Missions.update_status!(mission.id)
 
-          GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-            type: :budget_auto_failed,
-            message:
-              "Quest #{mission.id} auto-failed after #{@pause_grace_hours}h budget pause grace period"
-          })
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :budget_auto_failed,
+            "Quest #{mission.id} auto-failed after #{@pause_grace_hours}h budget pause grace period",
+            dedup_key: "budget_auto_failed:#{mission.id}"
+          )
         end
 
       _ ->

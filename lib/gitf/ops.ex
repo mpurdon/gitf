@@ -26,8 +26,16 @@ defmodule GiTF.Ops do
 
   @transitions %{
     {"pending", :assign} => "assigned",
+    # pending self-transitions exist so recovery can operate on ops stranded
+    # pending with a stale ghost assignment (crashed ghost, unclean
+    # shutdown): reset clears the assignment, fail lets watchdogs time such
+    # ops out. Without them, both manual `op reset` (422) and the
+    # timeout_stale_jobs janitor were no-ops on exactly the stuck shape.
+    {"pending", :reset} => "pending",
+    {"pending", :fail} => "failed",
     {"assigned", :start} => "running",
     {"assigned", :reset} => "pending",
+    {"assigned", :fail} => "failed",
     {"running", :reset} => "pending",
     {"running", :complete} => "done",
     {"running", :fail} => "failed",
@@ -229,8 +237,6 @@ defmodule GiTF.Ops do
         {:error, :not_found}
 
       {:ok, %{ghost_id: ghost_id}} ->
-        cleanup_ghost_and_shell(ghost_id)
-
         result =
           Archive.update(:ops, op_id, fn op ->
             case validate_transition(op.status, :reset) do
@@ -259,10 +265,22 @@ defmodule GiTF.Ops do
             end
           end)
 
-        # Nudge Major's spawner so the reset op gets picked up immediately
-        case Process.whereis(GiTF.Major) do
-          pid when is_pid(pid) -> send(pid, :spawn_ready_jobs)
-          _ -> :ok
+        case result do
+          {:ok, _} ->
+            # Cleanup only after the transition is accepted — it deletes the
+            # ghost's shell/worktree (and any partial work on its branch), so
+            # running it before validation destroyed work on every refused
+            # reset attempt.
+            cleanup_ghost_and_shell(ghost_id)
+
+            # Nudge Major's spawner so the reset op gets picked up immediately
+            case Process.whereis(GiTF.Major) do
+              pid when is_pid(pid) -> send(pid, :spawn_ready_jobs)
+              _ -> :ok
+            end
+
+          _ ->
+            :ok
         end
 
         result

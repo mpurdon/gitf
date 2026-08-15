@@ -97,7 +97,11 @@ defmodule GiTF.Exfil do
   defp mark_jobs_stopped do
     GiTF.Archive.filter(:ops, fn j -> j.status in ["running", "assigned"] end)
     |> Enum.each(fn op ->
-      GiTF.Archive.put(:ops, %{op | status: "pending"})
+      # ghost_id must be cleared with the demotion: the ghost is about to be
+      # stopped, and a pending op that still points at a dead ghost can
+      # neither be respawned (:already_assigned) nor reset — the deadlock
+      # that stalled missions until 2026-08-15.
+      GiTF.Archive.put(:ops, %{op | status: "pending", ghost_id: nil})
     end)
   rescue
     e -> Logger.warning("Exfil: mark_jobs_stopped failed: #{Exception.message(e)}")

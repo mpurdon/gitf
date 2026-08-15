@@ -1064,6 +1064,13 @@ defmodule GiTF.Major do
       %{state | retry_pending: MapSet.put(state.retry_pending, op_id)}
     else
       Logger.warning("Job #{op_id} exhausted #{state.max_retries} retries")
+
+      GiTF.Observability.Alerts.dispatch_webhook(
+        :retries_exhausted,
+        "Op #{op_id} exhausted #{state.max_retries} retries and will not be reattempted",
+        dedup_key: "retries_exhausted:#{op_id}"
+      )
+
       GiTF.Ops.unblock_dependents(op_id)
       unblock_scout_parent(op_id)
       best_effort_update_quest_status(op_id)

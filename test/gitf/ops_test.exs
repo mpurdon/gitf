@@ -215,9 +215,14 @@ defmodule GiTF.OpsTest do
       assert {:error, :invalid_transition} = Ops.complete(op.id)
     end
 
-    test "cannot fail a pending op", %{mission: mission, sector: sector} do
+    test "can fail a pending op (recovery from stranded assignments)", %{
+      mission: mission,
+      sector: sector
+    } do
+      # pending -> fail exists so watchdogs can time out ops stranded
+      # pending with a stale ghost assignment after an unclean shutdown.
       {:ok, op} = create_job(mission, sector)
-      assert {:error, :invalid_transition} = Ops.fail(op.id)
+      assert {:ok, %{status: "failed"}} = Ops.fail(op.id)
     end
 
     test "cannot unblock a pending op", %{mission: mission, sector: sector} do
@@ -235,9 +240,18 @@ defmodule GiTF.OpsTest do
       assert {:error, :invalid_transition} = Ops.block(op.id)
     end
 
-    test "cannot reset a pending op", %{mission: mission, sector: sector} do
+    test "can reset a pending op, clearing a stale ghost assignment", %{
+      mission: mission,
+      sector: sector
+    } do
+      # pending -> reset exists so a pending op left pointing at a dead
+      # ghost (unclean shutdown) can be unstuck — previously this 422'd
+      # while the spawner refused the op as :already_assigned.
+      ghost = create_bee()
       {:ok, op} = create_job(mission, sector)
-      assert {:error, :invalid_transition} = Ops.reset(op.id)
+      {:ok, _} = GiTF.Archive.update(:ops, op.id, fn j -> %{j | ghost_id: ghost.id} end)
+
+      assert {:ok, %{status: "pending", ghost_id: nil, retry_count: 1}} = Ops.reset(op.id)
     end
 
     test "can reset a running op (aborts ghost + returns to pending)", %{mission: mission, sector: sector} do
