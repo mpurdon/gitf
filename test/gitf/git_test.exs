@@ -3,6 +3,11 @@ defmodule GiTF.GitTest do
 
   alias GiTF.Git
 
+  # Absolute path so subprocess spawns survive other tests' temporary
+  # PATH narrowing (env vars are process-global; System.cmd raises
+  # :enoent when the executable can't be resolved).
+  @git System.find_executable("git")
+
   describe "local_path?/1" do
     test "recognizes absolute paths" do
       assert Git.local_path?("/home/user/repo")
@@ -49,7 +54,7 @@ defmodule GiTF.GitTest do
       tmp = Path.join(System.tmp_dir!(), "gitf_safe_rb_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(tmp)
 
-      run = fn args -> System.cmd("git", args, cd: tmp, stderr_to_stdout: true) end
+      run = fn args -> System.cmd(@git, args, cd: tmp, stderr_to_stdout: true) end
       run.(["init", "-q"])
       run.(["config", "user.email", "t@t.dev"])
       run.(["config", "user.name", "t"])
@@ -70,14 +75,14 @@ defmodule GiTF.GitTest do
       assert {:ok, {:stashed, _label}} = Git.safe_rollback(repo, "mission-1")
 
       # Working tree is clean now (changes moved to a stash)...
-      {status, 0} = System.cmd("git", ["status", "--porcelain"], cd: repo, stderr_to_stdout: true)
+      {status, 0} = System.cmd(@git, ["status", "--porcelain"], cd: repo, stderr_to_stdout: true)
       assert String.trim(status) == ""
 
       # ...but nothing was destroyed: the stash holds the tracked + untracked work.
-      {stash_list, 0} = System.cmd("git", ["stash", "list"], cd: repo, stderr_to_stdout: true)
+      {stash_list, 0} = System.cmd(@git, ["stash", "list"], cd: repo, stderr_to_stdout: true)
       assert stash_list =~ "gitf-failed-mission-1"
 
-      {_, 0} = System.cmd("git", ["stash", "pop"], cd: repo, stderr_to_stdout: true)
+      {_, 0} = System.cmd(@git, ["stash", "pop"], cd: repo, stderr_to_stdout: true)
       assert File.read!(Path.join(repo, "committed.txt")) == "human-edit\n"
       assert File.read!(Path.join(repo, "untracked.txt")) == "human-new\n"
     end

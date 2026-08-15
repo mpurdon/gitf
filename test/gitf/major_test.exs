@@ -84,9 +84,12 @@ defmodule GiTF.MajorTest do
 
   describe "launch/0" do
     test "returns error when Claude is not available", %{gitf_root: _gitf_root} do
-      # Temporarily break PATH to ensure Claude can't be found
+      # Temporarily narrow PATH so Claude can't be found. Keep /usr/bin:
+      # env vars are process-global, so concurrently running async tests
+      # still need git/sh resolvable during this window ("/empty" here
+      # caused :enoent flakes in GitTest's System.cmd calls).
       original_path = System.get_env("PATH")
-      System.put_env("PATH", "/empty")
+      System.put_env("PATH", "/usr/bin")
 
       Major.start_session()
       result = Major.launch()
