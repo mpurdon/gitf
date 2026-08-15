@@ -238,6 +238,18 @@ defmodule GiTF.Git do
     end
   end
 
+  @doc "True when a remote-tracking ref like \"origin/main\" exists."
+  @spec remote_branch_exists?(String.t(), String.t()) :: boolean()
+  def remote_branch_exists?(repo_path, remote_branch) do
+    case safe_cmd(["rev-parse", "--verify", "refs/remotes/#{remote_branch}"],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> true
+      _ -> false
+    end
+  end
+
   @doc "Creates a new branch from a base ref."
   @spec branch_create(String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
   def branch_create(repo_path, branch, base) do

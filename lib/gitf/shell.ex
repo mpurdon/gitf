@@ -20,11 +20,11 @@ defmodule GiTF.Shell do
   @spec create(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def create(sector_id, ghost_id, opts \\ []) do
     branch = Keyword.get(opts, :branch, "ghost/#{ghost_id}")
-    base_branch = Keyword.get(opts, :base_branch)
     gitf_root = Keyword.get(opts, :gitf_root)
 
     with {:ok, sector} <- GiTF.Sector.get(sector_id),
          :ok <- validate_sector_path(sector),
+         base_branch = Keyword.get(opts, :base_branch) || remote_base_branch(sector.path),
          worktree_path = build_worktree_path(sector.path, ghost_id),
          {:ok, _path} <- Git.worktree_add(sector.path, worktree_path, branch, base_branch),
          :ok <- maybe_generate_settings(ghost_id, gitf_root, worktree_path),
@@ -233,6 +233,23 @@ defmodule GiTF.Shell do
   defp validate_sector_path(%{path: nil}), do: {:error, :sector_has_no_path}
   defp validate_sector_path(%{path: path}) when is_binary(path), do: :ok
   defp validate_sector_path(_sector), do: {:error, :sector_has_no_path}
+
+  # Missions must start from the remote's truth, not the clone's local main:
+  # local main accumulates the factory's own merge commits and diverges
+  # further whenever PRs are squash-merged or history is rewritten on
+  # GitHub. Basing new worktrees on a freshly-fetched origin/<main> makes
+  # all of those non-events. Falls back to sector HEAD (nil) for
+  # remoteless/offline sectors. Explicit :base_branch opts (phase ghosts
+  # building on an impl ghost's branch) always win and skip this.
+  defp remote_base_branch(repo_path) do
+    with :ok <- Git.fetch(repo_path, "origin"),
+         {:ok, main} <- GiTF.Sync.detect_main_branch(repo_path),
+         true <- Git.remote_branch_exists?(repo_path, "origin/#{main}") do
+      "origin/#{main}"
+    else
+      _ -> nil
+    end
+  end
 
   defp build_worktree_path(sector_path, ghost_id) do
     Path.join([sector_path, "ghosts", ghost_id])
