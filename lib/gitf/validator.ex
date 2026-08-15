@@ -34,6 +34,16 @@ defmodule GiTF.Validator do
             {:error, reason} -> [{:error, :custom_validation_failed, reason} | results]
           end
         else
+          # Without a validation_command NOTHING is executed — the phase
+          # degrades to LLM code-reading only. That must be loud, not
+          # silent: it is the difference between "the change was run" and
+          # "the change was read".
+          Logger.warning(
+            "Sector #{sector.id} (#{sector.name}) has no validation_command — " <>
+              "validation is static review only; nothing was compiled or run. " <>
+              "Set one via: gitf sector set #{sector.id} --validation-command \"...\""
+          )
+
           results
         end
 

@@ -172,6 +172,7 @@ defmodule GiTF.Web.Router do
     post("/sectors", ApiController, :add_sector)
     get("/sectors", ApiController, :list_sectors)
     get("/sectors/:id", ApiController, :show_sector)
+    put("/sectors/:id", ApiController, :update_sector)
     delete("/sectors/:id", ApiController, :remove_sector)
     post("/sectors/:id/use", ApiController, :use_sector)
 

@@ -565,6 +565,42 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
+  # Only operator-tunable fields; identity/paths are immutable after add.
+  @sector_mutable_fields %{
+    "validation_command" => :validation_command,
+    "sync_strategy" => :sync_strategy
+  }
+
+  def update_sector(conn, %{"id" => id} = params) do
+    updates =
+      Enum.reduce(@sector_mutable_fields, %{}, fn {key, field}, acc ->
+        case Map.fetch(params, key) do
+          {:ok, value} -> Map.put(acc, field, value)
+          :error -> acc
+        end
+      end)
+
+    cond do
+      updates == %{} ->
+        error(conn, 422, "no updatable fields given (#{Enum.join(Map.keys(@sector_mutable_fields), ", ")})")
+
+      not valid_sync_strategy?(updates) ->
+        error(conn, 422, "sync_strategy must be auto_merge, pr_branch, or manual")
+
+      true ->
+        case GiTF.Archive.update(:sectors, id, &Map.merge(&1, updates)) do
+          {:ok, sector} -> json(conn, %{data: serialize_sector(sector)})
+          {:error, :not_found} -> error(conn, 404, "sector not found")
+          {:error, reason} -> error(conn, 422, reason)
+        end
+    end
+  end
+
+  defp valid_sync_strategy?(%{sync_strategy: s}),
+    do: s in ["auto_merge", "pr_branch", "manual"]
+
+  defp valid_sync_strategy?(_), do: true
+
   def list_sectors(conn, _params) do
     sectors = GiTF.Sector.list()
     json(conn, %{data: Enum.map(sectors, &serialize_sector/1)})

@@ -1786,6 +1786,45 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:sector, :set], result) do
+    id = result_get(result, :args, :id)
+
+    updates =
+      [:validation_command, :sync_strategy]
+      |> Enum.reduce(%{}, fn key, acc ->
+        case result_get(result, :options, key) do
+          nil -> acc
+          "" when key == :validation_command -> Map.put(acc, key, nil)
+          value -> Map.put(acc, key, value)
+        end
+      end)
+
+    if updates == %{} do
+      Format.error("Nothing to set. Pass --validation-command and/or --sync-strategy.")
+      System.halt(1)
+    end
+
+    result_or_error =
+      if GiTF.Client.remote?() do
+        GiTF.Client.put("/api/v1/sectors/#{id}", updates)
+      else
+        GiTF.Archive.update(:sectors, id, &Map.merge(&1, updates))
+      end
+
+    case result_or_error do
+      {:ok, _} ->
+        Enum.each(updates, fn {k, v} -> Format.success("#{k} = #{inspect(v)}") end)
+        Format.info("Sector #{id} updated.")
+
+      {:error, :not_found} ->
+        show_not_found_error(:sector, id)
+
+      {:error, reason} ->
+        Format.error("Failed to update sector: #{inspect(reason)}")
+        System.halt(1)
+    end
+  end
+
   defp dispatch([:sector, :rename], result) do
     name = result_get(result, :args, :name)
     new_name = result_get(result, :args, :new_name)
@@ -3870,6 +3909,34 @@ defmodule GiTF.CLI do
                   help: "New name for the sector",
                   required: true,
                   parser: :string
+                ]
+              ]
+            ],
+            set: [
+              name: "set",
+              about: "Update a sector's tunable settings (validation_command, sync_strategy)",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Sector ID (sec-...)",
+                  required: true,
+                  parser: :string
+                ]
+              ],
+              options: [
+                validation_command: [
+                  long: "--validation-command",
+                  value_name: "CMD",
+                  help: "Shell command run in each ghost worktree during validation (\"\" to clear)",
+                  parser: :string,
+                  required: false
+                ],
+                sync_strategy: [
+                  long: "--sync-strategy",
+                  value_name: "STRATEGY",
+                  help: "auto_merge | pr_branch | manual",
+                  parser: :string,
+                  required: false
                 ]
               ]
             ]
