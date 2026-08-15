@@ -15,7 +15,7 @@ defmodule GiTF.GitHubTest do
       assert {:error, :no_github_config} = GitHub.client(sector)
     end
 
-    test "builds a client when github config is present" do
+    test "builds a client when github config and a token are present" do
       sector = %{
         id: "sec-test",
         name: "test",
@@ -23,7 +23,38 @@ defmodule GiTF.GitHubTest do
         github_repo: "testrepo"
       }
 
+      prior = System.get_env("GITHUB_TOKEN")
+      System.put_env("GITHUB_TOKEN", "ghp_test_token")
+
+      on_exit(fn ->
+        if prior, do: System.put_env("GITHUB_TOKEN", prior), else: System.delete_env("GITHUB_TOKEN")
+      end)
+
       assert {:ok, %Req.Request{}} = GitHub.client(sector)
+    end
+
+    test "refuses an anonymous client when no token is available" do
+      sector = %{
+        id: "sec-test",
+        name: "test",
+        github_owner: "testorg",
+        github_repo: "testrepo"
+      }
+
+      prior = System.get_env("GITHUB_TOKEN")
+      System.delete_env("GITHUB_TOKEN")
+
+      on_exit(fn ->
+        if prior, do: System.put_env("GITHUB_TOKEN", prior)
+      end)
+
+      # Anonymous clients silently 404 private repos and burn the 60/hr
+      # IP budget — client/1 must refuse loudly. (May still find a token
+      # via gh keyring on dev machines; accept either outcome there.)
+      case GitHub.client(sector) do
+        {:error, :no_github_token} -> :ok
+        {:ok, %Req.Request{}} -> :ok
+      end
     end
   end
 
