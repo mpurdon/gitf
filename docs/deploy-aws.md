@@ -153,8 +153,23 @@ to know about (both bit us on day one):
 - **Anthropic use-case form**: a new account gets a handful of grace
   invocations, then every Anthropic model returns
   `ResourceNotFoundException: Model use case details have not been
-  submitted` account-wide. One-time console form (Bedrock → Model access
-  → Anthropic), ~15 min to propagate.
+  submitted` account-wide. The old console "Model access" page is retired;
+  the whole flow is scriptable (~15 min to propagate):
+
+  ```sh
+  # one-time, account-wide: submit the use-case form (base64 JSON)
+  aws bedrock put-use-case-for-model-access --form-data "$(python3 -c "
+  import json,base64
+  d={'companyName':'...','companyWebsite':'https://...','intendedUsers':'1',
+     'industryOption':'Technology','otherIndustryOption':'','useCases':'...'}
+  print(base64.b64encode(json.dumps(d).encode()).decode())")"
+
+  # per model: accept the marketplace agreement
+  TOKEN=$(aws bedrock list-foundation-model-agreement-offers \
+    --model-id anthropic.claude-sonnet-4-6 --query 'offers[0].offerToken' --output text)
+  aws bedrock create-foundation-model-agreement \
+    --model-id anthropic.claude-sonnet-4-6 --offer-token "$TOKEN"
+  ```
 - **Per-model availability**: newest models (e.g. claude-sonnet-5) can
   return `403: not available for this account` until access is granted,
   while older tiers work. Verify with a one-line
