@@ -1502,8 +1502,17 @@ defmodule GiTF.CLI do
         System.halt(1)
       end
 
-      name = result_get(result, :options, :name)
-      opts = if name, do: [name: name], else: []
+      # Forward ALL registration flags, not just name — dropping them here
+      # once caused a sector registered as pr_branch to land as manual and
+      # then get boot-backfilled to auto_merge (unreviewed pushes to main).
+      opts =
+        [:name, :sync_strategy, :validation_command, :github_owner, :github_repo]
+        |> Enum.reduce([], fn key, acc ->
+          case result_get(result, :options, key) do
+            nil -> acc
+            val -> Keyword.put(acc, key, val)
+          end
+        end)
 
       case GiTF.Client.add_sector(path, opts) do
         {:ok, sector} -> Format.success("Sector \"#{sector.name}\" registered (#{sector.id})")

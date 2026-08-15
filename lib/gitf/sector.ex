@@ -451,8 +451,11 @@ defmodule GiTF.Sector do
         "pr_branch"
 
       {:ok, %{status: 404}} ->
-        # Confirmed: no protection rules — direct merge is safe
-        "auto_merge"
+        # No protection rules — a direct merge would *work*, but silently
+        # choosing unreviewed pushes to main is an operator decision, not a
+        # backfill's. (This once flipped a freshly-registered sector to
+        # auto_merge overnight.) auto_merge is opt-in only.
+        "pr_branch"
 
       _ ->
         # Can't confirm unprotected — default to PR for safety
