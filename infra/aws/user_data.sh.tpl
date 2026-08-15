@@ -67,6 +67,11 @@ echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg]
   >/etc/apt/sources.list.d/github-cli.list
 apt-get update && apt-get install -y gh
 
+# Node.js (nodesource LTS) — sector validation_commands routinely need
+# npm/npx (typecheck, builds, future playwright probes)
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y nodejs
+
 # Tailscale (the operator runs `tailscale up` interactively afterwards)
 curl -fsSL https://tailscale.com/install.sh | sh
 
