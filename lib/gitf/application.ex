@@ -6,8 +6,17 @@ defmodule GiTF.Application do
 
   @impl true
   def start(_type, _args) do
-    if GiTF.Client.remote?() do
-      # Remote mode: thin client, no local services needed
+    # Make [server] config visible before the boot-mode decision. Without
+    # this, config-file remote mode (`gitf login`, no GITF_SERVER env) was
+    # invisible here and every CLI invocation booted the full local app.
+    # Preload is a pure :persistent_term put and idempotent — start_full_app
+    # re-preloads with the project root overlay.
+    GiTF.Config.Provider.preload(nil)
+
+    if GiTF.Client.remote?() and one_shot_cli?() do
+      # Remote-mode one-shot: thin client, no local services needed.
+      # `gitf server`/`gitf daemon`, releases, and mix/iex/tests always get
+      # the full app even when a remote URL is configured.
       Supervisor.start_link([], strategy: :one_for_one, name: GiTF.Supervisor)
     else
       start_full_app()
@@ -190,25 +199,15 @@ defmodule GiTF.Application do
          ]}
     }
 
-    endpoint_children = endpoint_child()
-
-    # Graceful shutdown: drain in-flight HTTP requests before stopping
-    # cowboy listeners. Must come after endpoints in the sibling list, and
-    # only when an endpoint is actually running.
-    drainer_children =
-      if endpoint_children == [],
-        do: [],
-        else: [{Plug.Cowboy.Drainer, refs: [GiTF.Web.Endpoint.HTTP]}]
-
     interface_children =
-      endpoint_children ++
+      endpoint_child() ++
         [
           {GiTF.MCPServer.SocketListener, []},
           {GiTF.ViewModel, []},
           {GiTF.PubSubBridge, []},
           # Planning-studio sessions (one GenServer per open studio conversation)
           {DynamicSupervisor, name: GiTF.Studio.SessionSupervisor, strategy: :one_for_one}
-        ] ++ drainer_children
+        ]
 
     interface = %{
       id: GiTF.Interface.Supervisor,
@@ -339,9 +338,14 @@ defmodule GiTF.Application do
   # is NOT a valid probe (it succeeds under mix too — it just returns the
   # head of the plain arguments).
   defp one_shot_cli? do
-    :init.get_argument(:gitf_escript) != :error and
-      first_subcommand() not in ["server", "daemon"]
+    :init.get_argument(:gitf_escript) != :error and not server_subcommand?()
   end
+
+  # Single definition of which subcommands mean "run as a daemon" — shared
+  # by one_shot_cli?/0 and daemon_mode?/0 so the two can never disagree
+  # (a subcommand added to only one list would boot a daemon that silently
+  # skipped its endpoint).
+  defp server_subcommand?, do: first_subcommand() in ["server", "daemon"]
 
   defp try_bind_port(port, 0) do
     fail_or_skip(port, "Port #{port} still in use after retries")
@@ -351,7 +355,14 @@ defmodule GiTF.Application do
     case :gen_tcp.listen(port, reuseaddr: true) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
-        [{GiTF.Web.Endpoint, []}]
+
+        # The drainer travels with the endpoint: it must sit after it in the
+        # sibling list so shutdown drains in-flight requests before the
+        # listener stops, and it must not exist when the endpoint doesn't.
+        [
+          {GiTF.Web.Endpoint, []},
+          {Plug.Cowboy.Drainer, refs: [GiTF.Web.Endpoint.HTTP]}
+        ]
 
       {:error, :eaddrinuse} ->
         if retries > 1 do
@@ -388,8 +399,7 @@ defmodule GiTF.Application do
   # interactive CLI run that tolerates a missing endpoint. This is THE mode
   # predicate — stdout logging keys off it too, so the two never disagree.
   defp daemon_mode? do
-    System.get_env("RELEASE_NAME") != nil or
-      first_subcommand() in ["server", "daemon"]
+    System.get_env("RELEASE_NAME") != nil or server_subcommand?()
   end
 
   # The first positional escript argument, skipping global flags and their

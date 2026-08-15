@@ -96,7 +96,9 @@ jobs:
       - name: Read version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: version
-        run: echo "version=$(grep -o '@version "[^"]*"' mix.exs | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        env:
+          MIX_ENV: prod
+        run: echo "version=$(mix eval 'IO.puts(Mix.Project.config()[:version])')" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -126,8 +128,16 @@ jobs:
             -e "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" \
             -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
             /tmp/tap/Formula/gitf.rb
+          # A sed that silently matched nothing would publish releases the
+          # formula never points at — assert the substitutions landed.
+          grep -q "download/v${VERSION}/gitf" /tmp/tap/Formula/gitf.rb
+          grep -q "sha256 \"${SHA}\"" /tmp/tap/Formula/gitf.rb
           cd /tmp/tap
+          if git diff --quiet; then
+            echo "Formula already at ${VERSION}; nothing to bump."
+            exit 0
+          fi
           git config user.name "Ghost-Factory"
           git config user.email "factory@ghostinthefactory.com"
-          git commit -am "gitf ${VERSION}" || exit 0
+          git commit -am "gitf ${VERSION}"
           git push

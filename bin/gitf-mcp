@@ -2,29 +2,23 @@
 # MCP client for gitf.
 #
 # Remote mode (GITF_SERVER set, or [server] url in ~/.config/gitf/config.toml):
-#   runs `gitf mcp-serve`, which proxies JSON-RPC to the remote daemon's
-#   /api/v1/mcp bridge — tools answer from the factory's store.
+#   runs `gitf mcp-serve`, which boots as a thin client and proxies JSON-RPC
+#   to the remote daemon's /api/v1/mcp bridge — the escript resolves the url
+#   and api_key from config itself; this wrapper only picks the branch.
 # Local mode: connects to the local daemon's Unix socket (thin client).
 
-CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/gitf/config.toml"
+# Same path GiTF.global_config_dir/0 uses (it does not honor XDG_CONFIG_HOME,
+# so neither do we — the two readers must agree on the file).
+CONFIG="$HOME/.config/gitf/config.toml"
 
-server_field() {
-  # Prints the quoted value of a key inside the [server] section, or nothing.
-  awk -F'"' -v key="$1" \
-    '/^\[/{s = ($0 == "[server]")} s && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {print $2; exit}' \
-    "$CONFIG" 2>/dev/null
+remote_configured() {
+  [ -n "$GITF_SERVER" ] && return 0
+  [ -f "$CONFIG" ] || return 1
+  # True if a non-empty url line appears inside the [server] section.
+  awk '/^\[/{in_server = ($0 == "[server]")} in_server && /^[[:space:]]*url[[:space:]]*=[[:space:]]*"..*"/{found=1} END{exit !found}' "$CONFIG"
 }
 
-if [ -z "$GITF_SERVER" ] && [ -f "$CONFIG" ]; then
-  GITF_SERVER=$(server_field url)
-fi
-
-if [ -n "$GITF_SERVER" ]; then
-  # Export both so the escript boots as a thin client (no local services, no
-  # port binds) and proxies JSON-RPC to the remote daemon's /api/v1/mcp.
-  export GITF_SERVER
-  [ -n "$GITF_API_KEY" ] || GITF_API_KEY=$(server_field api_key)
-  [ -z "$GITF_API_KEY" ] || export GITF_API_KEY
+if remote_configured; then
   # Filter boot-time log noise from stdout, passing only JSON-RPC lines.
   exec gitf mcp-serve 2>/dev/null | grep --line-buffered '^{'
 fi
@@ -48,12 +42,7 @@ fi
 i=0
 while [ $i -lt $RETRIES ]; do
   if [ -S "$SOCK" ]; then
-    # Test if socket is alive with a quick ping (1s timeout)
-    RESP=$(echo '{"jsonrpc":"2.0","id":0,"method":"initialize"}' | nc -w 1 -U "$SOCK" 2>/dev/null | head -1)
-    if echo "$RESP" | grep -q '"jsonrpc"'; then
-      # Socket is alive — connect for real
-      exec nc -U "$SOCK"
-    fi
+    exec nc -U "$SOCK"
   fi
   sleep 0.5
   i=$((i + 1))

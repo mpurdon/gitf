@@ -6,8 +6,16 @@ defmodule GiTF.CLI do
   alias GiTF.CLI.Format
 
   # Commands that must work while the remote server is unreachable
-  # (e.g. the factory box is idle-stopped).
-  @no_server_ping [[:self_update], [:login], [:version]]
+  # (e.g. the factory box is idle-stopped). This is a subset of
+  # @no_auto_store, which is derived from it — declare a fully-local
+  # command once, here.
+  @no_server_ping [
+    [:self_update],
+    [:login],
+    [:version],
+    [:completions],
+    [:quickref]
+  ]
 
   # -- Escript entry point ----------------------------------------------------
 
@@ -46,8 +54,11 @@ defmodule GiTF.CLI do
   end
 
   defp run_mcp_server do
-    # App is already started by the escript boot. Just run the server.
-    # Boot-time log noise on stdout is filtered by the bin/gitf-mcp wrapper.
+    # App is already started by the escript boot. Stdout belongs to the
+    # JSON-RPC stream from here on — silence the default logger like
+    # launch_tui does. (Logs emitted during app boot itself are still
+    # filtered by the bin/gitf-mcp wrapper's grep.)
+    :logger.remove_handler(:default)
     GiTF.MCPServer.run()
   end
 
@@ -281,15 +292,7 @@ defmodule GiTF.CLI do
   defp expand_defaults(argv), do: argv
 
   # Commands that manage their own store lifecycle or don't need the store.
-  @no_auto_store [
-    [:version],
-    [:server],
-    [:daemon],
-    [:completions],
-    [:quickref],
-    [:login],
-    [:self_update]
-  ]
+  @no_auto_store @no_server_ping ++ [[:server], [:daemon]]
 
   defp maybe_ensure_store(subcommand_path) do
     if subcommand_path not in @no_auto_store do
@@ -2882,6 +2885,10 @@ defmodule GiTF.CLI do
       {:error, reason} ->
         Format.error("Failed to start Tachikoma: #{inspect(reason)}")
     end
+  end
+
+  defp dispatch([:version], _result) do
+    IO.puts("gitf #{GiTF.version()}")
   end
 
   defp dispatch([:self_update], result) do

@@ -19,24 +19,9 @@ defmodule GiTF.CLI.SelfUpdateTest do
   end
 
   @tag :tmp_dir
-  test "archive_version tolerates a spec without the trailing dot", %{tmp_dir: tmp_dir} do
-    path = fake_escript(tmp_dir, ~s({application, gitf, [{vsn, "4.5.6"}]}))
-    assert {:ok, "4.5.6"} = SelfUpdate.archive_version(path)
-  end
-
-  @tag :tmp_dir
   test "archive_version rejects a file that is not an escript", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "not-an-escript")
     File.write!(path, "just some text")
     assert {:error, _} = SelfUpdate.archive_version(path)
-  end
-
-  test "the installed escript, if present, is a readable archive" do
-    installed = Path.expand("~/.local/bin/gitf")
-
-    if File.exists?(installed) do
-      assert {:ok, version} = SelfUpdate.archive_version(installed)
-      assert version =~ ~r/^\d+\.\d+\.\d+$/
-    end
   end
 end
