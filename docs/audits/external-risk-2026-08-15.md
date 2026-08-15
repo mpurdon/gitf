@@ -71,6 +71,36 @@ Idle-stop makes multi-hour wall-clock gaps routine. On the first tick after wake
 - `mix.exs:71` — `~> 0.5` req floor doesn't encode the CVE fix (0.5.17); `loadout.ex:392` follows model-supplied redirects. OTP skew: escript is OTP27 bytecode with no minimum-OTP assertion at entry. `Dockerfile:61` unpinned `npm -g claude-code` with `|| echo WARN`.
 - Gemini/misc: `gemini_cache_manager.ex:39` cache keyed on content hash without model (cross-model 400 loops for the TTL); `llm_client.ex:181-218` Gemini finishReason/blockReason unchecked → empty success + nil usage poisons cost accounting; `llm_client.ex:81` key in URL query (leaks in logs) on v1beta; `model_resolver.ex:111-118` `String.split(":") |> List.last()` → every Bedrock model's trust bucket is literally `"0"`; no GitHub rate-limit awareness anywhere (8-concurrent poller + no Retry-After handling); `provider_manager.ex:31-78` fallback tier tables contain retired/never-valid vendor model IDs (groq/together/fireworks/mistral) — the fallback chain is partly decorative.
 
+## Status (updated same day)
+
+**APPLIED** (three commits following the audit): all of C1 (GiTF.Clock +
+awake-time deadlines + boot grace); C2 delivery verification (publish push
+assert + SHA compare, 201-only PR create with redirect:false, revert-flag
+honesty + :critical alert, sync push verify, -X theirs alert, fetch-failure
+logging, report pr_url source, default-branch CI polling, gh URL regex
+extraction, {:exit,_} clause); C3 auth (AWS env-cred expiry + IMDS 403
+cache-drop + no-invented-validity, auth-aware gh :permanent classification
++ alert, no anonymous GitHub client, Telegram 400-retry/401/409 logging);
+C4 (workflow-drift hold, checkpoint ordering, .corrupt preservation,
+manifest unsafe fallback, downgrade guard, compacted-artifact rejection,
+FixContext attempt preservation, killed-status reset, string priorities,
+sector PUT 422); C5 (loud toml parse errors, TOML encoder struct/nil
+handling, doctor --fix preservation, upgrade chown repair, boot-id
+pidfiles, uninternable-etf logging); C6 (security-audit tool gating,
+validator 126/127 tool-missing, backup.sh aws check, CI assertions +
+tap-token failure + runner-label note, git 127 shape, normalize_key
+bedrock fix, Gemini cache {content,model} key + blocked-response errors,
+req >= 0.5.17 floor).
+
+**DEFERRED** (structural, tracked in the triage memory): per-record `_v`
+versioning; CLI↔daemon wire version negotiation; disk-space monitoring
+(:disksup); action SHA pins + Dependabot; self-update content digest;
+vendor fallback model-ID catalog refresh; @pipeline_phases derivation
+from workflow YAML; Dockerfile claude-code pin; GitHub rate-limit
+awareness; outcome delayed re-check before terminal seal; events-store
+count/byte cap; external dead-man heartbeat; approval Telegram commands;
+budget-cap unification; PrivateTmp docs; store cwd-walk hardening.
+
 ## Recommended fix order
 1. **C1 wake-clock** (GiTF.Clock + quiet period) — it merges/destroys work and fires on every wake.
 2. **C2 delivery verification** — publish push assert + PR-create 201/redirect:false + revert-flag honesty (all S).
