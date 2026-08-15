@@ -38,11 +38,16 @@ defmodule GiTF.TranscriptWatcherTest do
   end
 
   defp safe_stop(pid) do
+    # The alive? check races the process's own exit, and GenServer.stop on a
+    # freshly-dead pid EXITS (:noproc) rather than raising — so catch exits,
+    # not just exceptions.
     if Process.alive?(pid) do
       GenServer.stop(pid, :normal)
     end
   rescue
     _ -> :ok
+  catch
+    :exit, _ -> :ok
   end
 
   describe "start_link/1" do
