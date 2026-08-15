@@ -1,5 +1,63 @@
 #!/bin/sh
-# MCP server wrapper for gitf.
-# Filters boot-time log noise from stdout, passing only JSON-RPC lines.
-# Uses grep --line-buffered for unbuffered streaming.
-exec gitf mcp-serve 2>/dev/null | grep --line-buffered '^{'
+# MCP client for gitf.
+#
+# Remote mode (GITF_SERVER set, or [server] url in ~/.config/gitf/config.toml):
+#   runs `gitf mcp-serve`, which proxies JSON-RPC to the remote daemon's
+#   /api/v1/mcp bridge — tools answer from the factory's store.
+# Local mode: connects to the local daemon's Unix socket (thin client).
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/gitf/config.toml"
+
+server_field() {
+  # Prints the quoted value of a key inside the [server] section, or nothing.
+  awk -F'"' -v key="$1" \
+    '/^\[/{s = ($0 == "[server]")} s && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {print $2; exit}' \
+    "$CONFIG" 2>/dev/null
+}
+
+if [ -z "$GITF_SERVER" ] && [ -f "$CONFIG" ]; then
+  GITF_SERVER=$(server_field url)
+fi
+
+if [ -n "$GITF_SERVER" ]; then
+  # Export both so the escript boots as a thin client (no local services, no
+  # port binds) and proxies JSON-RPC to the remote daemon's /api/v1/mcp.
+  export GITF_SERVER
+  [ -n "$GITF_API_KEY" ] || GITF_API_KEY=$(server_field api_key)
+  [ -z "$GITF_API_KEY" ] || export GITF_API_KEY
+  # Filter boot-time log noise from stdout, passing only JSON-RPC lines.
+  exec gitf mcp-serve 2>/dev/null | grep --line-buffered '^{'
+fi
+
+# -- Local mode: Unix socket thin client -------------------------------------
+# Checks PID file to detect stale sockets immediately.
+# Retries for up to 15 seconds if the daemon is still starting.
+
+SOCK="${GITF_MCP_SOCK:-$HOME/.config/gitf/mcp.sock}"
+PIDFILE="${SOCK}.pid"
+RETRIES=30
+
+# If socket exists but PID file shows a dead process, remove stale socket
+if [ -S "$SOCK" ] && [ -f "$PIDFILE" ]; then
+  OLD_PID=$(cat "$PIDFILE" 2>/dev/null)
+  if [ -n "$OLD_PID" ] && ! kill -0 "$OLD_PID" 2>/dev/null; then
+    rm -f "$SOCK" "$PIDFILE"
+  fi
+fi
+
+i=0
+while [ $i -lt $RETRIES ]; do
+  if [ -S "$SOCK" ]; then
+    # Test if socket is alive with a quick ping (1s timeout)
+    RESP=$(echo '{"jsonrpc":"2.0","id":0,"method":"initialize"}' | nc -w 1 -U "$SOCK" 2>/dev/null | head -1)
+    if echo "$RESP" | grep -q '"jsonrpc"'; then
+      # Socket is alive — connect for real
+      exec nc -U "$SOCK"
+    fi
+  fi
+  sleep 0.5
+  i=$((i + 1))
+done
+
+echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"gitf daemon not running. Start it with: gitf daemon"}}' >&2
+exit 1
