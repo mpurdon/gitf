@@ -190,18 +190,25 @@ defmodule GiTF.Application do
          ]}
     }
 
+    endpoint_children = endpoint_child()
+
+    # Graceful shutdown: drain in-flight HTTP requests before stopping
+    # cowboy listeners. Must come after endpoints in the sibling list, and
+    # only when an endpoint is actually running.
+    drainer_children =
+      if endpoint_children == [],
+        do: [],
+        else: [{Plug.Cowboy.Drainer, refs: [GiTF.Web.Endpoint.HTTP]}]
+
     interface_children =
-      endpoint_child() ++
+      endpoint_children ++
         [
           {GiTF.MCPServer.SocketListener, []},
           {GiTF.ViewModel, []},
           {GiTF.PubSubBridge, []},
           # Planning-studio sessions (one GenServer per open studio conversation)
-          {DynamicSupervisor, name: GiTF.Studio.SessionSupervisor, strategy: :one_for_one},
-          # Graceful shutdown: drain in-flight HTTP requests before stopping
-          # cowboy listeners. Must come after endpoints in the sibling list.
-          {Plug.Cowboy.Drainer, refs: [GiTF.Web.Endpoint.HTTP]}
-        ]
+          {DynamicSupervisor, name: GiTF.Studio.SessionSupervisor, strategy: :one_for_one}
+        ] ++ drainer_children
 
     interface = %{
       id: GiTF.Interface.Supervisor,
@@ -313,8 +320,26 @@ defmodule GiTF.Application do
   # nothing listening is the worst failure mode under a service manager, so
   # server/release boots fail hard instead.
   defp endpoint_child do
-    port = Application.get_env(:gitf, GiTF.Web.Endpoint)[:http][:port] || 4000
-    try_bind_port(port, 3)
+    if one_shot_cli?() do
+      # One-shot CLI invocations never serve HTTP. The bind probe below is
+      # also unreliable for them: on macOS a wildcard-address probe with
+      # reuseaddr succeeds while another process holds 127.0.0.1:<port>, so
+      # the endpoint child then crashes the whole boot with :eaddrinuse.
+      []
+    else
+      port = Application.get_env(:gitf, GiTF.Web.Endpoint)[:http][:port] || 4000
+      try_bind_port(port, 3)
+    end
+  end
+
+  # An escript invocation whose subcommand isn't server/daemon. Releases,
+  # mix/iex, and tests are never one-shots — they keep the probe path (and
+  # LiveView tests need the endpoint in the tree).
+  defp one_shot_cli? do
+    _ = :escript.script_name()
+    first_subcommand() not in ["server", "daemon"]
+  catch
+    _, _ -> false
   end
 
   defp try_bind_port(port, 0) do
@@ -368,11 +393,13 @@ defmodule GiTF.Application do
 
   # The first positional escript argument, skipping global flags and their
   # values — matching a literal "server"/"daemon" anywhere in argv would trip
-  # on mission goals or ids that merely contain those words.
+  # on mission goals or ids that merely contain those words. The head of the
+  # plain arguments is the escript path itself, not an argument.
   defp first_subcommand do
-    :init.get_plain_arguments()
-    |> Enum.map(&List.to_string/1)
-    |> skip_global_flags()
+    case Enum.map(:init.get_plain_arguments(), &List.to_string/1) do
+      [_script_path | args] -> skip_global_flags(args)
+      [] -> nil
+    end
   end
 
   defp skip_global_flags([flag, _value | rest]) when flag in ["-w", "--workspace"],
