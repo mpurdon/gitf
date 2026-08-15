@@ -43,14 +43,19 @@ defmodule GiTF.Workflow.Advancer do
 
     case Workflow.phase(workflow, phase_id) do
       {:error, :not_found} ->
-        # Mission's current_phase isn't in this workflow — most likely
-        # the operator switched workflows mid-mission to one that
-        # doesn't include the current phase. The orchestrator should
-        # advance to the workflow's entry phase.
-        case Workflow.entry_phase(workflow) do
-          {:ok, %Phase{id: entry}} -> {:dispatch, entry}
-          {:error, _} = err -> err
-        end
+        # Mission's current_phase isn't in this workflow. This is NOT
+        # only "operator switched workflows" — workflows are re-resolved
+        # from priv/ on every advance, so a deploy that renames/removes a
+        # phase id lands every in-flight mission here. Rewinding to the
+        # entry phase re-paid the whole pipeline (and could re-implement
+        # over merged work). Hold and alert instead; the operator decides.
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :workflow_phase_drift,
+          "Mission #{mission.id} is in phase '#{phase_id}' which the current workflow doesn't define — holding (deploy renamed a phase, or workflow switched mid-mission)",
+          dedup_key: "workflow_drift:#{mission.id}"
+        )
+
+        {:error, {:workflow_drift, phase_id}}
 
       {:ok, %Phase{} = phase_config} ->
         artifact = GiTF.Missions.get_artifact(mission.id, phase_id)

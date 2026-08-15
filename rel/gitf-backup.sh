@@ -12,6 +12,14 @@ set -euo pipefail
 BUCKET="${GITF_BACKUP_BUCKET:-}"
 [[ -n "$BUCKET" ]] || exit 0
 
+# A missing aws CLI means backups silently stop until restore day —
+# fail loudly into the journal AND syslog so it's greppable/alertable.
+if ! command -v aws >/dev/null 2>&1; then
+  logger -p user.err -t gitf-backup "aws CLI not found — BACKUPS ARE NOT RUNNING"
+  echo "gitf-backup: aws CLI not found — BACKUPS ARE NOT RUNNING" >&2
+  exit 1
+fi
+
 GITF_HOME="${GITF_HOME:-/var/lib/gitf}"
 HOST_PREFIX="s3://${BUCKET}/$(hostname)"
 

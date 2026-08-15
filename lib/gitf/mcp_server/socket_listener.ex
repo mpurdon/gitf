@@ -127,17 +127,46 @@ defmodule GiTF.MCPServer.SocketListener do
 
   # -- PID file management -----------------------------------------------------
 
+  # Linux exposes a per-boot UUID; on other platforms we can't tell, so
+  # treat the file as same-boot (previous behavior).
+  defp current_boot_id do
+    case File.read("/proc/sys/kernel/random/boot_id") do
+      {:ok, id} -> String.trim(id)
+      _ -> ""
+    end
+  end
+
+  defp stale_boot?(content) do
+    case content |> String.trim() |> String.split("\n") do
+      [_pid, recorded_boot | _] when recorded_boot != "" ->
+        current = current_boot_id()
+        current != "" and recorded_boot != current
+
+      _ ->
+        false
+    end
+  end
+
   defp cleanup_stale_socket(path) do
     pid_file = pid_path()
 
     case File.read(pid_file) do
       {:ok, content} ->
-        old_pid = String.trim(content)
+        [old_pid | _] = content |> String.trim() |> String.split("\n")
         our_pid = to_string(:os.getpid())
 
         cond do
           old_pid == our_pid ->
             # Same process (restart within same VM) — clean up
+            File.rm(path)
+            File.rm(pid_file)
+            :ok
+
+          stale_boot?(content) ->
+            # PID file from a previous OS boot: PIDs are recycled fast
+            # after reboot, so kill -0 on a reused PID lied "already
+            # running" and blocked the daemon after every power event.
+            Logger.info("Removing stale MCP socket (pid file from a previous boot)")
             File.rm(path)
             File.rm(pid_file)
             :ok
@@ -179,7 +208,9 @@ defmodule GiTF.MCPServer.SocketListener do
   end
 
   defp write_pid_file do
-    File.write!(pid_path(), to_string(:os.getpid()))
+    # PID + boot id: a pid alone can't distinguish "running" from "reused
+    # after reboot" (see stale_boot?/1).
+    File.write!(pid_path(), to_string(:os.getpid()) <> "\n" <> current_boot_id())
   end
 
   # -- Connection handler ------------------------------------------------------

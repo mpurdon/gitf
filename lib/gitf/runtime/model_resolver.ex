@@ -109,9 +109,18 @@ defmodule GiTF.Runtime.ModelResolver do
   def normalize_key(nil), do: nil
 
   def normalize_key(model) when is_binary(model) do
+    # parts: 2 — bedrock IDs carry a trailing version colon
+    # ("...claude-sonnet-4-6...-v1:0") and ollama uses ":tag"; List.last
+    # of a full split collapsed every such model into a bucket named "0"
+    # (or "32b"), destroying per-model trust/performance data. ARNs keep
+    # only their final path segment.
     model
-    |> String.split(":")
+    |> String.split(":", parts: 2)
     |> List.last()
+    |> String.split("/")
+    |> List.last()
+    |> String.replace(~r/:\d+$/, "")
+    |> String.replace("anthropic.", "")
     |> String.replace("claude-", "")
     |> String.split("-")
     |> hd()

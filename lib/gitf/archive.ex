@@ -644,6 +644,19 @@ defmodule GiTF.Archive do
   defp recover_collection_from_backup(col) do
     base = collection_path(col)
 
+    # Preserve the undecodable primary before any backup overwrites it —
+    # "won't decode on THIS release" (version skew, partial write) is not
+    # "worthless", and the overwrite made up to 3 backup generations of
+    # newer data unrecoverable.
+    if File.exists?(base) do
+      preserved = base <> ".corrupt-#{System.os_time(:second)}"
+
+      case File.copy(base, preserved) do
+        {:ok, _} -> Logger.error("Archive #{col}: primary preserved at #{Path.basename(preserved)} before backup restore")
+        _ -> :ok
+      end
+    end
+
     backup_paths =
       [base <> ".bak"] ++
         Enum.map(2..@backup_generations, fn gen -> base <> ".bak.#{gen}" end)
@@ -706,7 +719,14 @@ defmodule GiTF.Archive do
         try do
           :erlang.binary_to_term(binary, [:safe])
         rescue
-          _ -> nil
+          _ ->
+            # Same unsafe fallback the collection reader has: a manifest
+            # holding atoms not yet loaded must not silently vanish.
+            try do
+              :erlang.binary_to_term(binary)
+            rescue
+              _ -> nil
+            end
         end
 
       _ ->
@@ -859,6 +879,15 @@ defmodule GiTF.Archive do
 
   # Returns list of collection atoms found by scanning the data directory
   # for *.etf files. Excludes manifest, section.etf, *.bak/*.tmp/.pre_migration.
+  # A collection file we can't intern is INVISIBLE (reads as empty and is
+  # then dropped from the manifest) — that must never be silent.
+  defp log_if_uninternable(file, :error) do
+    Logger.error("Archive: skipping collection file #{file} — name not internable; data invisible until renamed")
+    :error
+  end
+
+  defp log_if_uninternable(_file, ok), do: ok
+
   defp scan_collection_files do
     case File.ls(data_dir()) do
       {:ok, files} ->
@@ -869,7 +898,7 @@ defmodule GiTF.Archive do
             not String.contains?(file, ".pre_migration"),
             file != "manifest.etf",
             file != "section.etf",
-            {:ok, col} <- [safe_collection_atom(file)],
+            {:ok, col} <- [log_if_uninternable(file, safe_collection_atom(file))],
             do: col
 
       {:error, _} ->

@@ -72,12 +72,25 @@ defmodule GiTF.Quality.Security do
   defp check_mix_audit(path) do
     task =
       Task.async(fn ->
-        System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true)
+        # Tool may be absent on this host (the box has no mix toolchain);
+        # System.cmd raises :enoent INSIDE the task, and a rescue in the
+        # caller cannot catch a linked task's exit — it crashed the whole
+        # quality pass, misattributed to gitf.
+        if System.find_executable("mix") do
+          try do
+            System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true)
+          rescue
+            _ -> :tool_error
+          end
+        else
+          :tool_missing
+        end
       end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {_output, 0}} -> []
-      {:ok, {output, _}} -> parse_mix_audit(output)
+      {:ok, {output, _}} when is_binary(output) -> parse_mix_audit(output)
+      {:ok, _tool_missing_or_error} -> []
       nil -> []
     end
   rescue
@@ -87,11 +100,24 @@ defmodule GiTF.Quality.Security do
   defp check_npm_audit(path) do
     task =
       Task.async(fn ->
-        System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+        # Tool may be absent on this host (the box has no npm toolchain);
+        # System.cmd raises :enoent INSIDE the task, and a rescue in the
+        # caller cannot catch a linked task's exit — it crashed the whole
+        # quality pass, misattributed to gitf.
+        if System.find_executable("npm") do
+          try do
+            System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+          rescue
+            _ -> :tool_error
+          end
+        else
+          :tool_missing
+        end
       end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, _}} -> parse_npm_audit(output)
+      {:ok, {output, _}} when is_binary(output) -> parse_npm_audit(output)
+      {:ok, _tool_missing_or_error} -> []
       nil -> []
     end
   rescue
@@ -101,11 +127,24 @@ defmodule GiTF.Quality.Security do
   defp check_cargo_audit(path) do
     task =
       Task.async(fn ->
-        System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+        # Tool may be absent on this host (the box has no cargo toolchain);
+        # System.cmd raises :enoent INSIDE the task, and a rescue in the
+        # caller cannot catch a linked task's exit — it crashed the whole
+        # quality pass, misattributed to gitf.
+        if System.find_executable("cargo") do
+          try do
+            System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+          rescue
+            _ -> :tool_error
+          end
+        else
+          :tool_missing
+        end
       end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, _}} -> parse_cargo_audit(output)
+      {:ok, {output, _}} when is_binary(output) -> parse_cargo_audit(output)
+      {:ok, _tool_missing_or_error} -> []
       nil -> []
     end
   rescue
@@ -115,11 +154,24 @@ defmodule GiTF.Quality.Security do
   defp check_pip_audit(path) do
     task =
       Task.async(fn ->
-        System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true)
+        # Tool may be absent on this host (the box has no pip-audit toolchain);
+        # System.cmd raises :enoent INSIDE the task, and a rescue in the
+        # caller cannot catch a linked task's exit — it crashed the whole
+        # quality pass, misattributed to gitf.
+        if System.find_executable("pip-audit") do
+          try do
+            System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true)
+          rescue
+            _ -> :tool_error
+          end
+        else
+          :tool_missing
+        end
       end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, _}} -> parse_pip_audit(output)
+      {:ok, {output, _}} when is_binary(output) -> parse_pip_audit(output)
+      {:ok, _tool_missing_or_error} -> []
       nil -> []
     end
   rescue

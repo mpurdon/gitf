@@ -23,7 +23,9 @@ defmodule GiTF.Workflow.AdvancerTest do
   end
 
   describe "decide/2 — workflow lookup edge cases" do
-    test "dispatches to entry phase when current_phase isn't in the workflow" do
+    test "holds (workflow_drift) when current_phase isn't in the workflow" do
+      # Rewinding to the entry phase re-paid the entire pipeline whenever a
+      # deploy renamed a phase id — the decision is now to hold and alert.
       m = insert_mission!(%{current_phase: "implementation"})
 
       w =
@@ -32,13 +34,13 @@ defmodule GiTF.Workflow.AdvancerTest do
           %Phase{id: "design", next: "end"}
         ])
 
-      assert {:dispatch, "research"} = Advancer.decide(m, w)
+      assert {:error, {:workflow_drift, "implementation"}} = Advancer.decide(m, w)
     end
 
-    test "errors out for an empty workflow with unknown current_phase" do
+    test "holds (workflow_drift) for an empty workflow with unknown current_phase" do
       m = insert_mission!(%{current_phase: "anything"})
       w = build_workflow([])
-      assert {:error, :empty_workflow} = Advancer.decide(m, w)
+      assert {:error, {:workflow_drift, "anything"}} = Advancer.decide(m, w)
     end
   end
 

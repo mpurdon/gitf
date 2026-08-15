@@ -16,9 +16,21 @@ defmodule GiTF.Migrations do
   def migrate! do
     current = get_schema_version()
 
-    if current < @current_version do
-      Enum.each((current + 1)..@current_version, &run_migration/1)
-      set_schema_version(@current_version)
+    cond do
+      current > @current_version ->
+        # A rolled-back release reading a newer store must fail loudly at
+        # boot, not run against a schema it doesn't understand and scatter
+        # KeyErrors through drift/model-routing readers.
+        raise "Store schema is v#{current} but this release only knows v#{@current_version} — " <>
+                "refusing to run a downgraded release against a newer store. " <>
+                "Deploy the newer release, or restore a matching store backup."
+
+      current < @current_version ->
+        Enum.each((current + 1)..@current_version, &run_migration/1)
+        set_schema_version(@current_version)
+
+      true ->
+        :ok
     end
 
     :ok

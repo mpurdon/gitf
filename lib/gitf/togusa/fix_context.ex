@@ -135,7 +135,19 @@ defmodule GiTF.Togusa.FixContext do
         end)
     }
   rescue
-    _ -> nil
+    e ->
+      # A shape-drift decode failure must NOT read as "first attempt" —
+      # from_map(...) || new(...) would silently reset the fix budget and
+      # unbound the fix loop. Preserve at least the attempt counter.
+      require Logger
+      Logger.warning("FixContext decode failed (#{Exception.message(e)}); preserving attempt count")
+
+      %__MODULE__{
+        attempt: Map.get(map, :attempt, map["attempt"] || 0),
+        max_attempts: Map.get(map, :max_attempts, map["max_attempts"] || 3),
+        original_op_id: Map.get(map, :original_op_id, map["original_op_id"]),
+        history: []
+      }
   end
 
   # -- Private ---------------------------------------------------------------

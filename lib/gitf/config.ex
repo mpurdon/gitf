@@ -231,6 +231,15 @@ defmodule GiTF.Config do
   defp encode_value(value) when is_float(value), do: Float.to_string(value)
   defp encode_value(value) when is_boolean(value), do: Atom.to_string(value)
 
+  # Toml.decode returns structs for datetime literals; the generic is_map
+  # clause serialized them as `{ __struct__ = ... }`, corrupting the file
+  # on the next `gitf use`/`gitf login` round-trip. nil crashed outright.
+  defp encode_value(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp encode_value(%Date{} = value), do: Date.to_iso8601(value)
+  defp encode_value(%Time{} = value), do: Time.to_iso8601(value)
+  defp encode_value(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+  defp encode_value(nil), do: ~s("")
+
   defp encode_value(value) when is_map(value) do
     entries = Enum.map_join(value, ", ", fn {k, v} -> "#{k} = #{encode_value(v)}" end)
     "{ #{entries} }"

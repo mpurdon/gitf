@@ -83,6 +83,15 @@ defmodule GiTF.Validator do
       {:ok, {_output, 0}} ->
         :ok
 
+      {:ok, {output, exit_code}} when exit_code in [126, 127] ->
+        # Shell "not executable"/"not found" — a HOST provisioning gap,
+        # not the ghost's code. Blaming the diff sent missions into
+        # fail-loops over a missing npm.
+        {:error,
+         "TOOL MISSING on host (exit #{exit_code}) — the validation command's toolchain " <>
+           "is not installed; this is an infrastructure problem, not a code problem: " <>
+           String.slice(output, 0, 300)}
+
       {:ok, {output, exit_code}} ->
         {:error, "Command failed (exit #{exit_code}): #{String.slice(output, 0, 500)}"}
 

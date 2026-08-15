@@ -580,7 +580,17 @@ defmodule GiTF.Web.ApiController do
         end
       end)
 
+    unknown =
+      params
+      |> Map.drop(["id" | Map.keys(@sector_mutable_fields)])
+      |> Map.keys()
+
     cond do
+      unknown != [] ->
+        # Silently dropping unknown fields lies to a newer CLI: the 200
+        # said "applied" while nothing changed.
+        error(conn, 422, "unknown sector fields: #{Enum.join(unknown, ", ")}")
+
       updates == %{} ->
         error(conn, 422, "no updatable fields given (#{Enum.join(Map.keys(@sector_mutable_fields), ", ")})")
 

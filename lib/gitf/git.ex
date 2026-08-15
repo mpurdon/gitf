@@ -500,15 +500,23 @@ defmodule GiTF.Git do
   Returns `{output, exit_code}` or `{"git command timed out", 1}`.
   """
   def safe_cmd(args, opts \\ []) do
-    git_path = System.find_executable("git") || "/usr/bin/git"
-    # Ensure English/POSIX output regardless of host locale so parsers work on Linux prod.
-    env = Keyword.get(opts, :env, []) ++ [{"LC_ALL", "C"}, {"LANG", "C"}]
-    opts = Keyword.put(opts, :env, env)
-    task = Task.async(fn -> System.cmd(git_path, args, opts) end)
+    case System.find_executable("git") do
+      nil ->
+        # Absent git previously raised :enoent INSIDE the task (killing the
+        # caller with an exit no rescue caught) via the blind /usr/bin/git
+        # fallback — return the documented error shape instead.
+        {"git executable not found on PATH", 127}
 
-    case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, result} -> result
-      nil -> {"git command timed out after #{div(@git_timeout_ms, 1000)}s", 1}
+      git_path ->
+        # Ensure English/POSIX output regardless of host locale so parsers work on Linux prod.
+        env = Keyword.get(opts, :env, []) ++ [{"LC_ALL", "C"}, {"LANG", "C"}]
+        opts = Keyword.put(opts, :env, env)
+        task = Task.async(fn -> System.cmd(git_path, args, opts) end)
+
+        case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, 5_000) do
+          {:ok, result} -> result
+          nil -> {"git command timed out after #{div(@git_timeout_ms, 1000)}s", 1}
+        end
     end
   end
 

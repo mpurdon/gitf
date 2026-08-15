@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.65.64"
+  @version "0.65.65"
 
   def project do
     [
@@ -72,7 +72,9 @@ defmodule GiTF.MixProject do
       {:optimus, "~> 0.5"},
       {:toml, "~> 0.7"},
       {:yaml_elixir, "~> 2.11"},
-      {:req, "~> 0.5"},
+      # >= 0.5.17 encodes the EEF-CVE-2026-49755 (decompression bomb) fix in
+      # the constraint itself, not just lock hygiene.
+      {:req, "~> 0.5.17"},
       # Gemini Live API (bidirectional voice) — studio voice sessions (M4)
       {:gemini_ex, "~> 0.14"},
       {:floki, "~> 0.36"},

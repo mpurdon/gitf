@@ -72,6 +72,17 @@ defmodule GiTF.Priority do
   @doc "Returns the integer weight for a priority atom. Lower = higher priority."
   @spec weight(atom()) :: non_neg_integer()
   def weight(priority) when is_map_key(@weights, priority), do: @weights[priority]
+
+  # REST serialization turns priority atoms into strings; a remote CLI
+  # previously showed "critical (effective: normal)" because the string
+  # fell through to the default.
+  def weight(priority) when is_binary(priority) do
+    case Enum.find(Map.keys(@weights), &(Atom.to_string(&1) == priority)) do
+      nil -> @weights[:normal]
+      atom -> @weights[atom]
+    end
+  end
+
   def weight(_), do: @weights[:normal]
 
   @doc """

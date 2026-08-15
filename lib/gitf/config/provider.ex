@@ -170,8 +170,22 @@ defmodule GiTF.Config.Provider do
     case File.read(path) do
       {:ok, content} ->
         case Toml.decode(content) do
-          {:ok, parsed} -> parsed |> interpolate_env() |> strip_empty_strings() |> atomize_keys()
-          {:error, _} -> %{}
+          {:ok, parsed} ->
+            parsed |> interpolate_env() |> strip_empty_strings() |> atomize_keys()
+
+          {:error, reason} ->
+            # A file that exists but doesn't parse must be LOUD: silently
+            # booting on pure defaults (no keys, no [server]) reads as
+            # "the provider is down", not "your config is corrupt".
+            require Logger
+
+            Logger.error(
+              "Config file #{path} exists but failed to parse — RUNNING ON DEFAULTS. " <>
+                "Error: #{inspect(reason)}"
+            )
+
+            GiTF.Telemetry.emit([:gitf, :config, :parse_error], %{}, %{path: path})
+            %{}
         end
 
       {:error, _} ->

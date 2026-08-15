@@ -106,18 +106,23 @@ defmodule GiTF.Runtime.LLMClient.Default do
 
     case Req.post(url, json: body) do
       {:ok, %{status: 200, body: resp}} ->
-        response = parse_gemini_response(resp, model)
+        try do
+          response = parse_gemini_response(resp, model)
 
-        # Append assistant response to context so AgentLoop can continue history
-        updated_context =
-          try do
-            ReqLLM.Context.append(messages, response.message)
-          rescue
-            FunctionClauseError -> messages
-            ArgumentError -> messages
-          end
+          # Append assistant response to context so AgentLoop can continue history
+          updated_context =
+            try do
+              ReqLLM.Context.append(messages, response.message)
+            rescue
+              FunctionClauseError -> messages
+              ArgumentError -> messages
+            end
 
-        {:ok, %{response | context: updated_context}}
+          {:ok, %{response | context: updated_context}}
+        catch
+          {:gemini_blocked, reason} ->
+            {:error, "Gemini returned 200 without usable content — #{reason}"}
+        end
 
       {:ok, %{status: status, body: body}} ->
         {:error, "Gemini API #{status}: #{inspect(body)}"}
@@ -179,8 +184,28 @@ defmodule GiTF.Runtime.LLMClient.Default do
   end
 
   defp parse_gemini_response(resp, model) do
-    # Minimal parsing
     candidate = List.first(resp["candidates"] || [])
+
+    # A 200 with no usable candidate is NOT success: safety blocks and
+    # MAX_TOKENS truncation returned {:ok, empty} with nil usage, so
+    # ghosts silently produced nothing and cost accounting got poisoned.
+    block_reason = get_in(resp, ["promptFeedback", "blockReason"])
+    finish_reason = candidate && candidate["finishReason"]
+
+    cond do
+      is_binary(block_reason) ->
+        throw({:gemini_blocked, "prompt blocked: #{block_reason}"})
+
+      candidate == nil ->
+        throw({:gemini_blocked, "no candidates in response (finishReason unavailable)"})
+
+      finish_reason in ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"] ->
+        throw({:gemini_blocked, "candidate blocked: #{finish_reason}"})
+
+      true ->
+        :ok
+    end
+
     parts = candidate["content"]["parts"] || []
 
     # Extract text parts

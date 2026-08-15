@@ -21,6 +21,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 if ! id -u gitf >/dev/null 2>&1; then
   useradd --system --create-home --home /var/lib/gitf --shell /usr/sbin/nologin gitf
   chown -R gitf:gitf /var/lib/gitf
+else
+  # Upgrades: repair ownership of the STORE tree only (cheap — no sector
+  # repos). An `aws s3 sync` restore run as root leaves root-owned files
+  # there; the daemon then reads fine but every flush fails EACCES and
+  # the store silently diverges from disk until the next restart eats it.
+  chown -R gitf:gitf /var/lib/gitf/.gitf /var/lib/gitf/.config 2>/dev/null || true
 fi
 mkdir -p /opt/gitf /var/lib/gitf /etc/gitf
 

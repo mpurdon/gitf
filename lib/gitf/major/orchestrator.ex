@@ -385,6 +385,13 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  # Workflow drift (phase id no longer defined — deploy renamed it, or
+  # workflow switched mid-mission): HOLD in the current phase. Neither
+  # rewinding nor the legacy path is safe here; the Advancer already
+  # alerted the operator.
+  defp handle_workflow_decision({:error, {:workflow_drift, _}}, _mission, phase, _wf),
+    do: {:ok, phase}
+
   defp handle_workflow_decision({:error, reason}, mission, phase, _wf) do
     Logger.warning(
       "Workflow dispatch error for mission #{mission.id}: #{inspect(reason)}; falling back to legacy"
@@ -2507,7 +2514,11 @@ defmodule GiTF.Major.Orchestrator do
 
   # Returns true if the artifact was a fallback from a failed parse (empty ghost output).
   defp artifact_failed?(artifact) when is_map(artifact) do
-    Map.get(artifact, "parse_failed", false) == true
+    # A compacted stub is not a usable artifact: treating it as one made
+    # resumed missions read nil complexity -> :complex -> full pipeline
+    # re-run on phases they'd already paid for.
+    Map.get(artifact, "parse_failed", false) == true or
+      Map.get(artifact, "compacted", false) == true
   end
 
   defp artifact_failed?(_), do: false

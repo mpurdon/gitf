@@ -36,7 +36,11 @@ defmodule GiTF.Runtime.GeminiCacheManager do
   Gets an existing cache name or creates a new one for the given content.
   """
   def get_or_create(content, model, opts \\ []) do
-    hash = :crypto.hash(:sha256, content) |> Base.encode16()
+    # Key on {content, model}: Gemini rejects cross-model cache reuse with
+    # a 400, and a content-only key returned the FIRST model's cache name
+    # for every model sharing that system prompt — a self-perpetuating
+    # error loop for the whole TTL.
+    hash = :crypto.hash(:sha256, [content, "|", to_string(model)]) |> Base.encode16()
     GenServer.call(__MODULE__, {:get_or_create, hash, content, model, opts})
   end
 

@@ -500,9 +500,18 @@ defmodule GiTF.Medic do
       {:ok, path} ->
         config_path = Path.join([path, ".gitf", "config.toml"])
 
-        case GiTF.Config.write_config(config_path) do
+        # Preserve whatever still parses — a bare write_config(path)
+        # replaced the whole file with defaults, losing [session]
+        # current_sector and any project-local [server] settings.
+        existing =
+          case GiTF.Config.read_config(config_path) do
+            {:ok, map} when map_size(map) > 0 -> map
+            _ -> nil
+          end
+
+        case GiTF.Config.write_config(config_path, existing) do
           :ok ->
-            result(:config_valid, :ok, "Regenerated config.toml with defaults")
+            result(:config_valid, :ok, "Regenerated config.toml (existing settings preserved)")
 
           {:error, reason} ->
             result(:config_valid, :error, "Failed to regenerate config.toml: #{inspect(reason)}")

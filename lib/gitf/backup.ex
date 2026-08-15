@@ -114,12 +114,15 @@ defmodule GiTF.Backup do
 
   # -- Private ---------------------------------------------------------------
 
-  # Recency = the monotonic seq stamped at save time; saved_at (second
-  # precision) is only the fallback ordering for pre-seq legacy records.
+  # Recency = saved_at first, seq only as an intra-second tiebreak.
+  # seq is System.unique_integer(:monotonic), which is monotonic only
+  # within ONE VM instance — after a restart it can start lower OR higher,
+  # so seq-first ordering handed replacement ghosts pre-restart (older)
+  # checkpoints and they redid merged work.
   defp latest_checkpoint(ghost_id) do
     Archive.filter(@collection, &(&1.ghost_id == ghost_id))
     |> Enum.max_by(
-      &{Map.get(&1, :seq, -1), DateTime.to_unix(&1.saved_at)},
+      &{DateTime.to_unix(&1.saved_at), Map.get(&1, :seq, -1)},
       fn -> nil end
     )
   end

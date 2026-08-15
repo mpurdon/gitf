@@ -43,6 +43,9 @@ defmodule GiTF.Ops do
     {"failed", :reset} => "pending",
     {"rejected", :reset} => "pending",
     {"failed", :revive} => "running",
+    # Legacy: older releases wrote status "killed" (kill now deletes the
+    # record); without this those records are un-resettable forever.
+    {"killed", :reset} => "pending",
     {"pending", :block} => "blocked",
     {"running", :block} => "blocked",
     {"blocked", :unblock} => "pending"
