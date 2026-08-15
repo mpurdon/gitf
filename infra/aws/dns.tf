@@ -13,6 +13,32 @@ resource "aws_route53_zone" "main" {
   comment = "GiTF — managed by infra/aws"
 }
 
+# Mail: the domain is attached to the existing purdonmoi.com Google
+# Workspace (free additional domain) so factory@ghostinthefactory.com is an
+# alias on an existing mailbox — no new subscription, no third-party
+# forwarder.
+resource "aws_route53_record" "mx" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = var.domain
+  type    = "MX"
+  ttl     = 3600
+  records = ["1 smtp.google.com"]
+}
+
+resource "aws_route53_record" "spf" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = var.domain
+  type    = "TXT"
+  ttl     = 3600
+
+  # SPF plus (when set) the Google site-verification token for the
+  # Workspace add-domain flow — TXT values merge into one record set.
+  records = concat(
+    ["v=spf1 include:_spf.google.com ~all"],
+    var.google_site_verification == null ? [] : [var.google_site_verification]
+  )
+}
+
 resource "aws_route53_record" "factory" {
   count = var.factory_tailnet_ip == null ? 0 : 1
 

@@ -40,6 +40,12 @@ variable "factory_tailnet_ip" {
   default     = null
 }
 
+variable "google_site_verification" {
+  description = "google-site-verification=... TXT value from the Workspace add-domain flow"
+  type        = string
+  default     = null
+}
+
 variable "monthly_budget_usd" {
   description = "Monthly account-wide spend budget (alerts at 50/80/100% actual + forecasted overrun)"
   type        = number
