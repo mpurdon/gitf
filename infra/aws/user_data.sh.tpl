@@ -31,6 +31,18 @@ if [ -n "$DATA_DEV" ]; then
   mount -a
 fi
 
+# ---- Swap -------------------------------------------------------------------
+# The BEAM under ghost load spiked past physical RAM on the first real
+# mission (OOM-killed 56x on t4g.small). Swap turns future spikes into
+# slowdowns instead of SIGKILLs.
+if ! grep -q swapfile /etc/fstab; then
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo "/swapfile none swap sw 0 0" >>/etc/fstab
+fi
+
 # ---- Packages ---------------------------------------------------------------
 apt-get update
 # NB: no `awscli` here — Ubuntu 24.04 dropped the apt package; the official
