@@ -191,7 +191,17 @@ curl https://<host>.<tailnet>.ts.net/api/v1/health        # "idle":true when qui
 sudo systemctl start gitf-idle-stop.service               # dry-run the check
 # after GITF_IDLE_STOP_MINUTES of idleness the box powers off (= EC2 "stopped")
 curl "$(terraform output -raw wake_url)"                  # starts it again (~60s to ready)
+gitf wake                                                 # same, from any logged-in CLI
 ```
+
+**Wake-URL landmine (cost a debugging session 2026-08-15):** function URLs
+created after October 2025 require BOTH `lambda:InvokeFunctionUrl` AND
+`lambda:InvokeFunction` in the resource policy. The console adds both
+automatically; terraform/CLI add neither. Missing the second yields a
+front-door 403 `AccessDeniedException` before the function runs, with
+every visible setting (AuthType NONE, public policy, SCPs, RCPs) looking
+correct. Both grants live in `wake.tf`. `gitf wake` reads `[server]
+wake_url` from the global config (`gitf login` preserves it).
 
 - Pause idle-stop without config edits: `sudo touch /etc/gitf/idle-stop-disabled`
 - Backups: hourly `aws s3 sync` of the store (`gitf-backup.timer`) +
