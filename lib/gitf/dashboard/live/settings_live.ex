@@ -30,6 +30,13 @@ defmodule GiTF.Dashboard.SettingsLive do
       :ok ->
         GiTF.Config.Provider.reload()
 
+        GiTF.AuditLog.record(
+          GiTF.Web.TailnetAuth.actor(socket.assigns),
+          "settings.save",
+          "config",
+          %{keys: config |> Map.keys() |> Enum.sort()}
+        )
+
         {:noreply,
          socket
          |> assign(:dirty, false)

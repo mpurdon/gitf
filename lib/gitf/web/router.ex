@@ -5,6 +5,7 @@ defmodule GiTF.Web.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    plug(GiTF.Web.TailnetAuth)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {GiTF.Web.Layout, :root})
     plug(:protect_from_forgery)
@@ -13,6 +14,7 @@ defmodule GiTF.Web.Router do
 
   pipeline :api_public do
     plug(:accepts, ["json"])
+
     plug(GiTF.Web.RateLimitPlug,
       max_requests: 600,
       window_seconds: 60,
@@ -25,6 +27,7 @@ defmodule GiTF.Web.Router do
   # multi-PR merges).
   pipeline :webhooks do
     plug(:accepts, ["json"])
+
     plug(GiTF.Web.RateLimitPlug,
       max_requests: 1_000,
       window_seconds: 60,
@@ -34,27 +37,32 @@ defmodule GiTF.Web.Router do
 
   pipeline :api do
     plug(:accepts, ["json"])
+
     plug(GiTF.Web.RateLimitPlug,
       max_requests: 60,
       window_seconds: 60,
       bucket: :api
     )
+
     plug(:require_local_or_api_key)
   end
 
   pipeline :metrics do
     plug(:accepts, ["json", "text"])
+
     plug(GiTF.Web.RateLimitPlug,
       max_requests: 600,
       window_seconds: 60,
       bucket: :metrics
     )
+
     plug(:require_local_or_api_key)
   end
 
   pipeline :dashboard do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    plug(GiTF.Web.TailnetAuth)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {GiTF.Dashboard.Layouts, :root})
     plug(:protect_from_forgery)
@@ -64,40 +72,44 @@ defmodule GiTF.Web.Router do
   scope "/", GiTF.Web do
     pipe_through(:browser)
 
-    live("/", Live.Dashboard)
+    live_session :root, on_mount: GiTF.Web.TailnetAuth do
+      live("/", Live.Dashboard)
+    end
   end
 
   scope "/dashboard", GiTF.Dashboard do
     pipe_through(:dashboard)
 
-    live("/", OverviewLive)
-    live("/studio", StudioLive)
-    live("/studio/:session_id", StudioLive)
-    live("/missions/new", MissionNewLive)
-    live("/missions/:id/diagnostics", MissionDiagnosticsLive)
-    live("/missions/:id/design", DesignLive)
-    live("/missions/:id/plan", PlanLive)
-    live("/missions/:id", MissionDetailLive)
-    live("/missions", MissionsLive)
-    live("/ghosts", GhostsLive)
-    live("/costs", CostsLive)
-    live("/models", ModelPerformanceLive)
-    live("/links", LinksLive)
-    live("/progress", ProgressLive)
-    live("/approvals", ApprovalsLive)
-    live("/ops/:id", OpDetailLive)
-    live("/sectors", SectorsLive)
-    live("/workflows", WorkflowsLive)
-    live("/workflows/:name", WorkflowEditorLive)
-    live("/autonomy", AutonomyLive)
-    live("/providers", ProvidersLive)
-    live("/health", HealthLive)
-    live("/shells", ShellsLive)
-    live("/timeline", TimelineLive)
-    live("/timeline/:mission_id", TimelineLive)
-    live("/rollback", RollbackLive)
-    live("/merges", MergeQueueLive)
-    live("/settings", SettingsLive)
+    live_session :dashboard, on_mount: GiTF.Web.TailnetAuth do
+      live("/", OverviewLive)
+      live("/studio", StudioLive)
+      live("/studio/:session_id", StudioLive)
+      live("/missions/new", MissionNewLive)
+      live("/missions/:id/diagnostics", MissionDiagnosticsLive)
+      live("/missions/:id/design", DesignLive)
+      live("/missions/:id/plan", PlanLive)
+      live("/missions/:id", MissionDetailLive)
+      live("/missions", MissionsLive)
+      live("/ghosts", GhostsLive)
+      live("/costs", CostsLive)
+      live("/models", ModelPerformanceLive)
+      live("/links", LinksLive)
+      live("/progress", ProgressLive)
+      live("/approvals", ApprovalsLive)
+      live("/ops/:id", OpDetailLive)
+      live("/sectors", SectorsLive)
+      live("/workflows", WorkflowsLive)
+      live("/workflows/:name", WorkflowEditorLive)
+      live("/autonomy", AutonomyLive)
+      live("/providers", ProvidersLive)
+      live("/health", HealthLive)
+      live("/shells", ShellsLive)
+      live("/timeline", TimelineLive)
+      live("/timeline/:mission_id", TimelineLive)
+      live("/rollback", RollbackLive)
+      live("/merges", MergeQueueLive)
+      live("/settings", SettingsLive)
+    end
   end
 
   # Liveness probe — process alive, no auth

@@ -7,8 +7,6 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   import GiTF.Dashboard.Helpers
 
   @heartbeat_interval :timer.seconds(15)
-  # Placeholder until dashboard auth provides real user identity
-  @default_user "dashboard_user"
 
   @impl true
   def mount(_params, _session, socket) do
@@ -77,11 +75,17 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   end
 
   def handle_event("confirm_approve", _params, socket) do
+    actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
+
     case GiTF.Override.approve(socket.assigns.action_id, %{
-           approved_by: @default_user,
+           approved_by: actor,
            notes: socket.assigns.notes
          }) do
       {:ok, _} ->
+        GiTF.AuditLog.record(actor, "approval.approve", socket.assigns.action_id, %{
+          notes: socket.assigns.notes
+        })
+
         {:noreply,
          socket
          |> assign(action_id: nil, action_type: nil, notes: "")
@@ -99,10 +103,16 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     if reason == "" do
       {:noreply, put_flash(socket, :error, "Rejection reason is required.")}
     else
+      actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
+
       case GiTF.Override.reject(socket.assigns.action_id, reason, %{
-             rejected_by: @default_user
+             rejected_by: actor
            }) do
         {:ok, _} ->
+          GiTF.AuditLog.record(actor, "approval.reject", socket.assigns.action_id, %{
+            reason: reason
+          })
+
           {:noreply,
            socket
            |> assign(action_id: nil, action_type: nil, notes: "")

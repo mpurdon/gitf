@@ -142,6 +142,20 @@ if config_env() == :prod do
       list -> String.split(list, ",", trim: true)
     end
 
+  # Person-level identity on the tailnet-only dashboard. "required" makes
+  # GiTF.Web.TailnetAuth reject browser requests whose peer IP does not
+  # resolve (via `tailscale whois`) to a login — optionally restricted to
+  # the comma-separated GITF_TAILNET_ADMINS list. Default off: local dev
+  # and non-tailnet deployments are unaffected.
+  case System.get_env("GITF_TAILNET_AUTH") do
+    "required" -> config :gitf, :tailnet_auth, :required
+    _ -> :ok
+  end
+
+  if admins = System.get_env("GITF_TAILNET_ADMINS") do
+    config :gitf, :tailnet_admins, String.split(admins, ",", trim: true)
+  end
+
   # NB: compile-env keys (:code_reloader, :debug_errors, …) must NOT be set
   # here unless config/prod.exs sets the same value at compile time — the
   # release refuses to boot on any mismatch.

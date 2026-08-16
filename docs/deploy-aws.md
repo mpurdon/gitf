@@ -105,6 +105,37 @@ Caddy.
 Do this before creating the GitHub OAuth app for SSO, so the callback URL
 (`https://factory.ghostinthefactory.com/auth/callback`) never churns.
 
+### Person-level identity on the dashboard (tailnet semi-hardening)
+
+Tailscale authenticates *devices*; the dashboard also wants to know the
+*person*. With these two lines in `/etc/gitf/gitf.env` the app resolves
+every browser request's tailnet IP to a login via `tailscale whois`,
+403s anything unidentifiable, and writes an audit trail (`:audit_log`
+collection) of approvals/rejections/settings writes with the real actor:
+
+```
+GITF_TAILNET_AUTH=required
+# Optional: restrict to specific logins (comma-separated). Without it,
+# any tailnet identity passes — equivalent on a single-user tailnet.
+#GITF_TAILNET_ADMINS=you@example.com
+```
+
+Two prerequisites on the box:
+
+1. The `gitf` user must be allowed to query tailscaled:
+   `sudo tailscale set --operator=gitf` (once). Without it every whois
+   fails and, in `required` mode, all proxied dashboard requests 403.
+2. Caddy must proxy with `X-Forwarded-For` (its `reverse_proxy` default).
+   The app only trusts XFF from loopback peers, so a client dialing
+   port 4000 directly cannot forge an identity — its socket address is
+   used instead.
+
+Verify after restart: the dashboard still loads from your Mac, and
+`GITF_TAILNET_ADMINS` should only be set AFTER confirming your actual
+login string (`tailscale whois $(tailscale ip -4)` from another tailnet
+device, or check an audit entry's actor) — guessing it wrong locks you
+out until you edit the env file over SSM/SSH.
+
 ## 3. Install the release
 
 Grab `gitf-release-arm64` from the latest `main` CI run (or build locally in
