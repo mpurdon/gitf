@@ -253,7 +253,10 @@ defmodule GiTF.Major.Orchestrator do
             dedup_key: "budget_exceeded:#{mission_id}"
           )
 
-          fail_quest(mission_id, "Budget exceeded: spent $#{Float.round(spent, 4)} of $#{Float.round(cap, 2)} cap")
+          fail_quest(
+            mission_id,
+            "Budget exceeded: spent $#{Float.round(spent, 4)} of $#{Float.round(cap, 2)} cap"
+          )
 
         true ->
           advance_mission_phase(mission)
@@ -309,7 +312,10 @@ defmodule GiTF.Major.Orchestrator do
 
   defp advance_mission_phase(mission) do
     phase = Map.get(mission, :current_phase, "pending")
-    Logger.info("Orchestrator: advancing #{mission.id} from phase=#{phase} status=#{mission.status}")
+
+    Logger.info(
+      "Orchestrator: advancing #{mission.id} from phase=#{phase} status=#{mission.status}"
+    )
 
     if workflow_dispatch_active?(mission) do
       advance_via_workflow(mission, phase)
@@ -356,7 +362,9 @@ defmodule GiTF.Major.Orchestrator do
     # `Phases.Publish.before_advance/3`, so the standard `complete_quest`
     # would be wrong here.
     case GiTF.Workflow.Advancer.invoke_terminal(mission, workflow, :complete) do
-      {:ok, :handled} -> {:ok, "completed"}
+      {:ok, :handled} ->
+        {:ok, "completed"}
+
       :default ->
         GiTF.Missions.complete_quest(mission.id, "workflow reached :end")
         {:ok, "completed"}
@@ -379,7 +387,10 @@ defmodule GiTF.Major.Orchestrator do
         {:ok, "failed"}
 
       :default ->
-        Logger.warning("Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed")
+        Logger.warning(
+          "Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed"
+        )
+
         GiTF.Missions.update(mission.id, %{status: "failed"})
         {:ok, "failed"}
     end
@@ -647,7 +658,12 @@ defmodule GiTF.Major.Orchestrator do
       with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
         sector = Archive.get(:sectors, sector_id)
         ctx = GiTF.Intel.get_prompt_context(sector_id, "research", mission)
-        prompt = PhasePrompts.research_prompt(mission, sector, ctx, complexity: triage_complexity(mission))
+
+        prompt =
+          PhasePrompts.research_prompt(mission, sector, ctx,
+            complexity: triage_complexity(mission)
+          )
+
         spawn_phase_ghost(mission, "research", prompt, model: "general")
         {:ok, "research"}
       end
@@ -768,7 +784,11 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "review", "Design complete") do
       prompt = PhasePrompts.review_prompt(mission, designs, requirements, research)
-      spawn_phase_ghost(mission, "review", prompt, model: phase_model_for_complexity("review", mission))
+
+      spawn_phase_ghost(mission, "review", prompt,
+        model: phase_model_for_complexity("review", mission)
+      )
+
       {:ok, "review"}
     end
   end
@@ -819,7 +839,11 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning", "Review approved") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "planning", mission)
       prompt = PhasePrompts.planning_prompt(mission, design, requirements, review, ctx)
-      spawn_phase_ghost(mission, "planning", prompt, model: phase_model_for_complexity("planning", mission))
+
+      spawn_phase_ghost(mission, "planning", prompt,
+        model: phase_model_for_complexity("planning", mission)
+      )
+
       {:ok, "planning"}
     end
   end
@@ -934,14 +958,26 @@ defmodule GiTF.Major.Orchestrator do
       # re-walking the full op list per spawn.
       ops_by_variant =
         Enum.group_by(mission.ops, fn op ->
-          if op[:phase_job] in [nil, false] and op.status == "done", do: op[:variant], else: :_skip
+          if op[:phase_job] in [nil, false] and op.status == "done",
+            do: op[:variant],
+            else: :_skip
         end)
         |> Map.delete(:_skip)
 
       case Map.get(mission, :impl_variants) || [] do
         [] ->
+          consolidate_impl_branches(mission, Map.get(ops_by_variant, nil, []))
           changed_files = collect_changed_files(ops_by_variant, nil)
-          spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, nil, changed_files)
+
+          spawn_validation_for_variant(
+            mission,
+            requirements,
+            planning,
+            ctx,
+            diff_base,
+            nil,
+            changed_files
+          )
 
         variants ->
           # Tournament mode: one validation ghost per variant, each
@@ -995,7 +1031,15 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp spawn_validation_for_variant(mission, requirements, planning, ctx, diff_base, variant_id, changed_files) do
+  defp spawn_validation_for_variant(
+         mission,
+         requirements,
+         planning,
+         ctx,
+         diff_base,
+         variant_id,
+         changed_files
+       ) do
     lsp_diagnostics = collect_lsp_diagnostics_for_validation(mission, changed_files)
     exec_validation = run_exec_validation(mission, variant_id)
 
@@ -1028,7 +1072,8 @@ defmodule GiTF.Major.Orchestrator do
   defp run_exec_validation(mission, variant_id) do
     with %{validation_command: cmd} when is_binary(cmd) and cmd != "" <-
            Archive.get(:sectors, mission.sector_id),
-         %{ghost_id: ghost_id} when is_binary(ghost_id) <- impl_op_for_variant(mission, variant_id),
+         %{ghost_id: ghost_id} when is_binary(ghost_id) <-
+           impl_op_for_variant(mission, variant_id),
          %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, ghost_id),
          %{worktree_path: _} = shell <- Archive.get(:shells, shell_id) do
       Logger.info("Running validation command for #{mission.id}: #{cmd}")
@@ -1039,7 +1084,10 @@ defmodule GiTF.Major.Orchestrator do
           {:pass, cmd}
 
         {:error, output} ->
-          Logger.warning("Validation command FAILED for #{mission.id}: #{String.slice(to_string(output), 0, 300)}")
+          Logger.warning(
+            "Validation command FAILED for #{mission.id}: #{String.slice(to_string(output), 0, 300)}"
+          )
+
           {:fail, cmd, to_string(output)}
       end
     else
@@ -1093,6 +1141,60 @@ defmodule GiTF.Major.Orchestrator do
   # Returns [base_branch: "ghost/<id>"] when a completed impl op exists for
   # the mission, or [] if none — in which case worktrees branch from sector
   # HEAD (the current default).
+  # Merge every completed impl op's ghost branch into the LATEST completed
+  # op's worktree so validation (and publish downstream) sees the UNION of
+  # the mission's work. Parallel impl ops commit to per-ghost branches;
+  # without this merge the validator diffed one branch and reported the
+  # sibling ops' finished, type-checked work as "completely missing" —
+  # three runs died at the validation wall staring at origin/main while
+  # the feature sat in two branches (msn-807187, finding #17). Idempotent:
+  # re-merging an already-merged branch is "Already up to date". A merge
+  # conflict aborts that branch's merge and warns — the validator then
+  # honestly reports the gap and the fix loop works in the consolidated
+  # worktree.
+  defp consolidate_impl_branches(mission, done_impl_ops) do
+    with %{ghost_id: target_ghost} when is_binary(target_ghost) <-
+           GiTF.Validation.latest_completed_impl_op(mission),
+         %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, target_ghost),
+         %{worktree_path: wt} when is_binary(wt) <- Archive.get(:shells, shell_id),
+         true <- File.dir?(wt) do
+      target_branch = "ghost/#{target_ghost}"
+
+      done_impl_ops
+      |> Enum.map(& &1[:ghost_id])
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map(&("ghost/" <> &1))
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 == target_branch))
+      |> Enum.each(fn branch ->
+        case GiTF.Git.safe_cmd(["-C", wt, "merge", "--no-ff", "--no-edit", branch]) do
+          {_, 0} ->
+            Logger.info("Quest #{mission.id}: consolidated #{branch} into #{target_branch}")
+
+          {out, _} ->
+            Logger.warning(
+              "Quest #{mission.id}: consolidation merge of #{branch} failed " <>
+                "(#{String.slice(to_string(out), 0, 200)}) — aborting that merge; " <>
+                "validation will see partial work and report the gap"
+            )
+
+            GiTF.Git.safe_cmd(["-C", wt, "merge", "--abort"])
+        end
+      end)
+
+      :ok
+    else
+      _ -> :ok
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "consolidate_impl_branches crashed for #{mission.id}: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
   defp impl_base_branch_opts(mission) do
     case GiTF.Validation.latest_completed_impl_op(mission) do
       %{ghost_id: ghost_id} when is_binary(ghost_id) ->
@@ -1261,7 +1363,10 @@ defmodule GiTF.Major.Orchestrator do
         start_requirements(mission)
       end
     else
-      Logger.warning("Quest #{mission.id}: research artifact not found, falling back to check_and_advance")
+      Logger.warning(
+        "Quest #{mission.id}: research artifact not found, falling back to check_and_advance"
+      )
+
       check_and_advance(mission, "research", &start_requirements/1)
     end
   end
@@ -1273,7 +1378,9 @@ defmodule GiTF.Major.Orchestrator do
 
     case phase do
       "research" ->
-        {PhasePrompts.research_prompt(mission, sector, ctx, complexity: triage_complexity(mission)), "general"}
+        {PhasePrompts.research_prompt(mission, sector, ctx,
+           complexity: triage_complexity(mission)
+         ), "general"}
 
       "triage" ->
         {PhasePrompts.triage_prompt(mission, sector), "general"}
@@ -1562,7 +1669,6 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
 
   defp start_simplify(mission) do
@@ -1671,7 +1777,6 @@ defmodule GiTF.Major.Orchestrator do
       {:ok, "scoring"}
     end
   end
-
 
   # Store triage-vs-outcome data for future accuracy analysis.
   # Links the original triage complexity to the final quality score so
@@ -1903,7 +2008,6 @@ defmodule GiTF.Major.Orchestrator do
              mission.id,
              "Triage verified bug not reproducible"
            ) do
-
       GiTF.Observability.Alerts.dispatch_webhook(
         :quest_completed,
         "Quest #{mission.id} completed — no work needed (#{evidence})"
@@ -1935,7 +2039,6 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <-
            GiTF.Missions.complete_quest(mission.id, "All phases complete") do
-
       GiTF.Observability.Alerts.dispatch_webhook(
         :quest_completed,
         "Quest #{mission.id} completed successfully"
@@ -2014,6 +2117,7 @@ defmodule GiTF.Major.Orchestrator do
          sync_art when is_map(sync_art) <- GiTF.Missions.get_artifact(mission_id, "sync"),
          branch when is_binary(branch) <- sync_art["branch"] do
       GiTF.Git.branch_delete(sector.path, branch)
+
       GiTF.Git.safe_cmd(["push", "origin", "--delete", branch],
         cd: sector.path,
         stderr_to_stdout: true
@@ -2250,6 +2354,7 @@ defmodule GiTF.Major.Orchestrator do
           # propagate triage's target_files + goal_restatement + external
           # context into the op so the impl ghost has navigation scaffolding.
           triage = GiTF.Missions.get_artifact(mission.id, "triage") || %{}
+
           [
             %{
               "title" => "Implement: #{String.slice(mission.goal, 0, 80)}",
