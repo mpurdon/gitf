@@ -277,15 +277,19 @@ defmodule GiTF.Major do
   end
 
   def handle_info({:retry_advance, mission_id}, state) do
-    state = case GiTF.Missions.get(mission_id) do
-      {:ok, mission} when mission.status == "active" ->
-        case GiTF.Major.Orchestrator.advance_quest(mission_id) do
-          {:contended, _} -> state
-          {:ok, _} -> spawn_ready_jobs(mission, state)
-          _ -> state
-        end
-      _ -> state
-    end
+    state =
+      case GiTF.Missions.get(mission_id) do
+        {:ok, mission} when mission.status == "active" ->
+          case GiTF.Major.Orchestrator.advance_quest(mission_id) do
+            {:contended, _} -> state
+            {:ok, _} -> spawn_ready_jobs(mission, state)
+            _ -> state
+          end
+
+        _ ->
+          state
+      end
+
     {:noreply, state}
   end
 
@@ -367,7 +371,8 @@ defmodule GiTF.Major do
         GenServer.reply(state.awaiter, :ok)
       end
 
-      {:noreply, state |> Map.put(:port, nil) |> Map.put(:status, :idle) |> Map.put(:awaiter, nil)}
+      {:noreply,
+       state |> Map.put(:port, nil) |> Map.put(:status, :idle) |> Map.put(:awaiter, nil)}
     end
   end
 
@@ -1431,7 +1436,10 @@ defmodule GiTF.Major do
       :ok
     else
       {:error, :low_disk, free_mb} ->
-        Logger.warning("Free disk #{free_mb} MB below #{@min_free_disk_mb} MB floor — blocking spawn")
+        Logger.warning(
+          "Free disk #{free_mb} MB below #{@min_free_disk_mb} MB floor — blocking spawn"
+        )
+
         {:error, :low_disk}
 
       {:error, :daily_budget_exceeded, spent} ->
@@ -1560,16 +1568,56 @@ defmodule GiTF.Major do
     _ -> false
   end
 
+  # Chained implementation ops run in their predecessor's worktree so each
+  # ghost builds on the ACTUAL prior work. Private per-op branches merged
+  # late unioned divergent implementations of the same code into
+  # uncompilable duplicates (msn-269675, finding #18). Falls back to a
+  # fresh worktree when no completed dependency has a live shell.
+  defp spawn_for_op(op, gitf_root) do
+    case predecessor_shell(op) do
+      {:ok, shell_id} ->
+        Logger.info("Op #{op.id}: continuing in predecessor worktree (shell #{shell_id})")
+        GiTF.Ghosts.spawn_in_worktree(op.id, shell_id, op.sector_id, gitf_root)
+
+      :none ->
+        GiTF.Ghosts.spawn_detached(op.id, op.sector_id, gitf_root)
+    end
+  end
+
+  defp predecessor_shell(op) do
+    with false <- op[:phase_job] == true,
+         deps when deps != [] <- op[:depends_on] || [] do
+      deps
+      |> Enum.map(&GiTF.Archive.get(:ops, &1))
+      |> Enum.filter(&(is_map(&1) and &1[:status] == "done" and is_binary(&1[:ghost_id])))
+      |> Enum.sort_by(& &1[:updated_at], :desc)
+      |> Enum.find_value(:none, fn dep_op ->
+        with %{shell_id: shell_id} when is_binary(shell_id) <-
+               GiTF.Archive.get(:ghosts, dep_op[:ghost_id]),
+             %{worktree_path: wt} when is_binary(wt) <- GiTF.Archive.get(:shells, shell_id),
+             true <- File.dir?(wt) do
+          {:ok, shell_id}
+        else
+          _ -> nil
+        end
+      end)
+    else
+      _ -> :none
+    end
+  rescue
+    _ -> :none
+  end
+
   defp spawn_single_job(op, state, run) do
     if GiTF.Distributed.clustered?() do
       GiTF.Distributed.spawn_on_cluster(fn ->
-        GiTF.Ghosts.spawn_detached(op.id, op.sector_id, state.gitf_root)
+        spawn_for_op(op, state.gitf_root)
       end)
 
       Logger.info("Dispatched distributed spawn for op #{op.id}")
       state
     else
-      case GiTF.Ghosts.spawn_detached(op.id, op.sector_id, state.gitf_root) do
+      case spawn_for_op(op, state.gitf_root) do
         {:ok, ghost} ->
           Logger.info("Auto-spawned ghost #{ghost.id} for op #{op.id} (#{op.title})")
           register_with_run(run, ghost.id, op.id)
@@ -2032,9 +2080,7 @@ defmodule GiTF.Major do
     end
   rescue
     e ->
-      Logger.warning(
-        "find_op_for_ghost crashed for #{ghost_id}: #{Exception.message(e)}"
-      )
+      Logger.warning("find_op_for_ghost crashed for #{ghost_id}: #{Exception.message(e)}")
 
       nil
   end

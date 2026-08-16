@@ -453,8 +453,20 @@ defmodule GiTF.Major.Planner do
 
         case GiTF.Ops.create(job_attrs) do
           {:ok, op} ->
-            # Resolve dependencies by index
-            for dep_idx <- spec["depends_on_indices"] || [] do
+            # Resolve dependencies by index — PLUS an implicit dependency on
+            # the previous op, serializing a mission's implementation chain.
+            # Parallel impl ops editing overlapping files (four ops all
+            # touching models.rs in msn-269675) each implemented their own
+            # version blind to the siblings; branch consolidation then
+            # unioned three divergent designs into duplicate-riddled,
+            # uncompilable code (finding #18). Sequential ops build on the
+            # actual prior work. Intra-mission parallelism returns when
+            # file-ownership partitioning exists; cross-mission parallelism
+            # is unaffected.
+            deps = spec["depends_on_indices"] || []
+            deps = if idx > 0, do: Enum.uniq([idx - 1 | deps]), else: deps
+
+            for dep_idx <- deps do
               case Map.get(id_map, dep_idx) do
                 nil -> :ok
                 dep_id -> GiTF.Ops.add_dependency(op.id, dep_id)
