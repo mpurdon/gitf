@@ -35,7 +35,7 @@ defmodule GiTF.Runtime.BedrockDirect do
     encoded_arn = URI.encode(arn, &URI.char_unreserved?/1)
     url = "https://#{host}/model/#{encoded_arn}/converse"
 
-    body = build_converse_body(messages, opts)
+    body = build_converse_body(messages, Keyword.put(opts, :model_id, arn))
     json_body = Jason.encode!(body)
 
     # Use AWSAuth.Req plugin for signing. This integrates signing directly
@@ -79,7 +79,12 @@ defmodule GiTF.Runtime.BedrockDirect do
         # so the next call re-fetches instead of replaying dead credentials
         # for the rest of the cache window.
         :persistent_term.erase({__MODULE__, :imds_creds})
-        msg = if is_map(body), do: body["message"] || inspect(body), else: String.slice(to_string(body), 0, 300)
+
+        msg =
+          if is_map(body),
+            do: body["message"] || inspect(body),
+            else: String.slice(to_string(body), 0, 300)
+
         {:error, "Bedrock 403: #{msg}"}
 
       {:ok, %{status: status, body: %{"message" => msg}}} ->
@@ -100,13 +105,22 @@ defmodule GiTF.Runtime.BedrockDirect do
 
   # -- Body Building -----------------------------------------------------------
 
-  defp build_converse_body(messages, opts) do
+  @doc false
+  # Public for tests: the cachePoint layout is a wire-format contract.
+  def build_converse_body(messages, opts) do
     {system_parts, user_messages} = extract_messages(messages)
+    cache? = prompt_cache_enabled?(opts)
+
+    user_messages =
+      if cache?, do: append_message_cache_point(user_messages), else: user_messages
 
     body = %{"messages" => user_messages}
 
     body =
       if system_parts != [] do
+        system_parts =
+          if cache?, do: system_parts ++ [cache_point()], else: system_parts
+
         Map.put(body, "system", system_parts)
       else
         body
@@ -130,12 +144,47 @@ defmodule GiTF.Runtime.BedrockDirect do
     # Tools
     body =
       if opts[:tools] && opts[:tools] != [] do
-        Map.put(body, "toolConfig", %{"tools" => format_tools(opts[:tools])})
+        tools = format_tools(opts[:tools])
+        tools = if cache?, do: tools ++ [cache_point()], else: tools
+        Map.put(body, "toolConfig", %{"tools" => tools})
       else
         body
       end
 
     body
+  end
+
+  # -- Prompt caching ----------------------------------------------------------
+  #
+  # Anthropic models on Bedrock support prompt caching via Converse
+  # `cachePoint` blocks. Without them, every agent-loop iteration re-sent the
+  # ENTIRE growing conversation (system prompt + tools + full history) at
+  # full input price — the dominant share of mission spend. Three breakpoints
+  # (system, tools, conversation tail) keep the stable prefix on 90%-cheaper
+  # cache reads; prefixes under the model's cacheable minimum simply don't
+  # cache, which is harmless.
+
+  defp cache_point, do: %{"cachePoint" => %{"type" => "default"}}
+
+  defp prompt_cache_enabled?(opts) do
+    Application.get_env(:gitf, :bedrock_prompt_cache, true) and
+      anthropic_model?(opts[:model_id])
+  end
+
+  defp anthropic_model?(model_id) when is_binary(model_id),
+    do: String.contains?(model_id, "anthropic")
+
+  defp anthropic_model?(_), do: false
+
+  # The moving breakpoint: cache up to the end of the current conversation so
+  # the next iteration's prefix (everything up to and including this turn)
+  # reads from cache. Appended to the LAST message's content blocks.
+  defp append_message_cache_point([]), do: []
+
+  defp append_message_cache_point(messages) do
+    List.update_at(messages, -1, fn msg ->
+      Map.update(msg, "content", [cache_point()], &(&1 ++ [cache_point()]))
+    end)
   end
 
   # Extract messages from ReqLLM.Context or plain list
@@ -327,9 +376,19 @@ defmodule GiTF.Runtime.BedrockDirect do
         tool_calls: if(tool_calls == [], do: nil, else: tool_calls)
       },
       usage: %{
-        input_tokens: usage["inputTokens"] || 0,
+        # inputTokens excludes cached tokens on Converse; the effective
+        # context window is input + cache reads + cache writes, so include
+        # them in input_tokens (context monitoring) and break them out for
+        # cost pricing (cache reads bill at ~10% of input).
+        input_tokens:
+          (usage["inputTokens"] || 0) + (usage["cacheReadInputTokens"] || 0) +
+            (usage["cacheWriteInputTokens"] || 0),
         output_tokens: usage["outputTokens"] || 0,
-        total_tokens: (usage["inputTokens"] || 0) + (usage["outputTokens"] || 0)
+        cache_read_tokens: usage["cacheReadInputTokens"] || 0,
+        cache_write_tokens: usage["cacheWriteInputTokens"] || 0,
+        total_tokens:
+          (usage["inputTokens"] || 0) + (usage["cacheReadInputTokens"] || 0) +
+            (usage["cacheWriteInputTokens"] || 0) + (usage["outputTokens"] || 0)
       }
     }
   end

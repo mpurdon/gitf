@@ -174,10 +174,20 @@ defmodule GiTF.Costs do
     default_prices = %{input: 0.15, output: 0.60, cache_read: 0.0375, cache_write: 0.0}
     prices = Map.get(pricing, model, pricing[@default_model] || default_prices)
 
-    input = token_count(attrs, :input_tokens) * prices.input
+    # input_tokens reports the full effective context (uncached + cached —
+    # see BedrockDirect usage parsing); bill the cached share at cache rates
+    # and only the remainder at full input price, or cached tokens get
+    # double-charged.
+    cache_read_count = token_count(attrs, :cache_read_tokens)
+    cache_write_count = token_count(attrs, :cache_write_tokens)
+
+    uncached_input =
+      max(token_count(attrs, :input_tokens) - cache_read_count - cache_write_count, 0)
+
+    input = uncached_input * prices.input
     output = token_count(attrs, :output_tokens) * prices.output
-    cache_read = token_count(attrs, :cache_read_tokens) * prices.cache_read
-    cache_write = token_count(attrs, :cache_write_tokens) * prices.cache_write
+    cache_read = cache_read_count * prices.cache_read
+    cache_write = cache_write_count * prices.cache_write
 
     ((input + output + cache_read + cache_write) / 1_000_000)
     |> Float.round(6)

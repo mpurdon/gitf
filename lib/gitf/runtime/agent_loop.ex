@@ -484,7 +484,24 @@ defmodule GiTF.Runtime.AgentLoop do
     output = Map.get(usage, :output_tokens, 0) + Map.get(current, :output_tokens, 0)
     cost = Map.get(usage, :total_cost, 0) + Map.get(current, :total_cost, 0)
 
-    %{state | total_usage: %{input_tokens: input, output_tokens: output, total_cost: cost}}
+    # Cache token breakdown must survive accumulation or the cost recorder
+    # prices cached reads as full-rate input.
+    cache_read =
+      Map.get(usage, :cache_read_tokens, 0) + Map.get(current, :cache_read_tokens, 0)
+
+    cache_write =
+      Map.get(usage, :cache_write_tokens, 0) + Map.get(current, :cache_write_tokens, 0)
+
+    %{
+      state
+      | total_usage: %{
+          input_tokens: input,
+          output_tokens: output,
+          cache_read_tokens: cache_read,
+          cache_write_tokens: cache_write,
+          total_cost: cost
+        }
+    }
   end
 
   # -- Events ------------------------------------------------------------------
