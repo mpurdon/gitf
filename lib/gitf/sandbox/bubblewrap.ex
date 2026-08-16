@@ -46,7 +46,21 @@ defmodule GiTF.Sandbox.Bubblewrap do
     end
   end
 
+  # Only bind paths that exist on THIS host: /lib64 does not exist on arm64
+  # Ubuntu, and a bwrap --ro-bind of a missing source dies with "Can't find
+  # source path" before the sandboxed command ever runs. That single
+  # hardcoded bind kept the sandbox broken on the arm64 box even after the
+  # AppArmor userns fix — with sandbox_required set, every AI shell command
+  # was (correctly) refused and ghosts flew blind (msn-9695ad, finding #16).
+  @candidate_ro_binds ["/usr", "/bin", "/lib", "/lib64", "/etc/resolv.conf", "/etc/ssl/certs"]
+
   defp base_args do
+    ro_binds =
+      for path <- @candidate_ro_binds,
+          File.exists?(path),
+          arg <- ["--ro-bind", path, path],
+          do: arg
+
     [
       "--unshare-all",
       "--share-net",
@@ -55,26 +69,8 @@ defmodule GiTF.Sandbox.Bubblewrap do
       "--proc",
       "/proc",
       "--tmpfs",
-      "/tmp",
-      "--ro-bind",
-      "/usr",
-      "/usr",
-      "--ro-bind",
-      "/bin",
-      "/bin",
-      "--ro-bind",
-      "/lib",
-      "/lib",
-      "--ro-bind",
-      "/lib64",
-      "/lib64",
-      "--ro-bind",
-      "/etc/resolv.conf",
-      "/etc/resolv.conf",
-      "--ro-bind",
-      "/etc/ssl/certs",
-      "/etc/ssl/certs"
-    ]
+      "/tmp"
+    ] ++ ro_binds
   end
 
   # Critical risk: read-only worktree
