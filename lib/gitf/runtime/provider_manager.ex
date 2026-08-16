@@ -123,10 +123,30 @@ defmodule GiTF.Runtime.ProviderManager do
   end
 
   @doc "Returns tier model mapping for a provider, merged with config overrides."
+  def tier_models("bedrock") do
+    # Bedrock has TWO config sources: [llm.providers.bedrock] (the generic
+    # per-provider table) and [llm.bedrock_models] (the bedrock-mode map that
+    # `resolve/1` uses — typically inference-profile ARNs, required in
+    # regions where bare Anthropic model IDs reject on-demand invocation).
+    # Fallback paths read tier_models/1; without this overlay they selected
+    # the catalog model-id form, which ReqLLM can only call with explicit
+    # env credentials — every call failed and the shared bedrock circuit
+    # opened, taking the healthy ARN path down with it (msn-bf61a1).
+    defaults = Map.get(@known_providers, "bedrock", %{})
+    mode_map = Config.get([:llm, :bedrock_models]) || %{}
+    config_overrides = Map.merge(normalize_tier_keys(mode_map), get_provider_config("bedrock"))
+
+    build_tier_map(defaults, config_overrides)
+  end
+
   def tier_models(provider_name) do
     defaults = Map.get(@known_providers, provider_name, %{})
     config_overrides = get_provider_config(provider_name)
 
+    build_tier_map(defaults, config_overrides)
+  end
+
+  defp build_tier_map(defaults, config_overrides) do
     %{
       thinking:
         to_string(
@@ -140,6 +160,12 @@ defmodule GiTF.Runtime.ProviderManager do
         to_string(config_overrides[:fast] || config_overrides["fast"] || defaults[:fast] || "")
     }
   end
+
+  defp normalize_tier_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k) |> String.to_atom(), v} end)
+  end
+
+  defp normalize_tier_keys(_), do: %{}
 
   @doc "Returns provider status: :connected, :configured, or :unconfigured."
   def provider_status(name) do

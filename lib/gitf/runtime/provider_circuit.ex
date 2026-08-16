@@ -427,6 +427,12 @@ defmodule GiTF.Runtime.ProviderCircuit do
       String.contains?(lower, "forbidden") -> :auth_error
       String.contains?(lower, "invalid") and String.contains?(lower, "key") -> :auth_error
       String.contains?(lower, "expired") -> :auth_error
+      # ReqLLM raises ArgumentError "credentials required" when a provider
+      # has no usable key/role — that's a config problem (15-min backoff),
+      # not a transient. It was falling through to :unknown/:rate_limited
+      # and thrashing the circuit with 2-min probes that can never succeed.
+      String.contains?(lower, "credentials required") -> :auth_error
+      String.contains?(lower, "credentials are required") -> :auth_error
       # Model / config errors — needs manual fix
       String.contains?(lower, "not_found") -> :model_not_found
       String.contains?(lower, "unknown provider") -> :model_not_found
