@@ -62,6 +62,27 @@ Severity = (likelihood the external side changes) × (silence of the
 failure) × (blast radius). A likely change that fails *loudly* is low
 severity; an unlikely change that produces a *lie* is high.
 
+## Capability parity (the absence lens)
+
+Defect hunts only find what's present and wrong. For each external
+platform, ALSO enumerate what it **offers that we don't use** — read the
+vendor's current feature list, not our integration code — and force every
+absence to be a deliberate decision or a finding. Classic categories:
+cost levers (prompt/result caching, batch APIs, cheaper service tiers,
+compression), reliability levers (idempotency keys, checksums, webhooks
+vs polling), and limit levers (pagination, streaming, quota headroom
+APIs).
+
+Warning from the finding that created this section: **accounting code is
+not capability code.** GiTF tracked `cache_read_tokens` with configured
+prices through every cost summary — all faithfully recording zeros —
+while the Bedrock request path sent no cachePoint blocks at all. A
+reviewer who greps for the feature and finds its *bookkeeping* will
+wrongly conclude the feature exists. Verify at the wire: does the
+request/response actually carry the capability's fields, and is its
+metric ever nonzero in production? A metric that has never been nonzero
+is a red flag, not reassurance.
+
 ## Fix patterns (name one per finding)
 
 - **Re-derive at use** — fetch the source of truth at the point of
