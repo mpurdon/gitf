@@ -54,7 +54,7 @@ defmodule GiTF.Config.Provider do
   """
   @spec preload(String.t() | nil) :: :ok
   def preload(gitf_root) do
-    :persistent_term.put(@pt_key, load_config(gitf_root))
+    install(load_config(gitf_root))
     :ok
   end
 
@@ -105,7 +105,7 @@ defmodule GiTF.Config.Provider do
   def init(opts) do
     gitf_root = Keyword.get(opts, :gitf_root)
     config = load_config(gitf_root)
-    :persistent_term.put(@pt_key, config)
+    install(config)
     {:ok, %{gitf_root: gitf_root}}
   end
 
@@ -114,7 +114,7 @@ defmodule GiTF.Config.Provider do
     old_config = :persistent_term.get(@pt_key, %{})
 
     new_config = load_config(state.gitf_root)
-    :persistent_term.put(@pt_key, new_config)
+    install(new_config)
 
     changed_keys = diff_top_keys(old_config, new_config)
 
@@ -130,6 +130,15 @@ defmodule GiTF.Config.Provider do
   end
 
   # -- Private ---------------------------------------------------------------
+
+  # Every path that makes a loaded config current goes through here so the
+  # [features] table is applied to Application env in lockstep — flags flip
+  # on config reload, no restart.
+  defp install(config) do
+    :persistent_term.put(@pt_key, config)
+    GiTF.Flags.apply_from_config(config)
+    :ok
+  end
 
   defp load_config(gitf_root) do
     defaults()
