@@ -48,6 +48,23 @@ if [[ ! -f /etc/gitf/gitf.env ]]; then
 fi
 "$HERE/../bin/gen-secrets" /etc/gitf/gitf.env
 
+# Ubuntu's AppArmor userns restriction (kernel.apparmor_restrict_unprivileged_userns)
+# transitions unconfined processes that create user namespaces into a profile that
+# denies cap sys_admin — bwrap then dies at "setting up uid map: Permission denied"
+# and every sandboxed validation fails. Grant bwrap alone the userns permission
+# (the same pattern Ubuntu ships for browsers); the OS restriction stays on for
+# everything else. No-op on hosts without AppArmor.
+if command -v apparmor_parser >/dev/null 2>&1 && command -v bwrap >/dev/null 2>&1; then
+  cat > /etc/apparmor.d/bwrap <<'APPARMOR'
+abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+APPARMOR
+  apparmor_parser -r /etc/apparmor.d/bwrap || echo "WARN: apparmor bwrap profile failed to load"
+fi
+
 # Units
 install -m 0644 "$HERE/gitf.service" /etc/systemd/system/gitf.service
 install -m 0644 "$HERE/gitf-idle-stop.service" /etc/systemd/system/gitf-idle-stop.service

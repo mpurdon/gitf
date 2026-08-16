@@ -55,6 +55,7 @@ defmodule GiTF.Observability.Alerts do
     zombie_detected: :high,
     retries_exhausted: :high,
     revert_push_failed: :critical,
+    sandbox_broken: :critical,
     github_auth_broken: :high,
     workflow_phase_drift: :critical,
     sync_conflict_theirs: :high,

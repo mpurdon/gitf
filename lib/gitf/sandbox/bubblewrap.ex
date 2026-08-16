@@ -82,9 +82,105 @@ defmodule GiTF.Sandbox.Bubblewrap do
   # All other risk levels: read-write worktree
   defp cwd_bind_args(cwd, _risk_level), do: ["--bind", cwd, cwd]
 
+  @probe_cache_key {__MODULE__, :probe}
+  @probe_ttl_ms 60_000
+  @probe_timeout_ms 5_000
+
+  @doc """
+  A binary on PATH is not a working sandbox: host policy (Ubuntu's AppArmor
+  `unprivileged_userns` restriction, seccomp, kernel sysctls) can let bwrap
+  exist yet fail at namespace setup. When that happened, every validation
+  died at "bwrap: setting up uid map: Permission denied" and the failures
+  were attributed to the ghost's code. So availability means "a trivial
+  command actually ran inside the production flag set" — probed for real,
+  cached #{div(@probe_ttl_ms, 1000)}s, with a critical alert on breakage.
+  """
   def available? do
-    System.find_executable("bwrap") != nil
+    System.find_executable("bwrap") != nil and probe_ok?()
   end
 
   def name, do: "bubblewrap"
+
+  defp probe_ok? do
+    now = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get(@probe_cache_key, nil) do
+      {result, at} when now - at < @probe_ttl_ms ->
+        result
+
+      previous ->
+        result = run_probe()
+        :persistent_term.put(@probe_cache_key, {result, now})
+        maybe_alert(previous, result)
+        result
+    end
+  end
+
+  defp run_probe do
+    task =
+      Task.async(fn ->
+        try do
+          System.cmd(
+            "bwrap",
+            base_args() ++ ["--die-with-parent", "--", "true"],
+            stderr_to_stdout: true
+          )
+        rescue
+          e -> {:probe_exception, Exception.message(e)}
+        end
+      end)
+
+    case Task.yield(task, @probe_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {_out, 0}} ->
+        {:ok, nil}
+
+      {:ok, {out, code}} when is_binary(out) ->
+        {:broken, "exit #{code}: #{String.slice(out, 0, 200)}"}
+
+      {:ok, {:probe_exception, msg}} ->
+        {:broken, msg}
+
+      _ ->
+        {:broken, "probe timed out after #{@probe_timeout_ms}ms"}
+    end
+    |> case do
+      {:ok, _} -> true
+      {:broken, reason} -> put_last_error(reason)
+    end
+  end
+
+  defp put_last_error(reason) do
+    :persistent_term.put({__MODULE__, :last_error}, reason)
+    false
+  end
+
+  @doc "Why the last probe failed, if it did."
+  def last_error, do: :persistent_term.get({__MODULE__, :last_error}, nil)
+
+  # Alert on healthy→broken transitions (and the very first broken probe),
+  # not on every cached re-check — the webhook dedup key keeps repeats quiet.
+  defp maybe_alert({false, _at}, false), do: :ok
+
+  defp maybe_alert(_previous, false) do
+    require Logger
+    reason = last_error() || "unknown"
+
+    Logger.error(
+      "bwrap sandbox BROKEN on this host: #{reason} — AI-authored commands " <>
+        "cannot be sandboxed; validations must not attribute this to the code under test"
+    )
+
+    GiTF.Observability.Alerts.dispatch_webhook(
+      :sandbox_broken,
+      "bwrap present but cannot create sandboxes (#{reason}). If this host runs " <>
+        "Ubuntu's AppArmor userns restriction, install the bwrap userns profile " <>
+        "(rel/install-systemd.sh does this).",
+      dedup_key: "sandbox_broken:#{node()}"
+    )
+  rescue
+    # Alerting must never take down the availability check.
+    _ -> :ok
+  end
+
+  defp maybe_alert(_previous, true), do: :ok
 end
