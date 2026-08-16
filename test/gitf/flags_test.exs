@@ -22,6 +22,8 @@ defmodule GiTF.FlagsTest do
   end
 
   test "ignores unknown flags and non-boolean values" do
+    before = Application.get_env(:gitf, :skills_enabled)
+
     applied =
       Flags.apply_from_config(%{
         features: %{
@@ -32,7 +34,8 @@ defmodule GiTF.FlagsTest do
 
     assert applied == []
     assert Application.get_env(:gitf, :not_a_real_flag) == nil
-    assert Application.get_env(:gitf, :skills_enabled) == nil
+    # Non-boolean value must leave the flag exactly as it was.
+    assert Application.get_env(:gitf, :skills_enabled) == before
   end
 
   test "a config with no [features] table applies nothing" do

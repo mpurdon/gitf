@@ -103,8 +103,14 @@ defmodule GiTF.Runtime.ProviderManager do
         Enum.map(list, &to_string/1)
 
       _ ->
-        provider = Config.get([:llm, :provider]) || "google"
-        [to_string(provider)]
+        # Unconfigured priority must follow the execution mode. Defaulting
+        # to ["google"] on a bedrock box left the circuit-breaker fallback
+        # with zero usable candidates while bedrock served traffic next door.
+        case GiTF.Runtime.ModelResolver.execution_mode() do
+          :bedrock -> ["bedrock"]
+          :ollama -> ["ollama"]
+          _ -> [to_string(Config.get([:llm, :provider]) || "google")]
+        end
     end
   end
 

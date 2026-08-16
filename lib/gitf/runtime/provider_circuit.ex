@@ -300,10 +300,24 @@ defmodule GiTF.Runtime.ProviderCircuit do
     current_provider = extract_provider(model)
     tier = infer_tier(model, current_provider)
 
-    # Build candidate list: priority providers first, then any others with keys
+    # Build candidate list: priority providers first, then any others with
+    # keys. Bedrock is keyless (instance role / profile), so an api_key
+    # filter silently excluded the one provider that always works on the
+    # box — include it whenever it's plausibly usable.
     priority = ProviderManager.provider_priority()
     all_known = Map.keys(ProviderManager.known_providers())
-    extras = Enum.filter(all_known -- priority, &ProviderManager.api_key_for/1)
+
+    extras =
+      (all_known -- priority)
+      |> Enum.filter(fn
+        "bedrock" ->
+          ModelResolver.bedrock_mode?() or
+            ProviderManager.provider_status("bedrock") != :unconfigured
+
+        candidate ->
+          ProviderManager.api_key_for(candidate) != nil
+      end)
+
     candidates = (priority ++ extras) |> Enum.reject(&(&1 == current_provider))
 
     result =

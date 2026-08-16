@@ -223,14 +223,22 @@ defmodule GiTF.Runtime.ModelResolver do
     # Add legacy aliases that resolve to canonical tier specs
     with_aliases = Map.merge(base, resolve_aliases(base))
 
-    case Application.get_env(:gitf, :llm) do
-      nil ->
-        with_aliases
+    # The compile-time :llm default_models is the API-mode starter catalog
+    # (google). It must never override the mode-specific maps: merging it
+    # last sent bedrock-mode "fast"/alias tiers to google:gemini-2.5-flash
+    # on a box with no google key — every fix-op retry died on a dead
+    # provider (msn-bf61a1). API/CLI modes only.
+    if mode in [:api, :cli] do
+      Map.merge(with_aliases, app_env_default_models())
+    else
+      with_aliases
+    end
+  end
 
-      config ->
-        custom = config[:default_models] || %{}
-        custom_string_keys = Map.new(custom, fn {k, v} -> {to_string(k), v} end)
-        Map.merge(with_aliases, custom_string_keys)
+  defp app_env_default_models do
+    case Application.get_env(:gitf, :llm) do
+      nil -> %{}
+      config -> Map.new(config[:default_models] || %{}, fn {k, v} -> {to_string(k), v} end)
     end
   end
 
