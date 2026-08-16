@@ -69,6 +69,21 @@ if model = System.get_env("GITF_STUDIO_VOICE_MODEL") do
   config :gitf, :studio, voice_model: model
 end
 
+# Ghost activity-watchdog stale threshold. Build-heavy sectors (Rust/ts-rs
+# bindings take minutes on small boxes) need more headroom than the 120s
+# default even with tool-execution heartbeats, because a saturated box can
+# delay heartbeat delivery.
+case System.get_env("GITF_STALE_THRESHOLD_SECONDS") do
+  nil ->
+    :ok
+
+  raw ->
+    case Integer.parse(raw) do
+      {n, _} when n >= 30 -> config :gitf, :timeouts, stale_threshold_seconds: n
+      _ -> :ok
+    end
+end
+
 # Integer-valued flag: number of parallel implementation attempts (tournament).
 case System.get_env("GITF_PARALLEL_IMPL_ATTEMPTS") do
   nil ->

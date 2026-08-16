@@ -65,6 +65,37 @@ APPARMOR
   apparmor_parser -r /etc/apparmor.d/bwrap || echo "WARN: apparmor bwrap profile failed to load"
 fi
 
+# Distributed-Erlang reachability for the live console: on EC2+Tailscale the
+# short hostname resolves to IPv6 (tailnet ULA) only, while BEAM distribution
+# listens on IPv4 — every local rpc/remote died with :noconnection. Pin the
+# primary IPv4.
+HOST_IP=$(hostname -I | awk '{print $1}')
+HOST_NAME=$(hostname -s)
+if [[ -n "$HOST_IP" ]] && ! grep -q "$HOST_IP $HOST_NAME" /etc/hosts; then
+  echo "$HOST_IP $HOST_NAME" >> /etc/hosts
+fi
+
+# Live console wrapper: `gitf-console` opens a remote IEx shell on the
+# running daemon; `gitf-console rpc '<elixir>'` evaluates one expression
+# (e.g. `gitf-console rpc 'GiTF.Config.Provider.reload()'` for hot config
+# reload — no restart). Tries the env cookie, falls back to the cookie file
+# (which is what a node with a broken -setcookie flag actually uses).
+cat > /usr/local/bin/gitf-console <<'CONSOLE'
+#!/bin/bash
+set -euo pipefail
+COOKIE=$(grep '^RELEASE_COOKIE=' /etc/gitf/gitf.env 2>/dev/null | cut -d= -f2- | tr -d '"')
+FILE_COOKIE=$(cat /var/lib/gitf/.erlang.cookie 2>/dev/null || true)
+NODE="gitf@$(hostname -s)"
+try() {
+  sudo -u gitf env HOME=/var/lib/gitf RELEASE_COOKIE="$1" RELEASE_NODE="$NODE" \
+    RELEASE_DISTRIBUTION=sname /opt/gitf/bin/gitf "${@:2}"
+}
+CMD=${1:-remote}
+shift || true
+try "${COOKIE:-$FILE_COOKIE}" "$CMD" "$@" 2>/dev/null || try "$FILE_COOKIE" "$CMD" "$@"
+CONSOLE
+chmod 0755 /usr/local/bin/gitf-console
+
 # Units
 install -m 0644 "$HERE/gitf.service" /etc/systemd/system/gitf.service
 install -m 0644 "$HERE/gitf-idle-stop.service" /etc/systemd/system/gitf-idle-stop.service

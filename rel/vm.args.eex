@@ -6,9 +6,9 @@
 ## Crash dump location — override via ERL_CRASH_DUMP env at runtime.
 ## -env ERL_CRASH_DUMP /tmp/erl_crash.dump
 
-## Cookie and node name are provided at runtime via env.sh (RELEASE_COOKIE
-## / RELEASE_NODE). Production deployments MUST set RELEASE_COOKIE to a
-## stable secret — otherwise OTP generates a random cookie on each boot
-## and distributed Erlang connections will fail.
--setcookie ${RELEASE_COOKIE}
--name ${RELEASE_NODE}
+## Cookie and node name are provided at runtime by the release scripts from
+## RELEASE_COOKIE / RELEASE_NODE env. Do NOT add -setcookie/-name here:
+## vm.args gets no runtime env expansion, so `${RELEASE_COOKIE}` reached the
+## VM as a LITERAL trailing flag — the node silently fell back to the
+## ~/.erlang.cookie file and every `bin/gitf rpc` died with :noconnection
+## (the live-console outage diagnosed 2026-08-16).
