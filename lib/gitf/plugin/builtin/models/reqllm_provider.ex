@@ -237,8 +237,11 @@ defmodule GiTF.Plugin.Builtin.Models.ReqLLMProvider do
       %{
         input_tokens: Map.get(usage, :input_tokens, 0),
         output_tokens: Map.get(usage, :output_tokens, 0),
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
+        # Was hardcoded 0 — which silently discarded the Bedrock prompt-cache
+        # breakdown and billed cached reads at full input price in the ledger
+        # (AWS's actual bill was discounted; our books overstated it).
+        cache_read_tokens: Map.get(usage, :cache_read_tokens, 0),
+        cache_write_tokens: Map.get(usage, :cache_write_tokens, 0),
         model: Map.get(e, "model"),
         cost_usd: Map.get(e, "cost_usd", 0)
       }
