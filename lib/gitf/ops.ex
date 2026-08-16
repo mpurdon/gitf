@@ -123,6 +123,13 @@ defmodule GiTF.Ops do
         triage_result: attrs[:triage_result],
         # Skip verification (simple ops, recon ops)
         skip_verification: attrs[:skip_verification] || false,
+        # Fix-loop lineage. Dropping these orphaned every fix op: a gate
+        # failure on a COMPLETED fix op found no context, spawned a fresh
+        # "attempt 1" fix-of-fix, and the chain never accumulated toward
+        # exhausted?/1 — the unbounded loop that ate runs 3, 5, and 6
+        # (finding #14).
+        fix_of: attrs[:fix_of],
+        fix_context: attrs[:fix_context],
         # Priority (inherited from mission)
         priority: attrs[:priority] || inherit_mission_priority(attrs[:mission_id])
       }

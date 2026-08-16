@@ -36,6 +36,21 @@ defmodule GiTF.FixLoopConvergenceTest do
     %{op: op, shell: shell}
   end
 
+  test "fix ops carry their lineage — fix_of and fix_context survive creation", %{
+    op: op,
+    shell: shell
+  } do
+    ctx = FixContext.new(op.id)
+    {:ok, fix_op} = Togusa.request_fix(op.id, shell.id, %{"summary" => "gate fail"}, ctx)
+
+    # Ops.create silently dropped both fields (finding #14): every fix op
+    # was an orphan, and gate failures on completed fix ops restarted the
+    # chain at attempt 1 forever.
+    {:ok, reloaded} = Ops.get(fix_op.id)
+    assert reloaded[:fix_of] == op.id
+    assert FixContext.from_map(reloaded[:fix_context]).attempt == 1
+  end
+
   test "fix attempts accumulate on the origin op across cycles", %{op: op, shell: shell} do
     failures = %{"security" => [], "summary" => "proof of test failed"}
 
