@@ -294,7 +294,12 @@ defmodule GiTF.Ghost.Worker do
   def handle_info({port, {:exit_status, exit_code}}, %{handle: {:port, port}} = state) do
     Logger.warning("Ghost #{state.ghost_id} exited with status #{exit_code}")
     output = IO.iodata_to_binary(state.output)
-    mark_failed(state, "Exit code #{exit_code}: #{String.slice(output, 0, 500) |> :binary.copy()}")
+
+    mark_failed(
+      state,
+      "Exit code #{exit_code}: #{String.slice(output, 0, 500) |> :binary.copy()}"
+    )
+
     {:stop, :normal, %{state | status: :failed, handle: nil}}
   end
 
@@ -789,7 +794,11 @@ defmodule GiTF.Ghost.Worker do
 
       case spawn_api_or_cli(state, shell) do
         {:ok, handle} ->
-          Process.send_after(self(), :verify_beacon, timeout_cfg(:verify_beacon_initial_ms, 10_000))
+          Process.send_after(
+            self(),
+            :verify_beacon,
+            timeout_cfg(:verify_beacon_initial_ms, 10_000)
+          )
 
           # Split metadata into bounded-cardinality `labels` (safe for Prometheus
           # label sets) and high-cardinality `attributes` (op_id, ghost_id,
@@ -898,7 +907,12 @@ defmodule GiTF.Ghost.Worker do
 
           with :ok <- update_ghost_working(state, shell),
                {:ok, handle} <- spawn_api_or_cli(state, shell) do
-            Process.send_after(self(), :verify_beacon, timeout_cfg(:verify_beacon_initial_ms, 10_000))
+            Process.send_after(
+              self(),
+              :verify_beacon,
+              timeout_cfg(:verify_beacon_initial_ms, 10_000)
+            )
+
             {:ok, attach_handle(state, shell, handle)}
           else
             error ->
@@ -1422,8 +1436,15 @@ defmodule GiTF.Ghost.Worker do
     # such ops "done" causes the orchestrator to advance to validation, which
     # then fails — wasting time and retry budget. Detect at completion time
     # and delegate to mark_failed so the standard retry path takes over.
+    #
+    # Exemption: ops the planner marked skip_verification are analysis-only
+    # (recon/read-only) — their deliverable is the output, not a diff. The
+    # honesty bar applied blindly executed a Recon ghost for correctly
+    # changing nothing (msn-e631cb), deterministically failing its DAG.
+    read_only_op? = (op && Map.get(op, :skip_verification, false)) == true
+
     empty_completion? =
-      not is_phase_job and Map.get(metadata, :files_changed, 0) == 0
+      not is_phase_job and not read_only_op? and Map.get(metadata, :files_changed, 0) == 0
 
     if empty_completion? do
       Logger.warning(
@@ -1446,7 +1467,6 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp finish_mark_success(state, op, is_phase_job) do
-
     # See :spawned event above — same labels/attributes split for cardinality safety.
     GiTF.Telemetry.emit([:gitf, :ghost, :completed], %{}, %{
       labels: %{status: :completed, sector_id: state.sector_id},
@@ -1480,7 +1500,10 @@ defmodule GiTF.Ghost.Worker do
         # Phase ops: single durable delivery via Link (persisted, waggle-recoverable).
         # No redundant GenServer.cast — it caused lock contention and duplicate toasts.
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
-        body = "op_id: #{state.op_id}\nJob #{state.op_id} completed successfully (phase: #{op.phase})"
+
+        body =
+          "op_id: #{state.op_id}\nJob #{state.op_id} completed successfully (phase: #{op.phase})"
+
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
         {:ok, _link_msg} = GiTF.Link.send(state.ghost_id, "major", "job_complete", body)
 
@@ -1728,7 +1751,10 @@ defmodule GiTF.Ghost.Worker do
             Map.merge(metadata, %{branch: branch, shell_id: state.shell_id})
 
           nil ->
-            Logger.warning("Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for branch info")
+            Logger.warning(
+              "Ghost #{state.ghost_id}: shell #{inspect(state.shell_id)} not found for branch info"
+            )
+
             metadata
 
           _ ->
@@ -1749,7 +1775,8 @@ defmodule GiTF.Ghost.Worker do
       if not is_phase_job do
         try do
           case shell do
-            %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
+            %{worktree_path: path, base_commit_sha: base}
+            when is_binary(path) and is_binary(base) ->
               collect_file_changes(state, metadata, path, "#{base}..HEAD")
 
             %{worktree_path: path} when is_binary(path) ->
@@ -1795,7 +1822,10 @@ defmodule GiTF.Ghost.Worker do
         })
 
       {output, code} ->
-        Logger.warning("Op #{state.op_id}: git diff failed (exit #{code}): #{String.slice(output, 0, 200)}")
+        Logger.warning(
+          "Op #{state.op_id}: git diff failed (exit #{code}): #{String.slice(output, 0, 200)}"
+        )
+
         metadata
     end
   end
