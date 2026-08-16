@@ -156,7 +156,7 @@ defmodule GiTF.Validation do
     impl_ops =
       mission.ops
       |> Enum.filter(fn op ->
-        op.status == "done" and (op[:phase_job] in [nil, false])
+        op.status == "done" and op[:phase_job] in [nil, false]
       end)
 
     cond do
@@ -255,7 +255,7 @@ defmodule GiTF.Validation do
   def emit_confidence(mission) do
     validation_runs =
       Enum.count(mission.ops, fn op ->
-        op[:phase_job] && Map.get(op, :phase) == "validation" and op.status == "done"
+        (op[:phase_job] && Map.get(op, :phase) == "validation") and op.status == "done"
       end)
 
     Telemetry.emit([:gitf, :validation, :passed], %{runs: validation_runs}, %{
@@ -274,9 +274,7 @@ defmodule GiTF.Validation do
     :ok
   rescue
     e ->
-      Logger.warning(
-        "emit_confidence failed for #{mission.id}: #{Exception.message(e)}"
-      )
+      Logger.warning("emit_confidence failed for #{mission.id}: #{Exception.message(e)}")
 
       :ok
   end
@@ -612,19 +610,28 @@ defmodule GiTF.Validation do
     end
   rescue
     e ->
-      Logger.warning(
-        "learn_from_failure failed for #{mission.id}: #{Exception.message(e)}"
-      )
+      Logger.warning("learn_from_failure failed for #{mission.id}: #{Exception.message(e)}")
 
       :ok
   end
 
-  # Max validation fix attempts, consulting sector intelligence at
-  # `:high` confidence (so a sector profile recommending a different
-  # budget actually takes effect).
-  defp max_fix_attempts_for(nil), do: @default_max_fix_attempts
-
+  # Max validation fix attempts: operator config first (hot-reloadable via
+  # [validation] max_fix_attempts — run 9 died one fix cycle short of a
+  # compiling feature), then sector intelligence at `:high` confidence,
+  # then the default.
   defp max_fix_attempts_for(sector_id) do
+    configured = GiTF.Config.Provider.get([:validation, :max_fix_attempts])
+
+    cond do
+      is_integer(configured) and configured >= 1 -> configured
+      is_nil(sector_id) -> @default_max_fix_attempts
+      true -> profile_fix_attempts(sector_id)
+    end
+  rescue
+    _ -> @default_max_fix_attempts
+  end
+
+  defp profile_fix_attempts(sector_id) do
     profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
 
     case profile do
