@@ -53,6 +53,14 @@ defmodule GiTF.Togusa do
       # Record this attempt
       fix_ctx = FixContext.record_attempt(fix_ctx, :quality_gate, op_id, failures, feedback)
 
+      # Persist the incremented context onto the ORIGINAL op, not only the
+      # new fix op. load_fix_context reads the failing op's own record; when
+      # the context lived solely on the (completed) fix ops, every fresh
+      # failure of the origin restarted at attempt 1 — exhausted?/1 could
+      # never fire, and msn-8933dc ran 12 identical fix cycles against an
+      # environmental failure with no cap in sight.
+      persist_context_on_origin(fix_ctx)
+
       # Create fix op
       fix_title = "Fix quality issues (attempt #{fix_ctx.attempt})"
 
@@ -81,7 +89,10 @@ defmodule GiTF.Togusa do
                   {:ok, fix_op}
 
                 {:error, reason} ->
-                  Logger.warning("Togusa: worktree spawn failed, falling back: #{inspect(reason)}")
+                  Logger.warning(
+                    "Togusa: worktree spawn failed, falling back: #{inspect(reason)}"
+                  )
+
                   {:ok, fix_op}
               end
 
@@ -94,6 +105,25 @@ defmodule GiTF.Togusa do
       end
     end
   end
+
+  # Fire-and-forget: a failed persist must not block the fix cycle, but it
+  # is logged — attempt accounting silently resetting is how loops hide.
+  defp persist_context_on_origin(%FixContext{original_op_id: origin_id} = fix_ctx)
+       when is_binary(origin_id) do
+    case GiTF.Archive.update(:ops, origin_id, fn op ->
+           Map.put(op, :fix_context, FixContext.to_map(fix_ctx))
+         end) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Togusa: could not persist fix context on origin #{origin_id}: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp persist_context_on_origin(_), do: :ok
 
   # -- Agent Profile Learning ------------------------------------------------
 
@@ -194,8 +224,11 @@ defmodule GiTF.Togusa do
 
     lines =
       case failures[:proof_of_test] do
-        :fail -> lines ++ ["- Proof of test: FAILED (no test execution detected or 0 files changed)"]
-        _ -> lines
+        :fail ->
+          lines ++ ["- Proof of test: FAILED (no test execution detected or 0 files changed)"]
+
+        _ ->
+          lines
       end
 
     lines =

@@ -96,12 +96,16 @@ defmodule GiTF.Runtime.AgentLoop do
 
     system_prompt = build_system_prompt(Keyword.get(opts, :system_prompt), working_dir, nil)
     max_iterations = Keyword.get(opts, :max_iterations, @default_max_iterations)
+
     max_tokens =
       Keyword.get(opts, :max_tokens, default_max_tokens_for(model))
+
     receive_timeout =
       Keyword.get(opts, :receive_timeout, configured_receive_timeout(model))
+
     on_progress = Keyword.get(opts, :on_progress)
     temperature = Keyword.get(opts, :temperature)
+
     heartbeat_interval_ms =
       Keyword.get(opts, :heartbeat_interval_ms, @default_heartbeat_interval_ms)
 
@@ -231,6 +235,33 @@ defmodule GiTF.Runtime.AgentLoop do
     end
   end
 
+  # Tool execution with liveness heartbeats. The task is awaited without a
+  # deadline of its own — tool runtime policy (wall-clock caps, sandbox
+  # timeouts) belongs to the tools and the worker, not this loop; our job is
+  # only to keep proving the ghost is alive while a tool runs.
+  defp execute_tools_with_heartbeat(context, tool_calls, tools, state) do
+    task =
+      Task.async(fn ->
+        ReqLLM.Context.execute_and_append_tools(context, tool_calls, tools)
+      end)
+
+    wait_for_tools(task, state.on_progress, state.heartbeat_interval_ms)
+  end
+
+  defp wait_for_tools(task, on_progress, interval_ms) do
+    case Task.yield(task, interval_ms) do
+      {:ok, next_context} ->
+        next_context
+
+      {:exit, reason} ->
+        exit(reason)
+
+      nil ->
+        emit_progress(on_progress, %{type: :heartbeat})
+        wait_for_tools(task, on_progress, interval_ms)
+    end
+  end
+
   defp handle_response(response, _messages, _model, tools, state) do
     classified = ReqLLM.Response.classify(response)
     usage = normalize_usage(response)
@@ -326,13 +357,14 @@ defmodule GiTF.Runtime.AgentLoop do
         end)
 
         # Execute tool calls and append results to context using ReqLLM's
-        # official method (handles provider-specific message formatting)
+        # official method (handles provider-specific message formatting).
+        # Runs under the same heartbeat machinery as LLM calls: a tool that
+        # shells out to a long silent build (cargo/ts-rs bindings take
+        # minutes on a small box) previously starved the ghost worker's
+        # activity watchdog, which killed healthy ghosts at the stale
+        # threshold — four identical "No activity" deaths sank msn-8933dc.
         next_context =
-          ReqLLM.Context.execute_and_append_tools(
-            response.context,
-            tool_calls,
-            tools
-          )
+          execute_tools_with_heartbeat(response.context, tool_calls, tools, state)
 
         # Keep the original model spec (with provider prefix) — don't use
         # response.model which may strip the provider prefix (e.g. "gemini-2.5-flash"
