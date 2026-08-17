@@ -59,6 +59,7 @@ defmodule GiTF.Observability.Alerts do
     github_auth_broken: :high,
     workflow_phase_drift: :critical,
     sync_conflict_theirs: :high,
+    sync_retry: :medium,
     quest_timeout: :high,
     budget_exceeded: :high,
     quest_exhausted: :high,

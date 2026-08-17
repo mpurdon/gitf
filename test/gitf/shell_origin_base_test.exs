@@ -1,10 +1,14 @@
 defmodule GiTF.ShellOriginBaseTest do
   use GiTF.StoreCase
 
-  @git System.find_executable("git")
+  # Resolved at call time with an absolute fallback: a compile-time
+  # attribute bakes in nil when another test's PATH narrowing is active
+  # while this module loads, and System.cmd(nil, ...) fails the suite
+  # order-dependently.
+  defp git_exe, do: System.find_executable("git") || "/usr/bin/git"
 
   defp git!(dir, args) do
-    {out, 0} = System.cmd(@git, args, cd: dir, stderr_to_stdout: true)
+    {out, 0} = System.cmd(git_exe(), args, cd: dir, stderr_to_stdout: true)
     out
   end
 
