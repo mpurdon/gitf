@@ -228,6 +228,15 @@ defmodule GiTF.Major.Orchestrator do
   defp do_advance_quest(mission_id) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       cond do
+        # Terminal missions are DONE. Advancing them resurrected closed
+        # missions all day (run 17 was halted, closed, and came back
+        # spawning fix ghosts; the advance log spammed 'status=failed'
+        # missions every tick since msn-bf61a1). Nothing downstream of a
+        # terminal status may schedule work. ("completed" stays advanceable
+        # for async post-processing — scoring has its own failure path.)
+        mission.status in ["failed", "closed"] ->
+          {:ok, :terminal}
+
         quest_timed_out?(mission) ->
           timeout_h = max_quest_age_hours()
           Logger.warning("Quest #{mission_id} exceeded #{timeout_h}h max age, force-completing")

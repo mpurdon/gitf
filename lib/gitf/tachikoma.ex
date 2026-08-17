@@ -1199,8 +1199,10 @@ defmodule GiTF.Tachikoma do
   end
 
   defp active_mission_ids do
+    # "failed" is terminal too — omitting it meant op auto-retries kept
+    # resurrecting work for sealed missions (run 17's closed-mission loop).
     GiTF.Missions.list()
-    |> Enum.reject(&(&1[:status] in ["completed", "closed", "killed"]))
+    |> Enum.reject(&(&1[:status] in ["completed", "closed", "killed", "failed"]))
     |> Enum.map(& &1.id)
   rescue
     _ -> []
