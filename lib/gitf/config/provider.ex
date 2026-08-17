@@ -152,7 +152,10 @@ defmodule GiTF.Config.Provider do
       plugins: %{
         channels: %{},
         mcp: %{},
-        models: %{default: "reqllm", providers: %{}},
+        # No :default here — the model plugin default is execution-mode-aware
+        # (Models.default_name/0: api → reqllm, cli → claude). A hardcoded
+        # "reqllm" in this map shadowed that logic for every CLI-mode daemon.
+        models: %{providers: %{}},
         themes: %{default: "default"}
       },
       major: %{
