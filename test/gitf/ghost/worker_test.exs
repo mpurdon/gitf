@@ -149,7 +149,14 @@ defmodule GiTF.Ghost.WorkerTest do
       assert status.status == :running
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+        # The worker now traps exits and may already be stopping itself
+        # (reason :shutdown from the dead test process link) — racing a
+        # second stop against that is an expected exit, not a failure.
+        try do
+          if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+        catch
+          :exit, _ -> :ok
+        end
       end)
     end
 
@@ -207,7 +214,14 @@ defmodule GiTF.Ghost.WorkerTest do
       assert {:ok, ^pid} = Worker.lookup(ctx.ghost.id)
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+        # The worker now traps exits and may already be stopping itself
+        # (reason :shutdown from the dead test process link) — racing a
+        # second stop against that is an expected exit, not a failure.
+        try do
+          if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+        catch
+          :exit, _ -> :ok
+        end
       end)
     end
 

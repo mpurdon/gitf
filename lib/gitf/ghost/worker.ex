@@ -165,6 +165,13 @@ defmodule GiTF.Ghost.Worker do
     # Set correlation IDs for structured logging
     GiTF.Logger.set_ghost_context(ghost_id, op_id)
 
+    # A linked process (port, task, registry partition, …) exiting abnormally
+    # killed workers with ZERO log output — ops sat "running" until the
+    # reaper found the corpse, and the killer was undiagnosable (msn-e6cc5b
+    # burned hours on this). Trap exits so every death path speaks: linked
+    # exits arrive as {:EXIT, ...} messages and terminate/2 always runs.
+    Process.flag(:trap_exit, true)
+
     state = %{
       ghost_id: ghost_id,
       op_id: op_id,
@@ -542,6 +549,33 @@ defmodule GiTF.Ghost.Worker do
     {:noreply, state}
   end
 
+  # Port exits arrive after their :exit_status message once we trap exits —
+  # nothing left to do for a normal close.
+  def handle_info({:EXIT, _from, :normal}, state), do: {:noreply, state}
+
+  # Deliberate teardown (supervisor shutdown, test cleanup): stop with the
+  # same reason so terminate/2's :shutdown branch runs its existing
+  # fail-the-op machinery.
+  def handle_info({:EXIT, _from, :shutdown}, state), do: {:stop, :shutdown, state}
+
+  def handle_info({:EXIT, _from, {:shutdown, _} = reason}, state), do: {:stop, reason, state}
+
+  def handle_info({:EXIT, from, reason}, state) do
+    # Pre-trap_exit these killed the worker with no output whatsoever —
+    # this handler exists so that can never happen again.
+    Logger.error(
+      "Ghost #{state.ghost_id} received abnormal EXIT from #{inspect(from)}: " <>
+        "#{inspect(reason)} (status: #{state.status})"
+    )
+
+    if state.status in [:running, :provisioning, :retrying] do
+      mark_failed(state, "Linked process exited: #{inspect(reason)}")
+      {:stop, :normal, %{state | status: :failed, handle: nil}}
+    else
+      {:noreply, state}
+    end
+  end
+
   def handle_info(msg, state) do
     Logger.warning(
       "Ghost #{state.ghost_id} received unexpected message: #{inspect(msg)}",
@@ -559,7 +593,20 @@ defmodule GiTF.Ghost.Worker do
 
     case classify_exit(reason) do
       :clean ->
-        # Normal exit — success/failure already reported via mark_success/mark_failed
+        # Normal exit — success/failure already reported via mark_success/mark_failed.
+        # A "clean" exit while work is still in flight is the silent-death
+        # signature that made msn-e6cc5b undiagnosable — never let it pass
+        # unremarked, and don't leave the op running for the reaper.
+        if state.status in [:provisioning, :running, :retrying] do
+          Logger.error(
+            "Ghost #{state.ghost_id} terminated cleanly (#{inspect(reason)}) while " <>
+              "status=#{state.status} — op #{state.op_id} was still in flight"
+          )
+
+          record_partial_costs(state)
+          GiTF.Ops.fail(state.op_id)
+        end
+
         :ok
 
       :crash ->
