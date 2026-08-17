@@ -394,6 +394,32 @@ defmodule GiTF.Ops do
   end
 
   @doc """
+  Is a fix op (quality-gate or validation lane) already pending or running
+  for this mission?
+
+  Fix ghosts must run ONE AT A TIME in the single consolidated worktree
+  lineage: run 14 (msn-a5ddd6) had the validation lane fully reconcile the
+  merged tree on its branch while the quality lane concurrently built a
+  competing marker-laden lineage — target selection then picked the wrong
+  one and the mission burned its whole fix budget on work that was already
+  done. Callers skip creating a new fix op while one is in flight; the next
+  validation/quality round re-derives whatever remains.
+  """
+  @spec fix_in_flight?(String.t()) :: boolean()
+  def fix_in_flight?(mission_id) do
+    Archive.by_index(:ops, :mission_id, mission_id)
+    |> Enum.any?(fn op ->
+      is_binary(op[:fix_of]) and op.status in ["pending", "assigned", "running"]
+    end)
+  rescue
+    _ ->
+      GiTF.Archive.filter(:ops, fn op ->
+        op[:mission_id] == mission_id and is_binary(op[:fix_of]) and
+          op.status in ["pending", "assigned", "running"]
+      end) != []
+  end
+
+  @doc """
   Gets a op by ID.
 
   Returns `{:ok, op}` or `{:error, :not_found}`.

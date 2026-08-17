@@ -354,6 +354,21 @@ defmodule GiTF.Validation do
   """
   @spec attempt_fixes(map(), map(), FixContext.t()) :: {:ok, String.t()} | {:error, term()}
   def attempt_fixes(mission, validation, %FixContext{} = fix_ctx) do
+    if GiTF.Ops.fix_in_flight?(mission.id) do
+      # Single fix lineage: never run two fix ghosts concurrently — the
+      # in-flight fix's next validation round re-derives whatever remains.
+      # Skipping BEFORE record_attempt keeps the budget unburned.
+      Logger.info(
+        "Quest #{mission.id}: fix op already in flight — deferring validation fix attempt"
+      )
+
+      {:ok, "implementation"}
+    else
+      do_attempt_fixes(mission, validation, fix_ctx)
+    end
+  end
+
+  defp do_attempt_fixes(mission, validation, %FixContext{} = fix_ctx) do
     impl_files = mission_changed_files(mission)
 
     fix_description = build_fix_description(mission, validation, impl_files)
@@ -563,7 +578,24 @@ defmodule GiTF.Validation do
     end
   end
 
+  # The fix ghost must work in the CONSOLIDATION TARGET worktree — the
+  # latest completed non-phase op's shell, the same one
+  # consolidate_impl_branches merges every branch into. Any other pick
+  # hands the fix ghost a pre-union tree without the committed conflict
+  # markers it was asked to reconcile (run 14: attempt 1 "fixed" a stale
+  # tree while the markers lived on unseen).
   defp find_implementation_shell(mission) do
+    with %{ghost_id: ghost_id} when is_binary(ghost_id) <- latest_completed_impl_op(mission),
+         %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, ghost_id),
+         %{worktree_path: wt} = shell <- Archive.get(:shells, shell_id),
+         true <- is_binary(wt) and File.dir?(wt) do
+      shell
+    else
+      _ -> fallback_implementation_shell(mission)
+    end
+  end
+
+  defp fallback_implementation_shell(mission) do
     ghost_ids =
       mission.ops
       |> Enum.reject(& &1[:phase_job])

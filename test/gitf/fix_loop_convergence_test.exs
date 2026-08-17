@@ -56,7 +56,14 @@ defmodule GiTF.FixLoopConvergenceTest do
 
     # Cycle 1: origin has no context → attempt becomes 1, persisted to origin.
     ctx1 = FixContext.new(op.id)
-    {:ok, _fix_op} = Togusa.request_fix(op.id, shell.id, failures, ctx1)
+    {:ok, fix_op1} = Togusa.request_fix(op.id, shell.id, failures, ctx1)
+
+    # Single-lineage rule: a second fix is DEFERRED while one is in flight.
+    assert {:error, :fix_in_flight} =
+             Togusa.request_fix(op.id, shell.id, failures, ctx1)
+
+    # The fix ghost completes — the lane frees up.
+    {:ok, _} = GiTF.Archive.update(:ops, fix_op1.id, &Map.put(&1, :status, "done"))
 
     {:ok, reloaded} = Ops.get(op.id)
     assert %{} = ctx_map = reloaded[:fix_context]
@@ -64,7 +71,8 @@ defmodule GiTF.FixLoopConvergenceTest do
 
     # Cycle 2: context loaded FROM THE ORIGIN continues the count.
     ctx2 = FixContext.from_map(reloaded[:fix_context])
-    {:ok, _fix_op2} = Togusa.request_fix(op.id, shell.id, failures, ctx2)
+    {:ok, fix_op2} = Togusa.request_fix(op.id, shell.id, failures, ctx2)
+    {:ok, _} = GiTF.Archive.update(:ops, fix_op2.id, &Map.put(&1, :status, "done"))
 
     {:ok, reloaded2} = Ops.get(op.id)
     ctx_after = FixContext.from_map(reloaded2[:fix_context])

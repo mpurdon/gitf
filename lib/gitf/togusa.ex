@@ -46,7 +46,14 @@ defmodule GiTF.Togusa do
           {:ok, map()} | {:error, term()}
   def request_fix(op_id, shell_id, failures, %FixContext{} = fix_ctx) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
-         {:ok, shell} <- GiTF.Shell.get(shell_id) do
+         # Single fix lineage: quality-lane fixes defer to any in-flight fix
+         # op (either lane). Run 14's quality lane built a competing
+         # marker-laden branch lineage in parallel with the validation
+         # lane's fully reconciled one — the mission then validated the
+         # wrong lineage until its budget died. The next quality gate
+         # re-derives anything the in-flight fix doesn't cover.
+         false <- GiTF.Ops.fix_in_flight?(op.mission_id),
+         {:ok, shell} <- resolve_fix_shell(op, shell_id) do
       # Build prompt with accumulated history
       feedback = build_fix_prompt(op, failures, fix_ctx)
 
@@ -103,6 +110,35 @@ defmodule GiTF.Togusa do
         {:error, reason} ->
           {:error, reason}
       end
+    else
+      true ->
+        Logger.info(
+          "Togusa: fix op already in flight for op #{op_id}'s mission — deferring quality fix"
+        )
+
+        {:error, :fix_in_flight}
+
+      error ->
+        error
+    end
+  end
+
+  # The fix ghost must inherit the CONSOLIDATION TARGET worktree — the
+  # latest completed non-phase op's shell, where every branch (and any
+  # committed conflict markers) has been merged. The failed op's own shell
+  # is only a fallback: spawning there forks a fresh lineage off a stale
+  # tree (run 14's parallel-lineage divergence).
+  defp resolve_fix_shell(op, fallback_shell_id) do
+    with {:ok, mission} <- GiTF.Missions.get(op.mission_id),
+         %{ghost_id: ghost_id} when is_binary(ghost_id) <-
+           GiTF.Validation.latest_completed_impl_op(mission),
+         %{shell_id: shell_id} when is_binary(shell_id) <-
+           GiTF.Archive.get(:ghosts, ghost_id),
+         {:ok, %{worktree_path: wt} = shell} when is_binary(wt) <- GiTF.Shell.get(shell_id),
+         true <- File.dir?(wt) do
+      {:ok, shell}
+    else
+      _ -> GiTF.Shell.get(fallback_shell_id)
     end
   end
 
