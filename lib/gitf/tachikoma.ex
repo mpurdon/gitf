@@ -97,7 +97,10 @@ defmodule GiTF.Tachikoma do
       auto_fix: auto_fix,
       verify: verify,
       last_results: [],
-      patrol_count: 0
+      patrol_count: 0,
+      # Op IDs that had no live worker on the PREVIOUS patrol — the stuck-op
+      # reaper only fails an op on its second consecutive miss.
+      stuck_misses: MapSet.new()
     }
 
     # Subscribe to PubSub for event-driven verification
@@ -118,13 +121,14 @@ defmodule GiTF.Tachikoma do
   end
 
   def handle_call(:check_now, _from, state) do
-    results = run_patrol(state)
-    {:reply, results, %{state | last_results: results}}
+    {results, misses} = run_patrol(state)
+    {:reply, results, %{state | last_results: results, stuck_misses: misses}}
   end
 
   @impl true
   def handle_info(:patrol, state) do
-    results = run_patrol(state)
+    {results, misses} = run_patrol(state)
+    state = %{state | stuck_misses: misses}
     count = state.patrol_count + 1
 
     # Check for zombie missions every 5 patrols (~2.5 min)
@@ -198,7 +202,7 @@ defmodule GiTF.Tachikoma do
     conflict_results = check_merge_conflicts()
     audit_results = check_verifications()
     circuit_results = probe_provider_circuits()
-    check_stuck_jobs()
+    misses = check_stuck_jobs(state.stuck_misses)
     check_deadlocks()
     retry_failed_ops()
     check_blocked_ops()
@@ -215,7 +219,7 @@ defmodule GiTF.Tachikoma do
       notify_major(issues)
     end
 
-    all_results
+    {all_results, misses}
   rescue
     e ->
       Logger.warning("Tachikoma patrol failed: #{Exception.message(e)}")
@@ -226,7 +230,7 @@ defmodule GiTF.Tachikoma do
         message: "Tachikoma patrol crashed: #{Exception.message(e)}"
       })
 
-      state.last_results
+      {state.last_results, state.stuck_misses}
   end
 
   defp check_budgets do
@@ -1066,9 +1070,22 @@ defmodule GiTF.Tachikoma do
     _ -> 0
   end
 
-  defp check_stuck_jobs do
+  # Fresh spawns get this long before the reaper may consider them at all —
+  # covers the window where the op record says "running" but the worker's
+  # registration / the op→ghost linkage hasn't settled in the Archive yet.
+  @stuck_spawn_grace_seconds 60
+
+  # Reaps running ops with no live worker — but only on the SECOND
+  # consecutive patrol miss. A one-shot Registry lookup reaped healthy
+  # CLI-mode phase ghosts mid-run on the smoke mission (msn-e6cc5b: research
+  # ×2, requirements — every death timestamp landed exactly on a patrol
+  # tick), turning a momentary lookup miss into a failed op. Takes the
+  # previous patrol's miss-set; returns this patrol's, for Tachikoma state.
+  defp check_stuck_jobs(prev_misses) do
+    now = DateTime.utc_now()
+
     GiTF.Archive.filter(:ops, fn j -> j.status == "running" end)
-    |> Enum.each(fn op ->
+    |> Enum.reduce(MapSet.new(), fn op, misses ->
       worker_alive? =
         case op.ghost_id do
           nil ->
@@ -1081,15 +1098,37 @@ defmodule GiTF.Tachikoma do
             end
         end
 
-      if !worker_alive? do
-        Logger.warning("Tachikoma: recovering stuck op #{op.id} (worker dead)")
-        GiTF.Ops.fail(op.id)
+      in_grace? =
+        case op[:updated_at] || op[:inserted_at] do
+          %DateTime{} = t -> DateTime.diff(now, t, :second) < @stuck_spawn_grace_seconds
+          _ -> false
+        end
+
+      cond do
+        worker_alive? or in_grace? ->
+          misses
+
+        MapSet.member?(prev_misses, op.id) ->
+          Logger.warning(
+            "Tachikoma: recovering stuck op #{op.id} (worker dead on 2 consecutive patrols)"
+          )
+
+          GiTF.Ops.fail(op.id)
+          misses
+
+        true ->
+          Logger.info(
+            "Tachikoma: op #{op.id} has no live worker (ghost #{inspect(op.ghost_id)}) — " <>
+              "first miss, will recover if still dead next patrol"
+          )
+
+          MapSet.put(misses, op.id)
       end
     end)
   rescue
     e ->
       Logger.warning("Tachikoma: check_stuck_jobs failed: #{Exception.message(e)}")
-      :ok
+      prev_misses
   end
 
   @retry_cooldown_ms :timer.minutes(2)

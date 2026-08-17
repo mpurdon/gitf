@@ -85,6 +85,57 @@ defmodule GiTF.TachikomaTest do
     end
   end
 
+  describe "stuck-op reaper" do
+    # A one-shot lookup reaped healthy CLI-mode ghosts mid-run (msn-e6cc5b);
+    # the reaper must require two consecutive patrol misses, and fresh ops
+    # get a spawn grace window.
+    test "fails a workerless op only on the second consecutive patrol" do
+      {:ok, pid} = Tachikoma.start_link(poll_interval: 600_000)
+
+      old = DateTime.add(DateTime.utc_now(), -120, :second)
+
+      {:ok, op} =
+        GiTF.Archive.insert(:ops, %{
+          title: "stuck op",
+          status: "running",
+          ghost_id: "ghost-definitely-not-running",
+          mission_id: "msn-reaper-test",
+          inserted_at: old,
+          updated_at: old
+        })
+
+      Tachikoma.check_now()
+      assert GiTF.Archive.get(:ops, op.id).status == "running", "reaped on first miss"
+
+      Tachikoma.check_now()
+      assert GiTF.Archive.get(:ops, op.id).status == "failed"
+
+      GenServer.stop(pid)
+    end
+
+    test "fresh running ops are protected by the spawn grace window" do
+      {:ok, pid} = Tachikoma.start_link(poll_interval: 600_000)
+
+      now = DateTime.utc_now()
+
+      {:ok, op} =
+        GiTF.Archive.insert(:ops, %{
+          title: "fresh op",
+          status: "running",
+          ghost_id: "ghost-not-registered-yet",
+          mission_id: "msn-reaper-test",
+          inserted_at: now,
+          updated_at: now
+        })
+
+      Tachikoma.check_now()
+      Tachikoma.check_now()
+      assert GiTF.Archive.get(:ops, op.id).status == "running"
+
+      GenServer.stop(pid)
+    end
+  end
+
   describe "polling" do
     test "runs patrol on timer" do
       {:ok, pid} = Tachikoma.start_link(poll_interval: 100)
