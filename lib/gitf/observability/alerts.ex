@@ -60,6 +60,7 @@ defmodule GiTF.Observability.Alerts do
     workflow_phase_drift: :critical,
     sync_conflict_theirs: :high,
     sync_retry: :medium,
+    security_advisory: :medium,
     quest_timeout: :high,
     budget_exceeded: :high,
     quest_exhausted: :high,

@@ -234,8 +234,12 @@ defmodule GiTF.Togusa do
        second definition. Duplicate struct fields and functions are compile
        errors. Grep before you add.
     4. Make the minimal fixes needed to address each issue
-    5. Verify your fixes are correct (run tests/build if available)
-    6. Commit your changes with a clear message
+    5. NEVER modify dependency manifests (package.json, package-lock.json,
+       Cargo.toml, Cargo.lock, mix.exs deps) unless the task explicitly
+       requires it. Dependency vulnerabilities are handled by separate
+       maintenance missions — bumping them here is out of scope.
+    6. Verify your fixes are correct (run tests/build if available)
+    7. Commit your changes with a clear message
     """
 
     Enum.join(sections, "\n") <> "\n" <> instructions
@@ -252,11 +256,9 @@ defmodule GiTF.Togusa do
         _ -> lines
       end
 
-    lines =
-      case failures[:security_findings] do
-        n when is_integer(n) and n > 0 -> lines ++ ["- Security: #{n} finding(s)"]
-        _ -> lines
-      end
+    # Security findings are deliberately OMITTED from fix prompts: they're
+    # advisory (see AuditContract) and mentioning them nudged fix ghosts
+    # into out-of-scope dependency bumps.
 
     lines =
       case failures[:proof_of_test] do

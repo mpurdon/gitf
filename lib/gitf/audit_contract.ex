@@ -198,9 +198,36 @@ defmodule GiTF.AuditContract do
   end
 
   defp evaluate_check(:security, thresholds, result) do
+    # Security is advisory in mission context — REPORTED, never auto-fixed.
+    # Gate-failing on security spawned fix ghosts that "fixed" pre-existing
+    # repo conditions (npm audit dependency vulns) by bumping package.json/
+    # package-lock mid-mission: out-of-scope diffs that violated "touch
+    # nothing else" constraints and manufactured consolidation conflicts on
+    # every run from 13 through 18. Dependency hygiene belongs to a
+    # dedicated maintenance mission, not whatever feature is in flight.
     threshold = Map.get(thresholds, :security)
     score = result[:security_score]
-    do_threshold_check("security", threshold, score)
+
+    case do_threshold_check("security", threshold, score) do
+      [] ->
+        []
+
+      [finding | _] ->
+        require Logger
+
+        Logger.warning(
+          "Security check for op #{result[:op_id]}: #{finding} (advisory — " <>
+            "not blocking; schedule a maintenance mission for dependency vulns)"
+        )
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :security_advisory,
+          "Op #{result[:op_id]}: #{finding} — advisory only, not fixed in-mission",
+          dedup_key: "security_advisory:#{result[:op_id]}"
+        )
+
+        []
+    end
   end
 
   defp evaluate_check(:performance, thresholds, result) do

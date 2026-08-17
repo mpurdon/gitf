@@ -43,13 +43,33 @@ defmodule GiTF.AuditContractTest do
       }
 
       result = %{
-        static_score: 80,
-        security_score: 50,
+        static_score: 50,
+        security_score: 75,
         quality_score: 85
       }
 
       assert {:fail, reasons} = AuditContract.evaluate(contract, result)
-      assert Enum.any?(reasons, &String.contains?(&1, "security"))
+      assert Enum.any?(reasons, &String.contains?(&1, "static"))
+    end
+
+    test "security below threshold is ADVISORY — reported, never gate-failing" do
+      # Gate-failing on security spawned fix ghosts that bumped dependency
+      # manifests mid-mission (out-of-scope diffs + consolidation conflicts
+      # on runs 13-18). Dependency hygiene belongs to maintenance missions.
+      contract = %{
+        required_checks: [:static, :security],
+        skip_checks: [],
+        thresholds: %{composite: 70, static: 70, security: 60}
+      }
+
+      result = %{
+        op_id: "op-sec-adv",
+        static_score: 80,
+        security_score: 20,
+        quality_score: 85
+      }
+
+      assert :pass = AuditContract.evaluate(contract, result)
     end
 
     test "treats a nil score as :pass (analysis didn't run)" do
