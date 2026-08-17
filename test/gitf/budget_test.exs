@@ -143,6 +143,60 @@ defmodule GiTF.BudgetTest do
       end
     end
 
+    test "credit pool blocks when cumulative provider spend exhausts pool_usd", %{ghost: ghost} do
+      prev = GiTF.Config.Provider.get([:costs, :credit_pools])
+
+      GiTF.Config.Provider.put([:costs, :credit_pools], %{
+        "google" => %{"pool_usd" => 5.0, "since" => "2026-01-01"}
+      })
+
+      try do
+        # Under the pool: passes and reports pool headroom as the binding limit
+        assert {:ok, remaining} = Budget.pool_check("google")
+        assert remaining == 5.0
+
+        {:ok, _} =
+          Costs.record(ghost.id, %{
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 6.0,
+            model: "google:gemini-2.5-pro"
+          })
+
+        assert {:error, :credit_pool_exhausted, spent} = Budget.pool_check("google")
+        assert spent >= 5.0
+
+        # A different provider's stream is untouched by google's pool
+        assert {:ok, _} = Budget.pool_check("cli")
+      after
+        GiTF.Config.Provider.put([:costs, :credit_pools], prev)
+      end
+    end
+
+    test "global_check surfaces pool exhaustion for the active provider", %{ghost: ghost} do
+      prev = GiTF.Config.Provider.get([:costs, :credit_pools])
+
+      GiTF.Config.Provider.put([:costs, :credit_pools], %{
+        "cli" => %{"pool_usd" => 5.0}
+      })
+
+      try do
+        {:ok, _} =
+          Costs.record(ghost.id, %{
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 6.0,
+            model: "claude-sonnet-4-6"
+          })
+
+        with_mode("cli", fn ->
+          assert {:error, :credit_pool_exhausted, _} = Budget.global_check()
+        end)
+      after
+        GiTF.Config.Provider.put([:costs, :credit_pools], prev)
+      end
+    end
+
     test "config_budget honors [costs.provider_mission_budgets] for the active provider" do
       prev = GiTF.Config.Provider.get([:costs, :provider_mission_budgets])
       GiTF.Config.Provider.put([:costs, :provider_mission_budgets], %{"cli" => 40.0})

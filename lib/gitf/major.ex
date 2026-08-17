@@ -1450,6 +1450,15 @@ defmodule GiTF.Major do
 
         {:error, :daily_budget_exceeded}
 
+      {:error, :credit_pool_exhausted, spent} ->
+        Logger.warning(
+          "Pre-paid credit pool exhausted for provider #{GiTF.Budget.active_provider()} " <>
+            "($#{Float.round(spent, 2)} booked against the pool) — blocking spawn for #{mission_id}. " <>
+            "Top up and update [costs.credit_pools] pool_usd/since."
+        )
+
+        {:error, :credit_pool_exhausted}
+
       {:error, :budget_exceeded, _spent} ->
         {:error, :budget_exceeded}
     end

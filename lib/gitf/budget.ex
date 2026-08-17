@@ -167,22 +167,108 @@ defmodule GiTF.Budget do
 
   @doc """
   Fail-closed factory-wide budget check for the ACTIVE provider's stream.
-  Refuses new work once that stream's rolling-24h spend reaches its cap.
 
-  Returns `{:ok, remaining}` or `{:error, :daily_budget_exceeded, spent}`.
+  Two layers, both scoped to the active provider:
+  - rolling-24h daily cap (velocity brake — bounds burn rate)
+  - optional pre-paid credit pool (cumulative ceiling — bounds total spend
+    against money already loaded with the provider)
+
+  Returns `{:ok, remaining}` (the tighter of the two layers) or
+  `{:error, :daily_budget_exceeded | :credit_pool_exhausted, spent}`.
   """
-  @spec global_check() :: {:ok, float()} | {:error, :daily_budget_exceeded, float()}
+  @spec global_check() ::
+          {:ok, float()}
+          | {:error, :daily_budget_exceeded | :credit_pool_exhausted, float()}
   def global_check do
     provider = active_provider()
     cap = provider_budget(provider)
     spent = global_spent(provider)
 
-    if spent < cap do
-      {:ok, Float.round(cap - spent, 6)}
-    else
-      {:error, :daily_budget_exceeded, spent}
+    cond do
+      spent >= cap ->
+        {:error, :daily_budget_exceeded, spent}
+
+      true ->
+        case pool_check(provider) do
+          {:ok, pool_remaining} -> {:ok, min(Float.round(cap - spent, 6), pool_remaining)}
+          error -> error
+        end
     end
   end
+
+  @doc """
+  Pre-paid credit pool check for a provider (cumulative, not rolling).
+
+  Config, per provider:
+
+      [costs.credit_pools.anthropic]
+      pool_usd = 50.0          # credits loaded with the provider
+      since = "2026-08-01"     # accounting anchor: sum bookings from here
+
+  On top-up or reconciliation against the provider's real balance, update
+  `pool_usd` and `since` together. Providers with no pool configured pass
+  unconditionally (bedrock is post-pay; cli is subscription-billed).
+  """
+  @spec pool_check(String.t()) :: {:ok, float()} | {:error, :credit_pool_exhausted, float()}
+  def pool_check(provider) do
+    pools =
+      case GiTF.Config.Provider.get([:costs, :credit_pools]) do
+        map when is_map(map) -> Map.new(map, fn {k, v} -> {to_string(k), v} end)
+        _ -> %{}
+      end
+
+    with %{} = pool <- Map.get(pools, provider),
+         pool_usd when is_number(pool_usd) and pool_usd > 0 <-
+           pool["pool_usd"] || pool[:pool_usd] do
+      spent = spent_since(provider, pool["since"] || pool[:since])
+
+      if spent < pool_usd do
+        {:ok, Float.round(pool_usd - spent, 6)}
+      else
+        {:error, :credit_pool_exhausted, spent}
+      end
+    else
+      # No pool configured for this provider — effectively infinite pool,
+      # the daily cap is the only ceiling.
+      _ -> {:ok, 1.0e12}
+    end
+  end
+
+  # Cumulative provider spend since an anchor date (all bookings when nil).
+  defp spent_since(provider, anchor) do
+    cutoff = parse_anchor(anchor)
+
+    GiTF.Archive.all(:costs)
+    |> Enum.filter(fn cost ->
+      after_anchor =
+        case {cutoff, Map.get(cost, :recorded_at)} do
+          {nil, _} -> true
+          {%DateTime{} = c, %DateTime{} = ts} -> DateTime.compare(ts, c) != :lt
+          # Untimestamped booking with an anchor set: count it (fail-safe).
+          _ -> true
+        end
+
+      after_anchor and provider_of(cost) == provider
+    end)
+    |> GiTF.Costs.total()
+  end
+
+  defp parse_anchor(%DateTime{} = dt), do: dt
+
+  defp parse_anchor(anchor) when is_binary(anchor) do
+    case DateTime.from_iso8601(anchor <> "T00:00:00Z") do
+      {:ok, dt, _} ->
+        dt
+
+      _ ->
+        case DateTime.from_iso8601(anchor) do
+          {:ok, dt, _} -> dt
+          _ -> nil
+        end
+    end
+  end
+
+  defp parse_anchor(_), do: nil
 
   @doc "Returns total USD spent for all ghosts in a mission."
   @spec spent_for(String.t()) :: float()
