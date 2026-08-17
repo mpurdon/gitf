@@ -424,6 +424,26 @@ defmodule GiTF.Major.Planner do
     sector_id = if mission, do: mission.sector_id
     variant = Keyword.get(opts, :variant)
 
+    # Structural enforcement of complexity-proportional decomposition: the
+    # planning prompt asks for one op on single-agent-scope missions, but
+    # the LLM's output is a suggestion — merge is the guarantee. Every op
+    # boundary is a worktree/branch/feedback handoff, and the run-13→18
+    # defect catalog was handoff failures, never capability failures.
+    job_specs =
+      if mission != nil and length(job_specs) > 1 and
+           GiTF.Major.PhasePrompts.single_op_scope?(mission) do
+        require Logger
+
+        Logger.info(
+          "Planner: merging #{length(job_specs)} op specs into ONE for " <>
+            "single-agent-scope mission #{mission_id}"
+        )
+
+        [merge_specs_into_one(mission, job_specs)]
+      else
+        job_specs
+      end
+
     {ops, _id_map} =
       job_specs
       |> Enum.with_index()
@@ -485,6 +505,38 @@ defmodule GiTF.Major.Planner do
     ops = Enum.reverse(ops)
     add_file_overlap_dependencies(ops)
     {:ok, ops}
+  end
+
+  # Collapses a multi-op plan into one complete implementation brief:
+  # ordered sections preserve each spec's intent, unions cover files and
+  # acceptance criteria, and the model recommendation keeps the strongest
+  # tier any spec asked for.
+  defp merge_specs_into_one(mission, specs) do
+    sections =
+      specs
+      |> Enum.with_index(1)
+      |> Enum.map_join("\n\n", fn {spec, i} ->
+        "## Part #{i}: #{spec["title"] || "step"}\n\n#{spec["description"] || ""}"
+      end)
+
+    %{
+      "title" => "Implement: " <> String.slice(mission.goal || "feature", 0, 90),
+      "description" =>
+        "Implement the COMPLETE feature end to end in this worktree. " <>
+          "All parts below are one task — finish all of them before committing.\n\n" <>
+          sections,
+      "target_files" => specs |> Enum.flat_map(&(&1["target_files"] || [])) |> Enum.uniq(),
+      "acceptance_criteria" =>
+        specs |> Enum.flat_map(&(&1["acceptance_criteria"] || [])) |> Enum.uniq(),
+      "model_recommendation" =>
+        if(Enum.any?(specs, &(&1["model_recommendation"] == "thinking")),
+          do: "thinking",
+          else: "general"
+        ),
+      "verification_contract" =>
+        specs |> Enum.map(& &1["verification_contract"]) |> Enum.find(& &1),
+      "depends_on_indices" => []
+    }
   end
 
   @doc """

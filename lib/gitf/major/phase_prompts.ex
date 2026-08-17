@@ -563,6 +563,44 @@ defmodule GiTF.Major.PhasePrompts do
     """
   end
 
+  @doc false
+  # Complexity-proportional decomposition. A single agent holding the whole
+  # task in one context is strictly more reliable than a multi-op relay:
+  # every op boundary is a worktree/branch/feedback handoff, and the entire
+  # run-13→18 defect catalog was handoff failures, never capability
+  # failures. Decompose only when the work genuinely exceeds one session.
+  def decomposition_instructions(mission) do
+    if single_op_scope?(mission) do
+      """
+      1. Produce EXACTLY ONE op that implements the COMPLETE feature end to
+         end — backend, frontend, wiring, regenerated bindings, everything.
+         This task fits a single agent working in one worktree; splitting it
+         adds coordination cost without adding capability.
+      2. The op description must be a complete, ordered implementation brief.
+      """
+    else
+      """
+      1. Break the design into as FEW ops as the work truly requires —
+         prefer one op per independent deliverable; never split what one
+         agent can complete in a session.
+      2. Each op should be completable by a single developer in one session
+      """
+    end
+  end
+
+  @doc false
+  def single_op_scope?(mission) do
+    complexity =
+      case GiTF.Missions.get_artifact(mission.id, "triage") do
+        %{"complexity" => c} when is_binary(c) -> c
+        _ -> nil
+      end
+
+    complexity in ["trivial", "simple", "moderate"]
+  rescue
+    _ -> false
+  end
+
   @doc """
   Builds the planning phase prompt.
 
@@ -623,12 +661,11 @@ defmodule GiTF.Major.PhasePrompts do
 
     ## Instructions
 
-    1. Break the design into discrete, parallelizable ops
-    2. Each op should be completable by a single developer in one session
-    3. Define clear acceptance criteria derived from requirements
-    4. Specify target files from the design — these must be real files in the project
-    5. Set up dependencies (op indices, 0-based)
-    6. Recommend model complexity: "general" for straightforward changes, "thinking" for complex logic
+    #{decomposition_instructions(mission)}
+    - Define clear acceptance criteria derived from requirements
+    - Specify target files from the design — these must be real files in the project
+    - Set up dependencies (op indices, 0-based)
+    - Recommend model complexity: "general" for straightforward changes, "thinking" for complex logic
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 
