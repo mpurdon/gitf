@@ -106,14 +106,26 @@ defmodule GiTF.Ghosts do
   @spec spawn_detached(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def spawn_detached(op_id, sector_id, gitf_root, opts \\ []) do
-    if GiTF.Runtime.ModelResolver.api_mode?() do
-      # API mode: use supervised Worker (runs agent loop via API calls).
-      # The caller must keep the BEAM alive for the Worker to complete.
+    if GiTF.Runtime.ModelResolver.api_mode?() or daemon_running?() do
+      # Supervised Worker: API modes always, and CLI mode whenever the
+      # daemon is up to supervise it (the Worker drives the claude CLI
+      # through a port). The caller must keep the BEAM alive.
       spawn(op_id, sector_id, gitf_root, opts)
     else
-      # CLI mode: spawn Claude as a detached OS process that outlives the caller
+      # One-shot local CLI (no daemon): spawn Claude as a detached OS
+      # process that outlives the exiting escript. NEVER take this path in
+      # the daemon — a detached ghost has no Worker, no Registry entry and
+      # no logs, so the stuck-op reaper "recovers" it as a corpse ~90s in
+      # while the orphaned claude burns quota (msn-da9597: every daemon
+      # CLI spawn died this way; only retry-path supervised spawns lived).
       spawn_detached_cli(op_id, sector_id, gitf_root, opts)
     end
+  end
+
+  # The daemon supervision tree is up when Major is registered — the same
+  # process every supervised ghost ultimately reports to.
+  defp daemon_running? do
+    Process.whereis(GiTF.Major) != nil
   end
 
   defp spawn_detached_cli(op_id, sector_id, gitf_root, opts) do
