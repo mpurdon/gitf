@@ -430,8 +430,8 @@ defmodule GiTF.Major.Planner do
     # boundary is a worktree/branch/feedback handoff, and the run-13→18
     # defect catalog was handoff failures, never capability failures.
     job_specs =
-      if mission != nil and length(job_specs) > 1 and
-           GiTF.Major.PhasePrompts.single_op_scope?(mission) do
+      if mission != nil and variant == nil and length(job_specs) > 1 and
+           single_agent_scope?(mission, job_specs) do
         require Logger
 
         Logger.info(
@@ -505,6 +505,24 @@ defmodule GiTF.Major.Planner do
     ops = Enum.reverse(ops)
     add_file_overlap_dependencies(ops)
     {:ok, ops}
+  end
+
+  # Triage's complexity label varies run to run for the same goal (run 18:
+  # fast-path; run 19: "complex" — identical mission text), so the label
+  # alone can't gate single-op mode. The plan's own footprint is the
+  # honest measure: a feature whose specs touch ≤ this many distinct files
+  # fits one agent's session regardless of what triage called it.
+  @single_agent_max_files 10
+
+  defp single_agent_scope?(mission, job_specs) do
+    distinct_files =
+      job_specs
+      |> Enum.flat_map(&(&1["target_files"] || []))
+      |> Enum.uniq()
+      |> length()
+
+    GiTF.Major.PhasePrompts.single_op_scope?(mission) or
+      distinct_files <= @single_agent_max_files
   end
 
   # Collapses a multi-op plan into one complete implementation brief:
