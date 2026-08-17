@@ -20,10 +20,28 @@ defmodule GiTF.Runtime.LLMClient do
   @callback stream_text(model(), messages(), opts()) ::
               {:ok, struct()} | {:error, term()}
 
-  @doc "Returns the configured LLM client module."
+  @doc """
+  Returns the configured LLM client module.
+
+  With no explicit config, the backend follows the execution mode: `:cli`
+  routes EVERYTHING through the claude CLI (`GiTF.Runtime.CLIClient`) —
+  when the operator picks a provider, no in-process consumer may silently
+  spend on a metered API instead (the post-Max-flip bedrock leak). API
+  modes keep the ReqLLM/BedrockDirect default.
+  """
   @spec impl() :: module()
   def impl do
-    Application.get_env(:gitf, :llm_client, __MODULE__.Default)
+    case Application.get_env(:gitf, :llm_client) do
+      nil ->
+        if GiTF.Runtime.ModelResolver.execution_mode() == :cli do
+          GiTF.Runtime.CLIClient
+        else
+          __MODULE__.Default
+        end
+
+      mod ->
+        mod
+    end
   end
 
   @doc "Generates text via the configured LLM client."
