@@ -196,8 +196,20 @@ defmodule GiTF.Runtime.Claude do
     base ++ prompt_args(opts)
   end
 
-  defp build_headless_args(prompt, opts) do
-    base = ["--print", "--dangerously-skip-permissions", "--output-format", "stream-json"]
+  # Public for test assertion only — the exact argv is a compatibility
+  # contract with the claude CLI: `--print --output-format=stream-json`
+  # WITHOUT `--verbose` makes the CLI exit instantly with a usage error
+  # (killed the first CLI-mode ghost, msn-e6cc5b op-09700c).
+  @doc false
+  def build_headless_args(prompt, opts) do
+    base = [
+      "--print",
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--output-format",
+      "stream-json"
+    ]
+
     base = base ++ system_prompt_args(opts)
     base = base ++ resume_args(opts)
     base ++ [prompt] ++ model_args(opts)

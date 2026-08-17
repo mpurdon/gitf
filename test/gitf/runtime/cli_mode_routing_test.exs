@@ -91,6 +91,16 @@ defmodule GiTF.Runtime.CliModeRoutingTest do
     end
   end
 
+  describe "build_headless_args/2" do
+    test "stream-json output always carries --verbose (CLI exits instantly without it)" do
+      args = Claude.build_headless_args("do the thing", model: "sonnet")
+
+      assert "--verbose" in args
+      assert "--output-format" in args
+      assert ["--model", "sonnet"] == Enum.take(args, -2)
+    end
+  end
+
   describe "cli_model_name/1" do
     test "bare aliases and Anthropic model IDs pass through" do
       assert Claude.cli_model_name("sonnet") == "sonnet"
