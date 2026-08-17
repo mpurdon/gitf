@@ -687,6 +687,31 @@ defmodule GiTF.Major.PhasePrompts do
     lsp_diagnostics_block = render_lsp_diagnostics_block(lsp_diagnostics)
     exec_validation_block = render_exec_validation_block(Keyword.get(opts, :exec_validation))
 
+    merge_conflicts_block =
+      case Keyword.get(opts, :merge_conflicts, []) do
+        [] ->
+          ""
+
+        files ->
+          """
+
+          ## UNRESOLVED MERGE CONFLICTS (committed with markers)
+
+          Consolidating the implementation branches produced content conflicts.
+          The merge was completed WITH conflict markers (`<<<<<<<`/`=======`/
+          `>>>>>>>`) committed, so both sides of the work are present in:
+
+          ```
+          #{Enum.join(files, "\n")}
+          ```
+
+          These files will not compile until reconciled. Report each as a gap
+          of the form "reconcile merge conflict markers in <file>" — the fix
+          ghost must MERGE the two sides (both are wanted work from parallel
+          ops), never delete one side wholesale.
+          """
+      end
+
     """
     # Validation Phase
 
@@ -706,7 +731,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}
+    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}#{merge_conflicts_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's

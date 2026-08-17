@@ -15,6 +15,7 @@ defmodule GiTF.Runtime.Models do
 
   @default_plugin_name "reqllm"
   @default_plugin GiTF.Plugin.Builtin.Models.ReqLLMProvider
+  @cli_plugin_name "claude"
 
   # -- Core dispatch -----------------------------------------------------------
 
@@ -278,6 +279,11 @@ defmodule GiTF.Runtime.Models do
 
   @doc """
   Returns the default model plugin name from config.
+
+  API modes default to the in-process ReqLLM provider; CLI mode defaults to
+  the Claude Code CLI plugin. Both branches previously resolved to "reqllm",
+  so a CLI-mode daemon dispatched ghosts to an API plugin with no CLI —
+  health flagged "CLI executable not found" while spawns misrouted.
   """
   @spec default_name() :: String.t()
   def default_name do
@@ -285,11 +291,11 @@ defmodule GiTF.Runtime.Models do
 
     cond do
       configured != nil -> configured
-      GiTF.Runtime.ModelResolver.api_mode?() -> "reqllm"
-      true -> @default_plugin_name
+      GiTF.Runtime.ModelResolver.api_mode?() -> @default_plugin_name
+      true -> @cli_plugin_name
     end
   rescue
-    _ -> if GiTF.Runtime.ModelResolver.api_mode?(), do: "reqllm", else: @default_plugin_name
+    _ -> if GiTF.Runtime.ModelResolver.api_mode?(), do: @default_plugin_name, else: @cli_plugin_name
   end
 
   # -- Resolution --------------------------------------------------------------

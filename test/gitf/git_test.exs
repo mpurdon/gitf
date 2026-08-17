@@ -49,6 +49,69 @@ defmodule GiTF.GitTest do
     end
   end
 
+  describe "merge_union/2" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "gitf_mu_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+
+      run = fn args -> System.cmd(@git, args, cd: tmp, stderr_to_stdout: true) end
+      run.(["init", "-q", "-b", "main"])
+      run.(["config", "user.email", "t@t.dev"])
+      run.(["config", "user.name", "t"])
+      File.write!(Path.join(tmp, "shared.txt"), "line1\nline2\nline3\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "init"])
+
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      %{repo: tmp, run: run}
+    end
+
+    test "clean merge returns :ok", %{repo: repo, run: run} do
+      run.(["checkout", "-q", "-b", "feature"])
+      File.write!(Path.join(repo, "feature.txt"), "new\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "feature"])
+      run.(["checkout", "-q", "main"])
+
+      assert Git.merge_union(repo, "feature") == :ok
+      assert File.exists?(Path.join(repo, "feature.txt"))
+    end
+
+    test "content conflict commits WITH markers — no work is lost", %{repo: repo, run: run} do
+      # Two branches editing the same line — guaranteed content conflict.
+      run.(["checkout", "-q", "-b", "side-a"])
+      File.write!(Path.join(repo, "shared.txt"), "line1\nA-CHANGE\nline3\n")
+      run.(["commit", "-q", "-am", "a"])
+      run.(["checkout", "-q", "main"])
+      File.write!(Path.join(repo, "shared.txt"), "line1\nB-CHANGE\nline3\n")
+      run.(["commit", "-q", "-am", "b"])
+
+      assert {:conflicted, ["shared.txt"]} = Git.merge_union(repo, "side-a")
+
+      # The merge is COMMITTED (clean status, no MERGE_HEAD)…
+      {status, 0} = run.(["status", "--porcelain"])
+      assert String.trim(status) == ""
+      refute File.exists?(Path.join(repo, ".git/MERGE_HEAD"))
+
+      # …and BOTH sides survive in the file, wrapped in markers.
+      content = File.read!(Path.join(repo, "shared.txt"))
+      assert content =~ "A-CHANGE"
+      assert content =~ "B-CHANGE"
+      assert content =~ "<<<<<<<"
+      assert content =~ ">>>>>>>"
+    end
+
+    test "unknown branch aborts and returns error", %{repo: repo} do
+      assert {:error, _} = Git.merge_union(repo, "no-such-branch")
+      refute File.exists?(Path.join(repo, ".git/MERGE_HEAD"))
+    end
+
+    test "already up to date is :ok", %{repo: repo, run: run} do
+      run.(["branch", "twin"])
+      assert Git.merge_union(repo, "twin") == :ok
+    end
+  end
+
   describe "safe_rollback/2" do
     setup do
       tmp = Path.join(System.tmp_dir!(), "gitf_safe_rb_#{:erlang.unique_integer([:positive])}")

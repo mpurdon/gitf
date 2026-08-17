@@ -494,6 +494,47 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  Merges `branch` into the worktree at `wt`, refusing to lose work.
+
+  - Clean merge (or already up to date): `:ok`
+  - Content conflict: completes the merge WITH the conflict markers
+    committed and returns `{:conflicted, files}` — both sides of the work
+    stay visible for a later reconciliation pass. Dropping a branch from a
+    union because it conflicted is how run 13 (msn-c1c654) lost its entire
+    frontend: downstream consumers can recover from visible markers, never
+    from invisible absence.
+  - Any other failure (dirty tree, unknown branch): aborts the merge and
+    returns `{:error, output}`.
+  """
+  @spec merge_union(String.t(), String.t()) ::
+          :ok | {:conflicted, [String.t()]} | {:error, String.t()}
+  def merge_union(wt, branch) do
+    case safe_cmd(["-C", wt, "merge", "--no-ff", "--no-edit", branch]) do
+      {_, 0} ->
+        :ok
+
+      {out, _} ->
+        case safe_cmd(["-C", wt, "diff", "--name-only", "--diff-filter=U"]) do
+          {files_out, 0} ->
+            case String.split(String.trim(to_string(files_out)), "\n", trim: true) do
+              [] ->
+                safe_cmd(["-C", wt, "merge", "--abort"])
+                {:error, to_string(out)}
+
+              files ->
+                safe_cmd(["-C", wt, "add", "-A"])
+                safe_cmd(["-C", wt, "commit", "--no-edit"])
+                {:conflicted, files}
+            end
+
+          _ ->
+            safe_cmd(["-C", wt, "merge", "--abort"])
+            {:error, to_string(out)}
+        end
+    end
+  end
+
+  @doc """
   Runs a git command with a timeout to prevent hangs.
 
   Wraps `System.cmd/3` in a Task that is killed after `@git_timeout_ms`.

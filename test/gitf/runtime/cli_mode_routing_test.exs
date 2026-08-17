@@ -69,6 +69,28 @@ defmodule GiTF.Runtime.CliModeRoutingTest do
     end
   end
 
+  describe "plugin resolution by mode" do
+    test "cli mode resolves the claude CLI plugin, api mode resolves reqllm" do
+      prev = GiTF.Config.Provider.get([:plugins, :models, :default])
+      GiTF.Config.Provider.put([:plugins, :models, :default], nil)
+
+      try do
+        with_mode("cli", fn ->
+          assert GiTF.Runtime.Models.default_name() == "claude"
+
+          assert {:ok, GiTF.Plugin.Builtin.Models.Claude} =
+                   GiTF.Runtime.Models.resolve_plugin()
+        end)
+
+        with_mode("api", fn ->
+          assert GiTF.Runtime.Models.default_name() == "reqllm"
+        end)
+      after
+        GiTF.Config.Provider.put([:plugins, :models, :default], prev)
+      end
+    end
+  end
+
   describe "cli_model_name/1" do
     test "bare aliases and Anthropic model IDs pass through" do
       assert Claude.cli_model_name("sonnet") == "sonnet"

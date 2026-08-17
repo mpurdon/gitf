@@ -966,7 +966,9 @@ defmodule GiTF.Major.Orchestrator do
 
       case Map.get(mission, :impl_variants) || [] do
         [] ->
-          consolidate_impl_branches(mission, Map.get(ops_by_variant, nil, []))
+          {:ok, conflicted} =
+            consolidate_impl_branches(mission, Map.get(ops_by_variant, nil, []))
+
           changed_files = collect_changed_files(ops_by_variant, nil)
 
           spawn_validation_for_variant(
@@ -976,13 +978,15 @@ defmodule GiTF.Major.Orchestrator do
             ctx,
             diff_base,
             nil,
-            changed_files
+            changed_files,
+            conflicted
           )
 
         variants ->
           # Tournament mode: one validation ghost per variant, each
           # rooted at that variant's last completed impl op so the diff
-          # is variant-local.
+          # is variant-local. No consolidation across variants — no
+          # conflict markers to surface.
           Enum.each(variants, fn variant_id ->
             changed_files = collect_changed_files(ops_by_variant, variant_id)
 
@@ -993,7 +997,8 @@ defmodule GiTF.Major.Orchestrator do
               ctx,
               diff_base,
               variant_id,
-              changed_files
+              changed_files,
+              []
             )
           end)
       end
@@ -1038,7 +1043,8 @@ defmodule GiTF.Major.Orchestrator do
          ctx,
          diff_base,
          variant_id,
-         changed_files
+         changed_files,
+         merge_conflicts
        ) do
     lsp_diagnostics = collect_lsp_diagnostics_for_validation(mission, changed_files)
     exec_validation = run_exec_validation(mission, variant_id)
@@ -1048,7 +1054,8 @@ defmodule GiTF.Major.Orchestrator do
         diff_base: diff_base,
         changed_files: changed_files,
         lsp_diagnostics: lsp_diagnostics,
-        exec_validation: exec_validation
+        exec_validation: exec_validation,
+        merge_conflicts: merge_conflicts
       )
 
     # Branch the validation worktree from the variant's impl ghost tip so
@@ -1148,10 +1155,19 @@ defmodule GiTF.Major.Orchestrator do
   # sibling ops' finished, type-checked work as "completely missing" —
   # three runs died at the validation wall staring at origin/main while
   # the feature sat in two branches (msn-807187, finding #17). Idempotent:
-  # re-merging an already-merged branch is "Already up to date". A merge
-  # conflict aborts that branch's merge and warns — the validator then
-  # honestly reports the gap and the fix loop works in the consolidated
-  # worktree.
+  # re-merging an already-merged branch is "Already up to date".
+  #
+  # A CONTENT conflict completes the merge with the conflict markers
+  # committed, and the conflicted files are returned so the validation
+  # prompt can direct the fix loop to reconcile them. The previous policy
+  # (abort the branch's merge, let validation "report the gap") silently
+  # dropped entire branches from the union: run 13 (msn-c1c654) lost the
+  # whole frontend to one models.rs conflict, every validation round
+  # reported it missing, and fix ghosts re-implemented it blind —
+  # manufacturing exactly the duplicate definitions that killed the run.
+  # Visible markers are strictly better than invisible absence.
+  #
+  # Returns {:ok, conflicted_files}.
   defp consolidate_impl_branches(mission, done_impl_ops) do
     with %{ghost_id: target_ghost} when is_binary(target_ghost) <-
            GiTF.Validation.latest_completed_impl_op(mission),
@@ -1160,31 +1176,42 @@ defmodule GiTF.Major.Orchestrator do
          true <- File.dir?(wt) do
       target_branch = "ghost/#{target_ghost}"
 
-      done_impl_ops
-      |> Enum.map(& &1[:ghost_id])
-      |> Enum.filter(&is_binary/1)
-      |> Enum.map(&("ghost/" <> &1))
-      |> Enum.uniq()
-      |> Enum.reject(&(&1 == target_branch))
-      |> Enum.each(fn branch ->
-        case GiTF.Git.safe_cmd(["-C", wt, "merge", "--no-ff", "--no-edit", branch]) do
-          {_, 0} ->
-            Logger.info("Quest #{mission.id}: consolidated #{branch} into #{target_branch}")
+      conflicted =
+        done_impl_ops
+        |> Enum.map(& &1[:ghost_id])
+        |> Enum.filter(&is_binary/1)
+        |> Enum.map(&("ghost/" <> &1))
+        |> Enum.uniq()
+        |> Enum.reject(&(&1 == target_branch))
+        |> Enum.flat_map(fn branch ->
+          case GiTF.Git.merge_union(wt, branch) do
+            :ok ->
+              Logger.info("Quest #{mission.id}: consolidated #{branch} into #{target_branch}")
+              []
 
-          {out, _} ->
-            Logger.warning(
-              "Quest #{mission.id}: consolidation merge of #{branch} failed " <>
-                "(#{String.slice(to_string(out), 0, 200)}) — aborting that merge; " <>
-                "validation will see partial work and report the gap"
-            )
+            {:conflicted, files} ->
+              Logger.warning(
+                "Quest #{mission.id}: consolidation merge of #{branch} conflicted in " <>
+                  "#{Enum.join(files, ", ")} — committed WITH conflict markers so no " <>
+                  "work is dropped; the fix loop must reconcile the marked regions"
+              )
 
-            GiTF.Git.safe_cmd(["-C", wt, "merge", "--abort"])
-        end
-      end)
+              files
 
-      :ok
+            {:error, out} ->
+              Logger.warning(
+                "Quest #{mission.id}: consolidation merge of #{branch} failed without " <>
+                  "content conflicts (#{String.slice(out, 0, 200)}) — aborted"
+              )
+
+              []
+          end
+        end)
+        |> Enum.uniq()
+
+      {:ok, conflicted}
     else
-      _ -> :ok
+      _ -> {:ok, []}
     end
   rescue
     e ->
@@ -1192,7 +1219,7 @@ defmodule GiTF.Major.Orchestrator do
         "consolidate_impl_branches crashed for #{mission.id}: #{Exception.message(e)}"
       )
 
-      :ok
+      {:ok, []}
   end
 
   defp impl_base_branch_opts(mission) do
