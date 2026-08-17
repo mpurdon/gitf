@@ -226,8 +226,40 @@ defmodule GiTF.Runtime.Claude do
 
   defp model_args(opts) do
     case Keyword.get(opts, :model) do
-      nil -> []
-      model -> ["--model", model]
+      nil ->
+        []
+
+      model ->
+        case cli_model_name(model) do
+          nil -> []
+          name -> ["--model", name]
+        end
+    end
+  end
+
+  @doc """
+  Normalizes a model spec into a name the claude CLI accepts.
+
+  The CLI takes bare aliases ("sonnet", "haiku") or Anthropic model IDs —
+  never provider-qualified specs. "anthropic:claude-sonnet-4-6" arrives here
+  when an API-mode tier map or legacy alias leaks into a CLI spawn; strip the
+  prefix rather than hand the CLI an ID it will reject. Specs from other
+  providers (google:*, ollama:*, bedrock ARNs) have no CLI equivalent —
+  returns nil so the caller omits `--model` and the CLI uses the account
+  default, with a warning so the substitution is never silent.
+  """
+  @spec cli_model_name(String.t()) :: String.t() | nil
+  def cli_model_name("anthropic:" <> rest), do: rest
+
+  def cli_model_name(model) when is_binary(model) do
+    if String.contains?(model, ":") do
+      Logger.warning(
+        "Model spec #{inspect(model)} has no claude CLI equivalent — omitting --model (CLI default applies)"
+      )
+
+      nil
+    else
+      model
     end
   end
 

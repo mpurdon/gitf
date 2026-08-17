@@ -217,6 +217,7 @@ defmodule GiTF.Runtime.ModelResolver do
       cond do
         mode == :ollama -> provider_tier_map("ollama") |> Map.merge(mode_defaults(:ollama))
         mode == :bedrock -> provider_tier_map("bedrock") |> Map.merge(mode_defaults(:bedrock))
+        mode == :cli -> provider_tier_map("cli") |> Map.merge(mode_defaults(:cli))
         true -> provider_tier_map(configured_provider())
       end
 
@@ -227,8 +228,9 @@ defmodule GiTF.Runtime.ModelResolver do
     # (google). It must never override the mode-specific maps: merging it
     # last sent bedrock-mode "fast"/alias tiers to google:gemini-2.5-flash
     # on a box with no google key — every fix-op retry died on a dead
-    # provider (msn-bf61a1). API/CLI modes only.
-    if mode in [:api, :cli] do
+    # provider (msn-bf61a1). CLI mode has the same failure shape: the claude
+    # CLI rejects provider-qualified specs outright. API mode only.
+    if mode == :api do
       Map.merge(with_aliases, app_env_default_models())
     else
       with_aliases
@@ -314,6 +316,30 @@ defmodule GiTF.Runtime.ModelResolver do
     end
   rescue
     _ -> @bedrock_defaults
+  end
+
+  # Bare aliases, not full model IDs: the claude CLI resolves "sonnet"/"haiku"
+  # to the newest models available to the account, so these never go stale and
+  # never carry a provider prefix the CLI would reject.
+  @cli_defaults %{
+    "thinking" => "sonnet",
+    "general" => "sonnet",
+    "fast" => "haiku"
+  }
+
+  defp mode_defaults(:cli) do
+    case GiTF.Config.Provider.get([:llm, :cli_models]) do
+      nil ->
+        @cli_defaults
+
+      custom when is_map(custom) ->
+        Map.merge(@cli_defaults, Map.new(custom, fn {k, v} -> {to_string(k), v} end))
+
+      _ ->
+        @cli_defaults
+    end
+  rescue
+    _ -> @cli_defaults
   end
 
   @doc """

@@ -206,6 +206,39 @@ to know about (both bit us on day one):
   while older tiers work. Verify with a one-line
   `aws bedrock-runtime converse` from the box before blaming the factory.
 
+### Alternative: CLI mode on a Claude subscription
+
+Ghosts can run through the Claude Code CLI instead of an API, billing a
+Claude Pro/Max subscription (flat monthly cost, bounded by the plan's
+rate limits instead of dollars — the ledger still books the CLI-reported
+API-equivalent `cost_usd`, so spend guards keep functioning as a brake).
+
+```sh
+# install the CLI as the gitf user, then expose it on the daemon's PATH
+sudo -u gitf bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+sudo ln -sf /var/lib/gitf/.local/bin/claude /usr/local/bin/claude
+
+# /etc/gitf/gitf.env — token from `claude setup-token` run by the account
+# owner on their own machine (OAuth against the subscription)
+GITF_EXECUTION_MODE=cli
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+```
+
+```toml
+# /var/lib/gitf/.config/gitf/config.toml — OPTIONAL. Defaults are
+# sonnet/sonnet/haiku already; values are bare CLI aliases or Anthropic
+# model IDs, never provider-qualified specs (the CLI rejects those).
+[llm.cli_models]
+thinking = "sonnet"
+general  = "sonnet"
+fast     = "haiku"
+```
+
+The sandbox already binds `~/.claude` writable, and ports inherit the
+daemon env, so the token reaches sandboxed spawns. Note the token is
+readable by ghost-executed code (same trust level as an API key in env);
+revoke it from the account's settings if the box is ever compromised.
+
 ## 4. Authenticate the CLI from your machine
 
 ```sh
