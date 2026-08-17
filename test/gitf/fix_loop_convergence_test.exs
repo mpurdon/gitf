@@ -22,6 +22,11 @@ defmodule GiTF.FixLoopConvergenceTest do
     {:ok, op} =
       Ops.create(%{title: "Crux op", mission_id: mission.id, sector_id: sector.id})
 
+    # Production reality: the quality gate runs on COMPLETED ops. A
+    # pending/assigned origin op counts as an active worktree writer and
+    # (correctly) defers fix creation.
+    {:ok, op} = Archive.update(:ops, op.id, &Map.put(&1, :status, "done"))
+
     {:ok, shell} =
       Archive.insert(:shells, %{
         sector_id: sector.id,

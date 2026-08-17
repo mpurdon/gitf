@@ -52,7 +52,7 @@ defmodule GiTF.Togusa do
          # lane's fully reconciled one — the mission then validated the
          # wrong lineage until its budget died. The next quality gate
          # re-derives anything the in-flight fix doesn't cover.
-         false <- GiTF.Ops.fix_in_flight?(op.mission_id),
+         false <- GiTF.Ops.worktree_writer_in_flight?(op.mission_id),
          {:ok, shell} <- resolve_fix_shell(op, shell_id) do
       # Build prompt with accumulated history
       feedback = build_fix_prompt(op, failures, fix_ctx)

@@ -407,15 +407,38 @@ defmodule GiTF.Ops do
   """
   @spec fix_in_flight?(String.t()) :: boolean()
   def fix_in_flight?(mission_id) do
+    active_non_phase_op?(mission_id, &is_binary(&1[:fix_of]))
+  end
+
+  @doc """
+  Is ANY non-phase op (implementation chain or fix, either lane) pending or
+  running for this mission?
+
+  Fix creation must gate on this, not just on other fixes: a quality-gate
+  fix spawned while the NEXT chain op was already running forked a sibling
+  branch off the completed tip — a permanent divergence that re-conflicted
+  at every consolidation and GREW the marker set each round (run 15:
+  6 → 8 conflicted files across attempts). One worktree-writing ghost at a
+  time is the invariant; deferred quality issues are re-derived by the next
+  gate or validation round.
+  """
+  @spec worktree_writer_in_flight?(String.t()) :: boolean()
+  def worktree_writer_in_flight?(mission_id) do
+    active_non_phase_op?(mission_id, fn _ -> true end)
+  end
+
+  defp active_non_phase_op?(mission_id, extra_filter) do
     Archive.by_index(:ops, :mission_id, mission_id)
     |> Enum.any?(fn op ->
-      is_binary(op[:fix_of]) and op.status in ["pending", "assigned", "running"]
+      op[:phase_job] not in [true] and
+        op.status in ["pending", "assigned", "running"] and
+        extra_filter.(op)
     end)
   rescue
     _ ->
       GiTF.Archive.filter(:ops, fn op ->
-        op[:mission_id] == mission_id and is_binary(op[:fix_of]) and
-          op.status in ["pending", "assigned", "running"]
+        op[:mission_id] == mission_id and op[:phase_job] not in [true] and
+          op.status in ["pending", "assigned", "running"] and extra_filter.(op)
       end) != []
   end
 

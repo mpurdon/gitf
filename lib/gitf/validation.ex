@@ -354,7 +354,7 @@ defmodule GiTF.Validation do
   """
   @spec attempt_fixes(map(), map(), FixContext.t()) :: {:ok, String.t()} | {:error, term()}
   def attempt_fixes(mission, validation, %FixContext{} = fix_ctx) do
-    if GiTF.Ops.fix_in_flight?(mission.id) do
+    if GiTF.Ops.worktree_writer_in_flight?(mission.id) do
       # Single fix lineage: never run two fix ghosts concurrently — the
       # in-flight fix's next validation round re-derives whatever remains.
       # Skipping BEFORE record_attempt keeps the budget unburned.
