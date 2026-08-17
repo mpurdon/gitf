@@ -197,9 +197,14 @@ defmodule GiTF.Togusa do
 
     1. Review the failures above carefully
     2. Read the specific files mentioned to understand what needs to change
-    3. Make the minimal fixes needed to address each issue
-    4. Verify your fixes are correct (run tests if available)
-    5. Commit your changes with a clear message
+    3. RECONCILE, don't duplicate: when a failure says something is "missing",
+       FIRST search for an existing implementation under a different name,
+       field, or location. If one exists, RENAME or REWIRE it — never add a
+       second definition. Duplicate struct fields and functions are compile
+       errors. Grep before you add.
+    4. Make the minimal fixes needed to address each issue
+    5. Verify your fixes are correct (run tests/build if available)
+    6. Commit your changes with a clear message
     """
 
     Enum.join(sections, "\n") <> "\n" <> instructions

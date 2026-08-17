@@ -489,9 +489,17 @@ defmodule GiTF.Validation do
 
     1. Review the feedback above carefully
     2. Read the specific files mentioned to understand what needs to change
-    3. Make the minimal fixes needed to address each issue
-    4. Verify your fixes are correct
-    5. Commit your changes
+    3. RECONCILE, don't duplicate: when feedback says something is "missing",
+       FIRST search the codebase for an existing implementation under a
+       different name, field, or location. If one exists, RENAME or REWIRE
+       it to match — never add a second definition. Duplicate struct fields
+       and duplicate functions are compile errors that have killed entire
+       missions. Before adding ANY field, function, or component, grep for
+       its concept first.
+    4. Make the minimal fixes needed to address each issue
+    5. Verify your fixes are correct — if a build/test command is available,
+       RUN it; a fix that does not compile is not a fix
+    6. Commit your changes
     """
 
     Enum.join(sections, "\n") <> "\n" <> instructions
