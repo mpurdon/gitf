@@ -293,6 +293,60 @@ defmodule GiTF.Validation do
   end
 
   @doc """
+  The mission's CANONICAL worktree shell: the latest completed CHAIN op's
+  (fix ops excluded) shell, with a live worktree directory.
+
+  This — not `latest_completed_impl_op/1` — is the target every worktree
+  consumer (consolidation, validation base, fix-ghost spawn) must use.
+  Fix ghosts ADOPT older shells, then become the "latest completed op"
+  themselves: on run 17 that dragged the consolidation target back to
+  chain-op 2's worktree, the fix ghost re-implemented work that already
+  existed at the true tip, and the union manufactured a fresh wall of
+  conflict markers. Chain ops never adopt, so their newest shell is
+  always the true tip.
+
+  Returns the shell record or nil.
+  """
+  @spec canonical_impl_shell(map()) :: map() | nil
+  def canonical_impl_shell(mission) do
+    mission.ops
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.reject(&is_binary(&1[:fix_of]))
+    |> Enum.filter(&(&1.status == "done" and is_binary(&1[:ghost_id])))
+    |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
+    |> Enum.find_value(fn op ->
+      with %{shell_id: shell_id} when is_binary(shell_id) <-
+             Archive.get(:ghosts, op.ghost_id),
+           %{worktree_path: wt} = shell <- Archive.get(:shells, shell_id),
+           true <- is_binary(wt) and File.dir?(wt) do
+        shell
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  @doc """
+  The canonical worktree's CURRENT branch — the deepest point of the
+  mission's single lineage, including any fix commits made after the
+  chain finished. Basing validation on an op-derived branch name misses
+  fix work; the worktree's HEAD never does.
+  """
+  @spec canonical_branch(map()) :: String.t() | nil
+  def canonical_branch(mission) do
+    with %{worktree_path: wt} <- canonical_impl_shell(mission),
+         {out, 0} <-
+           GiTF.Git.safe_cmd(["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"],
+             stderr_to_stdout: true
+           ),
+         branch when branch != "" and branch != "HEAD" <- String.trim(to_string(out)) do
+      branch
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
   Is a validation artifact older than the latest completed impl op? If
   so, a fix ghost has run since this validation, and the verdict on
   this artifact is moot — the caller should re-validate.
@@ -578,21 +632,11 @@ defmodule GiTF.Validation do
     end
   end
 
-  # The fix ghost must work in the CONSOLIDATION TARGET worktree — the
-  # latest completed non-phase op's shell, the same one
-  # consolidate_impl_branches merges every branch into. Any other pick
-  # hands the fix ghost a pre-union tree without the committed conflict
-  # markers it was asked to reconcile (run 14: attempt 1 "fixed" a stale
-  # tree while the markers lived on unseen).
+  # The fix ghost must work in the CANONICAL worktree — the chain tip's
+  # shell (fix ops excluded from selection: they adopt older shells and
+  # would drag the target backward, run 17's re-implementation spiral).
   defp find_implementation_shell(mission) do
-    with %{ghost_id: ghost_id} when is_binary(ghost_id) <- latest_completed_impl_op(mission),
-         %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, ghost_id),
-         %{worktree_path: wt} = shell <- Archive.get(:shells, shell_id),
-         true <- is_binary(wt) and File.dir?(wt) do
-      shell
-    else
-      _ -> fallback_implementation_shell(mission)
-    end
+    canonical_impl_shell(mission) || fallback_implementation_shell(mission)
   end
 
   defp fallback_implementation_shell(mission) do

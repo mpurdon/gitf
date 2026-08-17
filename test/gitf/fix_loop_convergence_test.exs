@@ -90,4 +90,49 @@ defmodule GiTF.FixLoopConvergenceTest do
     assert ctx_final.attempt == 3
     assert FixContext.exhausted?(ctx_final)
   end
+
+  test "canonical shell selection excludes fix ops", %{op: op, shell: shell} do
+    # A completed FIX op newer than the chain tip must NOT become the
+    # canonical worktree (run 17: a fix ghost adopted chain-op 2's shell,
+    # became 'latest completed', and dragged consolidation backward).
+    tmp_wt = Path.join(System.tmp_dir!(), "gitf_canon_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_wt)
+    on_exit(fn -> File.rm_rf!(tmp_wt) end)
+
+    {:ok, chain_ghost} = Archive.insert(:ghosts, %{name: "chain", status: "stopped"})
+
+    {:ok, chain_shell} =
+      Archive.insert(:shells, %{
+        sector_id: op.sector_id,
+        ghost_id: chain_ghost.id,
+        path: "/tmp/s",
+        worktree_path: tmp_wt,
+        status: "active"
+      })
+
+    {:ok, _} = Archive.update(:ghosts, chain_ghost.id, &Map.put(&1, :shell_id, chain_shell.id))
+    {:ok, _} = Archive.update(:ops, op.id, &Map.put(&1, :ghost_id, chain_ghost.id))
+
+    # A newer, completed fix op pointing at the OLD shell.
+    {:ok, fix_op} =
+      Ops.create(%{
+        title: "Fix something",
+        mission_id: op.mission_id,
+        sector_id: op.sector_id,
+        fix_of: op.id
+      })
+
+    {:ok, fix_ghost} = Archive.insert(:ghosts, %{name: "fixer", status: "stopped"})
+    {:ok, _} = Archive.update(:ghosts, fix_ghost.id, &Map.put(&1, :shell_id, shell.id))
+
+    {:ok, _} =
+      Archive.update(:ops, fix_op.id, fn o ->
+        o |> Map.put(:status, "done") |> Map.put(:ghost_id, fix_ghost.id)
+      end)
+
+    {:ok, mission} = GiTF.Missions.get(op.mission_id)
+
+    canonical = GiTF.Validation.canonical_impl_shell(mission)
+    assert canonical.id == chain_shell.id
+  end
 end

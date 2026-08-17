@@ -123,19 +123,14 @@ defmodule GiTF.Togusa do
     end
   end
 
-  # The fix ghost must inherit the CONSOLIDATION TARGET worktree — the
-  # latest completed non-phase op's shell, where every branch (and any
-  # committed conflict markers) has been merged. The failed op's own shell
-  # is only a fallback: spawning there forks a fresh lineage off a stale
-  # tree (run 14's parallel-lineage divergence).
+  # The fix ghost must inherit the CANONICAL worktree — the chain tip's
+  # shell (GiTF.Validation.canonical_impl_shell/1; fix ops excluded from
+  # selection because they adopt older shells and would drag the target
+  # backward — run 17's re-implementation spiral). The failed op's own
+  # shell is only a fallback.
   defp resolve_fix_shell(op, fallback_shell_id) do
     with {:ok, mission} <- GiTF.Missions.get(op.mission_id),
-         %{ghost_id: ghost_id} when is_binary(ghost_id) <-
-           GiTF.Validation.latest_completed_impl_op(mission),
-         %{shell_id: shell_id} when is_binary(shell_id) <-
-           GiTF.Archive.get(:ghosts, ghost_id),
-         {:ok, %{worktree_path: wt} = shell} when is_binary(wt) <- GiTF.Shell.get(shell_id),
-         true <- File.dir?(wt) do
+         %{} = shell <- GiTF.Validation.canonical_impl_shell(mission) do
       {:ok, shell}
     else
       _ -> GiTF.Shell.get(fallback_shell_id)

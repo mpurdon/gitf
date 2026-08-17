@@ -1169,12 +1169,15 @@ defmodule GiTF.Major.Orchestrator do
   #
   # Returns {:ok, conflicted_files}.
   defp consolidate_impl_branches(mission, done_impl_ops) do
-    with %{ghost_id: target_ghost} when is_binary(target_ghost) <-
-           GiTF.Validation.latest_completed_impl_op(mission),
-         %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, target_ghost),
-         %{worktree_path: wt} when is_binary(wt) <- Archive.get(:shells, shell_id),
+    # Target the CANONICAL worktree (chain tip; fix ops excluded from
+    # selection — they adopt older shells and drag the target backward,
+    # run 17's re-implementation spiral). The target branch is whatever
+    # the canonical worktree currently has checked out — the deepest
+    # point of the lineage including post-chain fix commits.
+    with %{worktree_path: wt, ghost_id: target_ghost} <-
+           GiTF.Validation.canonical_impl_shell(mission),
          true <- File.dir?(wt) do
-      target_branch = "ghost/#{target_ghost}"
+      target_branch = GiTF.Validation.canonical_branch(mission) || "ghost/#{target_ghost}"
 
       conflicted =
         done_impl_ops
@@ -1223,12 +1226,22 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp impl_base_branch_opts(mission) do
-    case GiTF.Validation.latest_completed_impl_op(mission) do
-      %{ghost_id: ghost_id} when is_binary(ghost_id) ->
-        [base_branch: "ghost/#{ghost_id}"]
+    # Base validation on the canonical worktree's CURRENT branch — the
+    # deepest lineage point, including post-chain fix commits. An
+    # op-derived branch name can lag (run 17: validation based on chain
+    # op 2's branch while ops 3-4 and fixes lived further down the line).
+    case GiTF.Validation.canonical_branch(mission) do
+      branch when is_binary(branch) ->
+        [base_branch: branch]
 
       _ ->
-        []
+        case GiTF.Validation.latest_completed_impl_op(mission) do
+          %{ghost_id: ghost_id} when is_binary(ghost_id) ->
+            [base_branch: "ghost/#{ghost_id}"]
+
+          _ ->
+            []
+        end
     end
   end
 
