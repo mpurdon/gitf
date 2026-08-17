@@ -23,7 +23,9 @@ defmodule GiTF.Studio.Tools do
     sectors =
       case GiTF.Sector.list() do
         [] -> "none registered yet"
-        list -> Enum.map_join(list, ", ", & &1.name)
+        # Archive records are plain maps with no enforced shape — a sector
+        # written without :name must not crash session startup.
+        list -> Enum.map_join(list, ", ", &(Map.get(&1, :name) || Map.get(&1, :id, "unnamed")))
       end
 
     """

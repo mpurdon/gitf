@@ -192,6 +192,9 @@ defmodule GiTF.QualityTest do
       sector_id = "sector-thresh"
       sector = %{id: sector_id, path: "/tmp"}
       Archive.insert(:sectors, sector)
+      # Shared store: a leaked sector (esp. one without :name) breaks
+      # unrelated tests that enumerate :sectors (StudioLive, seed-dependent).
+      on_exit(fn -> Archive.delete(:sectors, sector_id) end)
 
       custom = %{composite: 80, static: 75, security: 70, performance: 60}
       {:ok, _} = Quality.set_thresholds(sector_id, custom)
