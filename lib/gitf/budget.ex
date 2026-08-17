@@ -41,12 +41,31 @@ defmodule GiTF.Budget do
     end
   end
 
-  @doc "Returns the base budget from config (ignoring mission overrides)."
+  @doc """
+  Returns the base budget from config (ignoring mission overrides).
+
+  `[costs.provider_mission_budgets]` (provider → USD) overrides the flat
+  `budget_usd` for the active provider — subscription-billed (cli) missions
+  book notional dollars at API-equivalent rates, so a cap tuned for real
+  metered spend would strangle them.
+  """
   @spec config_budget() :: float()
   def config_budget do
-    case GiTF.Config.Provider.get([:costs, :budget_usd]) do
-      val when is_number(val) and val > 0 -> val * 1.0
-      _ -> @default_budget_usd
+    per_provider =
+      case GiTF.Config.Provider.get([:costs, :provider_mission_budgets]) do
+        map when is_map(map) -> Map.new(map, fn {k, v} -> {to_string(k), v} end)
+        _ -> %{}
+      end
+
+    case Map.get(per_provider, active_provider()) do
+      val when is_number(val) and val > 0 ->
+        val * 1.0
+
+      _ ->
+        case GiTF.Config.Provider.get([:costs, :budget_usd]) do
+          val when is_number(val) and val > 0 -> val * 1.0
+          _ -> @default_budget_usd
+        end
     end
   end
 
@@ -64,32 +83,99 @@ defmodule GiTF.Budget do
     end
   end
 
-  @doc "Total USD spent across all missions within the rolling 24h window."
-  @spec global_spent() :: float()
-  def global_spent do
+  @doc """
+  Daily cap for a specific provider's spend stream.
+
+  Read from `[costs.provider_budgets]` (provider name → USD/day), falling
+  back to `daily_budget/0`. This lets metered providers (bedrock, google)
+  keep a tight real-dollar cap while subscription-billed streams (cli)
+  carry a higher notional cap that still brakes runaways.
+  """
+  @spec provider_budget(String.t()) :: float()
+  def provider_budget(provider) do
+    budgets =
+      case GiTF.Config.Provider.get([:costs, :provider_budgets]) do
+        map when is_map(map) -> Map.new(map, fn {k, v} -> {to_string(k), v} end)
+        _ -> %{}
+      end
+
+    case Map.get(budgets, provider) do
+      val when is_number(val) and val > 0 -> val * 1.0
+      _ -> daily_budget()
+    end
+  end
+
+  @doc """
+  The provider whose spend stream new work would add to, derived from the
+  execution mode. New spawns are budget-checked against this stream only —
+  yesterday's bedrock dollars must not block today's subscription work.
+  """
+  @spec active_provider() :: String.t()
+  def active_provider do
+    case GiTF.Runtime.ModelResolver.execution_mode() do
+      :cli -> "cli"
+      :bedrock -> "bedrock"
+      :ollama -> "ollama"
+      :api -> GiTF.Runtime.ModelResolver.configured_provider()
+    end
+  rescue
+    _ -> "unknown"
+  end
+
+  @doc """
+  Classifies a cost record (or model string) into a provider stream.
+
+  Cost records store normalized model specs: metered API paths always carry
+  a provider prefix ("bedrock:", "google:", ...) or a bedrock ARN, while the
+  Claude Code CLI booking path records bare model names — so bare = "cli".
+  """
+  @spec provider_of(map() | String.t() | nil) :: String.t()
+  def provider_of(%{} = cost), do: provider_of(Map.get(cost, :model))
+  def provider_of("arn:aws:bedrock" <> _), do: "bedrock"
+  def provider_of("amazon_bedrock:" <> _), do: "bedrock"
+
+  def provider_of(model) when is_binary(model) do
+    case String.split(model, ":", parts: 2) do
+      [prefix, _] -> prefix
+      [_] -> "cli"
+    end
+  end
+
+  def provider_of(_), do: "unknown"
+
+  @doc """
+  Total USD spent within the rolling 24h window — across all providers by
+  default, or scoped to one provider's stream.
+  """
+  @spec global_spent(:all | String.t()) :: float()
+  def global_spent(provider \\ :all) do
     cutoff = DateTime.add(DateTime.utc_now(), -@rolling_window_seconds, :second)
 
     GiTF.Archive.all(:costs)
     |> Enum.filter(fn cost ->
-      case Map.get(cost, :recorded_at) do
-        %DateTime{} = ts -> DateTime.compare(ts, cutoff) != :lt
-        # No timestamp: count it (fail-safe — err toward including spend).
-        _ -> true
-      end
+      in_window =
+        case Map.get(cost, :recorded_at) do
+          %DateTime{} = ts -> DateTime.compare(ts, cutoff) != :lt
+          # No timestamp: count it (fail-safe — err toward including spend).
+          _ -> true
+        end
+
+      in_window and (provider == :all or provider_of(cost) == provider)
     end)
     |> GiTF.Costs.total()
   end
 
   @doc """
-  Fail-closed factory-wide budget check. Refuses new work once rolling-24h
-  spend reaches the daily cap.
+  Fail-closed factory-wide budget check for the ACTIVE provider's stream.
+  Refuses new work once that stream's rolling-24h spend reaches its cap.
 
   Returns `{:ok, remaining}` or `{:error, :daily_budget_exceeded, spent}`.
   """
   @spec global_check() :: {:ok, float()} | {:error, :daily_budget_exceeded, float()}
   def global_check do
-    cap = daily_budget()
-    spent = global_spent()
+    provider = active_provider()
+    cap = provider_budget(provider)
+    spent = global_spent(provider)
 
     if spent < cap do
       {:ok, Float.round(cap - spent, 6)}
