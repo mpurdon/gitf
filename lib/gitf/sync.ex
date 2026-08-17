@@ -403,12 +403,35 @@ defmodule GiTF.Sync do
     fetch_sector(shell.sector_id)
   end
 
+  # The mission branch is factory-owned scratch: rebuild it fresh from the
+  # most trustworthy base every sync so retries are idempotent. Two lessons
+  # baked in (msn-da9597): (1) reusing a stale existing branch makes every
+  # retry merge into the wreckage of the last attempt; (2) basing on LOCAL
+  # main mixes bases — ghosts branch from origin/main, while local main can
+  # carry old unpushed mission merges, manufacturing conflicts out of thin
+  # air. Prefer origin/<main> when it exists.
   defp create_quest_branch(repo_path, quest_branch, main_branch) do
+    base =
+      case GiTF.Git.safe_cmd(
+             ["rev-parse", "--verify", "--quiet", "origin/#{main_branch}"],
+             cd: repo_path,
+             stderr_to_stdout: true
+           ) do
+        {_, 0} -> "origin/#{main_branch}"
+        _ -> main_branch
+      end
+
     if GiTF.Git.branch_exists?(repo_path, quest_branch) do
-      # Branch already exists — check it out
-      GiTF.Git.checkout(repo_path, quest_branch)
+      with :ok <- GiTF.Git.checkout(repo_path, quest_branch),
+           {_, 0} <-
+             GiTF.Git.safe_cmd(["reset", "--hard", base], cd: repo_path, stderr_to_stdout: true) do
+        :ok
+      else
+        {out, _} -> {:error, {:branch_reset_failed, to_string(out)}}
+        error -> error
+      end
     else
-      GiTF.Git.branch_create(repo_path, quest_branch, main_branch)
+      GiTF.Git.branch_create(repo_path, quest_branch, base)
     end
   end
 

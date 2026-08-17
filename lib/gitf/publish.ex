@@ -133,6 +133,14 @@ defmodule GiTF.Publish do
 
   defp finalize_merge_as_pr(mission, nil), do: finalize_merge_to_main(mission)
 
+  # A failed sync is retried by the workflow's next advance tick —
+  # merge_quest rebuilds the mission branch idempotently, so later attempts
+  # merge whatever the fix loop has landed since. Sealing on attempt 1
+  # killed msn-da9597 while its quality-fix ghost was mid-repair and the
+  # branch content was actually correct. The cap keeps a truly
+  # irreconcilable mission from retrying forever.
+  @max_sync_attempts 3
+
   # pr_branch sync: create the local mission branch with all impl ghost
   # branches merged in. The push + `gh pr create` happens later in the
   # publish phase, after simplify and scoring have run, so any cleanup
@@ -149,24 +157,45 @@ defmodule GiTF.Publish do
         Orchestrator.dispatch_phase("simplify", mission)
 
       {:error, reason} ->
-        Missions.store_artifact(mission.id, "sync", %{
-          "status" => "failed",
-          "error" => inspect(reason)
-        })
-
-        Logger.warning("Quest #{mission.id} pr_branch merge failed: #{inspect(reason)}")
-        Missions.fail_quest(mission.id, "Sync failed: #{inspect(reason)}")
+        record_sync_failure(mission, reason)
     end
   rescue
     e ->
       Logger.warning("Quest #{mission.id} pr_branch finalization failed: #{Exception.message(e)}")
+      record_sync_failure(mission, {:finalization_crash, Exception.message(e)})
+  end
 
-      Missions.store_artifact(mission.id, "sync", %{
-        "status" => "failed",
-        "error" => Exception.message(e)
-      })
+  defp record_sync_failure(mission, reason) do
+    attempts =
+      case Missions.get_artifact(mission.id, "sync") do
+        %{"sync_attempts" => n} when is_integer(n) -> n + 1
+        _ -> 1
+      end
 
-      Missions.fail_quest(mission.id, "PR finalization failed")
+    Missions.store_artifact(mission.id, "sync", %{
+      "status" => "failed",
+      "error" => inspect(reason),
+      "sync_attempts" => attempts
+    })
+
+    if attempts >= @max_sync_attempts do
+      Logger.warning(
+        "Quest #{mission.id} sync failed #{attempts}x (#{inspect(reason)}) — sealing failed"
+      )
+
+      Missions.fail_quest(mission.id, "Sync failed after #{attempts} attempts: #{inspect(reason)}")
+    else
+      Logger.warning(
+        "Quest #{mission.id} sync failed (attempt #{attempts}/#{@max_sync_attempts}): " <>
+          "#{inspect(reason)} — will retry on next advance"
+      )
+
+      GiTF.Observability.Alerts.dispatch_webhook(
+        :sync_retry,
+        "Quest #{mission.id} sync attempt #{attempts} failed: #{inspect(reason)}",
+        dedup_key: "sync_retry:#{mission.id}"
+      )
+    end
   end
 
   # -- Publish phase ---------------------------------------------------------
