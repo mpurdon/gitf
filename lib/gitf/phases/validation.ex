@@ -253,23 +253,49 @@ defmodule GiTF.Phases.Validation do
     end
   end
 
+  # Hard ceiling on TOTAL fix ops per mission (any lane, any status), as a
+  # multiple of the validation fix budget. The per-context attempt counter
+  # can be gamed by lane dynamics: on run 17 deferred validation attempts
+  # never recorded (counter frozen at 3/4) while the quality gate minted
+  # fresh attempt-1 fixes against each new fix op as origin — the mission
+  # churned "attempt 4/4" every 3 minutes indefinitely. Total-op count is
+  # ungameable.
+  @max_total_fix_ops_factor 3
+
   defp handle_validation_fail(mission, artifact) do
     fix_ctx = Validation.load_fix_context(mission)
 
-    if FixContext.exhausted?(fix_ctx) do
-      Logger.warning(
-        "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
-      )
+    total_fix_ops =
+      Enum.count(mission.ops, fn op ->
+        op[:phase_job] not in [true] and is_binary(op[:fix_of])
+      end)
 
-      :terminal_fail
-    else
-      Logger.info(
-        "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
-      )
+    hard_cap = fix_ctx.max_attempts * @max_total_fix_ops_factor
 
-      Validation.maybe_spawn_skill_refinement(mission, artifact)
-      Validation.attempt_fixes(mission, artifact, fix_ctx)
-      :wait
+    cond do
+      FixContext.exhausted?(fix_ctx) ->
+        Logger.warning(
+          "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
+        )
+
+        :terminal_fail
+
+      total_fix_ops >= hard_cap ->
+        Logger.warning(
+          "Quest #{mission.id} validation failed with #{total_fix_ops} total fix ops " <>
+            "(hard cap #{hard_cap}) — sealing regardless of attempt counter"
+        )
+
+        :terminal_fail
+
+      true ->
+        Logger.info(
+          "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
+        )
+
+        Validation.maybe_spawn_skill_refinement(mission, artifact)
+        Validation.attempt_fixes(mission, artifact, fix_ctx)
+        :wait
     end
   end
 
