@@ -86,6 +86,7 @@ defmodule GiTF.Runtime.Claude do
     # the claude binary is present.
     with :ok <- validate_directory(working_dir),
          {:ok, claude_path} <- find_executable() do
+      prompt = materialize_large_prompt(prompt, working_dir)
       args = build_headless_args(prompt, opts)
 
       # Always clear CLAUDECODE to prevent "nested session" errors when
@@ -194,6 +195,31 @@ defmodule GiTF.Runtime.Claude do
     base = []
     base = base ++ system_prompt_args(opts) ++ model_args(opts)
     base ++ prompt_args(opts)
+  end
+
+  # Linux caps a single execve argument at MAX_ARG_STRLEN (128KB); a prompt
+  # over the cap kills the spawn before the CLI ever runs — instantly and
+  # silently (msn-e6cc5b: phase prompts embedding raw-transcript artifacts).
+  # Stay well under it: oversized prompts are written into the worktree and
+  # replaced by a pointer instruction.
+  @max_argv_prompt_bytes 100_000
+  @prompt_file ".gitf-prompt.md"
+
+  defp materialize_large_prompt(prompt, working_dir) do
+    if byte_size(prompt) > @max_argv_prompt_bytes do
+      path = Path.join(working_dir, @prompt_file)
+      File.write!(path, prompt)
+
+      Logger.info(
+        "Prompt is #{byte_size(prompt)} bytes (argv cap #{@max_argv_prompt_bytes}) — " <>
+          "written to #{@prompt_file} with a pointer prompt"
+      )
+
+      "Read the file #{@prompt_file} in the current directory NOW — it contains " <>
+        "your complete instructions. Follow them exactly, then delete #{@prompt_file}."
+    else
+      prompt
+    end
   end
 
   # Public for test assertion only — the exact argv is a compatibility

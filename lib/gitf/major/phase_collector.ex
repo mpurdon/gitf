@@ -49,7 +49,21 @@ defmodule GiTF.Major.PhaseCollector do
   """
   @spec extract_assistant_text([map()], String.t()) :: String.t()
   def extract_assistant_text(parsed_events, raw_output) do
-    # Try to find assistant text in parsed events (CLI mode)
+    # The claude CLI's terminal event carries the complete final text —
+    # prefer it outright. Falling through to raw_output here handed the
+    # ENTIRE stream-json transcript to extract_json: every CLI-mode phase
+    # "parse_failed", raw transcripts became the artifacts, and each later
+    # phase embedded them in its prompt until the argv blew past Linux's
+    # 128KB per-string limit and spawns died silently (msn-e6cc5b).
+    cli_result =
+      parsed_events
+      |> Enum.filter(fn event ->
+        (Map.get(event, "type") || Map.get(event, :type)) == "result"
+      end)
+      |> Enum.map(fn event -> Map.get(event, "result") || Map.get(event, :result) end)
+      |> Enum.filter(&(is_binary(&1) and &1 != ""))
+      |> List.last()
+
     assistant_text =
       parsed_events
       |> Enum.filter(fn event ->
@@ -58,13 +72,14 @@ defmodule GiTF.Major.PhaseCollector do
           Map.get(event, "role") == "assistant" or
           Map.get(event, :role) == "assistant"
       end)
-      |> Enum.map(fn event ->
-        Map.get(event, "content") || Map.get(event, :content) ||
-          Map.get(event, "text") || Map.get(event, :text) || ""
-      end)
+      |> Enum.map(&assistant_event_text/1)
+      |> Enum.filter(&(&1 != ""))
       |> List.last()
 
     cond do
+      is_binary(cli_result) ->
+        cli_result
+
       is_binary(assistant_text) and assistant_text != "" ->
         assistant_text
 
@@ -75,6 +90,40 @@ defmodule GiTF.Major.PhaseCollector do
 
       true ->
         raw_output
+    end
+  end
+
+  # Assistant event text across event shapes: flat content/text strings
+  # (legacy / API mode) or the CLI's nested message.content block list.
+  defp assistant_event_text(event) do
+    flat =
+      Map.get(event, "content") || Map.get(event, :content) ||
+        Map.get(event, "text") || Map.get(event, :text)
+
+    cond do
+      is_binary(flat) and flat != "" ->
+        flat
+
+      true ->
+        message = Map.get(event, "message") || Map.get(event, :message) || %{}
+        content = Map.get(message, "content") || Map.get(message, :content)
+
+        case content do
+          blocks when is_list(blocks) ->
+            blocks
+            |> Enum.map(fn
+              %{"type" => "text", "text" => t} when is_binary(t) -> t
+              %{type: "text", text: t} when is_binary(t) -> t
+              _ -> ""
+            end)
+            |> Enum.join("")
+
+          text when is_binary(text) ->
+            text
+
+          _ ->
+            ""
+        end
     end
   end
 

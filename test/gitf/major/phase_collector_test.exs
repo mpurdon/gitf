@@ -108,6 +108,54 @@ defmodule GiTF.Major.PhaseCollectorTest do
       events = [%{"type" => "result", "status" => "completed"}]
       assert PhaseCollector.extract_assistant_text(events, "api result text") == "api result text"
     end
+
+    # The claude CLI's stream-json shapes: assistant events nest content
+    # under message.content as a block list, and the terminal result event
+    # carries the complete final text. Falling through to raw_output here
+    # made every CLI-mode phase parse_failed (msn-e6cc5b).
+    test "prefers the CLI terminal result event's text" do
+      events = [
+        %{
+          "type" => "assistant",
+          "message" => %{"content" => [%{"type" => "text", "text" => "intermediate"}]}
+        },
+        %{"type" => "result", "subtype" => "success", "result" => "```json\n{\"a\":1}\n```"}
+      ]
+
+      assert PhaseCollector.extract_assistant_text(events, "raw transcript") ==
+               "```json\n{\"a\":1}\n```"
+    end
+
+    test "extracts nested message.content block text from CLI assistant events" do
+      events = [
+        %{
+          "type" => "assistant",
+          "message" => %{
+            "content" => [
+              %{"type" => "thinking", "thinking" => "hmm"},
+              %{"type" => "text", "text" => "the final answer"}
+            ]
+          }
+        }
+      ]
+
+      assert PhaseCollector.extract_assistant_text(events, "raw transcript") ==
+               "the final answer"
+    end
+
+    test "CLI collect end-to-end: fenced JSON in result event parses as artifact" do
+      events = [
+        %{"type" => "system", "subtype" => "init"},
+        %{
+          "type" => "result",
+          "subtype" => "success",
+          "result" => ~s(```json\n{"complexity": "trivial", "summary": "ok"}\n```)
+        }
+      ]
+
+      assert {:ok, artifact} = PhaseCollector.collect("triage", "huge raw transcript", events)
+      assert artifact["complexity"] == "trivial"
+    end
   end
 
   describe "collect/3" do
