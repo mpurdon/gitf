@@ -55,6 +55,11 @@ defmodule GiTF.SpecsTest do
     test "creates mission directory if it doesn't exist" do
       mission_id = "msn-newdir-#{:erlang.unique_integer([:positive])}"
       dir = Specs.quest_dir(mission_id)
+      # unique_integer restarts per BEAM run while leaked dirs from past
+      # suite runs persist on disk — 175 msn-newdir-* leftovers made this
+      # collide seed-dependently. Clear both ways.
+      File.rm_rf!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
       refute File.dir?(dir)
 
       assert {:ok, _path} = Specs.write(mission_id, "requirements", "content")

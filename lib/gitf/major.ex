@@ -1594,11 +1594,21 @@ defmodule GiTF.Major do
     end
   end
 
-  defp predecessor_shell(op) do
+  # Public for test assertion only — the chain-inheritance contract this
+  # encodes silently broke once already (see comment below) and must stay
+  # pinned by a test.
+  @doc false
+  def predecessor_shell(op) do
+    # Dependencies live in the :op_dependencies COLLECTION
+    # (Ops.add_dependency/2), not on the op record. Reading a nonexistent
+    # op[:depends_on] field here meant this function NEVER fired — the
+    # v0.65.86 "serialized chain" ran ops sequentially (scheduler order)
+    # but every op provisioned a fresh worktree from origin/main, so impl
+    # branches were siblings and consolidation manufactured conflict
+    # markers on every run from 13 through 16.
     with false <- op[:phase_job] == true,
-         deps when deps != [] <- op[:depends_on] || [] do
+         deps when deps != [] <- GiTF.Ops.dependencies(op.id) do
       deps
-      |> Enum.map(&GiTF.Archive.get(:ops, &1))
       |> Enum.filter(&(is_map(&1) and &1[:status] == "done" and is_binary(&1[:ghost_id])))
       |> Enum.sort_by(& &1[:updated_at], :desc)
       |> Enum.find_value(:none, fn dep_op ->
