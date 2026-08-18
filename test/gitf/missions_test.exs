@@ -273,6 +273,36 @@ defmodule GiTF.MissionsTest do
     end
   end
 
+  describe "finished?/1 and non_terminal?/1" do
+    test "operator-ended missions are finished, so the box may sleep" do
+      # The bug this guards: `closed`/`killed` counted as live work forever,
+      # so idle-stop never fired and the instance never powered down.
+      for status <- ~w(completed failed cancelled closed killed) do
+        assert Missions.finished?(%{status: status}), "#{status} should be finished"
+        refute Missions.non_terminal?(%{status: status}), "#{status} should not be live"
+      end
+    end
+
+    test "in-flight and queued missions are neither finished nor terminal" do
+      for status <- ~w(pending active implementation validation awaiting_approval) do
+        refute Missions.finished?(%{status: status})
+        assert Missions.non_terminal?(%{status: status})
+      end
+    end
+
+    test "paused missions still want an operator but let the box sleep" do
+      for status <- ~w(paused paused_budget) do
+        refute Missions.finished?(%{status: status}), "#{status} still wants an operator"
+        refute Missions.non_terminal?(%{status: status}), "#{status} must not block idle-stop"
+      end
+    end
+
+    test "a mission with no status set counts as finished" do
+      assert Missions.finished?(%{})
+      refute Missions.non_terminal?(%{})
+    end
+  end
+
   describe "add_job/2" do
     test "creates a op linked to the mission", %{sector: sector} do
       {:ok, mission} = Missions.create(%{goal: "Quest with ops"})

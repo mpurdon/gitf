@@ -25,14 +25,27 @@ defmodule GiTF.Missions do
   @spec active_statuses() :: [String.t()]
   def active_statuses, do: @active_statuses
 
-  # Broader than @active_statuses: also covers queued/awaiting_approval etc.
-  # "Non-terminal" means the mission still wants the factory or an operator —
-  # the notion liveness and idle-stop decisions need.
-  @terminal_statuses [nil | ~w(completed failed cancelled paused paused_budget)]
+  # A mission nobody will do anything more with. `closed` and `killed` belong
+  # here as much as `completed`: an operator ending a mission ends it. Leaving
+  # them out made every closed mission look like live work forever, which kept
+  # the idle-stop timer from ever firing and pinned the box awake.
+  @finished_statuses [nil | ~w(completed failed cancelled closed killed)]
 
+  # Paused missions are finished with the FACTORY but not with the operator —
+  # they still show up in operator views, and still let the box sleep.
+  @paused_statuses ~w(paused paused_budget)
+
+  @doc "True when the mission will see no further work from anyone."
+  @spec finished?(map()) :: boolean()
+  def finished?(mission), do: Map.get(mission, :status) in @finished_statuses
+
+  # Broader than @active_statuses: also covers queued/awaiting_approval etc.
+  # "Non-terminal" means the mission still wants the factory — the notion
+  # liveness and idle-stop decisions need.
   @doc "True when the mission is not in a terminal or paused state."
   @spec non_terminal?(map()) :: boolean()
-  def non_terminal?(mission), do: Map.get(mission, :status) not in @terminal_statuses
+  def non_terminal?(mission),
+    do: not finished?(mission) and Map.get(mission, :status) not in @paused_statuses
 
   # -- Public API --------------------------------------------------------------
 

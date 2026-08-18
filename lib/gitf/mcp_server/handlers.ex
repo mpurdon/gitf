@@ -13,7 +13,10 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("factory_status", _args) do
     missions = GiTF.Missions.list()
-    active_missions = Enum.reject(missions, &(&1[:status] in ["completed", "closed", "killed"]))
+    # Everything an operator might still act on — paused missions included,
+    # failed/closed/killed ones not. One shared definition of "done" instead
+    # of this call's own list, which used to show a wall of failed missions.
+    active_missions = Enum.reject(missions, &GiTF.Missions.finished?/1)
     ghosts = GiTF.Ghosts.list()
     active_ghosts = Enum.reject(ghosts, &GhostStatus.terminal?(&1.status))
     summary = GiTF.Costs.summary()
