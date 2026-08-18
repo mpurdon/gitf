@@ -34,6 +34,7 @@ defmodule GiTF.MCPServer.Handlers do
           entity_id: event.entity_id,
           timestamp: to_string(event.timestamp),
           step: get_in(event, [:data, :step]),
+          failure_class: get_in(event, [:data, :failure_class]),
           reason:
             get_in(event, [:data, :reason]) || get_in(event, [:data, :error]) ||
               get_in(event, [:data, :message]),
@@ -43,6 +44,18 @@ defmodule GiTF.MCPServer.Handlers do
       end)
 
     stuck_count = count_stuck_missions(missions)
+
+    # Failures by class over the last 7 days: separates "the provider was
+    # down" from "the work was bad" — reliability is its own axis when
+    # comparing models/providers, so it gets its own numbers. Old events
+    # predate failure_class and report as unclassified.
+    week_ago = DateTime.add(DateTime.utc_now(), -7, :day)
+
+    reliability =
+      GiTF.EventStore.list(type: :ghost_failed, since: week_ago, limit: 1_000)
+      |> Enum.frequencies_by(fn event ->
+        to_string(get_in(event, [:data, :failure_class]) || "unclassified")
+      end)
 
     result = %{
       missions: %{
@@ -64,7 +77,8 @@ defmodule GiTF.MCPServer.Handlers do
       health: to_string(health.status),
       version: GiTF.version(),
       stuck_missions: stuck_count,
-      recent_failures: recent_failures
+      recent_failures: recent_failures,
+      reliability_7d: reliability
     }
 
     {:ok, json_text(result)}

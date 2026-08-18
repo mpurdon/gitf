@@ -144,7 +144,7 @@ defmodule GiTF.Telemetry do
 
   defp map_event([:gitf, :ghost, :failed], measurements, meta) do
     {:ghost_failed, Map.get(meta, :ghost_id, "unknown"),
-     Map.merge(measurements, %{error: meta[:error]}),
+     Map.merge(measurements, %{error: meta[:error], failure_class: meta[:failure_class]}),
      %{op_id: meta[:op_id], mission_id: meta[:mission_id]}}
   end
 

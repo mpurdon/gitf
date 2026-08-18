@@ -80,19 +80,34 @@ defmodule GiTF.Runtime.CLIClient do
     events = GiTF.Runtime.StreamParser.parse_chunk(raw)
     text = GiTF.Major.PhaseCollector.extract_assistant_text(events, raw)
 
-    # extract_costs returns one entry per result event; the terminal one
-    # carries the run's cumulative usage.
-    costs =
+    # extract_costs books one entry per model (a CLI run can use a sidecar
+    # model besides the main one). This response is a single completion, so
+    # sum the usage and let the costliest entry name the model.
+    entries =
       case GiTF.Runtime.StreamParser.extract_costs(events) do
-        list when is_list(list) -> List.last(list) || %{}
-        %{} = map -> map
-        _ -> %{}
+        list when is_list(list) -> list
+        %{} = map -> [map]
+        _ -> []
       end
+
+    costs =
+      Enum.reduce(entries, %{}, fn e, acc ->
+        Map.merge(acc, e, fn
+          :model, a, _b -> a
+          :cost_usd, a, b -> (a || 0) + (b || 0)
+          _k, a, b -> (a || 0) + (b || 0)
+        end)
+      end)
+
+    primary_model =
+      entries
+      |> Enum.max_by(&(&1[:cost_usd] || &1[:output_tokens] || 0), fn -> %{} end)
+      |> Map.get(:model)
 
     %ReqLLM.Response{
       id: nil,
       context: nil,
-      model: Map.get(costs, :model) || to_string(model),
+      model: primary_model || to_string(model),
       message: %Message{
         role: :assistant,
         content: [ContentPart.text(text)]

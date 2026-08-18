@@ -1907,6 +1907,8 @@ defmodule GiTF.Ghost.Worker do
         _ -> nil
       end
 
+    failure_class = GiTF.Ghost.FailureClass.classify(reason)
+
     GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
       labels: %{status: :failed, sector_id: state.sector_id},
       attributes: %{
@@ -1917,7 +1919,8 @@ defmodule GiTF.Ghost.Worker do
       ghost_id: state.ghost_id,
       op_id: state.op_id,
       mission_id: mission_id,
-      error: reason
+      error: reason,
+      failure_class: failure_class
     })
 
     GiTF.Progress.clear(state.ghost_id)

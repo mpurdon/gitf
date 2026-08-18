@@ -122,6 +122,62 @@ defmodule GiTF.Runtime.StreamParserTest do
 
       assert [] = StreamParser.extract_costs(events)
     end
+
+    # The shape a real `claude --print --output-format stream-json` result
+    # event has on the Max plan (captured 2026-08-18): no top-level "model",
+    # cost under "total_cost_usd", and per-model breakdown in "modelUsage".
+    test "books one record per model from a CLI result event's modelUsage" do
+      events = [
+        %{
+          "type" => "result",
+          "total_cost_usd" => 0.1347646,
+          "usage" => %{"input_tokens" => 2, "output_tokens" => 4},
+          "modelUsage" => %{
+            "claude-sonnet-5" => %{
+              "inputTokens" => 2,
+              "outputTokens" => 4,
+              "cacheReadInputTokens" => 24_462,
+              "cacheCreationInputTokens" => 21_129,
+              "costUSD" => 0.1341786,
+              "canonicalModel" => "claude-sonnet-5"
+            },
+            "claude-haiku-4-5-20251001" => %{
+              "inputTokens" => 521,
+              "outputTokens" => 13,
+              "cacheReadInputTokens" => 0,
+              "cacheCreationInputTokens" => 0,
+              "costUSD" => 0.000586,
+              "canonicalModel" => "claude-haiku-4-5"
+            }
+          }
+        }
+      ]
+
+      costs = StreamParser.extract_costs(events) |> Enum.sort_by(& &1.model)
+
+      assert [haiku, sonnet] = costs
+      assert sonnet.model == "claude-sonnet-5"
+      assert sonnet.cache_read_tokens == 24_462
+      assert sonnet.cache_write_tokens == 21_129
+      assert sonnet.cost_usd == 0.1341786
+      # Canonical name wins over the dated modelUsage key.
+      assert haiku.model == "claude-haiku-4-5"
+      assert haiku.cost_usd == 0.000586
+    end
+
+    test "CLI result event without modelUsage still books, with total_cost_usd" do
+      events = [
+        %{
+          "type" => "result",
+          "total_cost_usd" => 0.05,
+          "usage" => %{"input_tokens" => 10, "output_tokens" => 20}
+        }
+      ]
+
+      assert [cost] = StreamParser.extract_costs(events)
+      assert cost.cost_usd == 0.05
+      assert cost.model == nil
+    end
   end
 
   describe "session_complete?/1" do

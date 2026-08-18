@@ -65,7 +65,7 @@ defmodule GiTF.Runtime.StreamParser do
       cache_read_tokens: Map.get(usage, "cache_read_input_tokens", Map.get(usage, "cache_read_tokens", 0)),
       cache_write_tokens: Map.get(usage, "cache_creation_input_tokens", Map.get(usage, "cache_write_tokens", 0)),
       model: Map.get(entry, "model"),
-      cost_usd: Map.get(entry, "cost_usd")
+      cost_usd: Map.get(entry, "cost_usd") || Map.get(entry, "total_cost_usd")
     }
   end
 
@@ -75,12 +75,38 @@ defmodule GiTF.Runtime.StreamParser do
   Extracts all cost entries from a list of parsed events.
 
   Filters out non-result events and returns only the cost maps.
+
+  A Claude CLI result event carries no top-level "model" — its usage is
+  broken out per model under "modelUsage", with canonical model names and
+  the CLI's own costUSD. Booking from there gives one record per model
+  with real prices; the flat "usage" shape is only a fallback. (Booking
+  the flat shape as one record used to file every CLI session under model
+  "unknown" at made-up prices, which is what a cost baseline can't have.)
   """
   @spec extract_costs([map()]) :: [map()]
   def extract_costs(events) do
-    events
-    |> Enum.map(&extract_cost/1)
-    |> Enum.reject(&is_nil/1)
+    Enum.flat_map(events, &entry_costs/1)
+  end
+
+  defp entry_costs(%{"type" => "result", "modelUsage" => usage_by_model} = _entry)
+       when is_map(usage_by_model) and map_size(usage_by_model) > 0 do
+    Enum.map(usage_by_model, fn {model, u} ->
+      %{
+        input_tokens: Map.get(u, "inputTokens", 0),
+        output_tokens: Map.get(u, "outputTokens", 0),
+        cache_read_tokens: Map.get(u, "cacheReadInputTokens", 0),
+        cache_write_tokens: Map.get(u, "cacheCreationInputTokens", 0),
+        model: Map.get(u, "canonicalModel") || model,
+        cost_usd: Map.get(u, "costUSD")
+      }
+    end)
+  end
+
+  defp entry_costs(entry) do
+    case extract_cost(entry) do
+      nil -> []
+      cost -> [cost]
+    end
   end
 
   @doc """
