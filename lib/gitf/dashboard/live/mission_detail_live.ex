@@ -469,9 +469,31 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     _ -> :ok
   end
 
-  defp compute_phase_durations(transitions) when is_list(transitions) do
-    transitions
-    |> Enum.sort_by(&(&1[:transitioned_at] || &1[:inserted_at]), DateTime)
+  # Public for tests. Durations must sum to the mission's wall clock or the
+  # pipeline display reads as broken: a phase revisited by a fix loop
+  # ACCUMULATES (it used to overwrite, so "implementation 3m" showed the
+  # last fix cycle instead of the 50-minute build), and the phase the
+  # mission is in RIGHT NOW is closed at `now` (it used to show its last
+  # completed visit while the live minutes accrued invisibly).
+  @doc false
+  def compute_phase_durations(transitions, now \\ DateTime.utc_now())
+
+  def compute_phase_durations(transitions, %DateTime{} = now) when is_list(transitions) do
+    sorted = Enum.sort_by(transitions, &(&1[:transitioned_at] || &1[:inserted_at]), DateTime)
+
+    # A terminal transition (to_phase "completed") closes the previous phase
+    # and opens nothing, so appending a `now` sentinel is only correct while
+    # the mission is still somewhere: the sentinel closes the open phase.
+    closer = %{to_phase: nil, inserted_at: now}
+
+    sorted =
+      case List.last(sorted) do
+        %{to_phase: "completed"} -> sorted
+        nil -> sorted
+        _ -> sorted ++ [closer]
+      end
+
+    sorted
     |> Enum.chunk_every(2, 1, :discard)
     |> Enum.reduce(%{}, fn [from, to], acc ->
       phase = from[:to_phase] || from[:from_phase]
@@ -480,16 +502,17 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
       case {ts_from, ts_to} do
         {%DateTime{}, %DateTime{}} ->
-          seconds = DateTime.diff(ts_to, ts_from, :second)
-          Map.put(acc, phase, format_short_duration(seconds))
+          seconds = max(DateTime.diff(ts_to, ts_from, :second), 0)
+          Map.update(acc, phase, seconds, &(&1 + seconds))
 
         _ ->
           acc
       end
     end)
+    |> Map.new(fn {phase, seconds} -> {phase, format_short_duration(seconds)} end)
   end
 
-  defp compute_phase_durations(_), do: %{}
+  def compute_phase_durations(_, _), do: %{}
 
   defp format_short_duration(seconds) when seconds < 60, do: "#{seconds}s"
   defp format_short_duration(seconds) when seconds < 3600, do: "#{div(seconds, 60)}m"
