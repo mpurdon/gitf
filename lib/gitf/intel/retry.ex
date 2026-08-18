@@ -225,6 +225,23 @@ defmodule GiTF.Intel.Retry do
 
     Archive.insert(:ops, new_job)
 
+    # The DAG lives in the :op_dependencies COLLECTION, not the depends_on
+    # field copied above — without these records a retry op is an orphan:
+    # predecessor_shell finds no upstream shell so the retry ghost branches
+    # from origin/main WITHOUT the chain's prior work (run 21's SettingsView
+    # retry produced its inexplicable "8 lines vs main" tree exactly this
+    # way), and dependency-depth ranking scores the retry 0 so a completed
+    # tip-retry loses canonical-shell selection to shallower siblings.
+    # Mirror the original's edges in both directions: what it depended on,
+    # and what depended on it.
+    for dep <- GiTF.Ops.dependencies(op.id) do
+      GiTF.Ops.add_dependency(new_job.id, dep.id)
+    end
+
+    for dependent <- GiTF.Ops.dependents(op.id) do
+      GiTF.Ops.add_dependency(dependent.id, new_job.id)
+    end
+
     # Update original op to mark it as retried
     updated_original = Map.put(op, :retried_as, new_job.id)
     Archive.put(:ops, updated_original)
