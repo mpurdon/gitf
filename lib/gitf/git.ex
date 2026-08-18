@@ -112,22 +112,26 @@ defmodule GiTF.Git do
   @spec worktree_add(String.t(), String.t(), String.t(), String.t() | nil) ::
           {:ok, String.t()} | {:error, String.t()}
   def worktree_add(repo_path, worktree_path, branch, start_point \\ nil) do
-    # -B, not -b: a first attempt that dies on the config-lock race (see the
-    # retry below) has often already created the branch, and -b then fails
-    # the retry with "a branch named ... already exists". Ghost branch names
-    # are per-ghost unique, so reset-or-create is always safe here and makes
-    # the whole operation idempotent.
+    # -B, not -b: a failed earlier attempt has often already created the
+    # branch, and -b then dies with "a branch named ... already exists".
+    # Ghost branch names are per-ghost unique, so reset-or-create is safe
+    # and makes the operation idempotent.
     args = ["worktree", "add", worktree_path, "-B", branch]
     args = if start_point, do: args ++ [start_point], else: args
-    worktree_add_with_retry(args, repo_path, worktree_path, 3)
+
+    # Serialize worktree creation per repo: concurrent `worktree add`s that
+    # set upstream tracking all write the SAME .git/config, and git's config
+    # lock has no wait — the losers die with "could not lock config file"
+    # (runs 22-23 burned ~10 provision attempts on the race; a jittered
+    # retry alone then died on its own predecessor's leftover branch). The
+    # add takes well under a second, so queueing is invisible; the retry
+    # below stays as belt-and-braces for lock holders OUTSIDE this node
+    # (a human shell on the box, a cron job).
+    :global.trans({{:gitf_worktree_add, repo_path}, self()}, fn ->
+      worktree_add_with_retry(args, repo_path, worktree_path, 3)
+    end)
   end
 
-  # Concurrent `worktree add --track` calls all write upstream config to the
-  # SAME .git/config, and git's config lock has no wait — the losers die with
-  # "could not lock config file". Phase fan-outs (3 design ghosts at once)
-  # hit this whenever the box is slow enough to widen the lock window; run 22
-  # burned six provision attempts on it. The lock holder finishes in
-  # milliseconds, so a short jittered retry converts the race into a queue.
   defp worktree_add_with_retry(args, repo_path, worktree_path, attempts_left) do
     case safe_cmd(args, cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} ->
@@ -137,8 +141,17 @@ defmodule GiTF.Git do
         output = String.trim(to_string(output))
 
         if attempts_left > 1 and String.contains?(output, "could not lock config file") do
-          # A failed add can leave a half-registered worktree; prune before
-          # retrying so the name is free again.
+          # A failed add can leave a half-populated worktree DIRECTORY and a
+          # half-registered admin entry; `worktree prune` only cleans the
+          # admin data (and never touches branches — that's what -B is for),
+          # so remove the directory too or the retry dies on "already
+          # exists" and masks the real error.
+          safe_cmd(["worktree", "remove", "--force", worktree_path],
+            cd: repo_path,
+            stderr_to_stdout: true
+          )
+
+          File.rm_rf(worktree_path)
           safe_cmd(["worktree", "prune"], cd: repo_path, stderr_to_stdout: true)
           Process.sleep(250 + :rand.uniform(750))
           worktree_add_with_retry(args, repo_path, worktree_path, attempts_left - 1)
