@@ -112,7 +112,12 @@ defmodule GiTF.Git do
   @spec worktree_add(String.t(), String.t(), String.t(), String.t() | nil) ::
           {:ok, String.t()} | {:error, String.t()}
   def worktree_add(repo_path, worktree_path, branch, start_point \\ nil) do
-    args = ["worktree", "add", worktree_path, "-b", branch]
+    # -B, not -b: a first attempt that dies on the config-lock race (see the
+    # retry below) has often already created the branch, and -b then fails
+    # the retry with "a branch named ... already exists". Ghost branch names
+    # are per-ghost unique, so reset-or-create is always safe here and makes
+    # the whole operation idempotent.
+    args = ["worktree", "add", worktree_path, "-B", branch]
     args = if start_point, do: args ++ [start_point], else: args
     worktree_add_with_retry(args, repo_path, worktree_path, 3)
   end
