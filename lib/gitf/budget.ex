@@ -7,6 +7,9 @@ defmodule GiTF.Budget do
   """
 
   @default_budget_usd 10.0
+  # CLI/subscription mode books API-equivalent NOTIONAL dollars at $0
+  # marginal cost; this cap is a runaway-loop guard, not a spend limit.
+  @default_cli_notional_budget_usd 150.0
   @default_daily_budget_usd 100.0
   @rolling_window_seconds 24 * 60 * 60
 
@@ -63,8 +66,18 @@ defmodule GiTF.Budget do
 
       _ ->
         case GiTF.Config.Provider.get([:costs, :budget_usd]) do
-          val when is_number(val) and val > 0 -> val * 1.0
-          _ -> @default_budget_usd
+          val when is_number(val) and val > 0 ->
+            val * 1.0
+
+          _ ->
+            # No config at all: the default must fit the billing model.
+            # CLI-mode costs are NOTIONAL (subscription-billed at $0
+            # marginal) — the metered default here killed run 24, the
+            # campaign's only zero-failure run, at $22.51 "spent". The cap
+            # still exists in CLI mode purely as a runaway-loop guard.
+            if active_provider() == "cli",
+              do: @default_cli_notional_budget_usd,
+              else: @default_budget_usd
         end
     end
   end
