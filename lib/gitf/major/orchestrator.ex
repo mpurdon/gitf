@@ -1211,12 +1211,20 @@ defmodule GiTF.Major.Orchestrator do
               files
 
             {:error, out} ->
+              reason = out |> to_string() |> String.trim() |> String.slice(0, 200)
+
               Logger.warning(
                 "Quest #{mission.id}: consolidation merge of #{branch} failed without " <>
-                  "content conflicts (#{String.slice(out, 0, 200)}) — aborted"
+                  "content conflicts (#{reason}) — branch NOT merged; surfacing to validation"
               )
 
-              []
+              # A dropped branch must be as visible as a conflicted file:
+              # run 21's final fix branch aborted here with an empty reason
+              # and validation judged a tree silently missing that work.
+              # This synthetic entry rides the merge_conflicts list into the
+              # validation prompt so the fix loop knows work is absent.
+              ["UNMERGED BRANCH #{branch} (merge failed: #{reason}) — its commits are " <>
+                 "missing from this tree; merge it or re-apply its work"]
           end
         end)
         |> Enum.uniq()

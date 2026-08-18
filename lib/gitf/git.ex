@@ -509,7 +509,12 @@ defmodule GiTF.Git do
   @spec merge_union(String.t(), String.t()) ::
           :ok | {:conflicted, [String.t()]} | {:error, String.t()}
   def merge_union(wt, branch) do
-    case safe_cmd(["-C", wt, "merge", "--no-ff", "--no-edit", branch]) do
+    # stderr matters here: git merge reports its refusals ("fatal: refusing
+    # to merge unrelated histories", "error: your local changes...") on
+    # stderr, and without it a failed merge surfaced as {:error, ""} —
+    # run 21 dropped a fix branch from consolidation with "()" as the
+    # entire diagnosis.
+    case safe_cmd(["-C", wt, "merge", "--no-ff", "--no-edit", branch], stderr_to_stdout: true) do
       {_, 0} ->
         :ok
 

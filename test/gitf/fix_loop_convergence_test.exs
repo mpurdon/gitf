@@ -135,4 +135,59 @@ defmodule GiTF.FixLoopConvergenceTest do
     canonical = GiTF.Validation.canonical_impl_shell(mission)
     assert canonical.id == chain_shell.id
   end
+
+  test "a retried mid-chain op cannot displace the chain tip as canonical", %{op: op} do
+    # Run 21: the SettingsView RETRY was inserted after the Frontend tip
+    # completed. inserted_at-only ordering made the retry's shallow shell
+    # canonical; validation judged an 8-line tree and a fix ghost
+    # re-implemented the entire feature. Depth in the dependency DAG must
+    # outrank recency.
+    make_shell = fn name ->
+      wt = Path.join(System.tmp_dir!(), "gitf_tip_#{name}_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(wt)
+      on_exit(fn -> File.rm_rf!(wt) end)
+      {:ok, ghost} = Archive.insert(:ghosts, %{name: name, status: "stopped"})
+
+      {:ok, shell} =
+        Archive.insert(:shells, %{
+          sector_id: op.sector_id,
+          ghost_id: ghost.id,
+          path: "/tmp/s",
+          worktree_path: wt,
+          status: "active"
+        })
+
+      {:ok, _} = Archive.update(:ghosts, ghost.id, &Map.put(&1, :shell_id, shell.id))
+      {ghost, shell}
+    end
+
+    done_op = fn title, ghost ->
+      {:ok, o} = Ops.create(%{title: title, mission_id: op.mission_id, sector_id: op.sector_id})
+
+      {:ok, o} =
+        Archive.update(:ops, o.id, fn m ->
+          m |> Map.put(:status, "done") |> Map.put(:ghost_id, ghost.id)
+        end)
+
+      o
+    end
+
+    {tip_ghost, tip_shell} = make_shell.("tip")
+    {retry_ghost, _retry_shell} = make_shell.("retry")
+
+    # Chain: backend (the setup op) <- tip. The tip completes first.
+    tip_op = done_op.("Frontend tip", tip_ghost)
+    {:ok, _} = Ops.add_dependency(tip_op.id, op.id)
+
+    # The retry of a mid-chain op: inserted LAST, depends only on backend —
+    # shallower than the tip despite being newest.
+    retry_op = done_op.("SettingsView retry", retry_ghost)
+    {:ok, _} = Ops.add_dependency(retry_op.id, op.id)
+    {:ok, _} = Ops.add_dependency(tip_op.id, retry_op.id)
+
+    {:ok, mission} = GiTF.Missions.get(op.mission_id)
+
+    canonical = GiTF.Validation.canonical_impl_shell(mission)
+    assert canonical.id == tip_shell.id
+  end
 end

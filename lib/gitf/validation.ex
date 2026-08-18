@@ -313,7 +313,15 @@ defmodule GiTF.Validation do
     |> Enum.reject(& &1[:phase_job])
     |> Enum.reject(&is_binary(&1[:fix_of]))
     |> Enum.filter(&(&1.status == "done" and is_binary(&1[:ghost_id])))
+    # Deepest point of the DAG first, recency only as tie-break. Sorting
+    # by inserted_at alone made a RETRY of a mid-chain op — inserted last,
+    # but shallower than the tip — hijack the canonical shell: run 21's
+    # SettingsView retry displaced the frontend tip, validation judged an
+    # 8-line tree while the consolidated feature sat in the real tip, and
+    # a fix ghost re-implemented the whole feature from the misdiagnosis.
+    # (Stable sorts: recency ordering survives within equal depth.)
     |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
+    |> Enum.sort_by(&dependency_depth(&1.id), :desc)
     |> Enum.find_value(fn op ->
       with %{shell_id: shell_id} when is_binary(shell_id) <-
              Archive.get(:ghosts, op.ghost_id),
@@ -324,6 +332,23 @@ defmodule GiTF.Validation do
         _ -> nil
       end
     end)
+  end
+
+  # Size of the op's transitive dependency closure — how deep in the chain
+  # it sits. A cycle or missing record just stops the walk; this ranks, it
+  # doesn't validate.
+  defp dependency_depth(op_id, seen \\ MapSet.new()) do
+    if MapSet.member?(seen, op_id) do
+      0
+    else
+      seen = MapSet.put(seen, op_id)
+
+      GiTF.Ops.dependencies(op_id)
+      |> Enum.map(&(1 + dependency_depth(&1.id, seen)))
+      |> Enum.max(fn -> 0 end)
+    end
+  rescue
+    _ -> 0
   end
 
   @doc """

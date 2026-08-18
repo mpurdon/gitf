@@ -46,6 +46,12 @@ defmodule GiTF.Major.Janitor do
 
   @name __MODULE__
 
+  # Hard-stall reap bound for a ghost whose OS process is still ALIVE: 6x
+  # the (already adaptive) stall threshold — with the default 600s base
+  # that's 60 minutes, past any sane npm ci or cargo build but still short
+  # enough to break a genuine spin. Dead processes keep the 2x bound.
+  @os_alive_hard_stall_multiplier 6
+
   # -- Client API ------------------------------------------------------------
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -287,8 +293,26 @@ defmodule GiTF.Major.Janitor do
       stall_seconds = adaptive_stall_timeout(ghost, base_stall_seconds)
 
       cond do
-        seconds_since > stall_seconds * 2 ->
+        seconds_since > stall_seconds * @os_alive_hard_stall_multiplier ->
+          # Even a live OS process gets reaped eventually — it may be
+          # genuinely spinning.
           handle_hard_stall(ghost, seconds_since)
+
+        seconds_since > stall_seconds * 2 ->
+          # Silence ≠ wedged: a CLI ghost emits nothing for the whole
+          # duration of one long tool call (npm ci, a cargo build). Run 21's
+          # Janitor reaped a live fix ghost 1213s into such a call. If the
+          # OS process is still there, defer the reap to the bigger bound
+          # above; reap now only when the process is actually gone.
+          if ghost_os_alive?(ghost) do
+            Logger.info(
+              "Ghost #{ghost.id} silent for #{seconds_since}s but its OS process is " <>
+                "alive — likely a long tool call; deferring hard-stall until " <>
+                "#{stall_seconds * @os_alive_hard_stall_multiplier}s"
+            )
+          else
+            handle_hard_stall(ghost, seconds_since)
+          end
 
         seconds_since > stall_seconds ->
           Logger.warning(
@@ -312,6 +336,15 @@ defmodule GiTF.Major.Janitor do
           :ok
       end
     end)
+  end
+
+  defp ghost_os_alive?(ghost) do
+    case GiTF.Archive.get(:ghosts, ghost.id) do
+      %{pid: os_pid} when not is_nil(os_pid) -> GiTF.Runtime.OsProc.alive?(os_pid)
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 
   defp handle_hard_stall(ghost, seconds_since) do

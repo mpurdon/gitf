@@ -746,6 +746,11 @@ defmodule GiTF.Major.PhasePrompts do
           of the form "reconcile merge conflict markers in <file>" — the fix
           ghost must MERGE the two sides (both are wanted work from parallel
           ops), never delete one side wholesale.
+
+          Entries marked `UNMERGED BRANCH` are worse: that branch's commits
+          are entirely ABSENT from this tree (the merge itself failed).
+          Report the missing work as a gap so the fix ghost merges the
+          branch or re-applies its changes.
           """
       end
 
