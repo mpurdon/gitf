@@ -288,13 +288,24 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp mission_budget_snapshot(mission) do
+    # Resolution order: per-mission cap, explicit [major] override, then the
+    # provider-scoped mission budget ([costs.provider_mission_budgets] —
+    # cli/Max caps are notional, so they're set generous). This used to
+    # hard-default to $20 without ever consulting Budget.config_budget():
+    # invisible while CLI costs booked as model-unknown pocket change, but
+    # the moment per-model booking recorded REAL notional costUSD, a healthy
+    # run 24 hit $22.50 by validation round 1 and was killed mid-fix-loop
+    # against config that said $40.
     cap =
       Map.get(mission, :cost_cap_usd) ||
-        Config.get([:major, :mission_cost_cap_usd], 20.0)
+        Config.get([:major, :mission_cost_cap_usd]) ||
+        GiTF.Budget.config_budget()
 
     spent = GiTF.Costs.for_quest(mission.id) |> GiTF.Costs.total()
     {cap * 1.0, spent}
   rescue
+    # spent=0 means the guard can't fire on a failed lookup; the cap value
+    # is inert here.
     _ -> {20.0, 0.0}
   end
 
