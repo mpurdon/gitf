@@ -29,7 +29,7 @@ defmodule GiTF.Validator do
       # Run custom validation command if configured
       results =
         if sector.validation_command do
-          case run_custom_validation(shell, sector.validation_command) do
+          case run_custom_validation(shell, sector.validation_command, sector[:validation_timeout_ms]) do
             :ok -> results
             {:error, reason} -> [{:error, :custom_validation_failed, reason} | results]
           end
@@ -65,9 +65,17 @@ defmodule GiTF.Validator do
 
   @validation_timeout_ms 120_000
 
-  @doc "Runs a custom shell command in the shell worktree."
-  @spec run_custom_validation(map(), String.t()) :: :ok | {:error, String.t()}
-  def run_custom_validation(shell, command) do
+  @doc """
+  Runs a custom shell command in the shell worktree.
+
+  `timeout_ms` lets a sector opt into longer validation: a runtime smoke
+  probe that builds and launches the actual app (the cora probe) cannot fit
+  the 2-minute default that suits typecheck-only commands.
+  """
+  @spec run_custom_validation(map(), String.t(), pos_integer() | nil) ::
+          :ok | {:error, String.t()}
+  def run_custom_validation(shell, command, timeout_ms \\ nil) do
+    timeout_ms = timeout_ms || @validation_timeout_ms
     {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(command, cd: shell.worktree_path)
 
     task =
@@ -79,7 +87,7 @@ defmodule GiTF.Validator do
         )
       end)
 
-    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {_output, 0}} ->
         :ok
 
@@ -93,10 +101,13 @@ defmodule GiTF.Validator do
            String.slice(output, 0, 300)}
 
       {:ok, {output, exit_code}} ->
-        {:error, "Command failed (exit #{exit_code}): #{String.slice(output, 0, 500)}"}
+        # The TAIL is where shell pipelines put their verdicts — a probe's
+        # "FAIL: ..." summary or a compiler's final error. Slicing the head
+        # fed the validation prompt 500 chars of npm install noise instead.
+        {:error, "Command failed (exit #{exit_code}): #{tail_slice(output, 900)}"}
 
       nil ->
-        {:error, "Validation command timed out after #{div(@validation_timeout_ms, 1000)}s"}
+        {:error, "Validation command timed out after #{div(timeout_ms, 1000)}s"}
     end
   rescue
     e -> {:error, "Validation command error: #{Exception.message(e)}"}
@@ -256,5 +267,17 @@ defmodule GiTF.Validator do
     if Port.info(port) != nil, do: Port.close(port)
   rescue
     ArgumentError -> :ok
+  end
+
+  # Last `max` bytes of command output, valid UTF-8, with an ellipsis when
+  # truncated — pipelines put their verdict at the end.
+  defp tail_slice(output, max) do
+    output = to_string(output)
+
+    if String.length(output) > max do
+      "…" <> String.slice(output, -max, max)
+    else
+      output
+    end
   end
 end

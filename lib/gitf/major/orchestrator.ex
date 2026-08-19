@@ -1097,7 +1097,7 @@ defmodule GiTF.Major.Orchestrator do
   # normal pipeline — GiTF.Validator.validate is otherwise reached just
   # via the conflict-rebase path.
   defp run_exec_validation(mission, variant_id) do
-    with %{validation_command: cmd} when is_binary(cmd) and cmd != "" <-
+    with %{validation_command: cmd} = sector when is_binary(cmd) and cmd != "" <-
            Archive.get(:sectors, mission.sector_id),
          %{ghost_id: ghost_id} when is_binary(ghost_id) <-
            impl_op_for_variant(mission, variant_id),
@@ -1105,7 +1105,7 @@ defmodule GiTF.Major.Orchestrator do
          %{worktree_path: _} = shell <- Archive.get(:shells, shell_id) do
       Logger.info("Running validation command for #{mission.id}: #{cmd}")
 
-      case GiTF.Validator.run_custom_validation(shell, cmd) do
+      case GiTF.Validator.run_custom_validation(shell, cmd, sector[:validation_timeout_ms]) do
         :ok ->
           Logger.info("Validation command passed for #{mission.id}")
           {:pass, cmd}
