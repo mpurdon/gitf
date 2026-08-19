@@ -160,5 +160,35 @@ defmodule GiTF.ShellTest do
       {:ok, still_active} = Shell.get(shell.id)
       assert still_active.status == "active"
     end
+
+    test "a terminal ghost's shell survives while its mission is live", %{sector: sector} do
+      # Run 26: validation executes the runtime probe IN the done impl
+      # ghost's worktree; the orphan sweep deleted it mid-probe. Terminal
+      # ghost + live mission = protected.
+      {:ok, mission} = Archive.insert(:missions, %{name: "live", goal: "g", status: "active"})
+      {:ok, ghost} = Archive.insert(:ghosts, %{name: "done-ghost", status: "stopped"})
+
+      {:ok, _op} =
+        Archive.insert(:ops, %{
+          title: "impl",
+          mission_id: mission.id,
+          sector_id: sector.id,
+          ghost_id: ghost.id,
+          status: "done"
+        })
+
+      {:ok, shell} = Shell.create(sector.id, ghost.id)
+
+      {:ok, _count} = Shell.cleanup_orphans()
+
+      {:ok, still_there} = Shell.get(shell.id)
+      assert still_there.status == "active"
+
+      # Once the mission seals, the same shell becomes sweepable.
+      {:ok, _} = Archive.update(:missions, mission.id, &Map.put(&1, :status, "failed"))
+      {:ok, _count} = Shell.cleanup_orphans()
+      {:ok, swept} = Shell.get(shell.id)
+      assert swept.status == "removed"
+    end
   end
 end

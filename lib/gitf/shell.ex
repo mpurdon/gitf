@@ -174,6 +174,17 @@ defmodule GiTF.Shell do
     # These must NOT be deleted even if the ghost is terminal.
     protected_branches = sync_pending_branches()
 
+    # A terminal ghost does NOT mean its shell is disposable: validation
+    # executes the exec-validation command (typecheck + runtime probe) IN
+    # the done impl ghost's worktree, minutes after the ghost stopped.
+    # Run 26: this sweep deleted the canonical worktree mid-probe — npm
+    # died with "getcwd: cannot access parent directories" and the shell
+    # was left half-butchered. Shells are only orphans once their MISSION
+    # is finished.
+    live_mission_ids =
+      Archive.filter(:missions, &(not GiTF.Missions.finished?(&1)))
+      |> MapSet.new(& &1.id)
+
     orphan_count =
       Enum.count(active_shells, fn shell ->
         orphan? =
@@ -181,6 +192,16 @@ defmodule GiTF.Shell do
             nil -> true
             ghost -> GhostStatus.terminal?(ghost.status)
           end
+
+        orphan? =
+          orphan? and
+            case Archive.find_one(:ops, fn o -> o[:ghost_id] == shell.ghost_id end) do
+              %{mission_id: mid} when is_binary(mid) ->
+                not MapSet.member?(live_mission_ids, mid)
+
+              _ ->
+                true
+            end
 
         if orphan? do
           Archive.put(:shells, Map.merge(shell, %{status: "removed", removed_at: now}))
