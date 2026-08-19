@@ -54,7 +54,7 @@ fi
 
 # --- 2. the real binary ------------------------------------------------------
 say "building app binary (shared cargo cache)"
-if ! (cd src-tauri && cargo build -j 2 >"$ART/cargo-build.log" 2>&1); then
+if ! (cd src-tauri && cargo build -j 1 >"$ART/cargo-build.log" 2>&1); then
   tail -20 "$ART/cargo-build.log"
   say "FAIL: cargo build failed"
   exit 1
