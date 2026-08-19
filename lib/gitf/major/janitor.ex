@@ -82,6 +82,7 @@ defmodule GiTF.Major.Janitor do
       schedule(:check_debriefs, :debrief_interval_ms, 5 * 60 * 1_000)
       schedule(:advance_stuck_phases, :phase_advancement_interval_ms, 3 * 60 * 1_000)
       schedule(:janitor_run, :janitor_interval_ms, 15 * 60 * 1_000)
+      schedule(:maintain_caches, :cache_maintenance_interval_ms, 6 * 60 * 60 * 1_000)
     end
 
     {:noreply, state}
@@ -106,6 +107,15 @@ defmodule GiTF.Major.Janitor do
   def handle_info(:schedule_waggle_recovery, state) do
     GenServer.cast(GiTF.Major, :recover_missed_waggles)
     schedule(:schedule_waggle_recovery, :waggle_recovery_interval_ms, 30_000)
+    {:noreply, state}
+  end
+
+  # Shared build caches need an owner: unmaintained, a corrupt npm cache
+  # silently poisons every validation (runs 21/27/30) and a cargo target
+  # dir grows until the disk fills (2026-08-19). Verify, repair, GC.
+  def handle_info(:maintain_caches, state) do
+    safe(fn -> GiTF.Infra.CacheLifecycle.maintain() end, "cache maintenance")
+    schedule(:maintain_caches, :cache_maintenance_interval_ms, 6 * 60 * 60 * 1_000)
     {:noreply, state}
   end
 

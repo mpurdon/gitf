@@ -35,15 +35,61 @@ defmodule GiTF.Sandbox.Bubblewrap do
         []
 
       home ->
+        # Download caches are shared for speed but must be UNCORRUPTIBLE:
+        # OOM-killed ghosts writing ~/.npm/_cacache left npm exiting 0 with a
+        # broken typescript install, which cost runs 21, 27 and 30. Bound as
+        # overlays — the warm shared copy is the read-only lower layer, each
+        # sandbox writes to its own throwaway upper layer. Cache misses still
+        # install; the shared copy simply cannot be damaged by a dying ghost.
+        overlay =
+          if tmp_overlay_supported?() do
+            for sub <- [".npm", ".cargo"],
+                path = Path.join(home, sub),
+                File.dir?(path),
+                arg <- ["--overlay-src", path, "--tmp-overlay", path],
+                do: arg
+          else
+            []
+          end
+
+        overlaid = if overlay == [], do: [], else: [".npm", ".cargo"]
+
+        # cargo-target is a BUILD OUTPUT, not a download cache: cargo must
+        # write it, guards it with its own lock, and an overlay would throw
+        # away exactly the incremental artifacts that make a probe build 90
+        # seconds instead of 25 minutes.
         writable =
           for sub <- [".claude", ".config", ".cache", ".npm", ".cargo", "cargo-target"],
+              sub not in overlaid,
               path = Path.join(home, sub),
               File.dir?(path),
               arg <- ["--bind", path, path],
               do: arg
 
-        ["--ro-bind", home, home] ++ writable
+        ["--ro-bind", home, home] ++ writable ++ overlay
     end
+  end
+
+  # bwrap gained --tmp-overlay in 0.9.0 and it needs unprivileged overlayfs
+  # in user namespaces. Probe once per boot; fall back to a plain writable
+  # bind (today's behaviour) rather than failing closed on older hosts.
+  @overlay_cache_key {__MODULE__, :tmp_overlay}
+  defp tmp_overlay_supported? do
+    case :persistent_term.get(@overlay_cache_key, nil) do
+      nil ->
+        supported =
+          case System.cmd("bwrap", ["--help"], stderr_to_stdout: true) do
+            {out, _} -> String.contains?(out, "--tmp-overlay")
+          end
+
+        :persistent_term.put(@overlay_cache_key, supported)
+        supported
+
+      cached ->
+        cached
+    end
+  rescue
+    _ -> false
   end
 
   # Only bind paths that exist on THIS host: /lib64 does not exist on arm64

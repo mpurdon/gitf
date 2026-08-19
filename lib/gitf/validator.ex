@@ -76,7 +76,18 @@ defmodule GiTF.Validator do
           :ok | {:error, String.t()}
   def run_custom_validation(shell, command, timeout_ms \\ nil) do
     timeout_ms = timeout_ms || @validation_timeout_ms
-    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(command, cd: shell.worktree_path)
+
+    # OS-enforced deadline INSIDE the sandbox. Task.shutdown/2 kills the
+    # Elixir task but never the OS process behind System.cmd, so a timed-out
+    # validation left its whole bwrap namespace alive — including the
+    # runtime probe's WebDriver and its :1420 server, which then squatted
+    # the port and poisoned the NEXT round (run 30). `timeout` fires a few
+    # seconds before the Elixir deadline so the kill is the shell's, with a
+    # SIGKILL backstop for anything ignoring SIGTERM.
+    inner_deadline_s = max(div(timeout_ms, 1000) - 5, 5)
+    guarded = "timeout -k 10 #{inner_deadline_s} sh -c #{shell_quote(command)}"
+
+    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(guarded, cd: shell.worktree_path)
 
     task =
       Task.async(fn ->
@@ -267,6 +278,11 @@ defmodule GiTF.Validator do
     if Port.info(port) != nil, do: Port.close(port)
   rescue
     ArgumentError -> :ok
+  end
+
+  # Single-quote for `sh -c`, closing and reopening around embedded quotes.
+  defp shell_quote(str) do
+    "'" <> String.replace(str, "'", "'\\''") <> "'"
   end
 
   # Last `max` bytes of command output, valid UTF-8, with an ellipsis when
