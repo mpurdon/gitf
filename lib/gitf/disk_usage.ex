@@ -176,17 +176,24 @@ defmodule GiTF.DiskUsage do
 
   # du on a large tree can take a while; bound it so a report can't hang
   # the caller.
+  # The rescue belongs INSIDE the task: a missing binary raises in the
+  # spawned process, where an outer rescue never sees it (it arrives as an
+  # EXIT and kills the caller).
   defp safe_cmd(cmd, args) do
     task =
       Task.async(fn ->
-        System.cmd(cmd, args, stderr_to_stdout: true)
+        try do
+          System.cmd(cmd, args, stderr_to_stdout: true)
+        rescue
+          _ -> {"error", 1}
+        catch
+          _, _ -> {"error", 1}
+        end
       end)
 
     case Task.yield(task, 30_000) || Task.shutdown(task, 1_000) do
       {:ok, result} -> result
-      nil -> {"timeout", 1}
+      _ -> {"timeout", 1}
     end
-  rescue
-    _ -> {"error", 1}
   end
 end

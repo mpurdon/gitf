@@ -230,14 +230,26 @@ defmodule GiTF.Infra.CostShape do
     end
   end
 
+  # The rescue must live INSIDE the task: a missing binary raises :enoent in
+  # the spawned process, where an outer rescue never sees it — it surfaces
+  # as an EXIT and kills the caller. CI containers have no curl, which is
+  # exactly the "not on EC2" case this module must treat as unknown, not
+  # fatal.
   defp cmd(bin, args) do
-    task = Task.async(fn -> System.cmd(bin, args, stderr_to_stdout: true) end)
+    task =
+      Task.async(fn ->
+        try do
+          System.cmd(bin, args, stderr_to_stdout: true)
+        rescue
+          _ -> {"", 1}
+        catch
+          _, _ -> {"", 1}
+        end
+      end)
 
     case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
       {:ok, result} -> result
-      nil -> {"", 1}
+      _ -> {"", 1}
     end
-  rescue
-    _ -> {"", 1}
   end
 end
