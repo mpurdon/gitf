@@ -23,6 +23,17 @@ WT="$(pwd)"
 ART="$WT/.gitf-probe"
 mkdir -p "$ART"
 
+# Evidence must outlive the worktree: when a mission seals, the orphan
+# sweep deletes the ghost's worktree and takes .gitf-probe with it —
+# run 29's PASSING screenshots were gone within minutes of being written.
+# Mirror artifacts to a mission-scoped keep dir on the host.
+KEEP="/var/lib/gitf/probe-artifacts/$(basename "$WT")-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$KEEP" 2>/dev/null || KEEP=""
+keep_artifacts() {
+  [ -n "$KEEP" ] && cp -f "$ART"/* "$KEEP"/ 2>/dev/null
+  [ -n "$KEEP" ] && say "artifacts kept at $KEEP"
+}
+
 # A round killed mid-flight (validator timeout = SIGKILL, traps never run)
 # leaks its driver and static server; the NEXT round's driver then dies on
 # "address in use" while the monkey talks to the stale driver serving a
@@ -174,6 +185,8 @@ if [ "$RC" -eq 124 ]; then
   say "the app never reached first paint; last driver output:"
   grep -iE "panic|error|fatal|readonly|refused" "$ART/tauri-driver.log" 2>/dev/null | tail -5
 fi
+
+keep_artifacts
 
 if [ "$RC" -eq 0 ]; then
   say "PASS: app booted and survived the click sweep (screenshots in .gitf-probe/)"
