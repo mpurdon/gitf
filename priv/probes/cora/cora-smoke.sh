@@ -40,7 +40,16 @@ keep_artifacts() {
 # run 30's overlapping validation rounds had the second probe killing the
 # FIRST probe's server, leaving that app on "Connection refused" with no
 # clickable UI (which the monkey then correctly, uselessly, reported).
-exec 9>/var/lib/gitf/probes/.probe.lock
+# The lock must be on a path the SANDBOX can write and that every probe
+# sees: bubblewrap binds the gitf home read-only except a few subdirs, so
+# /var/lib/gitf/probes/.lock failed to open (exit 127), and a per-sandbox
+# /tmp would serialize nothing. ~/.cache is bound writable and shared.
+LOCK_DIR="/var/lib/gitf/.cache"
+mkdir -p "$LOCK_DIR" 2>/dev/null
+exec 9>"$LOCK_DIR/gitf-probe.lock" || {
+  say "TOOL MISSING on host: cannot open probe lock in $LOCK_DIR; this is an infrastructure problem, not a code problem"
+  exit 127
+}
 if ! flock -w 900 9; then
   say "TOOL MISSING on host: another probe held the lock for 15min; this is an infrastructure problem, not a code problem"
   exit 127
