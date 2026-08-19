@@ -23,6 +23,27 @@ WT="$(pwd)"
 ART="$WT/.gitf-probe"
 mkdir -p "$ART"
 
+# A round killed mid-flight (validator timeout = SIGKILL, traps never run)
+# leaks its driver and static server; the NEXT round's driver then dies on
+# "address in use" while the monkey talks to the stale driver serving a
+# dead worktree — blank page, false "UI did not boot". Sweep first; the
+# network namespace is shared, so squatters from any round hold real ports.
+pkill -f 'tauri-driver' 2>/dev/null
+pkill -f 'WebKitWebDriver' 2>/dev/null
+pkill -x cora 2>/dev/null
+pkill -f 'http\.server 1420' 2>/dev/null
+sleep 1
+if curl -s -m 2 -o /dev/null http://127.0.0.1:1420/; then
+  say "FAIL: something still serves :1420 after cleanup — stale process outside this namespace"
+  exit 1
+fi
+
+# Fresh driver ports per run — the devUrl port (1420) is baked into the
+# binary, but the WebDriver ports need not collide across rounds.
+DRIVER_PORT=$((20000 + RANDOM % 10000))
+NATIVE_PORT=$((DRIVER_PORT + 1))
+export WEBDRIVER_URL="http://127.0.0.1:$DRIVER_PORT"
+
 # --- 1. frontend bundle (embedded into the binary at cargo build time) ------
 say "building frontend bundle"
 if ! npm run build >"$ART/vite-build.log" 2>&1; then
@@ -104,7 +125,7 @@ fi
 
 # --- 4. driver under Xvfb ----------------------------------------------------
 say "starting tauri-driver under Xvfb"
-xvfb-run -a --server-args="-screen 0 1400x900x24" tauri-driver --port 4444 \
+xvfb-run -a --server-args="-screen 0 1400x900x24" tauri-driver --port "$DRIVER_PORT" --native-port "$NATIVE_PORT" \
   >"$ART/tauri-driver.log" 2>&1 &
 DRIVER_PID=$!
 if [ "${KEEP_DATA:-0}" = "1" ]; then
@@ -114,10 +135,10 @@ else
 fi
 
 for _ in $(seq 1 30); do
-  curl -s -m 2 http://127.0.0.1:4444/status >/dev/null 2>&1 && break
+  curl -s -m 2 "$WEBDRIVER_URL/status" >/dev/null 2>&1 && break
   sleep 1
 done
-if ! curl -s -m 2 http://127.0.0.1:4444/status >/dev/null 2>&1; then
+if ! curl -s -m 2 "$WEBDRIVER_URL/status" >/dev/null 2>&1; then
   tail -10 "$ART/tauri-driver.log"
   say "FAIL: tauri-driver did not come up"
   exit 1
