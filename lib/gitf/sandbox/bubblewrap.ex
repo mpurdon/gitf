@@ -36,7 +36,7 @@ defmodule GiTF.Sandbox.Bubblewrap do
 
       home ->
         writable =
-          for sub <- [".claude", ".config", ".cache", ".npm"],
+          for sub <- [".claude", ".config", ".cache", ".npm", ".cargo", "cargo-target"],
               path = Path.join(home, sub),
               File.dir?(path),
               arg <- ["--bind", path, path],
