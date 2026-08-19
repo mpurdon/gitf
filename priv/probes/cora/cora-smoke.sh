@@ -34,11 +34,21 @@ keep_artifacts() {
   [ -n "$KEEP" ] && say "artifacts kept at $KEEP"
 }
 
-# A round killed mid-flight (validator timeout = SIGKILL, traps never run)
-# leaks its driver and static server; the NEXT round's driver then dies on
-# "address in use" while the monkey talks to the stale driver serving a
-# dead worktree — blank page, false "UI did not boot". Sweep first; the
-# network namespace is shared, so squatters from any round hold real ports.
+# Only ONE probe may run per host: the app's devUrl port (1420) is baked
+# into the binary, so concurrent probes fight over it. Take an exclusive
+# lock BEFORE sweeping — the sweep kills any http.server on :1420, and
+# run 30's overlapping validation rounds had the second probe killing the
+# FIRST probe's server, leaving that app on "Connection refused" with no
+# clickable UI (which the monkey then correctly, uselessly, reported).
+exec 9>/var/lib/gitf/probes/.probe.lock
+if ! flock -w 900 9; then
+  say "TOOL MISSING on host: another probe held the lock for 15min; this is an infrastructure problem, not a code problem"
+  exit 127
+fi
+
+# With the lock held, any surviving driver/server is a corpse from a round
+# killed mid-flight (validator timeout = SIGKILL, traps never run), never a
+# live sibling. Sweep it.
 pkill -f 'tauri-driver' 2>/dev/null
 pkill -f 'WebKitWebDriver' 2>/dev/null
 pkill -x cora 2>/dev/null
