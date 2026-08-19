@@ -56,6 +56,11 @@ defmodule GiTF.Observability do
   end
 
   defp run_checks do
+    # Fixed-infrastructure cost drift (instance type, provisioned volume).
+    # Token spend has budgets and velocity caps; recurring infra cost had
+    # nothing until a volume silently doubled during an incident.
+    GiTF.Infra.CostShape.check()
+
     alerts = Alerts.check_alerts()
 
     # Check for zombie state (active missions but no progress)

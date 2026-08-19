@@ -61,6 +61,9 @@ defmodule GiTF.Observability.Alerts do
     sync_conflict_theirs: :high,
     sync_retry: :medium,
     security_advisory: :medium,
+    # Recurring infrastructure cost changed shape — high because it is a
+    # standing bill increase nobody explicitly approved yet.
+    infra_cost_changed: :high,
     quest_timeout: :high,
     budget_exceeded: :high,
     quest_exhausted: :high,
