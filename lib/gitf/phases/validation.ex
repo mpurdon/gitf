@@ -273,6 +273,20 @@ defmodule GiTF.Phases.Validation do
     hard_cap = fix_ctx.max_attempts * @max_total_fix_ops_factor
 
     cond do
+      infrastructure_failure?(artifact) ->
+        # The tree was never judged: the toolchain was missing, the disk was
+        # full, a probe lock starved. Spending a fix attempt sends a ghost
+        # to "fix" code that was never found wanting, and it returns empty —
+        # which is how runs 27-29 ground to their ceilings with healthy
+        # trees. Wait for the next validation pass instead; the attempt
+        # counter stays intact for real findings.
+        Logger.warning(
+          "Quest #{mission.id} validation hit an INFRASTRUCTURE failure — " <>
+            "re-validating without burning a fix attempt (#{fix_ctx.attempt}/#{fix_ctx.max_attempts} intact)"
+        )
+
+        :wait
+
       FixContext.exhausted?(fix_ctx) ->
         Logger.warning(
           "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts — ghost lost in the net"
@@ -298,6 +312,29 @@ defmodule GiTF.Phases.Validation do
         :wait
     end
   end
+
+  # The exec-validation layer already classifies host problems (missing
+  # toolchain, exhausted disk, an unavailable probe lock) as TOOL MISSING /
+  # exit 127 rather than blaming the diff. Anything carrying that marker
+  # means the ghost's code was never actually evaluated.
+  @doc false
+  @spec infrastructure_failure?(map() | nil) :: boolean()
+  def infrastructure_failure?(artifact) when is_map(artifact) do
+    text =
+      [
+        artifact["exec_validation_output"],
+        artifact["summary"],
+        get_in(artifact, ["failures", "output"])
+      ]
+      |> Enum.filter(&is_binary/1)
+      |> Enum.join(" ")
+      |> String.downcase()
+
+    String.contains?(text, "tool missing on host") or
+      String.contains?(text, "infrastructure problem, not a code problem")
+  end
+
+  def infrastructure_failure?(_), do: false
 
   @impl true
   def terminal(mission, :retries_exhausted, artifact) do

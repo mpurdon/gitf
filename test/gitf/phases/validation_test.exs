@@ -171,4 +171,33 @@ defmodule GiTF.Phases.ValidationTest do
       assert Validation.verdict(m, nil) == :terminal_fail
     end
   end
+
+  describe "infrastructure_failure?/1" do
+    test "TOOL MISSING output is infrastructure, not the ghost's code" do
+      # Runs 27-29: a missing toolchain / full disk / starved probe lock
+      # burned fix attempts on trees that were never actually judged.
+      assert Validation.infrastructure_failure?(%{
+               "exec_validation_output" =>
+                 "TOOL MISSING on host (exit 127) — the validation command's toolchain is not installed"
+             })
+
+      assert Validation.infrastructure_failure?(%{
+               "failures" => %{
+                 "output" => "only 900MB disk free; this is an infrastructure problem, not a code problem"
+               }
+             })
+    end
+
+    test "a real code failure is NOT treated as infrastructure" do
+      refute Validation.infrastructure_failure?(%{
+               "exec_validation_output" =>
+                 "error TS2322: Type 'string' is not assignable to type 'number'"
+             })
+
+      refute Validation.infrastructure_failure?(%{"summary" => "the drawer crashed on open"})
+      refute Validation.infrastructure_failure?(nil)
+      refute Validation.infrastructure_failure?(%{})
+    end
+  end
+
 end

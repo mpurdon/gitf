@@ -1490,8 +1490,27 @@ defmodule GiTF.Ghost.Worker do
     # changing nothing (msn-e631cb), deterministically failing its DAG.
     read_only_op? = (op && Map.get(op, :skip_verification, false)) == true
 
+    # A FIX op with nothing to fix is an honest outcome, not a failure. The
+    # complaint that spawned it was often environmental (a corrupt npm
+    # cache, a killed probe) or already resolved by a sibling fix — the
+    # ghost inspects the tree, finds the code correct, and changes nothing.
+    # Failing it here was the campaign's terminal loop: no completed fix op
+    # meant validation never re-ran, so the mission ground to its ceiling
+    # while the tree was fine (runs 27, 28, 29). Complete it instead: the
+    # orchestrator re-validates, and if the complaint was real, validation
+    # says so again with its own budget intact.
+    fix_op? = op && is_binary(Map.get(op, :fix_of))
+
     empty_completion? =
-      not is_phase_job and not read_only_op? and Map.get(metadata, :files_changed, 0) == 0
+      not is_phase_job and not read_only_op? and not fix_op? and
+        Map.get(metadata, :files_changed, 0) == 0
+
+    if fix_op? and Map.get(metadata, :files_changed, 0) == 0 do
+      Logger.info(
+        "Op #{state.op_id}: fix ghost #{state.ghost_id} found nothing to change — " <>
+          "completing so validation re-runs against the current tree"
+      )
+    end
 
     if empty_completion? do
       Logger.warning(
