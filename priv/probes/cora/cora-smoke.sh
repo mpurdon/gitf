@@ -44,6 +44,17 @@ DRIVER_PORT=$((20000 + RANDOM % 10000))
 NATIVE_PORT=$((DRIVER_PORT + 1))
 export WEBDRIVER_URL="http://127.0.0.1:$DRIVER_PORT"
 
+# --- 0. disk floor ----------------------------------------------------------
+# The build below transiently needs 1-2GB; running it onto a nearly-full
+# disk is how the 2026-08-19 incident took the whole box down. Failing
+# here with a TOOL-MISSING-style message keeps the validator classifying
+# this as infrastructure, never as the ghost's code.
+FREE_MB=$(df -Pk . | awk 'NR==2 {print int($4/1024)}')
+if [ "${FREE_MB:-0}" -lt 1500 ]; then
+  say "TOOL MISSING on host: only ${FREE_MB}MB disk free — probe build needs ~2GB; this is an infrastructure problem, not a code problem"
+  exit 127
+fi
+
 # --- 1. frontend bundle (embedded into the binary at cargo build time) ------
 say "building frontend bundle"
 if ! npm run build >"$ART/vite-build.log" 2>&1; then

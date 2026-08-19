@@ -1423,8 +1423,12 @@ defmodule GiTF.Major do
 
   # Refuse to spawn when free disk is below this floor — a new ghost creates a
   # worktree and writes logs/artifacts, and running out of disk mid-mission
-  # corrupts the archive and wedges git.
-  @min_free_disk_mb 500
+  # corrupts the archive and wedges git. 2.5GB, not a token amount: a
+  # single validation cycle (npm ci + vite build + the runtime probe's
+  # cargo build) transiently consumes 1-2GB AFTER admission passed — the
+  # 2026-08-19 disk-full took down SSM, git, and the daemon at once with
+  # the old 500MB floor happily green.
+  @min_free_disk_mb 2_500
 
   defp check_quest_budget(mission_id) do
     # Disk floor first (cheapest, hardest failure): out-of-disk corrupts state.
