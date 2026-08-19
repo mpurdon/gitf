@@ -352,6 +352,10 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("mission_report", _), do: {:error, "Missing required parameter: id"}
 
+  def call("disk_usage", _args) do
+    {:ok, json_text(GiTF.DiskUsage.report())}
+  end
+
   def call("health_check", _args) do
     health = GiTF.Observability.Health.check()
 

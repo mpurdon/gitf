@@ -10,6 +10,13 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{type: "object", properties: %{}}
       },
       %{
+        name: "disk_usage",
+        description:
+          "Disk-usage report: filesystem totals, gitf's infra dirs (build caches, store), " <>
+            "and per-sector/per-ghost/per-mission worktree attribution.",
+        inputSchema: %{type: "object", properties: %{}}
+      },
+      %{
         name: "list_missions",
         description: "List missions. Defaults to active missions only.",
         inputSchema: %{
