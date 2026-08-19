@@ -52,7 +52,23 @@ defmodule GiTF.Sandbox.Bubblewrap do
   # hardcoded bind kept the sandbox broken on the arm64 box even after the
   # AppArmor userns fix — with sandbox_required set, every AI shell command
   # was (correctly) refused and ghosts flew blind (msn-9695ad, finding #16).
-  @candidate_ro_binds ["/usr", "/bin", "/lib", "/lib64", "/etc/resolv.conf", "/etc/ssl/certs"]
+  # /etc is bound selectively — /etc/gitf holds secrets that AI-authored
+  # commands must never read. /etc/alternatives is required or every
+  # Debian-alternatives symlink dangles inside the sandbox (run 27: rustc
+  # died with "linker `cc` not found" because /usr/bin/cc points through
+  # it); the ld.so entries keep the dynamic linker's view consistent.
+  @candidate_ro_binds [
+    "/usr",
+    "/bin",
+    "/lib",
+    "/lib64",
+    "/etc/resolv.conf",
+    "/etc/ssl/certs",
+    "/etc/alternatives",
+    "/etc/ld.so.cache",
+    "/etc/ld.so.conf",
+    "/etc/ld.so.conf.d"
+  ]
 
   defp base_args do
     ro_binds =
