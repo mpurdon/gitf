@@ -87,9 +87,16 @@ fi
 # (rounds 4-12 seeded dirs the app provably never opened — it kept
 # recreating ~/.config/com.mp.cora regardless). This is a factory box and
 # the dir is probe residue; recreate it fresh every run.
+# HOME is redirected into the WORKTREE (bound writable by the sandbox for
+# the whole run) rather than seeding ~/.config directly: bubblewrap binds
+# the real ~/.config as it existed at sandbox start, so a dir the probe
+# creates inside the sandbox lands on a read-only view and the app panics
+# "attempt to write a readonly database" (orgs.rs) before first paint.
+export HOME="$WT/.gitf-probe-home"
+rm -rf "$HOME"
+mkdir -p "$HOME"
 APP_DIR="$HOME/.config/com.mp.cora"
-rm -rf "$APP_DIR"
-DATA_ROOT="$APP_DIR"
+DATA_ROOT="$HOME"
 if [ "${KEEP_DATA:-0}" = "1" ]; then
   echo "$DATA_ROOT" > /tmp/cora-probe-last-data
   trap 'true' EXIT
@@ -113,7 +120,6 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 INSERT OR REPLACE INTO kv (key, value) VALUES
   ('settings', '{"watchedRepos":["octocat/hello-world"],"repoPriorities":{"octocat/hello-world":"high"},"pollIntervalSecs":300,"githubGraphqlUrl":"https://api.github.com/graphql","awsProfile":"probe","awsEndpointUrl":"","bedrockModelId":"probe-model"}');
 SQL
-export HOME="${HOME:-/var/lib/gitf}"
 
 # --- 3b. serve the built frontend on the devUrl port -------------------------
 # A DEBUG tauri binary loads build.devUrl (localhost:1420) instead of the
@@ -159,6 +165,15 @@ fi
 say "launching app + monkey probe"
 timeout 300 node /var/lib/gitf/probes/monkey.mjs "$BIN" "$ART"
 RC=$?
+
+# A timeout usually means the app died before first paint (the monkey then
+# polls a corpse until its deadline). The driver log carries the real
+# reason — a Rust panic, a missing lib — so surface it in the verdict
+# instead of leaving "exit 124" to be guessed at.
+if [ "$RC" -eq 124 ]; then
+  say "the app never reached first paint; last driver output:"
+  grep -iE "panic|error|fatal|readonly|refused" "$ART/tauri-driver.log" 2>/dev/null | tail -5
+fi
 
 if [ "$RC" -eq 0 ]; then
   say "PASS: app booted and survived the click sweep (screenshots in .gitf-probe/)"
