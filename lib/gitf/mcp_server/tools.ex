@@ -10,6 +10,13 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{type: "object", properties: %{}}
       },
       %{
+        name: "host_stats",
+        description:
+          "Host vitals: memory (with swap and a headroom verdict), CPU load per core, " <>
+            "uptime, network interfaces, and the BEAM's own footprint.",
+        inputSchema: %{type: "object", properties: %{}}
+      },
+      %{
         name: "disk_usage",
         description:
           "Disk-usage report: filesystem totals, gitf's infra dirs (build caches, store), " <>
