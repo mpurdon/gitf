@@ -76,6 +76,10 @@ defmodule GiTF.Ghost.Worker do
   # ghost's event list can't grow the heap without bound. Recent events are
   # what cost/context tracking reads; older ones are already accounted for.
   @max_parsed_events 2_000
+  # Byte ceiling for retained events (~8MB/worker). The count cap alone let
+  # a single worker hold hundreds of MB of assistant text and thinking
+  # blocks; with several workers that is the whole box.
+  @max_parsed_event_bytes 8_000_000
 
   # -- Child spec --------------------------------------------------------------
 
@@ -738,9 +742,40 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  # Prepend new events (newest-first) and bound the retained list.
+  @doc false
+  # Public for tests: the retention bound is the point.
+  def cap_events_for_test(events, existing), do: cap_events(events, existing)
+
+  # Prepend new events (newest-first) and bound the retained list by BOTH
+  # count and bytes. A count-only cap was effectively unbounded: CLI
+  # stream-json events carry whole assistant messages and thinking blocks,
+  # so 2_000 of them can be hundreds of MB per worker — the BEAM grew
+  # 588MB to 1.9GB during one run's probe validations, pushing a 4GB box
+  # into swap. Retention exists so a crash can be diagnosed; the newest
+  # events serve that, and older ones are already persisted in the
+  # transcript on disk.
   defp cap_events(events, existing) do
-    (Enum.reverse(events) ++ existing) |> Enum.take(@max_parsed_events)
+    (Enum.reverse(events) ++ existing)
+    |> Enum.take(@max_parsed_events)
+    |> take_within_bytes(@max_parsed_event_bytes)
+  end
+
+  # Newest-first list truncated once the running total exceeds `budget`.
+  # An oversized single event is kept (it is the newest and may be the
+  # crash evidence) but ends the list.
+  defp take_within_bytes(events, budget) do
+    {kept, _} =
+      Enum.reduce_while(events, {[], 0}, fn event, {acc, bytes} ->
+        size = :erlang.external_size(event)
+
+        cond do
+          acc == [] -> {:cont, {[event], size}}
+          bytes + size > budget -> {:halt, {acc, bytes}}
+          true -> {:cont, {[event | acc], bytes + size}}
+        end
+      end)
+
+    Enum.reverse(kept)
   end
 
   defp save_crash_context(state) do
