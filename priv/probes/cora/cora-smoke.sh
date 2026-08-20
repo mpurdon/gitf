@@ -50,9 +50,23 @@ exec 9>"$LOCK_DIR/gitf-probe.lock" || {
   say "TOOL MISSING on host: cannot open probe lock in $LOCK_DIR; this is an infrastructure problem, not a code problem"
   exit 127
 }
-if ! flock -w 900 9; then
-  say "TOOL MISSING on host: another probe held the lock for 15min; this is an infrastructure problem, not a code problem"
-  exit 127
+
+# Short wait, then self-heal. A long wait was worse than useless: run 31
+# blocked the FULL validation budget on a lock held by a corpse from a
+# round killed before the killable-validation fix existed, producing exit
+# 124 with no output at all. If the holder is dead, sweeping frees it; if
+# it is a live sibling, the second wait lets it finish.
+if ! flock -w 60 9; then
+  say "probe lock busy after 60s — sweeping stale holders"
+  pkill -f 'tauri-driver' 2>/dev/null
+  pkill -f 'WebKitWebDriver' 2>/dev/null
+  pkill -x cora 2>/dev/null
+  pkill -f 'http\.server 1420' 2>/dev/null
+  sleep 2
+  if ! flock -w 120 9; then
+    say "TOOL MISSING on host: probe lock still held after sweep; this is an infrastructure problem, not a code problem"
+    exit 127
+  fi
 fi
 
 # With the lock held, any surviving driver/server is a corpse from a round
