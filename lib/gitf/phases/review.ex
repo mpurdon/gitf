@@ -42,6 +42,16 @@ defmodule GiTF.Phases.Review do
   def before_advance(mission, verdict, artifact)
       when verdict in [:pass, :advance] and is_map(artifact) do
     GiTF.Major.Orchestrator.promote_selected_design(mission.id, artifact)
+
+    # An OVERRULED review (advance-on-exhaustion) is an unresolved
+    # objection, not a settled one. Record it so validation and the PR can
+    # say "the design reviewer wanted X; we shipped anyway" — otherwise the
+    # dissent evaporates and the human approving the PR never learns a
+    # reviewer disagreed.
+    if verdict == :advance and verdict(artifact) == :fail do
+      record_unresolved_objection(mission, artifact)
+    end
+
     :ok
   end
 
@@ -56,6 +66,32 @@ defmodule GiTF.Phases.Review do
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
+
+  @doc """
+  The objection review raised that was never resolved, or nil.
+
+  Set only when the redesign budget was exhausted and the mission advanced
+  over the reviewer's head.
+  """
+  @spec unresolved_objection(map()) :: String.t() | nil
+  def unresolved_objection(mission) do
+    get_in(Map.get(mission, :artifacts, %{}), ["review_unresolved"])
+  end
+
+  defp record_unresolved_objection(mission, artifact) do
+    text =
+      [artifact["summary"], artifact["reason"], artifact["feedback"]]
+      |> Enum.find(&(is_binary(&1) and String.trim(&1) != ""))
+
+    if text do
+      GiTF.Archive.update(:missions, mission.id, fn m ->
+        artifacts = Map.get(m, :artifacts, %{})
+        Map.put(m, :artifacts, Map.put(artifacts, "review_unresolved", String.slice(text, 0, 2_000)))
+      end)
+    end
+  rescue
+    _ -> :ok
+  end
 
   @doc false
   @spec rejection_fingerprint(map()) :: String.t()

@@ -162,6 +162,24 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  True when `branch`'s commits are already contained in the worktree's HEAD.
+
+  Consolidation runs on every validation round; without this check a
+  re-merge of an already-merged branch resurrects conflict markers the fix
+  loop had reconciled (run 32 spent its entire budget on that cycle).
+  `merge-base --is-ancestor` answers exactly "is this already in".
+  """
+  @spec merged?(String.t(), String.t()) :: boolean()
+  def merged?(worktree_path, branch) do
+    case safe_cmd(["-C", worktree_path, "merge-base", "--is-ancestor", branch, "HEAD"],
+           stderr_to_stdout: true
+         ) do
+      {_, 0} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
   Removes a git worktree.
 
   Runs `git worktree remove <worktree_path>` from the given `repo_path`.

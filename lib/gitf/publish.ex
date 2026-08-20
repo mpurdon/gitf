@@ -598,8 +598,30 @@ defmodule GiTF.Publish do
     Mission #{mission.id}
 
     **Goal:** #{mission.goal}
+    #{unresolved_review_block(mission)}
     """
     |> GiTF.Signature.sign()
+  end
+
+  # When the design review was overruled (redesign budget exhausted), the
+  # objection ships with the PR instead of evaporating: the person clicking
+  # approve deserves to know a reviewer disagreed and what about.
+  defp unresolved_review_block(mission) do
+    case GiTF.Phases.Review.unresolved_objection(mission) do
+      text when is_binary(text) ->
+        """
+
+        > [!WARNING]
+        > **Design review objection was not resolved.** The redesign budget
+        > was exhausted and this mission proceeded with the best available
+        > design. The reviewer's remaining concern:
+        >
+        > #{String.replace(text, "\n", "\n> ")}
+        """
+
+      _ ->
+        ""
+    end
   end
 
   defp fetch_sector(sector_id) do

@@ -724,6 +724,27 @@ defmodule GiTF.Major.PhasePrompts do
     lsp_diagnostics_block = render_lsp_diagnostics_block(lsp_diagnostics)
     exec_validation_block = render_exec_validation_block(Keyword.get(opts, :exec_validation))
 
+    # An overruled design review is a live lead for validation: the
+    # reviewer's unresolved concern is exactly where the implementation is
+    # most likely to fall short of the requirements.
+    unresolved_review_block =
+      case Keyword.get(opts, :unresolved_review) do
+        text when is_binary(text) ->
+          """
+
+          ## UNRESOLVED DESIGN REVIEW OBJECTION
+
+          The design review rejected this approach but its redesign budget was
+          exhausted, so the mission proceeded anyway. Treat this as a lead, not
+          a verdict — check whether the shipped code actually suffers from it:
+
+          #{text}
+          """
+
+        _ ->
+          ""
+      end
+
     merge_conflicts_block =
       case Keyword.get(opts, :merge_conflicts, []) do
         [] ->
@@ -773,7 +794,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}#{merge_conflicts_block}
+    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}#{merge_conflicts_block}#{unresolved_review_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's

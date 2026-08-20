@@ -1075,7 +1075,8 @@ defmodule GiTF.Major.Orchestrator do
         changed_files: changed_files,
         lsp_diagnostics: lsp_diagnostics,
         exec_validation: exec_validation,
-        merge_conflicts: merge_conflicts
+        merge_conflicts: merge_conflicts,
+        unresolved_review: GiTF.Phases.Review.unresolved_objection(mission)
       )
 
     # Branch the validation worktree from the variant's impl ghost tip so
@@ -1130,6 +1131,49 @@ defmodule GiTF.Major.Orchestrator do
   # conflict markers in another, so a green probe said nothing about the
   # tree under judgement. Falls back to the per-variant impl shell only
   # when no canonical shell exists (tournament variants have their own).
+  # Files whose content is emitted by a generator, never hand-authored.
+  @generated_patterns [~r{/bindings/.*\.ts$}, ~r{\.generated\.}, ~r{/__generated__/}]
+
+  defp generated_file?(path) do
+    Enum.any?(@generated_patterns, &Regex.match?(&1, path))
+  end
+
+  # Re-run the sector's generator and stage the result. Returns the files
+  # it actually rewrote; anything left is handed back to the fix loop.
+  defp regenerate(worktree, files) do
+    case GiTF.Sandbox.wrap_shell("npm run bindings", cd: worktree) do
+      {cmd, args} ->
+        case System.cmd(cmd, args, cd: worktree, stderr_to_stdout: true) do
+          {_, 0} ->
+            still_conflicted =
+              Enum.filter(files, fn f ->
+                case File.read(Path.join(worktree, f)) do
+                  {:ok, body} -> String.contains?(body, "<<<<<<<")
+                  _ -> true
+                end
+              end)
+
+            resolved = files -- still_conflicted
+
+            if resolved != [] do
+              GiTF.Git.safe_cmd(["-C", worktree, "add" | resolved], stderr_to_stdout: true)
+
+              GiTF.Git.safe_cmd(
+                ["-C", worktree, "commit", "-m", "gitf: regenerate bindings after consolidation"],
+                stderr_to_stdout: true
+              )
+            end
+
+            resolved
+
+          _ ->
+            []
+        end
+    end
+  rescue
+    _ -> []
+  end
+
   defp exec_validation_shell(mission, nil) do
     case GiTF.Validation.canonical_impl_shell(mission) do
       %{worktree_path: _} = shell -> shell
@@ -1229,6 +1273,12 @@ defmodule GiTF.Major.Orchestrator do
         |> Enum.map(&("ghost/" <> &1))
         |> Enum.uniq()
         |> Enum.reject(&(&1 == target_branch))
+        # Skip branches already contained in this tree. Consolidation runs
+        # on EVERY validation round, and re-merging a branch whose commits
+        # are already present re-injected the same conflict markers the fix
+        # loop had just reconciled — run 32 burned its whole budget
+        # resolving Settings.ts, then MainApp.tsx, then Settings.ts again.
+        |> Enum.reject(&GiTF.Git.merged?(wt, &1))
         |> Enum.flat_map(fn branch ->
           case GiTF.Git.merge_union(wt, branch) do
             :ok ->
@@ -1236,13 +1286,32 @@ defmodule GiTF.Major.Orchestrator do
               []
 
             {:conflicted, files} ->
-              Logger.warning(
-                "Quest #{mission.id}: consolidation merge of #{branch} conflicted in " <>
-                  "#{Enum.join(files, ", ")} — committed WITH conflict markers so no " <>
-                  "work is dropped; the fix loop must reconcile the marked regions"
-              )
+              # Generated files are not worth reconciling: both sides are
+              # machine output from the same source of truth, so the merge
+              # is meaningless and the regenerator is authoritative. Run 32
+              # burned rounds hand-merging src/bindings/Settings.ts, which
+              # `npm run bindings` rewrites wholesale from the Rust structs.
+              {generated, human} = Enum.split_with(files, &generated_file?/1)
+              regenerated = if generated == [], do: [], else: regenerate(wt, generated)
 
-              files
+              unresolved = human ++ (generated -- regenerated)
+
+              if regenerated != [] do
+                Logger.info(
+                  "Quest #{mission.id}: regenerated #{Enum.join(regenerated, ", ")} " <>
+                    "instead of merging machine output"
+                )
+              end
+
+              if unresolved != [] do
+                Logger.warning(
+                  "Quest #{mission.id}: consolidation merge of #{branch} conflicted in " <>
+                    "#{Enum.join(unresolved, ", ")} — committed WITH conflict markers so no " <>
+                    "work is dropped; the fix loop must reconcile the marked regions"
+                )
+              end
+
+              unresolved
 
             {:error, out} ->
               reason = out |> to_string() |> String.trim() |> String.slice(0, 200)
