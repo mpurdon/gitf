@@ -1099,10 +1099,7 @@ defmodule GiTF.Major.Orchestrator do
   defp run_exec_validation(mission, variant_id) do
     with %{validation_command: cmd} = sector when is_binary(cmd) and cmd != "" <-
            Archive.get(:sectors, mission.sector_id),
-         %{ghost_id: ghost_id} when is_binary(ghost_id) <-
-           impl_op_for_variant(mission, variant_id),
-         %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, ghost_id),
-         %{worktree_path: _} = shell <- Archive.get(:shells, shell_id) do
+         %{worktree_path: _} = shell <- exec_validation_shell(mission, variant_id) do
       Logger.info("Running validation command for #{mission.id}: #{cmd}")
 
       case GiTF.Validator.run_custom_validation(shell, cmd, sector[:validation_timeout_ms]) do
@@ -1124,6 +1121,32 @@ defmodule GiTF.Major.Orchestrator do
     e ->
       Logger.warning("run_exec_validation crashed for #{mission.id}: #{Exception.message(e)}")
       nil
+  end
+
+  # The exec command (typecheck + the runtime probe) MUST run in the same
+  # tree the LLM validator judges and publish ships — the CANONICAL shell,
+  # which is also the consolidation target. Run 31 proved why: the probe
+  # passed in one worktree while the validator correctly reported
+  # conflict markers in another, so a green probe said nothing about the
+  # tree under judgement. Falls back to the per-variant impl shell only
+  # when no canonical shell exists (tournament variants have their own).
+  defp exec_validation_shell(mission, nil) do
+    case GiTF.Validation.canonical_impl_shell(mission) do
+      %{worktree_path: _} = shell -> shell
+      _ -> variant_shell(mission, nil)
+    end
+  end
+
+  defp exec_validation_shell(mission, variant_id), do: variant_shell(mission, variant_id)
+
+  defp variant_shell(mission, variant_id) do
+    with %{ghost_id: ghost_id} when is_binary(ghost_id) <-
+           impl_op_for_variant(mission, variant_id),
+         %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, ghost_id) do
+      Archive.get(:shells, shell_id)
+    else
+      _ -> nil
+    end
   end
 
   defp impl_op_for_variant(mission, nil), do: GiTF.Validation.latest_completed_impl_op(mission)
