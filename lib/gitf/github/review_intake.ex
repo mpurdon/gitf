@@ -149,6 +149,10 @@ defmodule GiTF.GitHub.ReviewIntake do
         "review_key" => review_key(review),
         "reviewer" => author(review),
         "inline_comments" => length(inline),
+        # Thread ids, so the completion reply lands under the comments it
+        # answers rather than as a top-level comment nobody notices.
+        "inline_comment_ids" => Enum.map(inline, & &1.id) |> Enum.reject(&is_nil/1),
+        "pr_number" => context.number,
         "parent_mission_id" => Map.get(outcome, :mission_id)
       }
     }

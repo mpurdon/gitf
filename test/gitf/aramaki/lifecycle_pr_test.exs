@@ -37,4 +37,14 @@ defmodule GiTF.Aramaki.LifecyclePRTest do
              "provider down"
            ) == :ok
   end
+
+  test "tolerates missing, empty or malformed thread ids" do
+    # answer_threads filters to integers and falls back to a PR comment; a
+    # malformed record must never raise inside a completion path.
+    for ids <- [nil, [], ["not-an-int"], [123, nil, "x"]] do
+      m = mission(%{"pr_url" => "https://github.com/nobody/nothing/pull/8", "inline_comment_ids" => ids})
+      assert Lifecycle.on_review_addressed(m) == :ok
+      assert Lifecycle.on_review_failed(m, "boom") == :ok
+    end
+  end
 end

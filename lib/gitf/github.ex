@@ -309,6 +309,9 @@ defmodule GiTF.GitHub do
 
   defp normalize_review_comment(c) do
     %{
+      # Kept so a follow-up can reply IN the thread it answers, where the
+      # reviewer can resolve it — a conversation comment is easy to miss.
+      id: c["id"],
       path: c["path"],
       # `line` is null on outdated comments; original_line still locates them.
       line: c["line"] || c["original_line"],
@@ -317,6 +320,29 @@ defmodule GiTF.GitHub do
       author: get_in(c, ["user", "login"]),
       diff_hunk: c["diff_hunk"]
     }
+  end
+
+  @doc """
+  Replies inside an existing review-comment thread.
+
+  A reply lands under the comment it answers, so the reviewer sees the
+  response next to their own words and can resolve the conversation. A
+  top-level comment on the PR does neither — it was posted and missed.
+  """
+  @spec reply_to_review_comment(GiTF.Schema.Sector.t(), integer(), integer(), String.t()) ::
+          :ok | {:error, term()}
+  def reply_to_review_comment(sector, pr_number, comment_id, body) do
+    with {:ok, client} <- client(sector) do
+      case Req.post(client,
+             url:
+               "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls/#{pr_number}/comments/#{comment_id}/replies",
+             json: %{body: body}
+           ) do
+        {:ok, %{status: 201}} -> :ok
+        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+        {:error, reason} -> {:error, reason}
+      end
+    end
   end
 
   @doc "Adds a comment to an issue or PR."

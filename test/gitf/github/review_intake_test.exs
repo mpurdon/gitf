@@ -248,4 +248,14 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
     # Same review, now with a body: must still be actionable.
     assert {:ok, :mission_created, _} = ReviewIntake.dispatch(payload(ctx.url))
   end
+
+  test "records the PR number and thread ids for the completion reply", ctx do
+    tracked_pr(ctx.url)
+
+    assert {:ok, :mission_created, m} = ReviewIntake.dispatch(payload(ctx.url))
+    # Without these, the reply lands as a top-level comment the reviewer
+    # misses instead of under the words it answers.
+    assert Map.has_key?(m.source_issue, "inline_comment_ids")
+    assert m.source_issue["pr_number"] == 8
+  end
 end

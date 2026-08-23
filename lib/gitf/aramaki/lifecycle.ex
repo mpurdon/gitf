@@ -77,18 +77,20 @@ defmodule GiTF.Aramaki.Lifecycle do
   @spec on_review_addressed(map()) :: :ok
   def on_review_addressed(mission) do
     with_pr(mission, fn sector, num, src ->
-      reviewer = src["reviewer"]
-      who = if reviewer, do: "@#{reviewer}'s", else: "the"
+      body =
+        "Pushed changes in response to this. Mission `#{mission.id}` committed to the branch — " <>
+          "the diff is the response.\n\nRe-review rather than assuming this point is settled: " <>
+          "the factory answers a review as a whole and cannot prove which individual comment a " <>
+          "given change resolves." <> @signature
 
-      comment(
-        sector,
-        num,
-        "Pushed changes in response to #{who} review request.\n\n" <>
-          "Mission `#{mission.id}` worked from the review body and committed to this branch — " <>
-          "the diff above is the response. Please re-review rather than assuming each point is " <>
-          "resolved: the factory cannot map changes to individual inline comments, so it makes " <>
-          "no claim about which are settled." <> @signature
-      )
+      answer_threads(sector, num, src, body, fn ->
+        reviewer = src["reviewer"]
+        who = if reviewer, do: "@#{reviewer}'s", else: "the"
+
+        "Pushed changes in response to #{who} review request. Mission `#{mission.id}` " <>
+          "committed to this branch — the diff above is the response. Please re-review." <>
+          @signature
+      end)
     end)
   end
 
@@ -104,16 +106,37 @@ defmodule GiTF.Aramaki.Lifecycle do
       # one-line fix and failed at validation, and this comment told the
       # reviewer their branch was untouched — a confident falsehood, which is
       # worse than silence. State only what is known: the run did not finish.
-      comment(
-        sector,
-        num,
-        "#{who}: mission `#{mission.id}` did not complete this review request — " <>
+      body =
+        "Mission `#{mission.id}` did not complete this review request — " <>
           "#{String.slice(reason, 0, 300)}.\n\n" <>
           "Check the branch before assuming nothing changed: work may have been " <>
           "committed before the run stopped. The request stands until you resolve it." <>
           @signature
-      )
+
+      answer_threads(sector, num, src, body, fn ->
+        "#{who}: mission `#{mission.id}` did not complete this review request — " <>
+          "#{String.slice(reason, 0, 300)}.\n\nCheck the branch before assuming nothing " <>
+          "changed. The request stands." <> @signature
+      end)
     end)
+  end
+
+  # Reply inside each thread the mission was answering, so the response sits
+  # under the reviewer's own words and the conversation can be resolved. A
+  # top-level PR comment is the fallback for a review that left no inline
+  # comments — and it is what the reviewer missed entirely last time.
+  defp answer_threads(sector, num, src, thread_body, fallback_fun) do
+    ids = List.wrap(src["inline_comment_ids"]) |> Enum.filter(&is_integer/1)
+
+    replied =
+      Enum.count(ids, fn id ->
+        GiTF.GitHub.reply_to_review_comment(sector, num, id, thread_body) == :ok
+      end)
+
+    # Nothing to reply to, or every reply failed: say it once on the PR
+    # rather than saying nothing at all.
+    if replied == 0, do: comment(sector, num, fallback_fun.())
+    :ok
   end
 
   # -- Internals -------------------------------------------------------------
