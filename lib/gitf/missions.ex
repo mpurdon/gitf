@@ -450,6 +450,39 @@ defmodule GiTF.Missions do
   # fast-path, no-work) and `mark_user_visible_completed` (standard workflow,
   # where complete_quest never runs — see Phases.Scoring.terminal). The
   # `aramaki_notified` flag dedupes missions that traverse both.
+  @doc """
+  Fires the terminal notification for a mission that reached a terminal
+  status without one, and normalises its phase.
+
+  Terminal transitions are supposed to run through `complete_quest` or
+  `fail_quest`, which notify. Not every path does: a mission was left
+  `status: "failed"` with `current_phase: "validation"` and no
+  `failure_reason`, so the reviewer who asked for the change was never told
+  what happened — and the Janitor re-advanced it every 3 minutes forever
+  because its phase never became terminal.
+
+  Idempotent via the existing `aramaki_notified` flag, so a repaired record
+  cannot double-post.
+  """
+  @spec ensure_terminal_notified(map()) :: :ok
+  def ensure_terminal_notified(mission) do
+    if finished?(mission) and not Map.get(mission, :aramaki_notified, false) do
+      outcome =
+        case Map.get(mission, :status) do
+          "completed" -> :completed
+          _ -> {:failed, Map.get(mission, :failure_reason) || "ended without a recorded reason"}
+        end
+
+      notify_aramaki_terminal(mission, outcome)
+
+      if Map.get(mission, :current_phase) not in ["completed", "terminal"] do
+        Archive.update(:missions, mission.id, &Map.put(&1, :current_phase, "completed"))
+      end
+    end
+
+    :ok
+  end
+
   defp notify_aramaki_terminal(mission, outcome) do
     source = Map.get(mission, :source)
 

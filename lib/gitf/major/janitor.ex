@@ -482,11 +482,22 @@ defmodule GiTF.Major.Janitor do
   defp advance_stuck_mission_phases do
     # Periodically call advance_quest for missions in non-terminal phases.
     # Catches cases where a phase ghost completed but the link_msg was lost.
-    GiTF.Archive.all(:missions)
-    |> Enum.filter(fn q ->
-      q[:status] in @phase_statuses or q[:current_phase] in @phase_statuses
-    end)
-    |> Enum.each(fn mission ->
+    {finished, live} =
+      GiTF.Archive.all(:missions)
+      |> Enum.filter(fn q ->
+        q[:status] in @phase_statuses or q[:current_phase] in @phase_statuses
+      end)
+      |> Enum.split_with(&GiTF.Missions.finished?/1)
+
+    # A mission can reach a terminal STATUS while its phase still reads
+    # "validation" — a half-finished transition that took a path other than
+    # complete_quest/fail_quest. Two consequences, both seen in the wild:
+    # the phase filter kept matching it, so this pass re-advanced it every
+    # 3 minutes forever; and nobody fired its terminal notification, so the
+    # reviewer who asked for the change was never told the run ended.
+    Enum.each(finished, &GiTF.Missions.ensure_terminal_notified/1)
+
+    Enum.each(live, fn mission ->
       current_phase = mission[:current_phase]
 
       case GiTF.Major.Orchestrator.advance_quest(mission.id) do
