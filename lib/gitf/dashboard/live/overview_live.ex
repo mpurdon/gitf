@@ -765,8 +765,8 @@ defmodule GiTF.Dashboard.OverviewLive do
             <%= for m <- Enum.sort_by(@all_missions, &(&1[:inserted_at] || DateTime.utc_now()), DateTime) do %>
               <a
                 href={"/dashboard/missions/#{m.id}"}
-                title={"#{Map.get(m, :name, short_id(m.id))} — #{m.status}"}
-                style={"display:block; width:14px; height:14px; border-radius:2px; background:#{case m.status do
+                title={"#{Map.get(m, :name, short_id(m.id))} — #{Map.get(m, :status, "unknown")}"}
+                style={"display:block; width:14px; height:14px; border-radius:2px; background:#{case Map.get(m, :status) do
                   s when s in ["active", "implementation", "research", "design", "planning", "review", "validation", "requirements"] -> "#1f6feb"
                   "completed" -> "#238636"
                   "failed" -> "#da3633"
