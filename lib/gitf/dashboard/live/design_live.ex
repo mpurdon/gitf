@@ -520,12 +520,13 @@ defmodule GiTF.Dashboard.DesignLive do
         :view_only
       end
 
+    # Open on Compare whenever there is something to compare. Landing on the
+    # winner's tab skipped past the case for it — the file divergence, the
+    # risks each strategy foresaw, and the review's own reasoning all live on
+    # Compare now. A single strategy has no comparison to show, so it opens
+    # straight to its detail.
     default_tab =
-      cond do
-        review -> review["selected_design"] || "compare"
-        length(active_strategies) == 1 -> hd(active_strategies)
-        true -> "compare"
-      end
+      if length(active_strategies) == 1, do: hd(active_strategies), else: "compare"
     active_tab = Map.get(socket.assigns, :active_tab, default_tab)
 
     socket
