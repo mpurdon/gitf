@@ -189,6 +189,48 @@ defmodule GiTF.GitHub do
     end
   end
 
+  @doc """
+  Lists inline review comments on a pull request.
+
+  These are where a change request usually lives: requesting changes via a
+  `suggestion` block leaves the review body empty and puts the entire ask in
+  a comment anchored to a file and line. A follow-up mission that reads only
+  the review body sees nothing at all.
+
+  Returns `{:ok, [%{path:, line:, body:, review_id:, author:, diff_hunk:}]}`.
+  """
+  @spec list_review_comments(GiTF.Schema.Sector.t(), integer()) ::
+          {:ok, [map()]} | {:error, term()}
+  def list_review_comments(sector, pr_number) do
+    with {:ok, client} <- client(sector) do
+      case Req.get(client,
+             url: "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls/#{pr_number}/comments",
+             params: [per_page: 100]
+           ) do
+        {:ok, %{status: 200, body: comments}} when is_list(comments) ->
+          {:ok, Enum.map(comments, &normalize_review_comment/1)}
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp normalize_review_comment(c) do
+    %{
+      path: c["path"],
+      # `line` is null on outdated comments; original_line still locates them.
+      line: c["line"] || c["original_line"],
+      body: c["body"],
+      review_id: c["pull_request_review_id"],
+      author: get_in(c, ["user", "login"]),
+      diff_hunk: c["diff_hunk"]
+    }
+  end
+
   @doc "Adds a comment to an issue or PR."
   @spec add_comment(GiTF.Schema.Sector.t(), integer(), String.t()) :: :ok | {:error, term()}
   def add_comment(sector, issue_number, body) do

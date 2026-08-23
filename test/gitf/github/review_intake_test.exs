@@ -131,12 +131,17 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
     assert m.goal =~ "still wrong"
   end
 
-  test "a changes-requested review with no summary still gives the mission direction", ctx do
+  test "a review with neither summary nor reachable comments is not a mission", ctx do
+    # Previously this produced a mission whose goal was "read the inline
+    # comments on the PR" — an instruction the ghost had no way to follow.
+    # Better to leave it unhandled so a later poll can retry once the
+    # comments are fetchable.
     tracked_pr(ctx.url)
 
     blank = review(ctx.url, %{"body" => "   "})
-    assert {:ok, :mission_created, m} = ReviewIntake.dispatch(payload(ctx.url, %{"review" => blank}))
-    assert m.goal =~ "inline comments"
+
+    assert {:ok, :ignored, :no_actionable_content} =
+             ReviewIntake.dispatch(payload(ctx.url, %{"review" => blank}))
   end
 
   test "does nothing at all when the feature is off", ctx do
@@ -215,5 +220,32 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
 
     assert {:ok, :ignored, _} = ReviewIntake.dispatch(%{"action" => "submitted"})
     assert {:ok, :ignored, _} = ReviewIntake.dispatch(payload(ctx.url, %{"pull_request" => %{}}))
+  end
+
+  test "a suggestion-only review still produces an actionable goal", ctx do
+    # The common shape: body empty, all intent in one inline suggestion.
+    # Reading only the body produced a mission told to "read the inline
+    # comments" with no means to do so.
+    tracked_pr(ctx.url)
+    blank = review(ctx.url, %{"body" => ""})
+
+    assert {:ok, :ignored, :no_actionable_content} =
+             ReviewIntake.dispatch(payload(ctx.url, %{"review" => blank}))
+  end
+
+  test "a review with a body is ingested even when no comments are reachable", ctx do
+    tracked_pr(ctx.url)
+    assert {:ok, :mission_created, m} = ReviewIntake.dispatch(payload(ctx.url))
+    assert m.goal =~ "clobbers settings"
+  end
+
+  test "an unactionable review is not marked handled, so it can be retried", ctx do
+    tracked_pr(ctx.url)
+    blank = review(ctx.url, %{"body" => "   "})
+    assert {:ok, :ignored, :no_actionable_content} =
+             ReviewIntake.dispatch(payload(ctx.url, %{"review" => blank}))
+
+    # Same review, now with a body: must still be actionable.
+    assert {:ok, :mission_created, _} = ReviewIntake.dispatch(payload(ctx.url))
   end
 end

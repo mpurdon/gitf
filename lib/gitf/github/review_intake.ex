@@ -124,8 +124,23 @@ defmodule GiTF.GitHub.ReviewIntake do
   defp capacity, do: Policy.capacity_available?(GiTF.Aramaki.external_active_count())
 
   defp create_followup(outcome, review, context, head) do
+    inline = inline_comments(outcome, context, review)
+    body = String.trim(body(review) || "")
+
+    # No summary and no reachable inline comments means there is nothing to
+    # act on. Spawning a mission anyway burns a run to discover that, and
+    # marking it handled would bury the feedback for good — so leave it
+    # unhandled and let a later poll retry once the comments are visible.
+    if body == "" and inline == [] do
+      {:ok, :ignored, :no_actionable_content}
+    else
+      do_create(outcome, review, context, head, inline)
+    end
+  end
+
+  defp do_create(outcome, review, context, head, inline) do
     attrs = %{
-      goal: goal(review, context),
+      goal: goal(review, context, inline),
       sector_id: Map.get(outcome, :sector_id),
       target_branch: head,
       source: "pr_review",
@@ -133,6 +148,7 @@ defmodule GiTF.GitHub.ReviewIntake do
         "pr_url" => context.url,
         "review_key" => review_key(review),
         "reviewer" => author(review),
+        "inline_comments" => length(inline),
         "parent_mission_id" => Map.get(outcome, :mission_id)
       }
     }
@@ -204,31 +220,87 @@ defmodule GiTF.GitHub.ReviewIntake do
 
   # The reviewer's own words are the specification — restating them in our
   # phrasing is how intent gets lost.
-  defp goal(review, context) do
+  #
+  # Requesting changes through a `suggestion` block leaves the review body
+  # EMPTY and puts the whole ask in an inline comment, which is the ordinary
+  # way people review. Reading only the body produced a mission told to "read
+  # the inline comments" with no means to do so.
+  defp goal(review, context, inline) do
     body = String.trim(body(review) || "")
-
-    feedback =
-      if body == "",
-        do:
-          "The reviewer requested changes without leaving a summary. Read the inline comments on the PR.",
-        else: body
-
     pr_label = if context.number, do: "PR ##{context.number}", else: "the pull request"
     titled = if context.title, do: " (#{context.title})", else: ""
 
+    summary =
+      if body == "", do: "", else: "\n#{author(review) || "A reviewer"} wrote:\n\n#{body}\n"
+
     """
     Address the review feedback on #{pr_label}#{titled}.
-
-    #{author(review) || "A reviewer"} requested changes:
-
-    #{feedback}
-
+    #{summary}#{inline_section(inline)}
     This branch is already open as a pull request. Extend the work that is
     on it — do not revert it or start over. Address every point raised
     above; if a point cannot be addressed, say so explicitly rather than
     silently skipping it.
     """
   end
+
+  defp inline_section([]), do: ""
+
+  defp inline_section(comments) do
+    rendered =
+      comments
+      |> Enum.with_index(1)
+      |> Enum.map_join("\n\n", fn {c, i} ->
+        where = "#{c.path}#{if c.line, do: ":#{c.line}", else: ""}"
+        "### #{i}. #{where}\n\n#{String.trim(c.body || "")}"
+      end)
+
+    """
+
+    ## Inline comments (#{length(comments)})
+
+    Each is anchored to a file and line. A fenced ```suggestion block is the
+    reviewer's exact replacement text for the lines it is attached to —
+    apply it verbatim unless it is plainly wrong, in which case explain why.
+
+    #{rendered}
+    """
+  end
+
+  # Comments belonging to this review when the API gives us the linkage;
+  # otherwise every inline comment by the same author, since an unattributed
+  # comment from the reviewer is still outstanding feedback. Failure to fetch
+  # is not fatal — a mission with the body alone beats no mission.
+  defp inline_comments(outcome, context, review) do
+    review_id = Map.get(review, "id") || Map.get(review, :id)
+
+    with sector_id when is_binary(sector_id) <- Map.get(outcome, :sector_id),
+         {:ok, sector} <- GiTF.Sector.get(sector_id),
+         number when is_integer(number) <- normalize_number(context.number),
+         {:ok, comments} <- GiTF.GitHub.list_review_comments(sector, number) do
+      scoped =
+        case Enum.filter(comments, &(&1.review_id == review_id)) do
+          [] -> Enum.filter(comments, &(&1.author == author(review)))
+          matched -> matched
+        end
+
+      Enum.take(scoped, 25)
+    else
+      _ -> []
+    end
+  rescue
+    _ -> []
+  end
+
+  defp normalize_number(n) when is_integer(n), do: n
+
+  defp normalize_number(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, _} -> i
+      _ -> nil
+    end
+  end
+
+  defp normalize_number(_), do: nil
 
   # -- Dedupe ----------------------------------------------------------------
 

@@ -246,6 +246,10 @@ defmodule GiTF.GitHub.CLI do
   defp normalize_reviews(reviews) when is_list(reviews) do
     Enum.map(reviews, fn r ->
       %{
+        # Carried so inline comments can be attributed to the review that
+        # made them — a change request's substance is usually there, not in
+        # the body, and the API keys comments by review id.
+        id: Map.get(r, "id"),
         author:
           case Map.get(r, "author") do
             %{"login" => login} -> login
