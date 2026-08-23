@@ -119,6 +119,11 @@ defmodule GiTF.Missions do
         # admission queue. All nil for operator-created missions.
         source: attrs[:source] || attrs["source"],
         source_issue: attrs[:source_issue] || attrs["source_issue"],
+        # Set when a mission amends work that is already on a branch (a
+        # follow-up from PR review feedback). Sync builds on this branch
+        # instead of cutting a new one off main, so the open PR for that
+        # head updates in place rather than a second PR appearing.
+        target_branch: attrs[:target_branch] || attrs["target_branch"],
         # For project-sourced missions: %{project_id, item_id} linking back to
         # the roadmap item this mission executes.
         source_project: attrs[:source_project] || attrs["source_project"],

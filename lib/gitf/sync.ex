@@ -54,8 +54,8 @@ defmodule GiTF.Sync do
          {:ok, sector} <- fetch_sector_for_cells(shells) do
       with_sector_lock(sector.id, fn ->
         with {:ok, main_branch} <- detect_main_branch(sector.path),
-             quest_branch = "mission/#{branch_slug(mission)}",
-             :ok <- create_quest_branch(sector.path, quest_branch, main_branch) do
+             {quest_branch, base} = quest_target(mission, main_branch),
+             :ok <- create_quest_branch(sector.path, quest_branch, base) do
           merge_cells_into_quest_branch(sector.path, quest_branch, shells)
         end
       end)
@@ -103,6 +103,17 @@ defmodule GiTF.Sync do
     e ->
       Logger.warning("create_local_pr failed: #{Exception.message(e)}")
       {:error, {:pr_creation_failed, Exception.message(e)}}
+  end
+
+  # A mission amending work that is already under review builds on that
+  # branch and keeps its name, so the existing PR for that head picks the
+  # new commits up. Everything else cuts a fresh branch off main.
+  @doc false
+  def quest_target(mission, main_branch) do
+    case Map.get(mission, :target_branch) do
+      branch when is_binary(branch) and branch != "" -> {branch, branch}
+      _ -> {"mission/#{branch_slug(mission)}", main_branch}
+    end
   end
 
   @slug_max_length 48

@@ -25,6 +25,7 @@ boolean_flags = [
   {"GITF_SKILL_REFINEMENT_ENABLED", :skill_refinement_enabled},
   {"GITF_SKILL_AUTO_COMMIT_ENABLED", :skill_auto_commit_enabled},
   {"GITF_OUTCOMES_ENABLED", :outcomes_enabled},
+  {"GITF_PR_REVIEW_INTAKE_ENABLED", :pr_review_intake_enabled},
   {"GITF_OUTCOME_REFINEMENT_ENABLED", :outcome_refinement_enabled},
   {"GITF_OUTCOME_AUTONOMY_TIERS_ENABLED", :outcome_autonomy_tiers_enabled},
   {"GITF_VAULT_WRITER_ENABLED", :vault_writer_enabled},

@@ -18,6 +18,7 @@ defmodule GiTF.Web.WebhookController do
 
   require Logger
 
+  alias GiTF.GitHub.ReviewIntake
   alias GiTF.Outcomes
   alias GiTF.Sentry.Inbound, as: SentryInbound
 
@@ -90,27 +91,40 @@ defmodule GiTF.Web.WebhookController do
 
   defp handle_github_event("pull_request", %{"pull_request" => %{"html_url" => url}})
        when is_binary(url) do
-    case Outcomes.get_by_pr_url(url) do
-      nil ->
-        Logger.debug("GitHub webhook: PR #{url} not tracked, ignoring")
-        :ok
+    bump_outcome_poll(url)
+  end
 
-      outcome ->
-        now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-        Outcomes.update(outcome.id, fn o ->
-          Map.put(o, :next_poll_at, now)
-        end)
-
-        # Force the tracker through a tick so the just-bumped record is
-        # picked up immediately rather than at the next 5-min interval.
-        if Process.whereis(GiTF.Outcomes.Tracker) do
-          GiTF.Outcomes.Tracker.tick()
-        end
-
-        Logger.info("GitHub webhook: PR #{url} flagged for immediate poll (outcome=#{outcome.id})")
-        :ok
+  # A submitted review is the moment an outcome's verdict actually changes —
+  # changes_requested, or the approval that precedes a merge. Polling would
+  # find it eventually; bumping here means the outcome record reflects the
+  # human's decision as soon as they make it.
+  defp handle_github_event("pull_request_review", payload) do
+    with %{"pull_request" => %{"html_url" => url}} when is_binary(url) <- payload do
+      bump_outcome_poll(url)
     end
+
+    case ReviewIntake.dispatch(payload) do
+      {:ok, :mission_created, mission} ->
+        Logger.info("GitHub webhook: review → follow-up mission #{mission.id}")
+
+      {:ok, :ignored, reason} ->
+        Logger.debug("GitHub webhook: review not ingested (#{reason})")
+
+      {:error, reason} ->
+        Logger.warning("GitHub webhook: review intake failed: #{inspect(reason)}")
+    end
+
+    :ok
+  end
+
+  # Inline comments arrive one event per comment and carry no verdict of
+  # their own, so they refresh the outcome but never spawn work — the
+  # enclosing review is the unit of intent.
+  defp handle_github_event("pull_request_review_comment", %{
+         "pull_request" => %{"html_url" => url}
+       })
+       when is_binary(url) do
+    bump_outcome_poll(url)
   end
 
   defp handle_github_event("issues", payload) do
@@ -130,6 +144,29 @@ defmodule GiTF.Web.WebhookController do
   defp handle_github_event(event, _payload) do
     Logger.debug("GitHub webhook: unhandled event=#{event}")
     :ok
+  end
+
+  # An untracked PR is silently ignored: the factory does not confirm which
+  # pull requests it watches.
+  defp bump_outcome_poll(url) do
+    case Outcomes.get_by_pr_url(url) do
+      nil ->
+        Logger.debug("GitHub webhook: PR #{url} not tracked, ignoring")
+        :ok
+
+      outcome ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+        Outcomes.update(outcome.id, &Map.put(&1, :next_poll_at, now))
+
+        # Force the tracker through a tick so the just-bumped record is
+        # picked up immediately rather than at the next 5-min interval.
+        if Process.whereis(GiTF.Outcomes.Tracker) do
+          GiTF.Outcomes.Tracker.tick()
+        end
+
+        Logger.info("GitHub webhook: PR #{url} flagged for immediate poll (outcome=#{outcome.id})")
+        :ok
+    end
   end
 
   # -- HMAC-SHA256 signature verification ------------------------------------

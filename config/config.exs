@@ -107,6 +107,13 @@ config :gitf, :skill_critic_model, "google:gemini-2.5-flash"
 config :gitf, :outcomes_enabled, false
 config :gitf, :outcome_refinement_enabled, false
 
+# Review-driven follow-up missions. When enabled, a `changes_requested`
+# review on a PR the factory opened creates a mission that amends that
+# PR's branch in place. Requires :outcomes_enabled — intake only fires
+# for a PR with a tracked outcome, which is what keeps a webhook from
+# pointing the factory at arbitrary repository work.
+config :gitf, :pr_review_intake_enabled, false
+
 # Inbound webhook ingestion. When enabled, /api/v1/webhooks/github
 # accepts HMAC-SHA256-signed events. Pull-request events for tracked
 # PRs short-circuit the outcome polling cycle. Secret comes from

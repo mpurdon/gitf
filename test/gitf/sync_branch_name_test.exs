@@ -48,4 +48,25 @@ defmodule GiTF.SyncBranchNameTest do
       assert Sync.branch_slug(%{name: "approve-messages"}) == "approve-messages"
     end
   end
+
+  describe "quest_target/2" do
+    test "cuts a fresh branch off main for an ordinary mission" do
+      assert {"mission/msn-aaaaaa-add-a-thing", "main"} =
+               Sync.quest_target(%{id: "msn-aaaaaa", name: "add-a-thing"}, "main")
+    end
+
+    test "a follow-up builds on the branch under review and keeps its name" do
+      # Same branch for both: the PR's head must gain commits, not be
+      # replaced by a second branch that opens a second PR.
+      mission = %{id: "msn-bbbbbb", name: "address-review", target_branch: "mission/msn-x-feature"}
+
+      assert {"mission/msn-x-feature", "mission/msn-x-feature"} =
+               Sync.quest_target(mission, "main")
+    end
+
+    test "an empty target_branch falls back to a fresh branch" do
+      assert {"mission/msn-cccccc-x", "main"} =
+               Sync.quest_target(%{id: "msn-cccccc", name: "x", target_branch: ""}, "main")
+    end
+  end
 end
