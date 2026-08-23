@@ -24,7 +24,8 @@ defmodule GiTF.Shell do
 
     with {:ok, sector} <- GiTF.Sector.get(sector_id),
          :ok <- validate_sector_path(sector),
-         base_branch = Keyword.get(opts, :base_branch) || remote_base_branch(sector.path),
+         :ok <- fetch_origin(sector.path),
+         base_branch = resolve_base_branch(sector.path, Keyword.get(opts, :base_branch)),
          worktree_path = build_worktree_path(sector.path, ghost_id),
          {:ok, _path} <- Git.worktree_add(sector.path, worktree_path, branch, base_branch),
          :ok <- maybe_generate_settings(ghost_id, gitf_root, worktree_path),
@@ -271,16 +272,46 @@ defmodule GiTF.Shell do
   defp validate_sector_path(%{path: path}) when is_binary(path), do: :ok
   defp validate_sector_path(_sector), do: {:error, :sector_has_no_path}
 
+  # Always refresh before cutting a worktree. This used to happen only inside
+  # remote_base_branch/1, i.e. only when NO explicit base was given — sound
+  # while every explicit base was a local ghost branch with nothing to fetch.
+  # Once a mission amending a pull request began passing that PR's REMOTE
+  # branch as an explicit base, the one case that most needed current code was
+  # the one case that skipped the refresh: a ghost was cut from a branch tip
+  # one commit behind what had already been pushed to it.
+  #
+  # Non-fatal: remoteless and offline sectors still work, they just start from
+  # whatever the clone has.
+  defp fetch_origin(repo_path) do
+    _ = Git.fetch(repo_path, "origin")
+    :ok
+  end
+
+  # An explicit base names a branch; prefer the remote's version of it when
+  # one exists, so "build on the PR branch" means the branch as GitHub has it
+  # rather than as this clone last saw it. Local-only bases (ghost/<id>) have
+  # no remote counterpart and pass through untouched.
+  defp resolve_base_branch(repo_path, nil), do: remote_base_branch(repo_path)
+
+  defp resolve_base_branch(repo_path, base) when is_binary(base) do
+    if String.starts_with?(base, "origin/") or not Git.remote_branch_exists?(repo_path, "origin/#{base}") do
+      base
+    else
+      "origin/#{base}"
+    end
+  end
+
+  defp resolve_base_branch(_repo_path, base), do: base
+
   # Missions must start from the remote's truth, not the clone's local main:
   # local main accumulates the factory's own merge commits and diverges
   # further whenever PRs are squash-merged or history is rewritten on
   # GitHub. Basing new worktrees on a freshly-fetched origin/<main> makes
   # all of those non-events. Falls back to sector HEAD (nil) for
-  # remoteless/offline sectors. Explicit :base_branch opts (phase ghosts
-  # building on an impl ghost's branch) always win and skip this.
+  # remoteless/offline sectors. Only reached when no explicit base was given;
+  # the fetch itself now happens unconditionally in create/3.
   defp remote_base_branch(repo_path) do
-    with :ok <- Git.fetch(repo_path, "origin"),
-         {:ok, main} <- GiTF.Sync.detect_main_branch(repo_path),
+    with {:ok, main} <- GiTF.Sync.detect_main_branch(repo_path),
          true <- Git.remote_branch_exists?(repo_path, "origin/#{main}") do
       "origin/#{main}"
     else
