@@ -461,6 +461,7 @@ defmodule GiTF.Dashboard.Layouts do
 
           /* -- Design viewer ------------------------------------------------- */
           .design-layout { display: grid; grid-template-columns: 1fr 300px; gap: 1rem; }
+          .review-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1rem; }
           .tab-minimal.tab-active { border-bottom-color: #58a6ff; }
           .tab-normal.tab-active { border-bottom-color: #3fb950; }
           .tab-complex.tab-active { border-bottom-color: #a78bfa; }
@@ -606,7 +607,7 @@ defmodule GiTF.Dashboard.Layouts do
           .op-filter-count { font-family: monospace; font-size: 0.7rem; font-weight: 700; }
 
           /* -- Responsive ---------------------------------------------------- */
-          @media (max-width: 1024px) { .design-layout { grid-template-columns: 1fr; } .mission-detail-layout { grid-template-columns: 1fr; } .mission-sidebar { position: static; } }
+          @media (max-width: 1024px) { .design-layout { grid-template-columns: 1fr; } .review-split { grid-template-columns: 1fr; } .mission-detail-layout { grid-template-columns: 1fr; } .mission-sidebar { position: static; } }
           @media (max-width: 768px) {
             .nav { flex-direction: column; height: auto; padding: 0.75rem; gap: 0.5rem; }
             .cards { grid-template-columns: 1fr 1fr; }

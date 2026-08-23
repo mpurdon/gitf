@@ -231,18 +231,85 @@ defmodule GiTF.Dashboard.DesignLive do
       </div>
     </div>
 
-    <div :if={@review} class="panel" style="margin-top:1rem">
-      <div class="panel-title">Review Summary</div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:0.5rem">
-        <div>
-          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Risk Assessment</div>
-          <div style="font-size:0.9rem">{@review["risk_assessment"] || "—"}</div>
-        </div>
-        <div>
-          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Selected</div>
-          <span class={"badge badge-#{design_strategy_badge(selected_strategy(@review))}"}>{strategy_label(selected_strategy(@review))}</span>
-          <span :if={@review["approved"]} class="badge badge-green" style="margin-left:0.3rem">Approved</span>
-          <span :if={@review["approved"] != true} class="badge badge-yellow" style="margin-left:0.3rem">Needs Review</span>
+    {render_file_matrix(assigns)}
+    {render_risk_columns(assigns)}
+    {render_review_analysis(assigns)}
+    """
+  end
+
+  # -- Convergence: which files does each strategy actually touch? ------------
+
+  # The first question when comparing designs is whether they genuinely differ
+  # or just describe the same change with different amounts of prose. Every
+  # design names its files, so that question is answerable mechanically:
+  # agreed rows are noise, the divergent ones are the whole decision.
+  defp render_file_matrix(assigns) do
+    cmp = file_divergence(Enum.map(assigns.strategy_list, &{&1, assigns.designs[&1]}))
+
+    assigns =
+      assign(assigns,
+        present_strategies: cmp.strategies,
+        divergent: Enum.reject(cmp.rows, fn {_, _, all?} -> all? end),
+        agreed_count: cmp.agreed,
+        total_files: cmp.total
+      )
+
+    ~H"""
+    <div :if={@total_files > 0} class="panel" style="margin-top:1rem">
+      <div class="panel-title">Files Touched</div>
+      <div style="color:#8b949e; font-size:0.85rem; margin:0.5rem 0 0.75rem">
+        {@agreed_count} of {@total_files} files are in every design — the strategies agree on those.
+        <span :if={@divergent == []}>They agree on all of them: this was a choice about rigor, not architecture.</span>
+        <span :if={@divergent != []}>The {length(@divergent)} below are where they diverge.</span>
+      </div>
+
+      <div :if={@divergent != []} style="overflow-x:auto">
+        <table class="table" style="min-width:32rem">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th :for={s <- @present_strategies} style="text-align:center">{strategy_label(s)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={{file, touched, _} <- @divergent}>
+              <td style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.82rem">{file}</td>
+              <td :for={s <- @present_strategies} style="text-align:center">
+                <span :if={s in touched} class="coverage-ok">✓</span>
+                <span :if={s not in touched} style="color:#484f58">—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """
+  end
+
+  # -- Risks, three-up -------------------------------------------------------
+
+  # Each design's risk list is where its judgement shows: what one strategy
+  # foresaw and another missed is the real argument for the pick. Reading them
+  # meant opening three tabs and holding them in your head; side by side, the
+  # gaps are visible at a glance.
+  defp render_risk_columns(assigns) do
+    ~H"""
+    <div class="panel" style="margin-top:1rem">
+      <div class="panel-title">Risks Foreseen</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(15rem, 1fr)); gap:1rem; margin-top:0.75rem">
+        <div :for={strategy <- @strategy_list}>
+          <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.5rem">
+            <span class={"badge badge-#{design_strategy_badge(strategy)}"}>{strategy_label(strategy)}</span>
+            <span :if={winner?(strategy, @review)} style="color:#d29922">★</span>
+          </div>
+          <% design = @designs[strategy] %>
+          <ol :if={design} style="margin:0; padding-left:1.1rem; display:flex; flex-direction:column; gap:0.5rem">
+            <li :for={risk <- get_list(design, "risks")} style="font-size:0.83rem; line-height:1.5">{risk}</li>
+          </ol>
+          <div :if={design && get_list(design, "risks") == []} style="color:#8b949e; font-size:0.85rem">
+            None recorded.
+          </div>
+          <div :if={is_nil(design)} style="color:#8b949e; font-size:0.85rem">Generating…</div>
         </div>
       </div>
     </div>
@@ -263,7 +330,7 @@ defmodule GiTF.Dashboard.DesignLive do
       )
 
     ~H"""
-    <div class="design-layout">
+    <div>
       <div>
         <div :if={@design} class={if @is_winner, do: "design-winner", else: ""} style="margin-bottom:1rem">
           {render_collapsible(assigns, "prompt_#{@strategy}", "Strategy Prompt", fn ->
@@ -289,46 +356,59 @@ defmodule GiTF.Dashboard.DesignLive do
         </div>
       </div>
 
-      <div>
-        <div class="panel">
-          <div class="panel-title">Review Analysis</div>
-          <div :if={@review}>
-            <div style="margin:0.75rem 0">
-              <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Selected Design</div>
-              <span class={"badge badge-#{design_strategy_badge(selected_strategy(@review))}"}>{strategy_label(selected_strategy(@review))}</span>
-            </div>
+    </div>
+    """
+  end
 
-            <div style="margin:0.75rem 0">
-              <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Coverage</div>
-              <div :for={cov <- get_list(@review, "coverage")} class="coverage-item">
-                <span :if={cov["covered"]} class="coverage-ok">✓</span>
-                <span :if={cov["covered"] != true} class="coverage-gap">✗</span>
-                <span>{cov["req_id"]}</span>
-                <span :if={cov["gap"]} style="color:#f85149; font-size:0.8rem; margin-left:0.3rem">({cov["gap"]})</span>
-              </div>
-            </div>
+  # -- Review analysis -------------------------------------------------------
 
-            <div style="margin:0.75rem 0">
-              <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Issues ({length(get_list(@review, "issues"))})</div>
-              <div :for={issue <- sort_issues(get_list(@review, "issues"))} class={"issue-item issue-#{issue["severity"] || "low"}"}>
-                <div style="font-weight:600; font-size:0.8rem; text-transform:uppercase">{issue["severity"] || "info"}</div>
-                <div style="font-size:0.85rem">{issue["description"]}</div>
-                <div :if={issue["suggestion"]} style="font-size:0.8rem; color:#8b949e; margin-top:0.2rem">→ {issue["suggestion"]}</div>
-              </div>
-              <div :if={get_list(@review, "issues") == []} style="color:#3fb950; font-size:0.85rem">No issues found.</div>
-            </div>
+  # Lives on the Compare tab, not beside an individual design: the review's
+  # job is to choose *among* the three, so its coverage, issues, and risk
+  # assessment only make sense next to all of them. Repeating it in each
+  # strategy's sidebar implied it was about that one design.
+  defp render_review_analysis(assigns) do
+    ~H"""
+    <div class="panel" style="margin-top:1rem">
+      <div class="panel-title">Review Analysis</div>
+      <div :if={@review}>
+        <div style="margin:0.75rem 0">
+          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Selected Design</div>
+          <span class={"badge badge-#{design_strategy_badge(selected_strategy(@review))}"}>{strategy_label(selected_strategy(@review))}</span>
+          <span :if={@review["approved"]} class="badge badge-green" style="margin-left:0.3rem">Approved</span>
+          <span :if={@review["approved"] != true} class="badge badge-yellow" style="margin-left:0.3rem">Needs Review</span>
+        </div>
 
-            <div style="margin:0.75rem 0">
-              <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Risk Assessment</div>
-              <div style="font-size:0.85rem">{@review["risk_assessment"] || "—"}</div>
+        <div class="review-split">
+          <div style="margin:0.75rem 0">
+            <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Coverage</div>
+            <div :for={cov <- get_list(@review, "coverage")} class="coverage-item">
+              <span :if={cov["covered"]} class="coverage-ok">✓</span>
+              <span :if={cov["covered"] != true} class="coverage-gap">✗</span>
+              <span>{cov["req_id"]}</span>
+              <span :if={cov["gap"]} style="color:#f85149; font-size:0.8rem; margin-left:0.3rem">({cov["gap"]})</span>
             </div>
           </div>
 
-          <div :if={is_nil(@review)} style="text-align:center; padding:2rem 0; color:#8b949e">
-            <span class="loading-spinner" style="width:16px;height:16px;border-width:2px"></span>
-            <div style="margin-top:0.5rem; font-size:0.85rem">Awaiting review...</div>
+          <div style="margin:0.75rem 0">
+            <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Issues ({length(get_list(@review, "issues"))})</div>
+            <div :for={issue <- sort_issues(get_list(@review, "issues"))} class={"issue-item issue-#{issue["severity"] || "low"}"}>
+              <div style="font-weight:600; font-size:0.8rem; text-transform:uppercase">{issue["severity"] || "info"}</div>
+              <div style="font-size:0.85rem">{issue["description"]}</div>
+              <div :if={issue["suggestion"]} style="font-size:0.8rem; color:#8b949e; margin-top:0.2rem">→ {issue["suggestion"]}</div>
+            </div>
+            <div :if={get_list(@review, "issues") == []} style="color:#3fb950; font-size:0.85rem">No issues found.</div>
           </div>
         </div>
+
+        <div style="margin:0.75rem 0">
+          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Risk Assessment</div>
+          <div style="font-size:0.85rem">{@review["risk_assessment"] || "—"}</div>
+        </div>
+      </div>
+
+      <div :if={is_nil(@review)} style="text-align:center; padding:2rem 0; color:#8b949e">
+        <span class="loading-spinner" style="width:16px;height:16px;border-width:2px"></span>
+        <div style="margin-top:0.5rem; font-size:0.85rem">Awaiting review...</div>
       </div>
     </div>
     """

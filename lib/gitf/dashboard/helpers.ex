@@ -117,11 +117,43 @@ defmodule GiTF.Dashboard.Helpers do
   def get_list(_, _), do: []
 
   @doc "Counts unique files across design components."
-  def count_design_files(design) do
+  def count_design_files(design), do: design |> design_files() |> length()
+
+  @doc "The sorted, unique set of files a design's components touch."
+  def design_files(design) do
     get_list(design, "components")
     |> Enum.flat_map(&(Map.get(&1, "files", []) |> List.wrap()))
     |> Enum.uniq()
-    |> length()
+    |> Enum.sort()
+  end
+
+  @doc """
+  Compares which files each design strategy touches.
+
+  Takes `[{strategy, design_or_nil}]` and returns `%{rows:, agreed:, total:}`
+  where each row is `{file, strategies_touching_it, in_every_design?}`.
+  Strategies whose design has not landed yet are excluded, so a partial
+  comparison never reports an absent design as divergence.
+  """
+  def file_divergence(strategy_designs) do
+    present = Enum.filter(strategy_designs, fn {_, d} -> is_map(d) end)
+
+    rows =
+      present
+      |> Enum.flat_map(fn {_, d} -> design_files(d) end)
+      |> Enum.uniq()
+      |> Enum.sort()
+      |> Enum.map(fn file ->
+        touched = for {s, d} <- present, file in design_files(d), do: s
+        {file, touched, length(touched) == length(present)}
+      end)
+
+    %{
+      rows: rows,
+      agreed: Enum.count(rows, fn {_, _, all?} -> all? end),
+      total: length(rows),
+      strategies: Enum.map(present, &elem(&1, 0))
+    }
   end
 
   @doc "Sorts review issues by severity (high > medium > low)."
