@@ -183,10 +183,15 @@ config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:remission_id]
 
-# OpenTelemetry — default to OTLP export if OTEL_EXPORTER_OTLP_ENDPOINT is set
+# OpenTelemetry. The exporter is configured in runtime.exs, and ONLY when
+# OTEL_EXPORTER_OTLP_ENDPOINT is set — which is what this always claimed to
+# do. Naming the OTLP exporter unconditionally meant that with no endpoint it
+# raised `badkey: endpoints` on every export batch, every few seconds, at
+# warning level, on a factory nobody was tracing. Log noise that constant
+# buries the warnings worth reading.
 config :opentelemetry,
   resource: %{service: %{name: "gitf"}},
   sampler: {:parent_based, %{root: :always_on}},
-  traces_exporter: {:otel_exporter_otlp, %{protocol: :http_protobuf}}
+  traces_exporter: :none
 
 import_config "#{config_env()}.exs"

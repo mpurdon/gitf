@@ -100,6 +100,14 @@ case System.get_env("GITF_PARALLEL_IMPL_ATTEMPTS") do
     end
 end
 
+# Traces are exported only when somebody is listening. Without an endpoint the
+# OTLP exporter cannot initialise, and it retries noisily rather than staying
+# quiet, so the default is no exporter at all.
+if endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
+  config :opentelemetry,
+    traces_exporter: {:otel_exporter_otlp, %{protocol: :http_protobuf, endpoints: [endpoint]}}
+end
+
 if secret = System.get_env("GITF_GITHUB_WEBHOOK_SECRET") do
   config :gitf, :github_webhook_secret, secret
 end
