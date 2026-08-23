@@ -507,6 +507,10 @@ defmodule GiTF.Missions do
 
             {:failed, reason} ->
               GiTF.Aramaki.Lifecycle.on_review_failed(mission, reason || "unknown")
+              # The request was not satisfied, so it is not handled. Release it
+              # (up to a retry limit) rather than consuming the reviewer's
+              # feedback on a run that never landed.
+              GiTF.GitHub.ReviewIntake.release(mission)
           end
 
         "project" ->

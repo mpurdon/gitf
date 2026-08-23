@@ -258,4 +258,35 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
     assert Map.has_key?(m.source_issue, "inline_comment_ids")
     assert m.source_issue["pr_number"] == 8
   end
+
+  test "a failed follow-up releases the review so it can be retried", ctx do
+    tracked_pr(ctx.url)
+    assert {:ok, :mission_created, m} = ReviewIntake.dispatch(payload(ctx.url))
+    assert {:ok, :ignored, :already_handled} = ReviewIntake.dispatch(payload(ctx.url))
+
+    # The run did not land, so the request is not satisfied. Consuming it
+    # permanently was only recoverable by editing the store by hand.
+    :ok = ReviewIntake.release(m)
+    assert {:ok, :mission_created, _} = ReviewIntake.dispatch(payload(ctx.url))
+  end
+
+  test "a review that keeps failing stops being retried", ctx do
+    tracked_pr(ctx.url)
+
+    for _ <- 1..3 do
+      case ReviewIntake.dispatch(payload(ctx.url)) do
+        {:ok, :mission_created, m} -> ReviewIntake.release(m)
+        other -> other
+      end
+    end
+
+    # Three attempts is enough; retrying forever would loop the factory.
+    assert {:ok, :ignored, reason} = ReviewIntake.dispatch(payload(ctx.url))
+    assert reason in [:retry_limit_reached, :already_handled]
+  end
+
+  test "releasing a mission with no review linkage is harmless" do
+    assert ReviewIntake.release(%{}) == :ok
+    assert ReviewIntake.release(%{source_issue: %{}}) == :ok
+  end
 end

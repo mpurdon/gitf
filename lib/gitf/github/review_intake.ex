@@ -55,6 +55,55 @@ defmodule GiTF.GitHub.ReviewIntake do
   alias GiTF.Missions
   alias GiTF.Outcomes
 
+  # A review whose mission never landed is not "handled". Releasing it lets
+  # the poller try again — but a review that fails forever would loop
+  # forever, so each one gets a small, finite number of attempts.
+  @max_attempts 3
+
+  @doc """
+  Releases a review whose follow-up mission ended without landing.
+
+  Called from the terminal path: feedback is only handled when work actually
+  reached the branch. Without this a killed or failed run consumed the
+  reviewer's request permanently and the only recovery was editing the store
+  by hand.
+  """
+  @spec release(map()) :: :ok
+  def release(mission) do
+    with src when is_map(src) <- Map.get(mission, :source_issue),
+         url when is_binary(url) <- src["pr_url"],
+         key when is_binary(key) <- src["review_key"],
+         outcome when is_map(outcome) <- Outcomes.get_by_pr_url(url) do
+      drop = Enum.reject([key, src["review_id"]], &is_nil/1)
+
+      Outcomes.update(outcome.id, fn o ->
+        attempts = Map.get(o, :review_attempts) || %{}
+        n = Map.get(attempts, key, 0) + 1
+
+        o
+        |> Map.put(:review_attempts, Map.put(attempts, key, n))
+        |> Map.put(
+          :handled_reviews,
+          # Past the limit it stays handled: retrying a request that has
+          # failed three times just burns the factory on a loop.
+          if(n >= @max_attempts,
+            do: Map.get(o, :handled_reviews) || [],
+            else: Enum.reject(Map.get(o, :handled_reviews) || [], &(&1 in drop))
+          )
+        )
+      end)
+
+      Logger.info("PR review released for retry: #{url} (#{key})")
+      :ok
+    else
+      _ -> :ok
+    end
+  rescue
+    e ->
+      Logger.debug("Review release failed: #{Exception.message(e)}")
+      :ok
+  end
+
   @doc "True when review-driven follow-up missions are enabled."
   @spec enabled?() :: boolean()
   def enabled?, do: Application.get_env(:gitf, :pr_review_intake_enabled, false)
@@ -107,6 +156,7 @@ defmodule GiTF.GitHub.ReviewIntake do
   defp admit(outcome, review, context) do
     with :admit <- Policy.admit_review?(review, bot_login: bot_login()),
          :ok <- check(not handled?(outcome, review), :already_handled),
+         :ok <- check(attempts(outcome, review) < @max_attempts, :retry_limit_reached),
          {:ok, _slots} <- capacity(),
          head when is_binary(head) <- context.head_ref || :no_head_ref do
       create_followup(outcome, review, context, head)
@@ -147,6 +197,9 @@ defmodule GiTF.GitHub.ReviewIntake do
       source_issue: %{
         "pr_url" => context.url,
         "review_key" => review_key(review),
+        # Both keys are written to handled_reviews, so both must be cleared
+        # on release — dropping only one leaves the review still "handled".
+        "review_id" => Map.get(review, "id") || Map.get(review, :id),
         "reviewer" => author(review),
         "inline_comments" => length(inline),
         # Thread ids, so the completion reply lands under the comments it
@@ -325,6 +378,10 @@ defmodule GiTF.GitHub.ReviewIntake do
       {_, id} when not is_nil(id) -> "id:#{id}"
       _ -> "#{author(review) || "?"}@?"
     end
+  end
+
+  defp attempts(outcome, review) do
+    (Map.get(outcome, :review_attempts) || %{}) |> Map.get(review_key(review), 0)
   end
 
   defp handled?(outcome, review) do
