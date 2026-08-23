@@ -159,7 +159,13 @@ defmodule GiTF.Outcomes.Tracker do
               if terminal? do
                 Map.merge(merged, %{tracking_stopped: true, stopped_reason: "terminal"})
               else
-                Map.put(merged, :next_poll_at, next_poll_at(merged, now))
+                # Something changed on this PR, so go back to watching it
+                # closely. The decay is keyed on age since first tracked,
+                # which means a two-day-old PR sits on 4-hour polls exactly
+                # when a human starts interacting with it — the moment it
+                # most deserves attention. Reaching this branch at all means
+                # content_unchanged? was false.
+                Map.put(merged, :next_poll_at, DateTime.add(now, fast_poll_seconds(), :second))
               end
             end)
 
@@ -250,6 +256,10 @@ defmodule GiTF.Outcomes.Tracker do
 
     DateTime.add(now, next_poll_seconds(age), :second)
   end
+
+  @doc "The tightest poll interval, used after a PR changes."
+  @spec fast_poll_seconds() :: pos_integer()
+  def fast_poll_seconds, do: next_poll_seconds(0)
 
   @doc """
   Exposed for tests — returns the next poll wait (seconds) for a given

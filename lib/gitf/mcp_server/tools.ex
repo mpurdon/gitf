@@ -592,6 +592,39 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "refresh_outcome",
+        description:
+          "Poll a tracked PR now instead of waiting for its scheduled slot. Use when you have just left a review and want the factory to see it immediately. Identify the outcome by id, mission_id, or pr_url.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Outcome ID"},
+            mission_id: %{type: "string", description: "Mission that opened the PR"},
+            pr_url: %{type: "string", description: "Full pull request URL"}
+          }
+        }
+      },
+      %{
+        name: "idle_stop_override",
+        description:
+          "Temporarily change how long the box tolerates being idle before powering itself off. Requires BOTH a new threshold and a duration — e.g. idle_minutes 60 for duration_minutes 240 means 'for the next 4 hours, wait an hour of idleness before stopping'. Pass clear:true to restore the default immediately. Overrides always expire; there is no permanent hold.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            idle_minutes: %{
+              type: "integer",
+              description: "Idle minutes to tolerate while the override is active (max 720)"
+            },
+            duration_minutes: %{
+              type: "integer",
+              description: "How long the override itself lasts (max 1440)"
+            },
+            reason: %{type: "string", description: "Why — shown when the override is inspected"},
+            clear: %{type: "boolean", description: "Remove any active override", default: false}
+          }
+        }
+      },
+      %{
         name: "show_outcome",
         description:
           "Full detail for a single outcome record — PR state, review history, poll timeline, category.",

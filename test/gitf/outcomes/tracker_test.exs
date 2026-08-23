@@ -47,6 +47,14 @@ defmodule GiTF.Outcomes.TrackerTest do
       assert Tracker.next_poll_seconds(72 * 3600) == 24 * 3600
       assert Tracker.next_poll_seconds(200 * 3600) == 24 * 3600
     end
+
+    test "a changed PR goes back to the tightest interval" do
+      # The decay is keyed on age since first tracked, so a days-old PR sits
+      # on 4- or 24-hour polls exactly when a human starts interacting with
+      # it. Any real change resets the cadence to this.
+      assert Tracker.fast_poll_seconds() == 5 * 60
+      assert Tracker.fast_poll_seconds() < Tracker.next_poll_seconds(200 * 3600)
+    end
   end
 
   describe "tick with feature flag off" do

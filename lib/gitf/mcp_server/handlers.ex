@@ -863,6 +863,64 @@ defmodule GiTF.MCPServer.Handlers do
 
   # -- Outcomes --------------------------------------------------------------
 
+  def call("refresh_outcome", args) do
+    safe_handler("refresh_outcome", args, fn ->
+      case find_outcome(args) do
+        nil ->
+          {:error, "No tracked outcome matched — pass id, mission_id, or pr_url"}
+
+        %{tracking_stopped: true} = o ->
+          {:error,
+           "Outcome #{o.id} is no longer tracked (#{o[:stopped_reason] || "stopped"}); nothing to refresh"}
+
+        outcome ->
+          now = DateTime.utc_now() |> DateTime.truncate(:second)
+          GiTF.Outcomes.update(outcome.id, &Map.put(&1, :next_poll_at, now))
+          if Process.whereis(GiTF.Outcomes.Tracker), do: GiTF.Outcomes.Tracker.tick()
+
+          {:ok,
+           json_text(%{
+             id: outcome.id,
+             pr_url: outcome[:pr_url],
+             status: "poll requested",
+             note: "The tracker polls asynchronously; re-read the outcome in a few seconds."
+           })}
+      end
+    end)
+  end
+
+  def call("idle_stop_override", %{"clear" => true}) do
+    safe_handler("idle_stop_override", %{}, fn ->
+      GiTF.IdleStop.clear()
+      {:ok, json_text(%{status: "cleared", note: "Configured default applies again."})}
+    end)
+  end
+
+  def call("idle_stop_override", args) do
+    safe_handler("idle_stop_override", args, fn ->
+      idle = args["idle_minutes"]
+      duration = args["duration_minutes"]
+
+      if is_integer(idle) and is_integer(duration) do
+        case GiTF.IdleStop.set(idle, duration, reason: args["reason"]) do
+          {:ok, override} ->
+            {:ok,
+             json_text(%{
+               idle_minutes: override.idle_minutes,
+               expires_at: DateTime.to_iso8601(override.expires_at),
+               reason: override.reason,
+               status: "active"
+             })}
+
+          {:error, reason} ->
+            {:error, "Invalid override: #{inspect(reason)}"}
+        end
+      else
+        {:error, "Both idle_minutes and duration_minutes are required (integers)"}
+      end
+    end)
+  end
+
   def call("list_outcomes", args) do
     safe_handler("list_outcomes", args, fn ->
       include_stopped = Map.get(args, "include_stopped", true)
@@ -1640,4 +1698,15 @@ defmodule GiTF.MCPServer.Handlers do
   end
 
   defp lsp_hover({sid, fp, l, c, _}), do: GiTF.LSP.hover(sid, fp, l, c)
+
+  # Three ways to name the same outcome, because the caller may be holding a
+  # PR URL from GitHub, a mission id from a report, or an outcome id.
+  defp find_outcome(args) do
+    cond do
+      is_binary(args["id"]) -> GiTF.Archive.get(:mission_outcomes, args["id"])
+      is_binary(args["pr_url"]) -> GiTF.Outcomes.get_by_pr_url(args["pr_url"])
+      is_binary(args["mission_id"]) -> GiTF.Outcomes.get_for_mission(args["mission_id"])
+      true -> nil
+    end
+  end
 end
