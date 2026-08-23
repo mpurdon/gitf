@@ -411,7 +411,16 @@ defmodule GiTF.Major.Orchestrator do
           "Quest #{mission.id}: workflow exhausted retries on phase=#{p}, marking failed"
         )
 
-        GiTF.Missions.update(mission.id, %{status: "failed"})
+        # fail_quest, not a bare status write: it records the reason, moves
+        # the phase to terminal, and fires the notification. Setting status
+        # directly left msn-dd29a1 as failed/validation/no-reason — the
+        # reviewer was never told, and the Janitor re-advanced the record
+        # every 3 minutes because its phase never became terminal.
+        GiTF.Missions.fail_quest(
+          mission.id,
+          "workflow exhausted retries on phase #{p}"
+        )
+
         {:ok, "failed"}
     end
   end

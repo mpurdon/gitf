@@ -137,9 +137,19 @@ defmodule GiTF.MCPServer.Handlers do
       if args["all"] do
         ops
       else
-        case args["status"] do
-          nil -> Enum.reject(ops, &(&1.status in ["done", "failed"]))
-          status -> Enum.filter(ops, &(&1.status == status))
+        case {args["status"], args["mission_id"]} do
+          {nil, nil} ->
+            # Factory-wide listing: hide terminal ops, which are the bulk.
+            Enum.reject(ops, &(&1.status in ["done", "failed"]))
+
+          # Asking about ONE mission means you want that mission's ops. The
+          # blanket filter returned an empty list for a finished mission with
+          # 14 ops, which reads as "no ops" rather than "all of them are done".
+          {nil, _mission_id} ->
+            ops
+
+          {status, _} ->
+            Enum.filter(ops, &(&1.status == status))
         end
       end
 
@@ -1470,6 +1480,11 @@ defmodule GiTF.MCPServer.Handlers do
       pipeline_mode: m[:pipeline_mode],
       post_processing_status: m[:post_processing_status],
       issue_ref: m[:issue_ref],
+      # Provenance: without these a review-driven mission reported
+      # `source: None`, hiding the very thing that explains why it exists.
+      source: m[:source],
+      source_issue: m[:source_issue],
+      target_branch: m[:target_branch],
       cost_cap_usd: m[:cost_cap_usd],
       inserted_at: to_string(m[:inserted_at]),
       ops: Enum.map(ops, &serialize_op/1)

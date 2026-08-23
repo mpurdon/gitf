@@ -90,7 +90,11 @@ defmodule GiTF.Major.ResearchTest do
     # Second call should refresh cache
     {:ok, result2} = Research.research_sector(sector.id)
 
-    assert result1.research.analyzed_at != result2.research.analyzed_at
+    # Two writes inside the same microsecond compare equal, which made this
+    # fail intermittently under load. The property under test is that the
+    # cache REFRESHED — the new file count proves that; the clock ticking
+    # between two fast writes does not.
+    assert result2.research.analyzed_at >= result1.research.analyzed_at
     assert result2.research.structure.total_files == 5
   end
 

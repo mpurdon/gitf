@@ -30,7 +30,7 @@ defmodule GiTF.Shell do
          {:ok, _path} <- Git.worktree_add(sector.path, worktree_path, branch, base_branch),
          :ok <- maybe_generate_settings(ghost_id, gitf_root, worktree_path),
          base_commit_sha = capture_base_sha(worktree_path),
-         base_ref = detect_base_ref(sector.path),
+         base_ref = detect_base_ref(sector.path, base_branch),
          {:ok, shell} <-
            insert_cell(sector_id, ghost_id, worktree_path, branch, base_commit_sha, base_ref) do
       GiTF.Telemetry.emit([:gitf, :drift, :base_captured], %{}, %{
@@ -73,6 +73,16 @@ defmodule GiTF.Shell do
   end
 
   # Detects the appropriate base ref in priority order: origin/main, main, master.
+  # The ref this worktree was ACTUALLY cut from. Drift compares against it to
+  # decide what "the base moved" means, so answering "origin/main" for a
+  # worktree cut from a pull request branch made every commit in that PR read
+  # as divergence — and fed the :risky/:conflicted classification and the
+  # auto-rebase decision. Harmless while every ghost really was on main;
+  # reachable the moment missions started building on a PR branch.
+  defp detect_base_ref(_sector_path, base) when is_binary(base) and base != "", do: base
+
+  defp detect_base_ref(sector_path, _base), do: detect_base_ref(sector_path)
+
   defp detect_base_ref(sector_path) do
     cond do
       match?({:ok, _}, Git.rev_parse(sector_path, "origin/main")) -> "origin/main"

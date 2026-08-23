@@ -92,7 +92,27 @@ try() {
 }
 CMD=${1:-remote}
 shift || true
-try "${COOKIE:-$FILE_COOKIE}" "$CMD" "$@" 2>/dev/null || try "$FILE_COOKIE" "$CMD" "$@"
+
+# Distribution is not up for the first ~60-90s after boot, so an rpc issued
+# in that window fails with :noconnection — which reads as "the daemon is
+# broken" and sent more than one debugging session down a false trail. Retry
+# briefly instead of reporting a startup race as a fault. Interactive
+# consoles are not retried; a human can see what happened.
+attempt() { try "${COOKIE:-$FILE_COOKIE}" "$CMD" "$@" 2>/dev/null || try "$FILE_COOKIE" "$CMD" "$@"; }
+
+if [ "$CMD" = "rpc" ]; then
+  for i in $(seq 1 12); do
+    if out=$(attempt "$@" 2>&1); then printf '%s\n' "$out"; exit 0; fi
+    case "$out" in
+      *noconnection*) sleep 10 ;;
+      *) printf '%s\n' "$out" >&2; exit 1 ;;
+    esac
+  done
+  echo "gitf-console rpc: node unreachable after 120s (:noconnection)" >&2
+  exit 1
+fi
+
+attempt "$@"
 CONSOLE
 chmod 0755 /usr/local/bin/gitf-console
 
