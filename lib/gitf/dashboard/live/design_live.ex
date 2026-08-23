@@ -55,6 +55,19 @@ defmodule GiTF.Dashboard.DesignLive do
     {:noreply, assign(socket, :collapsed, toggle_set(socket.assigns.collapsed, section))}
   end
 
+  # Synthesis takes a model call, so it runs off the LiveView process — the
+  # page stays interactive and a slow provider cannot block the socket.
+  def handle_event("generate_report", _params, socket) do
+    mission_id = socket.assigns.mission.id
+    lv = self()
+
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      send(lv, {:design_report, GiTF.Major.DesignReport.generate(mission_id)})
+    end)
+
+    {:noreply, assign(socket, :report_generating, true)}
+  end
+
   def handle_event("select_override", %{"strategy" => strategy}, socket) do
     current = socket.assigns.override_selection
 
@@ -121,6 +134,21 @@ defmodule GiTF.Dashboard.DesignLive do
 
       _ ->
         {:noreply, assign(socket, :refresh_scheduled, false)}
+    end
+  end
+
+  def handle_info({:design_report, result}, socket) do
+    socket = assign(socket, :report_generating, false)
+
+    case result do
+      {:ok, report} ->
+        {:noreply, assign(socket, :report, report)}
+
+      {:error, :no_designs} ->
+        {:noreply, put_flash(socket, :error, "No designs to compare yet.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Report failed: #{inspect(reason)}")}
     end
   end
 
@@ -195,6 +223,7 @@ defmodule GiTF.Dashboard.DesignLive do
 
   defp render_compare(assigns) do
     ~H"""
+    {render_decision_brief(assigns)}
     <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:1rem">
       <div :for={strategy <- @strategy_list} class={"strategy-card #{if winner?(strategy, @review), do: "selected"}"}>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem">
@@ -234,6 +263,80 @@ defmodule GiTF.Dashboard.DesignLive do
     {render_file_matrix(assigns)}
     {render_risk_columns(assigns)}
     {render_review_analysis(assigns)}
+    """
+  end
+
+  # -- Decision brief --------------------------------------------------------
+
+  # The panels below this one show what each strategy proposed and which one
+  # won. The brief is the part an operator otherwise writes by hand before
+  # agreeing with a plan: whether the strategies genuinely forked, what each
+  # one's judgement looked like, and what overriding the pick would cost.
+  # On demand, because most missions are never questioned.
+  defp render_decision_brief(assigns) do
+    ~H"""
+    <div class="panel" style="margin-bottom:1rem">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem">
+        <div class="panel-title" style="margin:0">Decision Brief</div>
+        <button
+          class="btn btn-grey"
+          style="font-size:0.8rem"
+          phx-click="generate_report"
+          disabled={@report_generating}
+        >
+          {cond do
+            @report_generating -> "Synthesising…"
+            @report -> "Regenerate"
+            true -> "Generate"
+          end}
+        </button>
+      </div>
+
+      <div :if={is_nil(@report) && !@report_generating} style="color:#8b949e; font-size:0.85rem; margin-top:0.5rem">
+        Reads the competing designs and the review together, and writes up what the
+        choice actually was — one model call over artifacts this mission already has.
+      </div>
+
+      <div :if={@report}>
+        <div style="font-size:1.02rem; line-height:1.5; margin:0.75rem 0 0.5rem">
+          {@report["headline"]}
+        </div>
+
+        <div :if={@report["convergence"]} style="font-size:0.9rem; color:#c9d1d9; margin-bottom:0.9rem">
+          {@report["convergence"]}
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(15rem, 1fr)); gap:1rem">
+          <div :for={d <- get_list(@report, "designs")}>
+            <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.35rem">
+              <span class={"badge badge-#{design_strategy_badge(d["strategy"])}"}>{strategy_label(d["strategy"])}</span>
+              <span :if={winner?(d["strategy"], @review)} style="color:#d29922">★</span>
+            </div>
+            <div style="font-size:0.85rem; margin-bottom:0.4rem">{d["character"]}</div>
+            <div :for={n <- List.wrap(d["notable"])} style="font-size:0.82rem; color:#8b949e">
+              <span class="coverage-ok">✓</span> {n}
+            </div>
+            <div :for={m <- List.wrap(d["missed"])} style="font-size:0.82rem; color:#8b949e">
+              <span style="color:#f85149">✗</span> {m}
+            </div>
+          </div>
+        </div>
+
+        <div :if={@report["decision"]} style="font-size:0.9rem; margin-top:0.9rem; padding-left:0.75rem; border-left:2px solid #d29922">
+          {@report["decision"]}
+        </div>
+
+        <div :if={get_list(@report, "watch_items") != []} style="margin-top:0.9rem">
+          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Watch Items</div>
+          <div :for={w <- get_list(@report, "watch_items")} class="issue-item issue-medium">
+            <div style="font-size:0.85rem">{w["concern"]}</div>
+            <div :if={w["why_it_matters"]} style="font-size:0.8rem; color:#8b949e; margin-top:0.2rem">
+              → {w["why_it_matters"]}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     """
   end
 
@@ -536,6 +639,8 @@ defmodule GiTF.Dashboard.DesignLive do
     |> assign(:strategy_list, active_strategies)
     |> assign(:review, review)
     |> assign(:active_tab, active_tab)
+    |> assign(:report, GiTF.Major.DesignReport.get(mission.id))
+    |> assign_new(:report_generating, fn -> false end)
   end
 
   # -- Helpers ---------------------------------------------------------------
