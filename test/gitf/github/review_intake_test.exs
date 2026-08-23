@@ -5,14 +5,17 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
   factory does not already own, and a redelivered event must not queue the
   same work twice.
   """
-  use ExUnit.Case, async: false
+  # StoreCase gives each module its own Archive. Calling ensure_infrastructure
+  # directly was not enough: it leaves the :mission_outcomes index tables to
+  # whatever ran before, which held locally by luck of ordering and blew up in
+  # CI's wider tag set with "table identifier does not refer to an existing
+  # ETS table".
+  use GiTF.StoreCase
 
   alias GiTF.GitHub.ReviewIntake
   alias GiTF.Outcomes
 
   setup do
-    GiTF.Test.StoreHelper.ensure_infrastructure()
-
     prev_intake = Application.get_env(:gitf, :pr_review_intake_enabled)
     prev_outcomes = Application.get_env(:gitf, :outcomes_enabled)
     prev_aramaki = Application.get_env(:gitf, :aramaki)
