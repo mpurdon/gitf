@@ -1,11 +1,19 @@
 defmodule GiTF.Aramaki.Lifecycle do
   @moduledoc """
-  Reports a mission's progress back onto its source GitHub issue.
+  Reports a mission's progress back onto whatever prompted it — a GitHub
+  issue, or the pull request whose review asked for changes.
 
-  All calls are best-effort and no-op unless the mission actually came from a
-  GitHub issue (`:source_issue` set) and the sector has GitHub credentials.
-  Every comment is signed so the factory can recognise (and ignore) its own
-  activity — loop prevention lives in `Aramaki.Policy.admit_issue?/2`.
+  Outbound GitHub communication lives here for the same reason admission
+  does: the factory has one boundary with the outside world, and spreading
+  "tell the human what happened" across whichever module happens to finish
+  the work is how half the paths end up silent. Acting on review feedback
+  without acknowledging it is worse than not acting — the reviewer sees
+  commits appear with no way to tell whether they answered the review.
+
+  All calls are best-effort and no-op unless the mission carries a usable
+  source linkage and the sector has GitHub credentials. Every comment is
+  signed so the factory can recognise (and ignore) its own activity — loop
+  prevention lives in `Aramaki.Policy.admit_issue?/2` and `admit_review?/2`.
   """
 
   require Logger
@@ -57,7 +65,73 @@ defmodule GiTF.Aramaki.Lifecycle do
     end)
   end
 
+  @doc """
+  A review-driven follow-up finished → say so on the pull request.
+
+  Deliberately does not claim each point was addressed: the factory has no
+  per-comment mapping, and a confident "all feedback addressed" that is
+  wrong is worse than an honest pointer. It states what it responded to and
+  where to look, and leaves the judgement — and the Resolve button — with
+  the reviewer.
+  """
+  @spec on_review_addressed(map()) :: :ok
+  def on_review_addressed(mission) do
+    with_pr(mission, fn sector, num, src ->
+      reviewer = src["reviewer"]
+      who = if reviewer, do: "@#{reviewer}'s", else: "the"
+
+      comment(
+        sector,
+        num,
+        "Pushed changes in response to #{who} review request.\n\n" <>
+          "Mission `#{mission.id}` worked from the review body and committed to this branch — " <>
+          "the diff above is the response. Please re-review rather than assuming each point is " <>
+          "resolved: the factory cannot map changes to individual inline comments, so it makes " <>
+          "no claim about which are settled." <> @signature
+      )
+    end)
+  end
+
+  @doc "A review-driven follow-up failed → say that too, rather than going quiet."
+  @spec on_review_failed(map(), String.t()) :: :ok
+  def on_review_failed(mission, reason) do
+    with_pr(mission, fn sector, num, src ->
+      reviewer = src["reviewer"]
+      who = if reviewer, do: "@#{reviewer}", else: "the reviewer"
+
+      comment(
+        sector,
+        num,
+        "#{who}: mission `#{mission.id}` could not act on this review request — " <>
+          "#{String.slice(reason, 0, 300)}.\n\nNothing was pushed. The request stands." <>
+          @signature
+      )
+    end)
+  end
+
   # -- Internals -------------------------------------------------------------
+
+  # PR-review missions carry a pr_url rather than the {number, repo} pair an
+  # issue-sourced mission has, so the owner/repo/number are parsed back out.
+  # GitHub's issue-comments endpoint serves pull requests too, which is why
+  # add_comment/3 works unchanged here.
+  defp with_pr(mission, fun) do
+    with src when is_map(src) <- Map.get(mission, :source_issue),
+         url when is_binary(url) <- src["pr_url"] || src[:pr_url],
+         [_, owner, repo, num] <-
+           Regex.run(~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}, url),
+         {:ok, sector} <- GiTF.Sector.by_github("#{owner}/#{repo}"),
+         {number, _} <- Integer.parse(num) do
+      fun.(sector, number, src)
+      :ok
+    else
+      _ -> :ok
+    end
+  rescue
+    e ->
+      Logger.debug("Aramaki.Lifecycle PR side-effect failed: #{Exception.message(e)}")
+      :ok
+  end
 
   defp with_issue(mission, fun) do
     with %{number: num, repo: repo} when is_integer(num) <- Map.get(mission, :source_issue),

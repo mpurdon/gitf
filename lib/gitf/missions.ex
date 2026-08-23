@@ -453,7 +453,8 @@ defmodule GiTF.Missions do
   defp notify_aramaki_terminal(mission, outcome) do
     source = Map.get(mission, :source)
 
-    if source in ["github_issue", "project"] and !Map.get(mission, :aramaki_notified, false) do
+    if source in ["github_issue", "project", "pr_review"] and
+         !Map.get(mission, :aramaki_notified, false) do
       Archive.update(:missions, mission.id, &Map.put(&1, :aramaki_notified, true))
 
       case source do
@@ -461,6 +462,18 @@ defmodule GiTF.Missions do
           case outcome do
             :completed -> GiTF.Aramaki.Lifecycle.on_merged(mission)
             {:failed, reason} -> GiTF.Aramaki.Lifecycle.on_failed(mission, reason || "unknown")
+          end
+
+        # A review asked for changes; the reviewer is owed an answer either
+        # way. Silence after a request is indistinguishable from the factory
+        # never having seen it.
+        "pr_review" ->
+          case outcome do
+            :completed ->
+              GiTF.Aramaki.Lifecycle.on_review_addressed(mission)
+
+            {:failed, reason} ->
+              GiTF.Aramaki.Lifecycle.on_review_failed(mission, reason || "unknown")
           end
 
         "project" ->
