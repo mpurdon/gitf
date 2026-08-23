@@ -487,8 +487,11 @@ defmodule GiTF.Dashboard.DesignLive do
             <div :for={cov <- get_list(@review, "coverage")} class="coverage-item">
               <span :if={cov["covered"]} class="coverage-ok">✓</span>
               <span :if={cov["covered"] != true} class="coverage-gap">✗</span>
-              <span>{cov["req_id"]}</span>
-              <span :if={cov["gap"]} style="color:#f85149; font-size:0.8rem; margin-left:0.3rem">({cov["gap"]})</span>
+              <span style="font-weight:600; white-space:nowrap">{cov["req_id"]}</span>
+              <span :if={@requirement_index[cov["req_id"]]} style="color:#8b949e">
+                {@requirement_index[cov["req_id"]]}
+              </span>
+              <span :if={cov["gap"]} style="color:#f85149; font-size:0.8rem">({cov["gap"]})</span>
             </div>
           </div>
 
@@ -640,6 +643,10 @@ defmodule GiTF.Dashboard.DesignLive do
     |> assign(:review, review)
     |> assign(:active_tab, active_tab)
     |> assign(:report, GiTF.Major.DesignReport.get(mission.id))
+    |> assign(
+      :requirement_index,
+      requirement_index(GiTF.Missions.get_artifact(mission.id, "requirements"))
+    )
     |> assign_new(:report_generating, fn -> false end)
   end
 

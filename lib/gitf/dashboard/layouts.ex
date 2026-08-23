@@ -461,7 +461,7 @@ defmodule GiTF.Dashboard.Layouts do
 
           /* -- Design viewer ------------------------------------------------- */
           .design-layout { display: grid; grid-template-columns: 1fr 300px; gap: 1rem; }
-          .review-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1rem; }
+          .review-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
           .tab-minimal.tab-active { border-bottom-color: #58a6ff; }
           .tab-normal.tab-active { border-bottom-color: #3fb950; }
           .tab-complex.tab-active { border-bottom-color: #a78bfa; }
@@ -471,7 +471,10 @@ defmodule GiTF.Dashboard.Layouts do
           .section-header:hover { color: #58a6ff; }
           .section-chevron { transition: transform 0.15s; display: inline-block; }
           .section-chevron.open { transform: rotate(90deg); }
-          .coverage-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0; font-size: 0.85rem; }
+          /* Requirement text sits beside the id, so rows wrap rather than
+             clip: align to the first line, not the vertical centre. */
+          .coverage-item { display: flex; align-items: baseline; gap: 0.4rem; padding: 0.25rem 0; font-size: 0.85rem; line-height: 1.45; }
+          .coverage-item > span:last-child { min-width: 0; }
           .coverage-ok { color: #3fb950; }
           .coverage-gap { color: #f85149; }
           .issue-item { padding: 0.4rem 0 0.4rem 0.6rem; margin: 0.25rem 0; font-size: 0.85rem; }

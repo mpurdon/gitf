@@ -156,6 +156,24 @@ defmodule GiTF.Dashboard.Helpers do
     }
   end
 
+  @doc """
+  Maps requirement ids to their descriptions, e.g. `%{"FR-1" => "..."}`.
+
+  Covers both halves of a requirements artifact — `functional_requirements`
+  and `non_functional` — because coverage lists cite ids from both and a
+  bare "NFR-2 ✓" tells the reader nothing.
+  """
+  def requirement_index(requirements) do
+    (get_list(requirements, "functional_requirements") ++
+       get_list(requirements, "non_functional"))
+    |> Enum.reduce(%{}, fn req, acc ->
+      case {Map.get(req, "id"), Map.get(req, "description")} do
+        {id, desc} when is_binary(id) and is_binary(desc) -> Map.put(acc, id, desc)
+        _ -> acc
+      end
+    end)
+  end
+
   @doc "Sorts review issues by severity (high > medium > low)."
   def sort_issues(issues) do
     order = %{"high" => 0, "medium" => 1, "low" => 2}
