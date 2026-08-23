@@ -111,6 +111,40 @@ defmodule GiTF.Phases.Design do
 
   def terminal(_mission, _kind, _artifact), do: :ok
 
+  @doc """
+  The sorted, unique set of files a design artifact's components name.
+
+  This is the mission's claim on the codebase, made at design time and
+  wider than any single op's `target_files` — planning has not decomposed
+  into ops yet when the design is written, and some claimed files are
+  never assigned to an op at all. Drift classification and the design page
+  both read it, so it lives here rather than in either caller.
+  """
+  @spec files(map() | nil) :: [String.t()]
+  def files(design) when is_map(design) do
+    design
+    |> Map.get("components", [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"files" => files} -> List.wrap(files)
+      _ -> []
+    end)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  def files(_), do: []
+
+  @doc """
+  The file set a mission has claimed, from its promoted design artifact.
+
+  Returns `[]` before the design phase has produced anything.
+  """
+  @spec claimed_files(String.t() | nil) :: [String.t()]
+  def claimed_files(nil), do: []
+  def claimed_files(mission_id), do: files(GiTF.Missions.get_artifact(mission_id, "design"))
+
   # -- Helpers ---------------------------------------------------------------
 
   defp design_ops(mission) do

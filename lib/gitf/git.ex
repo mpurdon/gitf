@@ -535,6 +535,24 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  Lists commit subjects in a range, newest first, capped at `limit`.
+
+  Subjects only — a mission being told what landed underneath it needs the
+  shape of the change, not its diff.
+  """
+  @spec log_subjects(String.t(), String.t(), pos_integer()) ::
+          {:ok, [String.t()]} | {:error, String.t()}
+  def log_subjects(repo_path, range, limit \\ 20) do
+    case safe_cmd(["log", "--no-merges", "--format=%h %s", "-n", to_string(limit), range],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} -> {:ok, String.split(output, "\n", trim: true)}
+      {output, _} -> {:error, String.trim(output)}
+    end
+  end
+
+  @doc """
   Counts commits in a range (`git rev-list --count <range>`).
   """
   @spec count_commits(String.t(), String.t()) :: {:ok, non_neg_integer()} | {:error, String.t()}

@@ -1069,6 +1069,16 @@ defmodule GiTF.Major.Orchestrator do
     lsp_diagnostics = collect_lsp_diagnostics_for_validation(mission, changed_files)
     exec_validation = run_exec_validation(mission, variant_id)
 
+    # Main can move under a mission that takes an hour. The fix loop was
+    # reconciling other people's merged work without ever being told what
+    # that work was — and when the merge was clean, nothing signalled that
+    # the plan might have been overtaken at all.
+    base_moved =
+      case GiTF.Validation.canonical_impl_shell(mission) do
+        %{worktree_path: wt} -> GiTF.Drift.main_advance_summary(wt)
+        _ -> nil
+      end
+
     prompt =
       PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
         diff_base: diff_base,
@@ -1076,6 +1086,7 @@ defmodule GiTF.Major.Orchestrator do
         lsp_diagnostics: lsp_diagnostics,
         exec_validation: exec_validation,
         merge_conflicts: merge_conflicts,
+        base_moved: base_moved,
         unresolved_review: GiTF.Phases.Review.unresolved_objection(mission)
       )
 

@@ -9,8 +9,9 @@ defmodule GiTF.Drift do
   ## Drift Levels
 
     * `:clean` — ghost's base is still an ancestor of origin/main
-    * `:behind` — main advanced but didn't touch ghost's target_files
-    * `:risky` — main touched files the ghost is targeting (but hasn't modified yet)
+    * `:behind` — main advanced but touched nothing the mission claimed
+    * `:risky` — main touched files the ghost targets, or files the
+      mission's design claimed but no op has opened yet
     * `:conflicted` — main touched files the ghost has already modified
     * `:unknown` — can't determine (no base SHA, worktree gone, force-push)
 
@@ -101,6 +102,41 @@ defmodule GiTF.Drift do
       :ok
     end
   end
+
+  @doc """
+  Summarises what landed on main since a worktree diverged from it.
+
+  Returns `nil` when main has not moved, so callers can treat "no drift"
+  and "could not tell" the same way — neither should put a section in a
+  prompt. Otherwise `%{commits:, subjects:, files:}`, capped so a busy
+  main branch cannot dominate the request.
+
+  The validation phase reads this: a fix loop reconciling conflict markers
+  is reconciling someone else's merged work, and it was previously doing so
+  without ever being told what that work was.
+  """
+  @spec main_advance_summary(String.t(), String.t()) :: map() | nil
+  def main_advance_summary(worktree_path, main_ref \\ "origin/main") do
+    with {:ok, base} <- Git.merge_base(worktree_path, "HEAD", main_ref),
+         {:ok, head} <- Git.rev_parse(worktree_path, main_ref),
+         false <- base == head,
+         {:ok, count} when count > 0 <- Git.count_commits(worktree_path, "#{base}..#{head}") do
+      %{
+        commits: count,
+        subjects: list_or_empty(Git.log_subjects(worktree_path, "#{base}..#{head}", 15)),
+        files:
+          worktree_path
+          |> Git.changed_files_between(base, head)
+          |> list_or_empty()
+          |> Enum.take(40)
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp list_or_empty({:ok, list}) when is_list(list), do: list
+  defp list_or_empty(_), do: []
 
   @doc """
   Attempts to auto-rebase a shell if it's safe. Returns `{:ok, :rebased}`,
@@ -214,19 +250,31 @@ defmodule GiTF.Drift do
         _ -> []
       end
 
-    target_files = get_op_target_files(shell.ghost_id)
+    {target_files, design_files} = claimed_files(shell.ghost_id)
 
     main_set = MapSet.new(main_changed)
-    target_set = MapSet.new(target_files)
     ghost_set = MapSet.new(ghost_modified)
 
     ghost_modified_overlap = MapSet.intersection(ghost_set, main_set) |> MapSet.to_list()
-    overlapping = MapSet.intersection(target_set, main_set) |> MapSet.to_list()
+    overlapping = main_set |> MapSet.intersection(MapSet.new(target_files)) |> MapSet.to_list()
+
+    # The op's target_files are only the slice of the mission assigned to
+    # this ghost. The design claimed a wider set, and a merged PR landing in
+    # any of it can invalidate the plan this ghost is executing even though
+    # no file it will personally open has moved. Scoring that as plain
+    # `:behind` auto-rebased the shell and let the mission carry on against
+    # an assumption that no longer held.
+    design_overlap =
+      main_set
+      |> MapSet.intersection(MapSet.new(design_files))
+      |> MapSet.difference(MapSet.new(overlapping))
+      |> MapSet.to_list()
 
     level =
       cond do
         ghost_modified_overlap != [] -> :conflicted
         overlapping != [] -> :risky
+        design_overlap != [] -> :risky
         true -> :behind
       end
 
@@ -235,6 +283,7 @@ defmodule GiTF.Drift do
       main_sha: main_sha,
       main_changed_files: main_changed,
       overlapping_files: overlapping,
+      design_overlap_files: design_overlap,
       ghost_modified_overlap: ghost_modified_overlap,
       reason: nil
     }
@@ -242,13 +291,21 @@ defmodule GiTF.Drift do
     {level, meta}
   end
 
-  defp get_op_target_files(ghost_id) do
+  # Returns `{op_target_files, mission_design_files}` — kept separate so the
+  # persisted meta can say which claim was hit, since they call for different
+  # responses: an op-target collision is a merge problem, a design-only
+  # collision is a "your plan may be stale" problem.
+  defp claimed_files(ghost_id) do
     case Archive.find_one(:ops, &(&1[:ghost_id] == ghost_id)) do
-      %{target_files: files} when is_list(files) -> files
-      _ -> []
+      nil ->
+        {[], []}
+
+      op ->
+        targets = if is_list(op[:target_files]), do: op[:target_files], else: []
+        {targets, GiTF.Phases.Design.claimed_files(op[:mission_id])}
     end
   rescue
-    _ -> []
+    _ -> {[], []}
   end
 
   # -- Private: Persistence + Telemetry ----------------------------------------

@@ -120,12 +120,7 @@ defmodule GiTF.Dashboard.Helpers do
   def count_design_files(design), do: design |> design_files() |> length()
 
   @doc "The sorted, unique set of files a design's components touch."
-  def design_files(design) do
-    get_list(design, "components")
-    |> Enum.flat_map(&(Map.get(&1, "files", []) |> List.wrap()))
-    |> Enum.uniq()
-    |> Enum.sort()
-  end
+  defdelegate design_files(design), to: GiTF.Phases.Design, as: :files
 
   @doc """
   Compares which files each design strategy touches.

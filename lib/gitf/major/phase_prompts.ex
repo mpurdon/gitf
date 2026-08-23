@@ -778,6 +778,38 @@ defmodule GiTF.Major.PhasePrompts do
           """
       end
 
+    base_moved_block =
+      case Keyword.get(opts, :base_moved) do
+        %{commits: n, subjects: subjects, files: files} when n > 0 ->
+          """
+
+          ## MAIN MOVED WHILE THIS MISSION RAN
+
+          #{n} commit(s) landed on the main branch after this work began. The
+          plan above was written against the tree BEFORE them.
+
+          ```
+          #{Enum.join(subjects, "\n")}
+          ```
+
+          Files they touched:
+
+          ```
+          #{Enum.join(files, "\n")}
+          ```
+
+          Judge the implementation against the code as it is NOW, not as the
+          plan assumed it would be. In particular, report a gap when this work
+          duplicates something those commits already added, contradicts a
+          convention they established, or calls an interface they changed —
+          even if it compiles and every requirement is otherwise met. A clean
+          merge is not evidence that the plan survived.
+          """
+
+        _ ->
+          ""
+      end
+
     """
     # Validation Phase
 
@@ -797,7 +829,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}#{merge_conflicts_block}#{unresolved_review_block}
+    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}#{base_moved_block}#{merge_conflicts_block}#{unresolved_review_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's
