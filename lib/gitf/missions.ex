@@ -746,6 +746,14 @@ defmodule GiTF.Missions do
         GiTF.Ops.list(mission_id: mission_id)
         |> Enum.each(fn op -> GiTF.Ops.kill(op[:id] || op.id) end)
 
+        # Tell whoever asked for this work that it stopped, BEFORE the record
+        # goes away. Killing deletes the mission outright, so nothing
+        # downstream can sweep it: a killed review-driven run left the
+        # reviewer with no reply and their request marked handled forever,
+        # recoverable only by editing the store by hand. Idempotent via
+        # aramaki_notified, and a no-op for missions with no external source.
+        notify_aramaki_terminal(quest, {:failed, "killed by operator"})
+
         Archive.delete(:missions, mission_id)
         :ok
     end

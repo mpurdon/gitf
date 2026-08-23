@@ -289,4 +289,17 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
     assert ReviewIntake.release(%{}) == :ok
     assert ReviewIntake.release(%{source_issue: %{}}) == :ok
   end
+
+  test "killing a review-driven mission releases the review", ctx do
+    # kill/1 deletes the record outright, so nothing downstream can sweep it.
+    # Without notifying first, a killed run left the reviewer with no reply
+    # and their request handled forever — recoverable only by hand.
+    tracked_pr(ctx.url)
+    assert {:ok, :mission_created, m} = ReviewIntake.dispatch(payload(ctx.url))
+    assert {:ok, :ignored, :already_handled} = ReviewIntake.dispatch(payload(ctx.url))
+
+    :ok = GiTF.Missions.kill(m.id)
+
+    assert {:ok, :mission_created, _} = ReviewIntake.dispatch(payload(ctx.url))
+  end
 end
