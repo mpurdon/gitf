@@ -291,6 +291,8 @@ defmodule GiTF.Major.PhasePrompts do
     3. Identify non-functional requirements (performance, security, etc.)
     4. Note constraints from the existing codebase
     5. Explicitly list what is OUT of scope
+    6. Name the work in 3-5 words, as a human would title the pull request —
+       the feature or fix itself, not the files it touches
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 
@@ -298,6 +300,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     ```json
     {
+      "title": "Configurable PR approve messages",
       "functional_requirements": [
         {
           "id": "FR-1",

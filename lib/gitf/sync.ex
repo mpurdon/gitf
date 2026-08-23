@@ -54,7 +54,7 @@ defmodule GiTF.Sync do
          {:ok, sector} <- fetch_sector_for_cells(shells) do
       with_sector_lock(sector.id, fn ->
         with {:ok, main_branch} <- detect_main_branch(sector.path),
-             quest_branch = "mission/#{sanitize_branch_segment(mission.name)}",
+             quest_branch = "mission/#{branch_slug(mission)}",
              :ok <- create_quest_branch(sector.path, quest_branch, main_branch) do
           merge_cells_into_quest_branch(sector.path, quest_branch, shells)
         end
@@ -103,6 +103,56 @@ defmodule GiTF.Sync do
     e ->
       Logger.warning("create_local_pr failed: #{Exception.message(e)}")
       {:error, {:pr_creation_failed, Exception.message(e)}}
+  end
+
+  @slug_max_length 48
+
+  @doc false
+  # Public for tests: the branch name is a user-facing contract.
+  def branch_slug(mission) do
+    slug =
+      mission
+      |> mission_title()
+      |> sanitize_branch_segment()
+      |> String.downcase()
+      |> truncate_on_word_boundary(@slug_max_length)
+
+    case {Map.get(mission, :id), slug} do
+      {id, ""} when is_binary(id) and id != "" -> id
+      {id, slug} when is_binary(id) and id != "" -> "#{id}-#{slug}"
+      {_, ""} -> "untitled"
+      {_, slug} -> slug
+    end
+  end
+
+  # Drops the trailing partial word only when the slice actually cut one off;
+  # trimming unconditionally turned "approve-messages" into "approve".
+  defp truncate_on_word_boundary(slug, max) when is_binary(slug) do
+    if String.length(slug) <= max do
+      slug
+    else
+      slug
+      |> String.slice(0, max)
+      |> String.replace(~r/-[^-]*$/, "")
+      |> String.trim_trailing("-")
+    end
+  end
+
+  # The branch name has to answer two questions for whoever checks it out:
+  # which mission produced this, and what is it? The mission id answers the
+  # first — nothing else in the name is unique across runs. The requirements
+  # title answers the second far better than `mission.name`, which is a slug
+  # of the goal's opening 50 characters and so usually leads with a file path
+  # or a preamble rather than the feature.
+  defp mission_title(mission) do
+    with id when is_binary(id) <- Map.get(mission, :id),
+         %{"title" => title} <- GiTF.Missions.get_artifact(id, "requirements"),
+         title when is_binary(title) <- title,
+         trimmed when trimmed != "" <- String.trim(title) do
+      trimmed
+    else
+      _ -> Map.get(mission, :name)
+    end
   end
 
   # Reduces a mission name (which may contain spaces, colons, slashes, and
