@@ -66,17 +66,17 @@ defmodule GiTF.Outcomes.TrackerTest do
   end
 
   describe "stale records are stopped on tick (via Analyzer)" do
-    test "records older than 72h get tracking_stopped" do
+    test "records with no activity for 72h get tracking_stopped" do
       Application.put_env(:gitf, :outcomes_enabled, true)
 
-      # Seed a record with an ancient first_tracked_at so the stale guard fires
-      # without any real GH call.
+      # Staleness means QUIET, not old: age the activity anchor, not just the
+      # tracking start. A PR still receiving reviews must never age out.
       old = DateTime.add(DateTime.utc_now(), -(72 * 3600 + 300), :second)
       {:ok, o} = Outcomes.start_tracking(%{id: "msn-stale", sector_id: nil}, "https://x/y/pull/1")
 
       {:ok, _} =
         Outcomes.update(o.id, fn rec ->
-          Map.merge(rec, %{first_tracked_at: old})
+          Map.merge(rec, %{first_tracked_at: old, last_activity_at: old})
         end)
 
       # Poll via an in-process call to the Tracker's private flow. We can't

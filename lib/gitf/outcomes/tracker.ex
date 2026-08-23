@@ -152,7 +152,13 @@ defmodule GiTF.Outcomes.Tracker do
           # writer (e.g. Alerts.downgrade_to_broke_main on a merged_clean
           # outcome) does not get silently clobbered by our pre-captured
           # snapshot.
-          delta = Map.take(updated, @compared_fields ++ [:last_polled_at, :poll_count])
+          # Reaching this branch means the PR itself changed, which is what
+          # staleness should be measured from. Without this, a PR is retired
+          # for being old rather than for being quiet.
+          delta =
+            updated
+            |> Map.take(@compared_fields ++ [:last_polled_at, :poll_count])
+            |> Map.put(:last_activity_at, now)
 
           {:ok, stored} =
             Outcomes.update(outcome.id, fn current ->

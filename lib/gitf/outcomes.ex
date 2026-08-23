@@ -51,6 +51,9 @@ defmodule GiTF.Outcomes do
           revert_detected: boolean(),
           outcome_category: category(),
           first_tracked_at: DateTime.t(),
+          # Last time the PR itself changed. Staleness is measured from here
+          # so an actively-reviewed PR is never retired for merely being old.
+          last_activity_at: DateTime.t() | nil,
           last_polled_at: DateTime.t() | nil,
           next_poll_at: DateTime.t() | nil,
           poll_count: non_neg_integer(),
@@ -131,6 +134,7 @@ defmodule GiTF.Outcomes do
             revert_detected: false,
             outcome_category: :pending,
             first_tracked_at: now,
+            last_activity_at: now,
             last_polled_at: nil,
             next_poll_at: now,
             poll_count: 0,

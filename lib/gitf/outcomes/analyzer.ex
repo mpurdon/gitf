@@ -37,12 +37,23 @@ defmodule GiTF.Outcomes.Analyzer do
     end
   end
 
-  @doc "True when the outcome has been open beyond the stale window."
+  @doc """
+  True when nothing has happened on the PR for longer than the stale window.
+
+  Measured from the last time the PR itself changed — not from when tracking
+  began. Anchoring on `first_tracked_at` retired a PR purely for being old,
+  which abandoned exactly the ones becoming interesting: a change request
+  arrived on PR #8 an hour after its 72h elapsed, and the tracker had already
+  stopped watching, so the review was never seen.
+
+  Falls back to `first_tracked_at` for records written before activity was
+  recorded, so an old row still ages out rather than being tracked forever.
+  """
   @spec stale?(map(), DateTime.t()) :: boolean()
   def stale?(outcome, now \\ DateTime.utc_now()) do
-    case Map.get(outcome, :first_tracked_at) do
-      %DateTime{} = first ->
-        DateTime.diff(now, first, :second) > @stale_window_seconds
+    case Map.get(outcome, :last_activity_at) || Map.get(outcome, :first_tracked_at) do
+      %DateTime{} = anchor ->
+        DateTime.diff(now, anchor, :second) > @stale_window_seconds
 
       _ ->
         false

@@ -31,16 +31,18 @@ defmodule GiTF.Runtime.AgentLoopHeartbeatTest do
   test "emits heartbeats while the task is still running" do
     {on_progress, _} = collector()
 
-    # Task sleeps ~110ms so with a 30ms heartbeat interval we expect
-    # ~3 heartbeats before the task resolves. Assert at least 2 to avoid
-    # scheduler-jitter flakiness.
-    task = Task.async(fn -> Process.sleep(110); {:ok, :finished} end)
+    # Periodicity needs >= 2 heartbeats, but a 110ms window at a 30ms
+    # interval leaves only ~3 ticks of headroom — under full-suite load the
+    # scheduler ate one often enough to fail intermittently and cost real
+    # diagnostic time. A wider window buys ~10 expected ticks for the same
+    # assertion, so jitter no longer decides the outcome.
+    task = Task.async(fn -> Process.sleep(400); {:ok, :finished} end)
     result = AgentLoop.wait_for_llm(task, on_progress, 30)
 
     assert result == {:ok, :finished}
 
     heartbeats =
-      for _ <- 1..10, reduce: 0 do
+      for _ <- 1..30, reduce: 0 do
         acc ->
           receive do
             {:progress, %{type: :heartbeat}} -> acc + 1
@@ -50,7 +52,7 @@ defmodule GiTF.Runtime.AgentLoopHeartbeatTest do
       end
 
     assert heartbeats >= 2,
-           "expected at least 2 heartbeats during ~110ms sleep at 30ms interval, got #{heartbeats}"
+           "expected at least 2 heartbeats during ~400ms sleep at 30ms interval, got #{heartbeats}"
   end
 
   test "propagates LLMClient {:error, reason} unchanged — no wrapping" do
