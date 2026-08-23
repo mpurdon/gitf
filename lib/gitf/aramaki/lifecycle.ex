@@ -99,11 +99,18 @@ defmodule GiTF.Aramaki.Lifecycle do
       reviewer = src["reviewer"]
       who = if reviewer, do: "@#{reviewer}", else: "the reviewer"
 
+      # Never claim nothing was pushed: a mission can do the work correctly
+      # and then fail a later phase. msn-dd29a1 committed the requested
+      # one-line fix and failed at validation, and this comment told the
+      # reviewer their branch was untouched — a confident falsehood, which is
+      # worse than silence. State only what is known: the run did not finish.
       comment(
         sector,
         num,
-        "#{who}: mission `#{mission.id}` could not act on this review request — " <>
-          "#{String.slice(reason, 0, 300)}.\n\nNothing was pushed. The request stands." <>
+        "#{who}: mission `#{mission.id}` did not complete this review request — " <>
+          "#{String.slice(reason, 0, 300)}.\n\n" <>
+          "Check the branch before assuming nothing changed: work may have been " <>
+          "committed before the run stopped. The request stands until you resolve it." <>
           @signature
       )
     end)
