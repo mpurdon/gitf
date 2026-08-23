@@ -47,7 +47,7 @@ defmodule GiTF.Dashboard.EndpointTest do
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, "GiTF Dashboard")
-      assert String.contains?(conn.resp_body, "Dashboard Overview")
+      assert String.contains?(conn.resp_body, "The Catwalk")
     end
 
     test "serves the missions page at /missions" do

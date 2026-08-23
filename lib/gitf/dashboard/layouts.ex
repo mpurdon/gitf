@@ -205,6 +205,13 @@ defmodule GiTF.Dashboard.Layouts do
           }
           .btn-green { background: #23863633; color: #3fb950; border-color: #23863655; }
           .btn-green:hover { background: #23863655; }
+          /* Panic control in the nav. Quiet until hovered — it should be
+             findable at a glance without competing with navigation. */
+          .nav-stop { background: #f8514922; color: #f85149; border: 1px solid #f8514955; border-radius: 4px; padding: 0.1rem 0.45rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; margin-left: 0.5rem; }
+          .nav-stop:hover { background: #f85149; color: #0d1117; }
+          .nav-stop-cancel { background: none; color: #8b949e; border: 1px solid #30363d; border-radius: 4px; padding: 0.1rem 0.45rem; font-size: 0.7rem; cursor: pointer; margin-left: 0.25rem; }
+          .nav-stop-confirm { font-size: 0.7rem; color: #f85149; margin-left: 0.5rem; display: inline-flex; align-items: center; }
+          .nav-stop-result { font-size: 0.7rem; color: #8b949e; margin-left: 0.5rem; }
           .btn-red { background: #f8514933; color: #f85149; border-color: #f8514955; }
           .btn-red:hover { background: #f8514955; }
           .btn-blue { background: #1f6feb33; color: #58a6ff; border-color: #1f6feb55; }

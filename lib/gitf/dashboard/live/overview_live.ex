@@ -34,7 +34,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     socket =
       socket
       |> init_toasts()
-      |> assign(:page_title, "Overview")
+      |> assign(:page_title, "The Catwalk")
       |> assign(:current_path, "/")
       |> assign(:last_updated, DateTime.utc_now())
       |> assign(:dark_factory, GiTF.Config.dark_factory?())
@@ -470,7 +470,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
         <div style="display:flex; align-items:baseline; gap:0.75rem">
-          <h1 class="page-title" style="margin-bottom:0">Dashboard Overview</h1>
+          <h1 class="page-title" style="margin-bottom:0">The Catwalk</h1>
           <% health = case @health_status do
             %{ok?: true, result: r} -> r
             _ -> :loading

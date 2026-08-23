@@ -35,10 +35,19 @@ defmodule GiTF.Web.DashboardTest do
     :ok
   end
 
-  test "dashboard renders successfully" do
+  # The legacy Factory Floor moved off "/" when the Catwalk took the root.
+  # It stays reachable at /floor for one release.
+  test "the legacy factory floor still renders at /floor" do
     conn = Phoenix.ConnTest.build_conn()
-    {:ok, _view, html} = live(conn, "/")
+    {:ok, _view, html} = live(conn, "/floor")
     assert html =~ "GiTF Control Plane"
     assert html =~ "Active Ghosts"
+  end
+
+  test "the root serves the Catwalk, not the factory floor" do
+    conn = Phoenix.ConnTest.build_conn()
+    {:ok, _view, html} = live(conn, "/")
+    assert html =~ "The Catwalk"
+    refute html =~ "GiTF Control Plane"
   end
 end

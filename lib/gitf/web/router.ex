@@ -69,10 +69,22 @@ defmodule GiTF.Web.Router do
     plug(:put_secure_browser_headers)
   end
 
-  scope "/", GiTF.Web do
+  # The root is the Catwalk — the dashboard suite's overview. It replaced
+  # the original single-page "Factory Floor", which survives at /floor for
+  # one release because it was the only web surface with a stop control
+  # until those were ported into the suite.
+  scope "/", GiTF.Dashboard do
+    pipe_through(:dashboard)
+
+    live_session :catwalk, on_mount: GiTF.Web.TailnetAuth do
+      live("/", OverviewLive)
+    end
+  end
+
+  scope "/floor", GiTF.Web do
     pipe_through(:browser)
 
-    live_session :root, on_mount: GiTF.Web.TailnetAuth do
+    live_session :legacy_floor, on_mount: GiTF.Web.TailnetAuth do
       live("/", Live.Dashboard)
     end
   end

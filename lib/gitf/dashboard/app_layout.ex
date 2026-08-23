@@ -31,7 +31,39 @@ defmodule GiTF.Dashboard.AppLayout do
      socket
      |> assign(safe_assigns)
      |> assign_new(:subscribed, fn -> true end)
+     |> assign_new(:confirming_stop, fn -> false end)
+     |> assign_new(:stop_result, fn -> nil end)
      |> assign_new(:toasts, fn -> Map.get(assigns, :toasts, []) end)}
+  end
+
+  @impl true
+  def handle_event("confirm_stop_all", _params, socket),
+    do: {:noreply, assign(socket, :confirming_stop, true)}
+
+  def handle_event("cancel_stop_all", _params, socket),
+    do: {:noreply, assign(socket, :confirming_stop, false)}
+
+  # Stops every working ghost. Deliberately does NOT kill their missions:
+  # this is "put the tools down", not "throw the work away". Ops whose ghost
+  # is stopped fail and follow the workflow's normal retry path, so a mission
+  # left active can start new ghosts afterwards — kill the mission from its
+  # detail page if you want it to stay stopped.
+  def handle_event("stop_all", _params, socket) do
+    working = GiTF.Ghosts.list(status: GhostStatus.working())
+    stopped = Enum.count(working, fn g -> GiTF.Ghosts.stop(g[:id]) == :ok end)
+
+    GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+      type: :emergency_stop,
+      message: "Stop All triggered from the dashboard: #{stopped}/#{length(working)} ghosts stopped"
+    })
+
+    # Result stays in the component's own assigns. Messaging the parent would
+    # require every page hosting this layout to carry a matching handle_info,
+    # and the ones without a catch-all would crash on it.
+    {:noreply,
+     socket
+     |> assign(:confirming_stop, false)
+     |> assign(:stop_result, "Stopped #{stopped}/#{length(working)}")}
   end
 
   @impl true
@@ -100,6 +132,25 @@ defmodule GiTF.Dashboard.AppLayout do
           <a href={"#{@prefix}/providers"} class={if @current_path == "/providers", do: "active"}>Providers</a>
           <a href={"#{@prefix}/settings"} class={if active?(@current_path, "/settings"), do: "active"}>Settings</a>
           <span style="font-size:0.7rem; color:#484f58; cursor:help" title="Press ? for keyboard shortcuts">?</span>
+
+          <%!-- The panic control lives in the nav, not on one page: when
+                something is running away you should not have to navigate to
+                reach it. Only rendered when there is something to stop. --%>
+          <button
+            :if={@active_ghosts > 0 and not @confirming_stop}
+            phx-click="confirm_stop_all"
+            phx-target={@myself}
+            class="nav-stop"
+            title={"Stop all #{@active_ghosts} working ghost(s)"}
+          >
+            Stop All
+          </button>
+          <span :if={@confirming_stop} class="nav-stop-confirm">
+            Stop {@active_ghosts} ghost(s)?
+            <button phx-click="stop_all" phx-target={@myself} class="nav-stop">Yes</button>
+            <button phx-click="cancel_stop_all" phx-target={@myself} class="nav-stop-cancel">No</button>
+          </span>
+          <span :if={@stop_result && @active_ghosts == 0} class="nav-stop-result">{@stop_result}</span>
         </div>
       </nav>
       <main class="main">

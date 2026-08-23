@@ -228,6 +228,18 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
+  # Distinct from reset_op: reset puts a failed op back in the queue, kill
+  # stops one that is still running. Previously only reachable via MCP/CLI.
+  def handle_event("kill_op", %{"id" => op_id}, socket) do
+    case GiTF.Ops.kill(op_id) do
+      :ok ->
+        {:noreply, socket |> put_flash(:info, "Op killed.") |> reload()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Kill failed: #{inspect(reason)}")}
+    end
+  end
+
   def handle_event("reset_op", %{"id" => op_id}, socket) do
     case GiTF.Ops.reset(op_id, nil) do
       {:ok, _} ->
@@ -850,6 +862,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                   <%= if Map.get(op, :status) == "failed" do %>
                     <button phx-click="reset_op" phx-value-id={op.id} class="btn btn-grey" style="padding:0.15rem 0.4rem; font-size:0.7rem; flex-shrink:0">
                       Reset
+                    </button>
+                  <% end %>
+                  <%= if Map.get(op, :status) == "running" do %>
+                    <button phx-click="kill_op" phx-value-id={op.id} class="btn btn-red" style="padding:0.15rem 0.4rem; font-size:0.7rem; flex-shrink:0" data-confirm="Kill this op? Its ghost is stopped and the op is marked failed.">
+                      Kill
                     </button>
                   <% end %>
                 </div>
