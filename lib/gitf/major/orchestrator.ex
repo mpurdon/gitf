@@ -1356,6 +1356,15 @@ defmodule GiTF.Major.Orchestrator do
       {:ok, []}
   end
 
+  # The branch a mission is amending, when it is amending one. Callers use it
+  # as the base for worktrees so ghosts see the code under review.
+  defp mission_base_branch_opts(mission) do
+    case Map.get(mission, :target_branch) do
+      branch when is_binary(branch) and branch != "" -> [base_branch: branch]
+      _ -> []
+    end
+  end
+
   defp impl_base_branch_opts(mission) do
     # Base validation on the canonical worktree's CURRENT branch — the
     # deepest lineage point, including post-chain fix commits. An
@@ -1370,8 +1379,10 @@ defmodule GiTF.Major.Orchestrator do
           %{ghost_id: ghost_id} when is_binary(ghost_id) ->
             [base_branch: "ghost/#{ghost_id}"]
 
+          # No prior impl work: fall back to the branch being amended, if
+          # any, rather than sector HEAD.
           _ ->
-            []
+            mission_base_branch_opts(mission)
         end
     end
   end
@@ -2365,7 +2376,17 @@ defmodule GiTF.Major.Orchestrator do
       assigned_model: model_id(model)
     }
 
-    spawn_opts = [prompt: prompt] ++ Keyword.take(opts, [:base_branch])
+    # A mission amending an open pull request must WORK ON that branch, not
+    # merely merge into it later. target_branch was applied only in
+    # Sync.merge_quest, so every ghost was cut from main: on msn-dd29a1 the
+    # file under review did not exist in any ghost's worktree, the correct
+    # commit fell out of a union merge rather than a ghost editing it, and
+    # validation then diffed a tree without the change and reported the work
+    # missing. Defaulting here covers every phase in one place.
+    spawn_opts =
+      [prompt: prompt]
+      |> Keyword.merge(mission_base_branch_opts(mission))
+      |> Keyword.merge(Keyword.take(opts, [:base_branch]))
 
     with {:ok, op} <- GiTF.Ops.create(job_attrs),
          _ = GiTF.Missions.record_phase_job(mission.id, phase, op.id),
