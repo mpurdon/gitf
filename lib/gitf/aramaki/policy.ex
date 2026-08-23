@@ -36,6 +36,46 @@ defmodule GiTF.Aramaki.Policy do
   end
 
   @doc """
+  Should this pull-request review be admitted?
+
+  The capacity gate is shared with issues via `capacity_available?/1` — this
+  covers only what is specific to a review. There is no label equivalent: a
+  review can only be left by someone with access to the repository, so the
+  untrusted-input problem that makes `gitf:build` necessary for issues does
+  not arise. What does arise is looping, since the factory can comment on
+  its own pull requests.
+
+  `review` is the webhook/poller review object; `opts` may carry `:bot_login`.
+  Returns `:admit` or `{:reject, reason}`.
+  """
+  @spec admit_review?(map(), keyword()) :: :admit | {:reject, atom()}
+  def admit_review?(review, opts \\ []) do
+    author = review_author(review)
+    bot_login = Keyword.get(opts, :bot_login)
+
+    cond do
+      not changes_requested?(review) -> {:reject, :not_changes_requested}
+      bot_login && author && author == bot_login -> {:reject, :own_activity}
+      true -> :admit
+    end
+  end
+
+  defp changes_requested?(review) do
+    review
+    |> Map.get("state", Map.get(review, :state))
+    |> to_string()
+    |> String.downcase()
+    |> Kernel.==("changes_requested")
+  end
+
+  defp review_author(review) do
+    case Map.get(review, "user") || Map.get(review, :user) do
+      %{"login" => login} -> login
+      _ -> Map.get(review, "author") || Map.get(review, :author)
+    end
+  end
+
+  @doc """
   Should this GitHub issue be admitted? `issue` is the webhook payload's
   `"issue"` object; `opts` may carry `:bot_login` to reject the factory's own
   activity (loop prevention).

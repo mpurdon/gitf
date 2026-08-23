@@ -38,7 +38,11 @@ defmodule GiTF.Aramaki do
 
   # Intake channels whose pending missions Aramaki owns (and will auto-start).
   # Operator-created missions (source nil) are deliberately NOT auto-started.
-  @owned_sources ~w(github_issue project)
+  # Sources whose missions the outside world causes. They share one
+  # concurrency budget: admission is a multiplier on every runaway risk, and
+  # giving each intake channel its own allowance would multiply the ceiling
+  # by the number of channels.
+  @owned_sources ~w(github_issue project pr_review)
 
   # -- Client ----------------------------------------------------------------
 
@@ -209,6 +213,21 @@ defmodule GiTF.Aramaki do
       Map.get(m, :status) == "pending" and Map.get(m, :source) in @owned_sources
     end)
   end
+
+  @doc """
+  Missions currently in flight that the outside world caused.
+
+  Public because admission is not Aramaki's private concern: any intake
+  channel that creates work from an external trigger must count against the
+  same ceiling, and must be able to ask without the Aramaki GenServer being
+  enabled. `GiTF.GitHub.ReviewIntake` is the second caller.
+  """
+  @spec external_active_count() :: non_neg_integer()
+  def external_active_count, do: active_count()
+
+  @doc "The mission `source` values treated as externally triggered."
+  @spec owned_sources() :: [String.t()]
+  def owned_sources, do: @owned_sources
 
   defp active_count do
     GiTF.Archive.all(:missions)

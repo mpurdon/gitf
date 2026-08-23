@@ -193,6 +193,13 @@ defmodule GiTF.Outcomes.Tracker do
     reviews = details.reviews
     changes_requested = Enum.count(reviews, fn r -> Map.get(r, :state) == "CHANGES_REQUESTED" end)
 
+    # These reviews were already fetched for the count above. Feeding them to
+    # intake costs no extra API call and is the only path that survives the
+    # box being stopped when the review lands — GitHub never retries a failed
+    # webhook delivery, so without this a review left on a sleeping factory is
+    # lost for good. Intake dedupes, so re-seeing a review is free.
+    if changes_requested > 0, do: offer_to_intake(outcome, reviews)
+
     Map.merge(outcome, %{
       pr_state: normalize_state(details.state, details.merged),
       pr_merged_at: Outcomes.parse_iso8601(details.merged_at) || outcome.pr_merged_at,
@@ -203,6 +210,24 @@ defmodule GiTF.Outcomes.Tracker do
       last_polled_at: now,
       poll_count: (outcome.poll_count || 0) + 1
     })
+  end
+
+  # Never let intake break the poll: an outcome that fails to record because
+  # a follow-up mission could not be created is strictly worse than one whose
+  # feedback waits for the next poll.
+  defp offer_to_intake(outcome, reviews) do
+    Enum.each(GiTF.GitHub.ReviewIntake.from_poll(outcome, reviews), fn
+      {:ok, :mission_created, mission} ->
+        Logger.info("Outcome #{outcome.id}: review → follow-up mission #{mission.id}")
+
+      {:ok, :deferred, reason} ->
+        Logger.info("Outcome #{outcome.id}: review deferred (#{reason}), will retry next poll")
+
+      _ ->
+        :ok
+    end)
+  rescue
+    e -> Logger.warning("Review intake from poll failed: #{Exception.message(e)}")
   end
 
   # Revert detection is stubbed — the Rollback module tracks auto_merge
