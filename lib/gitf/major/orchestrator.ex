@@ -2602,13 +2602,12 @@ defmodule GiTF.Major.Orchestrator do
         budget_preflight_mission(mission_id)
 
       {:error, :daily_budget_exceeded, spent} ->
-        Logger.warning(
-          "Quest #{mission_id} blocked: factory daily budget exceeded ($#{Float.round(spent, 2)} in last 24h)"
-        )
+        detail = GiTF.Budget.limit_description(spent)
+        Logger.warning("Quest #{mission_id} blocked: factory usage limit reached (#{detail})")
 
         GiTF.Observability.Alerts.dispatch_webhook(
           :budget_blocked,
-          "Factory daily budget exceeded ($#{Float.round(spent, 2)} in last 24h) — blocking new missions"
+          "Factory usage limit reached (#{detail}) — blocking new missions"
         )
 
         {:error, :daily_budget_exceeded}

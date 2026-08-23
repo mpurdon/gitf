@@ -190,6 +190,90 @@ defmodule GiTF.GitHub do
   end
 
   @doc """
+  Fetches the PR fields the outcome tracker needs, over the REST API.
+
+  Replaces the `gh pr view --json` shell-out. `gh` is an independently
+  versioned binary whose JSON schema changes underneath us: it removed the
+  `merged` field, `--json` rejects the whole request on any unknown field,
+  and so every outcome poll failed for days — invisibly, because a CLI
+  returns unstructured text that has to be guessed at rather than a status
+  code. The REST API is versioned and does not drop response fields.
+
+  Returns the same shape `GiTF.GitHub.CLI.pr_details/2` did, so callers are
+  unchanged: `{:ok, details}` or `{:error, :transient | :permanent}`.
+  """
+  @spec pr_details(GiTF.Schema.Sector.t(), String.t() | integer()) ::
+          {:ok, map()} | {:error, :transient | :permanent}
+  def pr_details(sector, pr_ref) do
+    with number when is_integer(number) <- pr_number(pr_ref),
+         {:ok, client} <- client(sector),
+         {:ok, pr} <- get_pr(client, sector, number) do
+      {:ok,
+       %{
+         state: pr["state"],
+         merged: pr["merged"] == true or not is_nil(pr["merged_at"]),
+         merged_at: pr["merged_at"],
+         closed_at: pr["closed_at"],
+         title: pr["title"],
+         reviews: fetch_reviews(client, sector, number),
+         # Only Alerts consumes check state, and it has its own path.
+         status_check_rollup: []
+       }}
+    else
+      {:error, :permanent} = err -> err
+      {:error, _} -> {:error, :transient}
+      nil -> {:error, :permanent}
+    end
+  end
+
+  defp get_pr(client, sector, number) do
+    case Req.get(client,
+           url: "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls/#{number}"
+         ) do
+      {:ok, %{status: 200, body: pr}} -> {:ok, pr}
+      # A PR that is gone or forbidden will never resolve by retrying.
+      {:ok, %{status: status}} when status in [401, 403, 404] -> {:error, :permanent}
+      {:ok, %{status: _}} -> {:error, :transient}
+      {:error, _} -> {:error, :transient}
+    end
+  end
+
+  # Reviews are a separate endpoint. A failure here degrades to "no reviews"
+  # rather than failing the whole poll: PR state still matters.
+  defp fetch_reviews(client, sector, number) do
+    case Req.get(client,
+           url: "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls/#{number}/reviews",
+           params: [per_page: 100]
+         ) do
+      {:ok, %{status: 200, body: reviews}} when is_list(reviews) ->
+        Enum.map(reviews, fn r ->
+          %{
+            id: r["id"],
+            author: get_in(r, ["user", "login"]),
+            # REST uses SCREAMING_CASE for state, as gh did.
+            state: r["state"] || "COMMENTED",
+            submitted_at: r["submitted_at"],
+            body: r["body"]
+          }
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp pr_number(n) when is_integer(n), do: n
+
+  defp pr_number(ref) when is_binary(ref) do
+    case Regex.run(~r{/pull/(\d+)}, ref) do
+      [_, n] -> String.to_integer(n)
+      _ -> if(Regex.match?(~r/^\d+$/, ref), do: String.to_integer(ref))
+    end
+  end
+
+  defp pr_number(_), do: nil
+
+  @doc """
   Lists inline review comments on a pull request.
 
   These are where a change request usually lives: requesting changes via a

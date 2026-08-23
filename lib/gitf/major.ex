@@ -1448,8 +1448,8 @@ defmodule GiTF.Major do
 
       {:error, :daily_budget_exceeded, spent} ->
         Logger.warning(
-          "Factory daily budget exceeded for provider #{GiTF.Budget.active_provider()} " <>
-            "($#{Float.round(spent, 2)} in last 24h) — blocking spawn for #{mission_id}"
+          "Factory usage limit reached for provider #{GiTF.Budget.active_provider()} " <>
+            "(#{GiTF.Budget.limit_description(spent)}) — blocking spawn for #{mission_id}"
         )
 
         {:error, :daily_budget_exceeded}

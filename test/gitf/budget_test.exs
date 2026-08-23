@@ -50,34 +50,35 @@ defmodule GiTF.BudgetTest do
   end
 
   describe "global_check/0 (factory-wide daily cap)" do
+    # Dollar caps apply to METERED providers. The cli stream is a flat-rate
+    # subscription and is rationed in requests — see BudgetUsageTest.
     test "ok with remaining under the cap", %{ghost: ghost} do
-      with_mode("cli", fn ->
+      with_mode("bedrock", fn ->
         {:ok, _} =
           Costs.record(ghost.id, %{
             input_tokens: 1000,
             output_tokens: 500,
-            model: "claude-sonnet-4-20250514"
+            model: "bedrock:anthropic.claude-sonnet-4-6"
           })
 
         assert {:ok, remaining} = Budget.global_check()
         assert remaining > 0
-        assert remaining <= Budget.provider_budget("cli")
+        assert remaining <= Budget.provider_budget("bedrock")
       end)
     end
 
     test "blocks once rolling-24h spend exceeds the daily cap", %{ghost: ghost} do
-      with_mode("cli", fn ->
+      with_mode("bedrock", fn ->
         # Enormous output spend to clear the $100 default cap in one record.
-        # Bare model name → "cli" stream, matching the pinned active provider.
         {:ok, _} =
           Costs.record(ghost.id, %{
             input_tokens: 0,
             output_tokens: 200_000_000,
-            model: "claude-sonnet-4-20250514"
+            model: "bedrock:anthropic.claude-sonnet-4-6"
           })
 
         assert {:error, :daily_budget_exceeded, spent} = Budget.global_check()
-        assert spent >= Budget.provider_budget("cli")
+        assert spent >= Budget.provider_budget("bedrock")
       end)
     end
 
@@ -125,9 +126,11 @@ defmodule GiTF.BudgetTest do
         assert {:error, :daily_budget_exceeded, _} = Budget.global_check()
       end)
 
+      # The cli stream is unaffected — and is now measured in requests, so
+      # its headroom is the request limit, not a dollar figure.
       with_mode("cli", fn ->
         assert {:ok, remaining} = Budget.global_check()
-        assert remaining == Budget.provider_budget("cli")
+        assert remaining == Budget.request_limit("cli")
       end)
     end
 
@@ -173,11 +176,13 @@ defmodule GiTF.BudgetTest do
       end
     end
 
+    # A credit pool is pre-paid DOLLARS, which a flat-rate subscription does
+    # not have — so pools apply to metered providers only.
     test "global_check surfaces pool exhaustion for the active provider", %{ghost: ghost} do
       prev = GiTF.Config.Provider.get([:costs, :credit_pools])
 
       GiTF.Config.Provider.put([:costs, :credit_pools], %{
-        "cli" => %{"pool_usd" => 5.0}
+        "bedrock" => %{"pool_usd" => 5.0}
       })
 
       try do
@@ -186,10 +191,10 @@ defmodule GiTF.BudgetTest do
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: 6.0,
-            model: "claude-sonnet-4-6"
+            model: "bedrock:anthropic.claude-sonnet-4-6"
           })
 
-        with_mode("cli", fn ->
+        with_mode("bedrock", fn ->
           assert {:error, :credit_pool_exhausted, _} = Budget.global_check()
         end)
       after

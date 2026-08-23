@@ -14,7 +14,7 @@ defmodule GiTF.Outcomes.Tracker do
     1. Short-circuit when `:outcomes_enabled` is false.
     2. Pull the open outcomes where `next_poll_at <= now`.
     3. Resolve the sector's repo path (required for `gh` calls).
-    4. Call `GitHub.CLI.pr_details/2`, update the record, re-categorize.
+    4. Call `GitHub.pr_details/2` (REST), update the record, re-categorize.
     5. Stop tracking when the category is terminal or >72h has elapsed.
 
   Polling decay (based on `first_tracked_at` age):
@@ -35,7 +35,6 @@ defmodule GiTF.Outcomes.Tracker do
 
   alias GiTF.Outcomes
   alias GiTF.Outcomes.Analyzer
-  alias GiTF.GitHub.CLI
 
   @name __MODULE__
   @default_interval_ms 5 * 60 * 1_000
@@ -130,8 +129,11 @@ defmodule GiTF.Outcomes.Tracker do
     end
   end
 
-  defp poll_with_repo(outcome, repo_path, now) do
-    case CLI.pr_details(repo_path, outcome.pr_url) do
+  # repo_path is still resolved upstream because it proves the sector exists
+  # and is where Alerts' check-run lookups run; PR polling itself now goes
+  # over REST, so a gh upgrade cannot silently break it again.
+  defp poll_with_repo(outcome, _repo_path, now) do
+    case fetch_pr_details(outcome) do
       {:ok, details} ->
         merged = flag_revert?(outcome, details)
         updated = apply_details(outcome, details, merged, now)
@@ -188,6 +190,15 @@ defmodule GiTF.Outcomes.Tracker do
         end)
 
         emit_telemetry(outcome, outcome.outcome_category, {:error, reason})
+    end
+  end
+
+  defp fetch_pr_details(outcome) do
+    with sector_id when is_binary(sector_id) <- Map.get(outcome, :sector_id),
+         {:ok, sector} <- GiTF.Sector.get(sector_id) do
+      GiTF.GitHub.pr_details(sector, outcome.pr_url)
+    else
+      _ -> {:error, :permanent}
     end
   end
 

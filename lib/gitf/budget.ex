@@ -10,6 +10,15 @@ defmodule GiTF.Budget do
   # CLI/subscription mode books API-equivalent NOTIONAL dollars at $0
   # marginal cost; this cap is a runaway-loop guard, not a spend limit.
   @default_cli_notional_budget_usd 150.0
+
+  # Subscription streams are rationed in requests, not dollars. These are
+  # runaway guards, deliberately generous — they are NOT a mirror of the
+  # provider's real limits, which we cannot observe. The point is to stop a
+  # loop burning a plan's quota, not to predict when Anthropic will throttle.
+  @default_subscription_providers ["cli"]
+  @default_usage_window_hours 5
+  @default_max_requests 1_500
+  @default_max_tokens 0
   @default_daily_budget_usd 100.0
   @rolling_window_seconds 24 * 60 * 60
 
@@ -194,6 +203,15 @@ defmodule GiTF.Budget do
           | {:error, :daily_budget_exceeded | :credit_pool_exhausted, float()}
   def global_check do
     provider = active_provider()
+
+    if subscription?(provider) do
+      subscription_check(provider)
+    else
+      metered_check(provider)
+    end
+  end
+
+  defp metered_check(provider) do
     cap = provider_budget(provider)
     spent = global_spent(provider)
 
@@ -206,6 +224,110 @@ defmodule GiTF.Budget do
           {:ok, pool_remaining} -> {:ok, min(Float.round(cap - spent, 6), pool_remaining)}
           error -> error
         end
+    end
+  end
+
+  @doc """
+  Human-readable description of why the active provider is over its limit.
+
+  Dollars for metered providers, requests for subscription ones. The same
+  sentence in the wrong unit — "spent $605.25 of $150.00 cap" for work that
+  cost nothing — is what turned a runaway guard into an apparent bill.
+  """
+  @spec limit_description(number()) :: String.t()
+  def limit_description(spent) do
+    provider = active_provider()
+
+    if subscription?(provider) do
+      "#{trunc(spent)} of #{request_limit(provider)} requests in the last " <>
+        "#{window_hours(provider)}h on the #{provider} subscription"
+    else
+      "$#{Float.round(spent * 1.0, 2)} of $#{Float.round(provider_budget(provider), 2)} in the last 24h"
+    end
+  end
+
+  @doc """
+  True when a provider bills a flat subscription rather than per token.
+
+  Dollars are the wrong unit for these: the marginal cost of a call is zero,
+  so a dollar cap is a fabricated number. What is real is the provider's
+  *usage* limit — Claude Max meters requests in a rolling window, and a
+  ChatGPT/Sol account would do the same. Configure via
+  `[costs.subscription_providers]`; defaults to the CLI stream.
+  """
+  @spec subscription?(String.t()) :: boolean()
+  def subscription?(provider) do
+    case GiTF.Config.Provider.get([:costs, :subscription_providers]) do
+      list when is_list(list) -> provider in Enum.map(list, &to_string/1)
+      _ -> provider in @default_subscription_providers
+    end
+  end
+
+  @doc """
+  Requests and tokens booked to a provider within its rolling usage window.
+
+  Each cost entry is one model call, so counting entries counts requests —
+  the unit subscription plans actually ration.
+  """
+  @spec usage_in_window(String.t()) :: %{requests: non_neg_integer(), tokens: non_neg_integer()}
+  def usage_in_window(provider) do
+    cutoff = DateTime.add(DateTime.utc_now(), -window_hours(provider) * 3600, :second)
+
+    entries =
+      GiTF.Archive.all(:costs)
+      |> Enum.filter(fn c ->
+        provider_of(c) == provider and
+          match?(%DateTime{}, c[:inserted_at]) and
+          DateTime.compare(c[:inserted_at], cutoff) != :lt
+      end)
+
+    %{
+      requests: length(entries),
+      tokens:
+        Enum.reduce(entries, 0, fn c, acc ->
+          acc + (c[:input_tokens] || 0) + (c[:output_tokens] || 0)
+        end)
+    }
+  end
+
+  # Reported as :daily_budget_exceeded so the three existing callers keep
+  # working — what changed is the unit being measured, not the protocol.
+  # `spent` carries the request count so operator messages stay truthful.
+  defp subscription_check(provider) do
+    %{requests: requests, tokens: tokens} = usage_in_window(provider)
+    req_cap = request_limit(provider)
+    tok_cap = token_limit(provider)
+
+    cond do
+      requests >= req_cap -> {:error, :daily_budget_exceeded, requests}
+      tok_cap > 0 and tokens >= tok_cap -> {:error, :daily_budget_exceeded, requests}
+      true -> {:ok, req_cap - requests}
+    end
+  end
+
+  @doc "Rolling window, in hours, over which a subscription's usage is counted."
+  @spec window_hours(String.t()) :: pos_integer()
+  def window_hours(provider),
+    do: provider_usage_setting(provider, :window_hours, @default_usage_window_hours)
+
+  @doc "Max model calls allowed within the rolling window."
+  @spec request_limit(String.t()) :: pos_integer()
+  def request_limit(provider),
+    do: provider_usage_setting(provider, :max_requests, @default_max_requests)
+
+  @doc "Max tokens within the window; 0 disables the token check."
+  @spec token_limit(String.t()) :: non_neg_integer()
+  def token_limit(provider),
+    do: provider_usage_setting(provider, :max_tokens, @default_max_tokens)
+
+  defp provider_usage_setting(provider, key, default) do
+    with quotas when is_map(quotas) <- GiTF.Config.Provider.get([:costs, :provider_quotas]),
+         settings when is_map(settings) <- Map.get(quotas, provider) || Map.get(quotas, :"#{provider}"),
+         val when is_number(val) and val > 0 <-
+           Map.get(settings, key) || Map.get(settings, to_string(key)) do
+      trunc(val)
+    else
+      _ -> default
     end
   end
 
