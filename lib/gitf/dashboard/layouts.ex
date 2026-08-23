@@ -618,6 +618,37 @@ defmodule GiTF.Dashboard.Layouts do
 
           /* -- Responsive ---------------------------------------------------- */
           @media (max-width: 1024px) { .design-layout { grid-template-columns: 1fr; } .review-split { grid-template-columns: 1fr; } .mission-detail-layout { grid-template-columns: 1fr; } .mission-sidebar { position: static; } }
+
+          /* -- Print --------------------------------------------------------- */
+          /* Printing a design review should yield the review, not the app.
+             Navigation, controls and transient UI are screen furniture: they
+             cost a third of the first page and mean nothing on paper. */
+          @media print {
+            .nav, .toast-container, .nav-stop, .nav-stop-confirm, .nav-stop-result,
+            .btn, button, .flash-info, .flash-error { display: none !important; }
+
+            /* Dark chrome on paper wastes ink and reads worse than plain
+               black on white. */
+            body { background: #fff !important; color: #111 !important; }
+            .main { padding: 0 !important; }
+            .panel, .card, .strategy-card {
+              background: #fff !important;
+              border: 1px solid #999 !important;
+              box-shadow: none !important;
+              break-inside: avoid;
+            }
+            .panel-title, .page-title, h1, h2, h3 { color: #000 !important; }
+            a { color: #000 !important; text-decoration: none; }
+
+            /* Collapsed sections are collapsed on screen for scrolling, but a
+               printout is read linearly — show everything. */
+            details { display: block !important; }
+            details > summary { display: none !important; }
+
+            /* Side-by-side comparison collapses to full width so nothing is
+               clipped at the page edge. */
+            .design-layout, .review-split { grid-template-columns: 1fr !important; }
+          }
           @media (max-width: 768px) {
             .nav { flex-direction: column; height: auto; padding: 0.75rem; gap: 0.5rem; }
             .cards { grid-template-columns: 1fr 1fr; }

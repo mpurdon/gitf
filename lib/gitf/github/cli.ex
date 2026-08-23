@@ -44,7 +44,11 @@ defmodule GiTF.GitHub.CLI do
   """
   @spec pr_details(String.t(), String.t()) :: {:ok, pr_details()} | {:error, error_class()}
   def pr_details(repo_path, pr_url) when is_binary(repo_path) and is_binary(pr_url) do
-    fields = "state,merged,mergedAt,closedAt,title,reviews,statusCheckRollup"
+    # No `merged` field: gh dropped it (2.97 errors with `Unknown JSON field:
+    # "merged"`), which failed EVERY poll — classified transient, retried on
+    # backoff, never surfaced. Merged-ness comes from mergedAt instead, which
+    # is what it always meant.
+    fields = "state,mergedAt,closedAt,title,reviews,statusCheckRollup"
 
     case run_gh(["pr", "view", pr_url, "--json", fields], repo_path) do
       {:ok, output} ->
@@ -53,7 +57,7 @@ defmodule GiTF.GitHub.CLI do
             {:ok,
              %{
                state: Map.get(data, "state"),
-               merged: Map.get(data, "merged", false),
+               merged: not is_nil(Map.get(data, "mergedAt")),
                merged_at: Map.get(data, "mergedAt"),
                closed_at: Map.get(data, "closedAt"),
                title: Map.get(data, "title"),
@@ -168,7 +172,20 @@ defmodule GiTF.GitHub.CLI do
         {:ok, output}
 
       {:ok, {output, _nonzero}} ->
-        {:error, classify_output(output)}
+        class = classify_output(output)
+
+        # A `gh` failure used to vanish: the output was discarded and the
+        # caller saw only :transient, so a request gh could never satisfy
+        # (an invalid --json field) retried forever and looked like flaky
+        # networking. Log the first line — it is the difference between
+        # "GitHub is slow" and "we are asking for a field that no longer
+        # exists".
+        Logger.warning(
+          "gh #{Enum.join(Enum.take(args, 2), " ")} failed (#{class}): " <>
+            (output |> String.split("\n") |> List.first() |> to_string() |> String.slice(0, 200))
+        )
+
+        {:error, class}
 
       {:exit, reason} ->
         Logger.debug("GitHub.CLI exited: #{inspect(reason)}")

@@ -315,7 +315,10 @@ defmodule GiTF.Dashboard.OverviewLive do
 
     missions
     |> Enum.sort_by(fn m ->
-      active = if m.status in active_statuses, do: 0, else: 1
+      # Map.get, not m.status: a record missing :status crashed the whole
+      # root page. Now that the Catwalk IS the root, one malformed mission
+      # takes down the operator's entry point rather than one card.
+      active = if Map.get(m, :status) in active_statuses, do: 0, else: 1
       {active, -safe_unix_ts(m)}
     end)
     |> Enum.take(8)
