@@ -68,5 +68,18 @@ defmodule GiTF.SyncBranchNameTest do
       assert {"mission/msn-cccccc-x", "main"} =
                Sync.quest_target(%{id: "msn-cccccc", name: "x", target_branch: ""}, "main")
     end
+
+    test "a review follow-up refuses to cut a new branch" do
+      # Falling back here would open a SECOND pull request carrying the answer
+      # to a review left on the first. Surface the bug instead.
+      assert_raise ArgumentError, ~r/refusing to cut a new branch/, fn ->
+        Sync.quest_target(%{id: "msn-dddddd", name: "x", source: "pr_review"}, "main")
+      end
+    end
+
+    test "a review follow-up with a head branch builds on it" do
+      mission = %{id: "msn-eeeeee", name: "x", source: "pr_review", target_branch: "feature/x"}
+      assert {"feature/x", "feature/x"} = Sync.quest_target(mission, "main")
+    end
   end
 end

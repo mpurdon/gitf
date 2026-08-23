@@ -110,9 +110,21 @@ defmodule GiTF.Sync do
   # new commits up. Everything else cuts a fresh branch off main.
   @doc false
   def quest_target(mission, main_branch) do
-    case Map.get(mission, :target_branch) do
-      branch when is_binary(branch) and branch != "" -> {branch, branch}
-      _ -> {"mission/#{branch_slug(mission)}", main_branch}
+    case {Map.get(mission, :target_branch), Map.get(mission, :source)} do
+      {branch, _} when is_binary(branch) and branch != "" ->
+        {branch, branch}
+
+      # A fix for review feedback belongs on the pull request it came from.
+      # Falling back to a fresh branch here would open a SECOND PR carrying
+      # the answer to a review on the first — never what anyone wants. If the
+      # head branch is unknown, that is a bug to surface, not to paper over.
+      {_, "pr_review"} ->
+        raise ArgumentError,
+              "pr_review mission #{Map.get(mission, :id)} has no target_branch; " <>
+                "refusing to cut a new branch for review feedback"
+
+      _ ->
+        {"mission/#{branch_slug(mission)}", main_branch}
     end
   end
 

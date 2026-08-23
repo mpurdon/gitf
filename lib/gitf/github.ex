@@ -215,6 +215,10 @@ defmodule GiTF.GitHub do
          merged_at: pr["merged_at"],
          closed_at: pr["closed_at"],
          title: pr["title"],
+         # The PR's own head branch. Review follow-ups must build on it, and
+         # asking GitHub is authoritative — deriving it from our sync artifact
+         # meant a missing artifact could send the work somewhere else.
+         head_ref: get_in(pr, ["head", "ref"]),
          reviews: fetch_reviews(client, sector, number),
          # Only Alerts consumes check state, and it has its own path.
          status_check_rollup: []

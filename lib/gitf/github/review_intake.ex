@@ -193,7 +193,10 @@ defmodule GiTF.GitHub.ReviewIntake do
       url: Map.get(outcome, :pr_url),
       number: pr_number(Map.get(outcome, :pr_url)),
       title: nil,
-      head_ref: parent_branch(outcome)
+      # GitHub is authoritative for the head branch; the sync artifact is a
+      # fallback for records predating it. A review fix belongs on the PR it
+      # came from — never on a branch of our own choosing.
+      head_ref: Map.get(outcome, :pr_head_ref) || parent_branch(outcome)
     }
   end
 

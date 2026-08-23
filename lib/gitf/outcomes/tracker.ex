@@ -224,6 +224,9 @@ defmodule GiTF.Outcomes.Tracker do
     if changes_requested > 0, do: offer_to_intake(outcome, reviews)
 
     Map.merge(outcome, %{
+      # Persisted so a review follow-up targets the PR's real head branch
+      # rather than one derived from our own bookkeeping.
+      pr_head_ref: Map.get(details, :head_ref) || Map.get(outcome, :pr_head_ref),
       pr_state: normalize_state(details.state, details.merged),
       pr_merged_at: Outcomes.parse_iso8601(details.merged_at) || outcome.pr_merged_at,
       pr_closed_at: Outcomes.parse_iso8601(details.closed_at) || outcome.pr_closed_at,
