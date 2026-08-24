@@ -588,7 +588,6 @@ defmodule GiTF.Sync.Resolver do
     end
   end
 
-  @validation_timeout_ms 120_000
   @validation_blocklist ~w(rm sudo chmod chown curl wget ssh scp rsync nc ncat mkfifo)
 
   defp validate_resolution(sector) do
@@ -603,7 +602,11 @@ defmodule GiTF.Sync.Resolver do
               System.cmd("sh", ["-c", command], cd: sector.path, stderr_to_stdout: true, env: [])
             end)
 
-          case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
+          # Same budget the sector's own validation runs under — see
+          # GiTF.Validator.validation_timeout_ms/1.
+          timeout_ms = GiTF.Validator.validation_timeout_ms(sector)
+
+          case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
             {:ok, {_, 0}} -> :ok
             {:ok, {output, _}} -> {:error, String.slice(output, 0, 500)}
             nil -> {:error, "validation command timed out"}

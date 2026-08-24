@@ -52,7 +52,7 @@ defmodule GiTF.Audit do
         # Run validation command if configured (skip if already run by Validator)
         validation_result =
           if not skip_validation and Map.get(sector, :validation_command) do
-            case run_validation_command(shell, sector.validation_command) do
+            case run_validation_command(shell, sector.validation_command, sector) do
               {:ok, output} ->
                 %{result | status: "passed", output: output, exit_code: 0}
 
@@ -193,9 +193,18 @@ defmodule GiTF.Audit do
     end
   end
 
-  @validation_timeout_ms 120_000
-
-  defp run_validation_command(shell, command) do
+  # The sector's own budget, not a second opinion about it. A sector that
+  # opted into a longer validation did so because its command genuinely takes
+  # longer — cora reinstalls ~200 npm packages before it can typecheck — and
+  # this module hardcoding its own 2 minutes is not a smaller timeout, it is a
+  # false failure report. msn-8e0eae is what that costs: every op came back
+  # "Validation command timed out after 120s", including the implementation
+  # that was fine, so the orchestrator spawned fix ghost after fix ghost for a
+  # defect that did not exist, and merging six same-base branches that had all
+  # made the same edit put conflict markers in the file. That was the real
+  # failure, and nothing upstream of it was ever broken.
+  defp run_validation_command(shell, command, sector) do
+    timeout_ms = GiTF.Validator.validation_timeout_ms(sector)
     {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(command, cd: shell.worktree_path)
 
     task =
@@ -206,7 +215,7 @@ defmodule GiTF.Audit do
         )
       end)
 
-    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, 0}} ->
         {:ok, output}
 
@@ -214,7 +223,7 @@ defmodule GiTF.Audit do
         {:error, {output, exit_code}}
 
       nil ->
-        {:error, {"Validation command timed out after #{div(@validation_timeout_ms, 1000)}s", 1}}
+        {:error, {"Validation command timed out after #{div(timeout_ms, 1000)}s", 1}}
     end
   rescue
     e -> {:error, {Exception.message(e), 1}}

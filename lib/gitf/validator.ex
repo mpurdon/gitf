@@ -29,7 +29,11 @@ defmodule GiTF.Validator do
       # Run custom validation command if configured
       results =
         if sector.validation_command do
-          case run_custom_validation(shell, sector.validation_command, sector[:validation_timeout_ms]) do
+          case run_custom_validation(
+                 shell,
+                 sector.validation_command,
+                 sector[:validation_timeout_ms]
+               ) do
             :ok -> results
             {:error, reason} -> [{:error, :custom_validation_failed, reason} | results]
           end
@@ -64,6 +68,22 @@ defmodule GiTF.Validator do
   end
 
   @validation_timeout_ms 120_000
+
+  @doc """
+  The validation deadline for a sector, in milliseconds.
+
+  The single source of truth for every module that runs a sector's
+  `validation_command` — this one, `GiTF.Audit`, and `GiTF.Sync.Resolver`.
+  Each used to carry its own `@validation_timeout_ms 120_000`, and only this
+  one consulted the sector, so a sector that opted into a longer validation
+  still got 2 minutes from the other two and reported a timeout as a failed
+  op. Route new callers through here rather than adding a fourth copy.
+  """
+  @spec validation_timeout_ms(map() | nil) :: pos_integer()
+  def validation_timeout_ms(sector) when is_map(sector),
+    do: sector[:validation_timeout_ms] || @validation_timeout_ms
+
+  def validation_timeout_ms(_), do: @validation_timeout_ms
 
   @doc """
   Runs a custom shell command in the shell worktree.

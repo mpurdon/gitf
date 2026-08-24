@@ -104,4 +104,39 @@ defmodule GiTF.ValidatorTest do
       assert match?({:ok, _}, result) or match?({:error, _, _}, result)
     end
   end
+
+  describe "validation_timeout_ms/1" do
+    # msn-8e0eae: Audit and Sync.Resolver each carried their own
+    # `@validation_timeout_ms 120_000` and never consulted the sector, so a
+    # sector that opted into a longer validation still got two minutes from
+    # them and had every op reported as "Validation command timed out after
+    # 120s" — including the implementation that was correct. The orchestrator
+    # then spawned fix ghosts for a defect that did not exist.
+    test "honours a sector's opt-in" do
+      assert Validator.validation_timeout_ms(%{validation_timeout_ms: 600_000}) == 600_000
+    end
+
+    test "falls back to the default when the sector has no opinion" do
+      assert Validator.validation_timeout_ms(%{}) == 120_000
+      assert Validator.validation_timeout_ms(%{validation_timeout_ms: nil}) == 120_000
+    end
+
+    test "tolerates a missing sector" do
+      assert Validator.validation_timeout_ms(nil) == 120_000
+    end
+
+    test "every module that runs a sector's validation_command shares this one" do
+      # A fourth hardcoded copy is the bug returning. Only Validator itself
+      # may name the default.
+      offenders =
+        for path <- ["lib/gitf/audit.ex", "lib/gitf/sync/resolver.ex"],
+            File.exists?(path),
+            String.contains?(File.read!(path), "@validation_timeout_ms"),
+            do: path
+
+      assert offenders == [],
+             "these still define their own validation timeout instead of calling " <>
+               "GiTF.Validator.validation_timeout_ms/1: #{inspect(offenders)}"
+    end
+  end
 end
