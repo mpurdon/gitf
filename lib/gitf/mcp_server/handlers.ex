@@ -273,14 +273,19 @@ defmodule GiTF.MCPServer.Handlers do
         {:ok, mission} ->
           # Collect all phase artifacts
           phases = ~w(research requirements design planning validation sync scoring)
-          artifacts = Map.new(phases, fn p ->
-            {p, GiTF.Missions.get_artifact(id, p)}
-          end) |> Enum.reject(fn {_, v} -> is_nil(v) end) |> Map.new()
+
+          artifacts =
+            Map.new(phases, fn p ->
+              {p, GiTF.Missions.get_artifact(id, p)}
+            end)
+            |> Enum.reject(fn {_, v} -> is_nil(v) end)
+            |> Map.new()
 
           ops = Map.get(mission, :ops, [])
 
           # Collect impl op details (files, branch, output, fix lineage)
-          impl_ops = ops
+          impl_ops =
+            ops
             |> Enum.reject(& &1[:phase_job])
             |> Enum.map(fn op ->
               %{
@@ -297,8 +302,9 @@ defmodule GiTF.MCPServer.Handlers do
             end)
 
           # Validation ops with their artifacts
-          validation_ops = ops
-            |> Enum.filter(& &1[:phase] == "validation")
+          validation_ops =
+            ops
+            |> Enum.filter(&(&1[:phase] == "validation"))
             |> Enum.map(fn op ->
               %{
                 id: op.id,
@@ -308,9 +314,15 @@ defmodule GiTF.MCPServer.Handlers do
             end)
 
           # Phase transitions
-          transitions = GiTF.Missions.get_phase_transitions(id)
+          transitions =
+            GiTF.Missions.get_phase_transitions(id)
             |> Enum.map(fn t ->
-              %{from: t[:from_phase], to: t[:to_phase], reason: t[:reason], at: to_string(t[:inserted_at])}
+              %{
+                from: t[:from_phase],
+                to: t[:to_phase],
+                reason: t[:reason],
+                at: to_string(t[:inserted_at])
+              }
             end)
 
           diagnosis = %{
@@ -319,6 +331,7 @@ defmodule GiTF.MCPServer.Handlers do
             status: mission.status,
             current_phase: mission[:current_phase],
             pipeline_mode: mission[:pipeline_mode],
+            pipeline_mode_forced: mission[:pipeline_mode_forced],
             artifacts: artifacts,
             impl_ops: impl_ops,
             validation_ops: validation_ops,
@@ -638,7 +651,11 @@ defmodule GiTF.MCPServer.Handlers do
             %{provider: provider.name, status: "error", error: msg, details: ctx}
 
           {:error, reason} ->
-            %{provider: provider.name, status: "error", error: log_and_sanitize("test_provider", reason)}
+            %{
+              provider: provider.name,
+              status: "error",
+              error: log_and_sanitize("test_provider", reason)
+            }
         end
       end)
 
@@ -656,7 +673,12 @@ defmodule GiTF.MCPServer.Handlers do
         {:ok, json_text(%{provider: name, status: "error", error: msg, details: ctx})}
 
       {:error, reason} ->
-        {:ok, json_text(%{provider: name, status: "error", error: log_and_sanitize("test_provider", reason)})}
+        {:ok,
+         json_text(%{
+           provider: name,
+           status: "error",
+           error: log_and_sanitize("test_provider", reason)
+         })}
     end
   end
 
@@ -725,7 +747,33 @@ defmodule GiTF.MCPServer.Handlers do
     {:error, "Invalid strategy '#{strategy}' — must be auto_merge, pr_branch, or manual"}
   end
 
-  def call("set_sync_strategy", _), do: {:error, "Missing required parameters: sector_id, strategy, confirm"}
+  def call("set_sync_strategy", _),
+    do: {:error, "Missing required parameters: sector_id, strategy, confirm"}
+
+  def call("set_validation_timeout", %{"sector_id" => sector_id} = args) do
+    clear = args["clear"] == true
+    timeout_ms = args["timeout_ms"]
+
+    with :ok <- require_confirm(args),
+         :ok <- validate_timeout_arg(clear, timeout_ms) do
+      # Setting nil hands the sector back to the 120s default, matching the
+      # CLI's `--validation-timeout-ms ""` and the API's null.
+      value = if clear, do: nil, else: timeout_ms
+
+      case GiTF.Archive.update(:sectors, sector_id, fn s ->
+             Map.put(s, :validation_timeout_ms, value)
+           end) do
+        {:ok, _} ->
+          {:ok, json_text(%{sector_id: sector_id, validation_timeout_ms: value})}
+
+        {:error, reason} ->
+          {:error, "Failed to update sector: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("set_validation_timeout", _),
+    do: {:error, "Missing required parameters: sector_id, confirm"}
 
   # -- Skills ----------------------------------------------------------------
 
@@ -1344,6 +1392,17 @@ defmodule GiTF.MCPServer.Handlers do
   defp parse_skill_status(nil), do: nil
   defp parse_skill_status(_), do: nil
 
+  defp validate_timeout_arg(true = _clear, _timeout_ms), do: :ok
+
+  defp validate_timeout_arg(false, timeout_ms)
+       when is_integer(timeout_ms) and timeout_ms >= 1_000 and timeout_ms <= 1_800_000,
+       do: :ok
+
+  defp validate_timeout_arg(false, timeout_ms),
+    do:
+      {:error,
+       "timeout_ms must be an integer between 1_000 and 1_800_000, got: #{inspect(timeout_ms)} (or pass clear: true)"}
+
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}
 
@@ -1432,8 +1491,12 @@ defmodule GiTF.MCPServer.Handlers do
       updated_at = m[:updated_at] || m[:inserted_at]
 
       cond do
-        phase in [nil | @terminal_phases] -> false
-        is_nil(updated_at) -> false
+        phase in [nil | @terminal_phases] ->
+          false
+
+        is_nil(updated_at) ->
+          false
+
         true ->
           case DateTime.diff(now, updated_at, :millisecond) do
             diff when diff >= threshold_ms -> true
@@ -1478,6 +1541,7 @@ defmodule GiTF.MCPServer.Handlers do
       sector_id: m[:sector_id],
       current_phase: m[:current_phase],
       pipeline_mode: m[:pipeline_mode],
+      pipeline_mode_forced: m[:pipeline_mode_forced],
       post_processing_status: m[:post_processing_status],
       issue_ref: m[:issue_ref],
       # Provenance: without these a review-driven mission reported
@@ -1595,7 +1659,13 @@ defmodule GiTF.MCPServer.Handlers do
       name: s.name,
       path: s[:path],
       repo_url: s[:repo_url],
-      sync_strategy: s[:sync_strategy]
+      sync_strategy: s[:sync_strategy],
+      # The validation contract was invisible over MCP, which cost a
+      # debugging session: cora's sector carried a hand-set 900s budget that
+      # Validator honoured while Audit hardcoded 120s, and nothing an
+      # operator could query showed the field existed.
+      validation_command: s[:validation_command],
+      validation_timeout_ms: s[:validation_timeout_ms]
     }
   end
 
@@ -1678,7 +1748,12 @@ defmodule GiTF.MCPServer.Handlers do
 
   # -- LSP helpers -----------------------------------------------------------
 
-  defp lsp_call(name, %{"sector_id" => sid, "file_path" => fp, "line" => l, "character" => c} = args, key, fun) do
+  defp lsp_call(
+         name,
+         %{"sector_id" => sid, "file_path" => fp, "line" => l, "character" => c} = args,
+         key,
+         fun
+       ) do
     safe_handler(name, args, fn ->
       case fun.({sid, fp, l, c, args}) do
         {:ok, value} -> {:ok, json_text(Map.new([{:ok, true}, {key, value}]))}

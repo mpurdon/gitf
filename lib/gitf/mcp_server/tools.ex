@@ -100,7 +100,10 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{
           type: "object",
           properties: %{
-            mode: %{type: "string", description: "Filter by mode: 'fast' or 'full'. Omit for all."}
+            mode: %{
+              type: "string",
+              description: "Filter by mode: 'fast' or 'full'. Omit for all."
+            }
           }
         }
       },
@@ -112,7 +115,11 @@ defmodule GiTF.MCPServer.Tools do
           type: "object",
           properties: %{
             mission_id: %{type: "string", description: "Mission ID"},
-            phase: %{type: "string", description: "Phase name: research, requirements, design, planning, validation, sync, scoring"}
+            phase: %{
+              type: "string",
+              description:
+                "Phase name: research, requirements, design, planning, validation, sync, scoring"
+            }
           },
           required: ["mission_id", "phase"]
         }
@@ -246,7 +253,10 @@ defmodule GiTF.MCPServer.Tools do
                 required: ["title", "goal"]
               }
             },
-            sector_id: %{type: "string", description: "Target sector (may be set at approval instead)"},
+            sector_id: %{
+              type: "string",
+              description: "Target sector (may be set at approval instead)"
+            },
             confirm: %{type: "boolean", description: "Must be true to execute"}
           },
           required: ["name", "roadmap", "confirm"]
@@ -254,7 +264,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "list_projects",
-        description: "[READ] List projects (optionally by status: draft|active|paused|completed|failed).",
+        description:
+          "[READ] List projects (optionally by status: draft|active|paused|completed|failed).",
         inputSchema: %{
           type: "object",
           properties: %{status: %{type: "string", description: "Filter by status"}}
@@ -262,7 +273,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "show_project",
-        description: "[READ] Show a project: brief, roadmap DAG with per-item status and mission ids.",
+        description:
+          "[READ] Show a project: brief, roadmap DAG with per-item status and mission ids.",
         inputSchema: %{
           type: "object",
           properties: %{id: %{type: "string", description: "Project ID"}},
@@ -296,7 +308,11 @@ defmodule GiTF.MCPServer.Tools do
           type: "object",
           properties: %{
             id: %{type: "string", description: "Project ID"},
-            roadmap: %{type: "array", description: "Replacement roadmap items", items: %{type: "object"}},
+            roadmap: %{
+              type: "array",
+              description: "Replacement roadmap items",
+              items: %{type: "object"}
+            },
             confirm: %{type: "boolean", description: "Must be true to execute"}
           },
           required: ["id", "roadmap", "confirm"]
@@ -304,7 +320,8 @@ defmodule GiTF.MCPServer.Tools do
       },
       %{
         name: "pause_project",
-        description: "[WRITE] Pause an active project (no new missions created). Requires confirm: true.",
+        description:
+          "[WRITE] Pause an active project (no new missions created). Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
@@ -330,14 +347,27 @@ defmodule GiTF.MCPServer.Tools do
       %{
         name: "start_mission",
         description:
-          "[WRITE] Start a mission (or restart a stalled one). Kicks off the phase pipeline from research. Requires confirm: true.",
+          "[WRITE] Start a mission (or restart a stalled one). Kicks off the phase pipeline " <>
+            "from triage, which infers a pipeline mode unless one is forced here. " <>
+            "Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{
             id: %{type: "string", description: "Mission ID"},
             fast: %{
               type: "boolean",
-              description: "Use fast path (skip full pipeline, single implementation op)",
+              description:
+                "Force the streamlined pipeline: single design strategy, review " <>
+                  "auto-approved. Sticky — triage cannot revise it.",
+              default: false
+            },
+            full: %{
+              type: "boolean",
+              description:
+                "Force the full pipeline: every phase runs (triage's skip flags are " <>
+                  "overridden) and design produces competing strategies. Sticky — " <>
+                  "triage cannot revise it. Omit both flags and triage decides from " <>
+                  "complexity.",
               default: false
             },
             confirm: %{type: "boolean", description: "Must be true to execute"}
@@ -496,6 +526,34 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "set_validation_timeout",
+        description:
+          "[WRITE] Override a sector's validation deadline (ms). The budget is normally " <>
+            "DERIVED — onboarding detects the stack and migration 9 backfilled existing " <>
+            "sectors — so this is the escape hatch, not the mechanism. Every runner " <>
+            "(validator, audit, merge resolution, regression checks) honours the same " <>
+            "value; a too-small budget reports healthy work as timeouts and manufactures " <>
+            "fix ghosts for defects that do not exist. Pass clear: true to remove the " <>
+            "override and fall back to the 120s default. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            sector_id: %{type: "string", description: "Sector ID"},
+            timeout_ms: %{
+              type: "integer",
+              description: "Deadline in milliseconds (1_000..1_800_000)"
+            },
+            clear: %{
+              type: "boolean",
+              description: "Remove the override instead of setting one",
+              default: false
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["sector_id", "confirm"]
+        }
+      },
+      %{
         name: "list_skills",
         description:
           "List skills in the self-improving skill library. Filter by scope (global/sector) or sector_id.",
@@ -503,7 +561,10 @@ defmodule GiTF.MCPServer.Tools do
           type: "object",
           properties: %{
             scope: %{type: "string", enum: ["global", "sector"], description: "Filter by scope"},
-            sector_id: %{type: "string", description: "Filter by sector (only meaningful with scope=sector)"},
+            sector_id: %{
+              type: "string",
+              description: "Filter by sector (only meaningful with scope=sector)"
+            },
             include_archived: %{
               type: "boolean",
               description: "Include archived skills",
@@ -532,7 +593,11 @@ defmodule GiTF.MCPServer.Tools do
             name: %{type: "string", description: "New name (optional)"},
             description: %{type: "string", description: "New description (optional)"},
             body: %{type: "string", description: "New body (optional)"},
-            status: %{type: "string", enum: ["active", "archived"], description: "New status (optional)"},
+            status: %{
+              type: "string",
+              enum: ["active", "archived"],
+              description: "New status (optional)"
+            },
             confirm: %{type: "boolean", description: "Must be true to execute"}
           },
           required: ["id", "confirm"]
@@ -558,7 +623,10 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{
           type: "object",
           properties: %{
-            sector_id: %{type: "string", description: "Scope stats to a specific sector (optional)"}
+            sector_id: %{
+              type: "string",
+              description: "Scope stats to a specific sector (optional)"
+            }
           }
         }
       },
@@ -641,7 +709,10 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{
           type: "object",
           properties: %{
-            sector_id: %{type: "string", description: "Scope stats to a specific sector (optional)"}
+            sector_id: %{
+              type: "string",
+              description: "Scope stats to a specific sector (optional)"
+            }
           }
         }
       },
@@ -762,7 +833,14 @@ defmodule GiTF.MCPServer.Tools do
               description: "Optional CodeActionKind filter (e.g. ['quickfix', 'refactor'])"
             }
           },
-          required: ["sector_id", "file_path", "start_line", "start_character", "end_line", "end_character"]
+          required: [
+            "sector_id",
+            "file_path",
+            "start_line",
+            "start_character",
+            "end_line",
+            "end_character"
+          ]
         }
       },
       %{
@@ -826,7 +904,10 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{
           type: "object",
           properties: %{
-            sector_id: %{type: ["string", "null"], description: "Sector ID, or null for global pages"},
+            sector_id: %{
+              type: ["string", "null"],
+              description: "Sector ID, or null for global pages"
+            },
             slug: %{type: "string", description: "Page slug (kebab-case)"}
           },
           required: ["slug"]
@@ -839,7 +920,10 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{
           type: "object",
           properties: %{
-            sector_id: %{type: ["string", "null"], description: "Sector ID, or null for global only"},
+            sector_id: %{
+              type: ["string", "null"],
+              description: "Sector ID, or null for global only"
+            },
             query: %{type: "string", description: "Free-text query"},
             top_k: %{type: "integer", description: "Number of results (default 5)"},
             min_similarity: %{
@@ -892,7 +976,8 @@ defmodule GiTF.MCPServer.Tools do
             url: %{type: "string", description: "Source URL (http or https)"},
             depth: %{
               type: "integer",
-              description: "Crawl depth: 0 (single page, default) or 1 (follow same-host links one hop)"
+              description:
+                "Crawl depth: 0 (single page, default) or 1 (follow same-host links one hop)"
             },
             slug: %{type: "string", description: "Override slug (default derived from URL)"},
             title: %{type: "string", description: "Override title (default from <title> or <h1>)"},
