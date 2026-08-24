@@ -219,6 +219,10 @@ defmodule GiTF.GitHub do
          # asking GitHub is authoritative — deriving it from our sync artifact
          # meant a missing artifact could send the work somewhere else.
          head_ref: get_in(pr, ["head", "ref"]),
+         # Lets a completion notice tell "I pushed a fix" from "this was
+         # already addressed" by comparing the head against what it was when
+         # the work was admitted.
+         head_sha: get_in(pr, ["head", "sha"]),
          reviews: fetch_reviews(client, sector, number),
          # Only Alerts consumes check state, and it has its own path.
          status_check_rollup: []

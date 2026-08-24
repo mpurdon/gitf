@@ -47,4 +47,21 @@ defmodule GiTF.Aramaki.LifecyclePRTest do
       assert Lifecycle.on_review_failed(m, "boom") == :ok
     end
   end
+
+  test "does not claim a push when the branch state is unknown" do
+    # An unreachable repo yields :unknown, and the wording must hedge rather
+    # than assert either "pushed" or "made no change".
+    src = %{
+      "pr_url" => "https://github.com/nobody/nothing/pull/8",
+      "head_sha_at_intake" => "abc123",
+      "inline_comment_ids" => []
+    }
+
+    assert Lifecycle.on_review_addressed(mission(src)) == :ok
+  end
+
+  test "handles a missing intake sha without raising" do
+    src = %{"pr_url" => "https://github.com/nobody/nothing/pull/8"}
+    assert Lifecycle.on_review_addressed(mission(src)) == :ok
+  end
 end

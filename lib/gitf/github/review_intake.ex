@@ -206,6 +206,9 @@ defmodule GiTF.GitHub.ReviewIntake do
         # answers rather than as a top-level comment nobody notices.
         "inline_comment_ids" => Enum.map(inline, & &1.id) |> Enum.reject(&is_nil/1),
         "pr_number" => context.number,
+        # The branch tip when this work was admitted. The completion notice
+        # compares against it rather than assuming a push happened.
+        "head_sha_at_intake" => context.head_sha,
         "parent_mission_id" => Map.get(outcome, :mission_id)
       }
     }
@@ -239,7 +242,8 @@ defmodule GiTF.GitHub.ReviewIntake do
       url: pr["html_url"],
       number: pr["number"],
       title: pr["title"],
-      head_ref: get_in(pr, ["head", "ref"])
+      head_ref: get_in(pr, ["head", "ref"]),
+      head_sha: get_in(pr, ["head", "sha"])
     }
   end
 
@@ -253,7 +257,8 @@ defmodule GiTF.GitHub.ReviewIntake do
       # GitHub is authoritative for the head branch; the sync artifact is a
       # fallback for records predating it. A review fix belongs on the PR it
       # came from — never on a branch of our own choosing.
-      head_ref: Map.get(outcome, :pr_head_ref) || parent_branch(outcome)
+      head_ref: Map.get(outcome, :pr_head_ref) || parent_branch(outcome),
+      head_sha: Map.get(outcome, :pr_head_sha)
     }
   end
 

@@ -227,6 +227,7 @@ defmodule GiTF.Outcomes.Tracker do
       # Persisted so a review follow-up targets the PR's real head branch
       # rather than one derived from our own bookkeeping.
       pr_head_ref: Map.get(details, :head_ref) || Map.get(outcome, :pr_head_ref),
+      pr_head_sha: Map.get(details, :head_sha) || Map.get(outcome, :pr_head_sha),
       pr_state: normalize_state(details.state, details.merged),
       pr_merged_at: Outcomes.parse_iso8601(details.merged_at) || outcome.pr_merged_at,
       pr_closed_at: Outcomes.parse_iso8601(details.closed_at) || outcome.pr_closed_at,

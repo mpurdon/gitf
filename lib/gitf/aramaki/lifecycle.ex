@@ -77,19 +77,34 @@ defmodule GiTF.Aramaki.Lifecycle do
   @spec on_review_addressed(map()) :: :ok
   def on_review_addressed(mission) do
     with_pr(mission, fn sector, num, src ->
+      # "Pushed changes" was asserted whether or not anything was pushed. A
+      # mission can complete having found the work already done — as
+      # msn-342bd2 did — and claiming a push that never happened sends the
+      # reviewer looking for a diff that is not there.
       body =
-        "Pushed changes in response to this. Mission `#{mission.id}` committed to the branch — " <>
-          "the diff is the response.\n\nRe-review rather than assuming this point is settled: " <>
-          "the factory answers a review as a whole and cannot prove which individual comment a " <>
-          "given change resolves." <> @signature
+        case pushed?(sector, num, src) do
+          true ->
+            "Pushed changes in response to this. Mission `#{mission.id}` committed to the " <>
+              "branch — the diff is the response.\n\nRe-review rather than assuming this " <>
+              "point is settled: the factory answers a review as a whole and cannot prove " <>
+              "which individual comment a given change resolves." <> @signature
+
+          false ->
+            "Mission `#{mission.id}` looked at this and made no change — the branch already " <>
+              "satisfied it, or the work had landed in an earlier run.\n\nIf that is wrong, " <>
+              "say so on this thread and it will be picked up again." <> @signature
+
+          :unknown ->
+            "Mission `#{mission.id}` finished working on this branch. Check the diff for the " <>
+              "response — the branch state could not be confirmed from here." <> @signature
+        end
 
       answer_threads(sector, num, src, body, fn ->
         reviewer = src["reviewer"]
         who = if reviewer, do: "@#{reviewer}'s", else: "the"
 
-        "Pushed changes in response to #{who} review request. Mission `#{mission.id}` " <>
-          "committed to this branch — the diff above is the response. Please re-review." <>
-          @signature
+        "Mission `#{mission.id}` finished working on #{who} review request. " <>
+          "Check the diff above for the response." <> @signature
       end)
     end)
   end
@@ -119,6 +134,20 @@ defmodule GiTF.Aramaki.Lifecycle do
           "changed. The request stands." <> @signature
       end)
     end)
+  end
+
+  # Did the branch actually move while this mission ran? Compares the head
+  # against what it was when the work was admitted. :unknown when either end
+  # is missing — better an honest hedge than a confident claim either way.
+  defp pushed?(sector, num, src) do
+    before = src["head_sha_at_intake"]
+
+    case {before, GiTF.GitHub.pr_details(sector, num)} do
+      {sha, {:ok, %{head_sha: now}}} when is_binary(sha) and is_binary(now) -> sha != now
+      _ -> :unknown
+    end
+  rescue
+    _ -> :unknown
   end
 
   # Reply inside each thread the mission was answering, so the response sits
