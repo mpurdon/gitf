@@ -158,7 +158,13 @@ defmodule GiTF.Tachikoma do
     end
 
     schedule_patrol(state.poll_interval)
-    {:noreply, %{state | last_results: results, patrol_count: count}}
+
+    # A patrol sweeps most of the store — every 30s, and far more on the
+    # periodic multiples above. Even folding instead of materialising, that
+    # is this process's peak allocation, and a GenServer heap keeps its
+    # high-water mark. Hibernating between patrols hands it back; the next
+    # tick is 30 seconds away, so the wakeup cost is noise.
+    {:noreply, %{state | last_results: results, patrol_count: count}, :hibernate}
   end
 
   # -- PubSub-driven verification (event-driven, no polling delay) ------------
@@ -1309,7 +1315,6 @@ defmodule GiTF.Tachikoma do
         GiTF.Togusa.FixContext.new(op_id)
     end
   end
-
 
   defp score_model(op_id, audit_result) do
     with {:ok, op} <- GiTF.Ops.get(op_id) do

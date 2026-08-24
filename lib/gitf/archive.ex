@@ -145,24 +145,64 @@ defmodule GiTF.Archive do
     route_write(collection, {:delete, collection, id})
   end
 
-  @doc "Returns all records in a collection."
+  @doc """
+  Returns all records in a collection.
+
+  Order is unspecified — ETS decides it, and callers that care sort.
+  """
   @spec all(atom()) :: [map()]
   def all(collection) do
-    :ets.tab2list(table_name(collection)) |> Enum.map(&elem(&1, 1))
-  rescue
-    ArgumentError -> []
+    fold(collection, [], fn record, acc -> [record | acc] end)
   end
 
-  @doc "Returns records matching a filter function."
+  @doc """
+  Returns records matching a filter function.
+
+  Folds the ETS table and keeps only matches, rather than copying the whole
+  collection into this process and filtering it afterwards. The old form
+  (`all/1 |> Enum.filter/2`) allocated one list of every `{key, record}`
+  tuple plus a second of every record before discarding nearly all of it —
+  so a predicate matching three ops still paid for every op in the store, in
+  the caller's heap. With ~200 call sites and several on 30-second patrol
+  timers, that allocation is what drove the BEAM's process memory from 89MB
+  at boot to 1.3GB on an idle factory: the garbage is collectable, but the
+  heap it forced is not given back.
+  """
   @spec filter(atom(), (map() -> boolean())) :: [map()]
   def filter(collection, fun) do
-    all(collection) |> Enum.filter(fun)
+    fold(collection, [], fn record, acc ->
+      if fun.(record), do: [record | acc], else: acc
+    end)
   end
 
-  @doc "Returns the first record matching a filter function, or nil."
+  @doc """
+  Returns the first record matching a filter function, or nil.
+
+  Stops at the first match instead of building the whole collection first.
+  """
   @spec find_one(atom(), (map() -> boolean())) :: map() | nil
   def find_one(collection, fun) do
-    all(collection) |> Enum.find(fun)
+    fold(collection, nil, fn record, acc ->
+      if fun.(record), do: throw({__MODULE__, :found, record}), else: acc
+    end)
+  catch
+    {__MODULE__, :found, record} -> record
+  end
+
+  # Folds a collection's records without materialising it. A collection whose
+  # table was never created yields the initial accumulator — the case the old
+  # `rescue ArgumentError` existed for.
+  #
+  # Resolved with :ets.whereis rather than a rescue around the fold, because
+  # the caller's predicate runs inside it: a rescue here would swallow an
+  # ArgumentError raised by a *predicate* and return "no matches", turning a
+  # caller's bug into silently empty results. The old code ran predicates in
+  # Enum.filter, outside the rescue, and this preserves that.
+  defp fold(collection, acc, fun) do
+    case :ets.whereis(table_name(collection)) do
+      :undefined -> acc
+      table -> :ets.foldl(fn {_key, record}, a -> fun.(record, a) end, acc, table)
+    end
   end
 
   @doc "Counts records in a collection. O(1) — ETS tracks table size."
@@ -272,11 +312,20 @@ defmodule GiTF.Archive do
       record ->
         try do
           case update_fn.(record) do
-            {:error, reason} -> {:error, reason}
-            {:ok, updated, meta} when is_map(updated) -> commit_update(collection, record, updated, {:meta, meta})
-            {:ok, updated} when is_map(updated) -> commit_update(collection, record, updated, nil)
-            updated when is_map(updated) -> commit_update(collection, record, updated, nil)
-            other -> {:error, {:bad_update_fn_return, other}}
+            {:error, reason} ->
+              {:error, reason}
+
+            {:ok, updated, meta} when is_map(updated) ->
+              commit_update(collection, record, updated, {:meta, meta})
+
+            {:ok, updated} when is_map(updated) ->
+              commit_update(collection, record, updated, nil)
+
+            updated when is_map(updated) ->
+              commit_update(collection, record, updated, nil)
+
+            other ->
+              {:error, {:bad_update_fn_return, other}}
           end
         rescue
           e ->
@@ -378,9 +427,15 @@ defmodule GiTF.Archive do
 
   @impl true
   def handle_info(:flush, state) do
-    flush_dirty()
+    had_writes = flush_dirty()
     schedule_flush()
-    {:noreply, state}
+
+    # Serialising a collection is the largest allocation this process ever
+    # makes, and a GenServer heap keeps its high-water mark. Hibernating
+    # after a flush that did work forces the fullsweep that gives it back;
+    # an idle tick (the common case) skips it, so this costs nothing when
+    # nothing was written.
+    if had_writes, do: {:noreply, state, :hibernate}, else: {:noreply, state}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -439,15 +494,24 @@ defmodule GiTF.Archive do
     end
 
     if dirty != [], do: maybe_update_manifest()
-    :ok
+    dirty != []
   rescue
     e ->
       Logger.warning("Archive flush_dirty failed: #{Exception.message(e)}")
-      :ok
+      false
   end
 
   defp persist_collection(col) do
-    binary = :ets.tab2list(table_name(col)) |> Map.new() |> :erlang.term_to_binary()
+    # Built by folding straight into the map. The previous form went
+    # :ets.tab2list |> Map.new |> term_to_binary, which held three full
+    # representations of the collection live at once — the tuple list, the
+    # map, and the binary — in the Archive process, once per second per
+    # dirty collection.
+    binary =
+      table_name(col)
+      |> then(&:ets.foldl(fn {key, record}, acc -> Map.put(acc, key, record) end, %{}, &1))
+      |> :erlang.term_to_binary()
+
     path = collection_path(col)
     tmp = path <> ".tmp"
 
@@ -547,12 +611,14 @@ defmodule GiTF.Archive do
             # Atomic rewrite via temp+rename so a crash mid-recovery doesn't
             # leave the primary file half-written.
             recovery_tmp = data_path() <> ".tmp"
+
             with :ok <- File.write(recovery_tmp, binary),
                  :ok <- File.rename(recovery_tmp, data_path()) do
               :ok
             else
               _ -> :ok
             end
+
             {:halt, data}
           rescue
             _ ->
@@ -637,7 +703,10 @@ defmodule GiTF.Archive do
     end)
   rescue
     e ->
-      Logger.warning("Archive rotate_collection_backups failed for #{col}: #{Exception.message(e)}")
+      Logger.warning(
+        "Archive rotate_collection_backups failed for #{col}: #{Exception.message(e)}"
+      )
+
       :ok
   end
 
@@ -652,8 +721,13 @@ defmodule GiTF.Archive do
       preserved = base <> ".corrupt-#{System.os_time(:second)}"
 
       case File.copy(base, preserved) do
-        {:ok, _} -> Logger.error("Archive #{col}: primary preserved at #{Path.basename(preserved)} before backup restore")
-        _ -> :ok
+        {:ok, _} ->
+          Logger.error(
+            "Archive #{col}: primary preserved at #{Path.basename(preserved)} before backup restore"
+          )
+
+        _ ->
+          :ok
       end
     end
 
@@ -673,12 +747,14 @@ defmodule GiTF.Archive do
               Logger.warning("Archive #{col} corrupted — recovered from #{Path.basename(backup)}")
               # Restore the primary file
               tmp = base <> ".tmp"
+
               with :ok <- File.write(tmp, binary),
                    :ok <- File.rename(tmp, base) do
                 :ok
               else
                 _ -> :ok
               end
+
               {:halt, data}
           end
 
@@ -776,7 +852,9 @@ defmodule GiTF.Archive do
 
   defp register_collection(col) do
     cols = known_collections()
-    unless MapSet.member?(cols, col), do: :persistent_term.put({__MODULE__, :collections}, MapSet.put(cols, col))
+
+    unless MapSet.member?(cols, col),
+      do: :persistent_term.put({__MODULE__, :collections}, MapSet.put(cols, col))
   end
 
   defp clear_collection_registry do
@@ -789,8 +867,11 @@ defmodule GiTF.Archive do
     # Clean up stale tables from a previous instance
     for old_col <- known_collections() do
       old_tab = table_name(old_col)
+
       case :ets.info(old_tab) do
-        :undefined -> :ok
+        :undefined ->
+          :ok
+
         _ ->
           if is_pid(heir_pid), do: GiTF.Archive.TableHeir.claim(old_tab)
           :ets.delete(old_tab)
@@ -863,8 +944,12 @@ defmodule GiTF.Archive do
       |> MapSet.to_list()
 
     if discovered_collections != [] and
-         MapSet.size(MapSet.difference(MapSet.new(discovered_collections), MapSet.new(manifest_collections))) > 0 do
-      missing = MapSet.difference(MapSet.new(discovered_collections), MapSet.new(manifest_collections))
+         MapSet.size(
+           MapSet.difference(MapSet.new(discovered_collections), MapSet.new(manifest_collections))
+         ) > 0 do
+      missing =
+        MapSet.difference(MapSet.new(discovered_collections), MapSet.new(manifest_collections))
+
       Logger.warning(
         "Archive: discovered #{MapSet.size(missing)} collections on disk not in manifest: " <>
           inspect(MapSet.to_list(missing)) <>
@@ -882,7 +967,10 @@ defmodule GiTF.Archive do
   # A collection file we can't intern is INVISIBLE (reads as empty and is
   # then dropped from the manifest) — that must never be silent.
   defp log_if_uninternable(file, :error) do
-    Logger.error("Archive: skipping collection file #{file} — name not internable; data invisible until renamed")
+    Logger.error(
+      "Archive: skipping collection file #{file} — name not internable; data invisible until renamed"
+    )
+
     :error
   end
 
@@ -937,9 +1025,13 @@ defmodule GiTF.Archive do
     # Preserve old file
     File.rename(data_path(), data_path() <> ".pre_migration")
 
-    GiTF.Telemetry.emit([:gitf, :store, :migrated_v1], %{collection_count: length(collections)}, %{
-      collections: collections
-    })
+    GiTF.Telemetry.emit(
+      [:gitf, :store, :migrated_v1],
+      %{collection_count: length(collections)},
+      %{
+        collections: collections
+      }
+    )
 
     Logger.info("Archive: migration complete — #{length(collections)} collections")
 
@@ -964,7 +1056,6 @@ defmodule GiTF.Archive do
   rescue
     ArgumentError -> :ok
   end
-
 
   # -- Private helpers -------------------------------------------------------
 

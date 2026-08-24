@@ -16,7 +16,9 @@ defmodule GiTF.ArchiveTest do
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    store_dir = Path.join(System.tmp_dir!(), "gitf_archive_test_#{:erlang.unique_integer([:positive])}")
+    store_dir =
+      Path.join(System.tmp_dir!(), "gitf_archive_test_#{:erlang.unique_integer([:positive])}")
+
     File.mkdir_p!(store_dir)
 
     GiTF.Test.StoreHelper.stop_store()
@@ -101,9 +103,10 @@ defmodule GiTF.ArchiveTest do
     test "bare map return -> {:ok, updated}" do
       {:ok, rec} = Archive.insert(:ops, %{counter: 0})
 
-      assert {:ok, updated} = Archive.update(:ops, rec.id, fn r ->
-        Map.put(r, :counter, r.counter + 1)
-      end)
+      assert {:ok, updated} =
+               Archive.update(:ops, rec.id, fn r ->
+                 Map.put(r, :counter, r.counter + 1)
+               end)
 
       assert updated.counter == 1
       assert Archive.get(:ops, rec.id).counter == 1
@@ -112,9 +115,10 @@ defmodule GiTF.ArchiveTest do
     test "{:ok, record} return -> {:ok, updated}" do
       {:ok, rec} = Archive.insert(:ops, %{counter: 0})
 
-      assert {:ok, updated} = Archive.update(:ops, rec.id, fn r ->
-        {:ok, Map.put(r, :counter, 5)}
-      end)
+      assert {:ok, updated} =
+               Archive.update(:ops, rec.id, fn r ->
+                 {:ok, Map.put(r, :counter, 5)}
+               end)
 
       assert updated.counter == 5
     end
@@ -122,9 +126,10 @@ defmodule GiTF.ArchiveTest do
     test "{:ok, record, metadata} return -> {:ok, updated, meta}" do
       {:ok, rec} = Archive.insert(:ops, %{status: "a"})
 
-      assert {:ok, updated, meta} = Archive.update(:ops, rec.id, fn r ->
-        {:ok, Map.put(r, :status, "b"), %{changed: true}}
-      end)
+      assert {:ok, updated, meta} =
+               Archive.update(:ops, rec.id, fn r ->
+                 {:ok, Map.put(r, :status, "b"), %{changed: true}}
+               end)
 
       assert updated.status == "b"
       assert meta == %{changed: true}
@@ -133,9 +138,10 @@ defmodule GiTF.ArchiveTest do
     test "{:error, reason} return -> record unchanged" do
       {:ok, rec} = Archive.insert(:ops, %{status: "locked"})
 
-      assert {:error, :cannot_modify} = Archive.update(:ops, rec.id, fn _r ->
-        {:error, :cannot_modify}
-      end)
+      assert {:error, :cannot_modify} =
+               Archive.update(:ops, rec.id, fn _r ->
+                 {:error, :cannot_modify}
+               end)
 
       assert Archive.get(:ops, rec.id).status == "locked"
     end
@@ -242,11 +248,12 @@ defmodule GiTF.ArchiveTest do
       {:ok, _} = Archive.insert(:ops, %{status: "pending", priority: 2})
       {:ok, _} = Archive.insert(:ops, %{status: "done", priority: 3})
 
-      count = Archive.update_matching(
-        :ops,
-        &(&1.status == "pending"),
-        &Map.put(&1, :status, "running")
-      )
+      count =
+        Archive.update_matching(
+          :ops,
+          &(&1.status == "pending"),
+          &Map.put(&1, :status, "running")
+        )
 
       assert count == 2
       assert Archive.count(:ops, &(&1.status == "running")) == 2
@@ -256,11 +263,12 @@ defmodule GiTF.ArchiveTest do
     test "0 matches returns 0, no write" do
       {:ok, _} = Archive.insert(:ops, %{status: "done"})
 
-      count = Archive.update_matching(
-        :ops,
-        &(&1.status == "nope"),
-        &Map.put(&1, :status, "running")
-      )
+      count =
+        Archive.update_matching(
+          :ops,
+          &(&1.status == "nope"),
+          &Map.put(&1, :status, "running")
+        )
 
       assert count == 0
     end
@@ -429,11 +437,26 @@ defmodule GiTF.ArchiveTest do
       # Create a monolithic section.etf in the old format
       old_data = %{
         missions: %{
-          "msn-migr1" => %{id: "msn-migr1", name: "migrated_mission", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()},
+          "msn-migr1" => %{
+            id: "msn-migr1",
+            name: "migrated_mission",
+            inserted_at: DateTime.utc_now(),
+            updated_at: DateTime.utc_now()
+          }
         },
         ops: %{
-          "op-migr1" => %{id: "op-migr1", status: "pending", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()},
-          "op-migr2" => %{id: "op-migr2", status: "done", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()},
+          "op-migr1" => %{
+            id: "op-migr1",
+            status: "pending",
+            inserted_at: DateTime.utc_now(),
+            updated_at: DateTime.utc_now()
+          },
+          "op-migr2" => %{
+            id: "op-migr2",
+            status: "done",
+            inserted_at: DateTime.utc_now(),
+            updated_at: DateTime.utc_now()
+          }
         }
       }
 
@@ -465,13 +488,31 @@ defmodule GiTF.ArchiveTest do
       # Boot must scan the dir and load all *.etf files anyway.
       GiTF.Test.StoreHelper.stop_store()
 
-      for f <- File.ls!(store_dir), String.ends_with?(f, ".etf"), do: File.rm!(Path.join(store_dir, f))
+      for f <- File.ls!(store_dir),
+          String.ends_with?(f, ".etf"),
+          do: File.rm!(Path.join(store_dir, f))
 
       # Write per-collection files for sectors and missions
-      sector_data = %{"sec-1" => %{id: "sec-1", name: "test-sector", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}}
+      sector_data = %{
+        "sec-1" => %{
+          id: "sec-1",
+          name: "test-sector",
+          inserted_at: DateTime.utc_now(),
+          updated_at: DateTime.utc_now()
+        }
+      }
+
       File.write!(Path.join(store_dir, "sectors.etf"), :erlang.term_to_binary(sector_data))
 
-      mission_data = %{"msn-1" => %{id: "msn-1", name: "test-mission", inserted_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}}
+      mission_data = %{
+        "msn-1" => %{
+          id: "msn-1",
+          name: "test-mission",
+          inserted_at: DateTime.utc_now(),
+          updated_at: DateTime.utc_now()
+        }
+      }
+
       File.write!(Path.join(store_dir, "missions.etf"), :erlang.term_to_binary(mission_data))
 
       # Write a stale manifest listing only :missions (sectors orphaned)
@@ -515,7 +556,9 @@ defmodule GiTF.ArchiveTest do
   # ── Multi-table heir survival ──────────────────────────────────────────
 
   describe "multi-table heir" do
-    test "all collection + index tables survive Archive crash and restart", %{store_dir: store_dir} do
+    test "all collection + index tables survive Archive crash and restart", %{
+      store_dir: store_dir
+    } do
       # Ensure the heir is alive
       heir_pid = GiTF.Archive.TableHeir.pid()
       assert is_pid(heir_pid), "TableHeir must be running"
@@ -599,6 +642,98 @@ defmodule GiTF.ArchiveTest do
       missions_data = :erlang.binary_to_term(missions_bin)
       assert Map.has_key?(missions_data, "msn-disk")
       assert missions_data["msn-disk"].name == "on_disk"
+    end
+  end
+
+  describe "reads do not materialise the collection" do
+    # The regression these guard: filter/3 and find_one/2 used to be
+    # `all/1 |> Enum.filter/2`, so a predicate matching one record still
+    # copied every record in the collection into the caller's heap. With
+    # ~200 call sites, several on 30-second patrol timers, that is what took
+    # an idle factory's BEAM from 89MB of process memory at boot to 1.3GB.
+    #
+    # Payloads are integer lists, not binaries: binaries over 64 bytes are
+    # reference-counted off-heap, so a binary payload would not show up in
+    # the process heap measurement at all.
+    @records 2_000
+    @payload_len 200
+
+    defp seed_wide_collection do
+      for i <- 1..@records do
+        {:ok, _} =
+          Archive.insert(:ops, %{
+            id: "op-wide-#{i}",
+            status: if(i == 1, do: "needle", else: "haystack"),
+            payload: Enum.to_list(1..@payload_len)
+          })
+      end
+    end
+
+    defp heap_growth_during(fun) do
+      :erlang.garbage_collect(self())
+      {:memory, before} = Process.info(self(), :memory)
+      result = fun.()
+      {:memory, after_} = Process.info(self(), :memory)
+      {after_ - before, result}
+    end
+
+    test "filter/2 keeps only matches on the heap" do
+      seed_wide_collection()
+
+      {growth, matches} =
+        heap_growth_during(fn ->
+          Archive.filter(:ops, &(&1.status == "needle"))
+        end)
+
+      assert length(matches) == 1
+
+      # The collection is several MB of on-heap terms. Holding it all live —
+      # what the old implementation did — cannot fit in 1MB of growth.
+      assert growth < 1_000_000,
+             "filter grew the caller's heap by #{growth} bytes; it should keep only matches"
+    end
+
+    test "find_one/2 stops at the first match" do
+      seed_wide_collection()
+
+      {growth, found} =
+        heap_growth_during(fn ->
+          Archive.find_one(:ops, &(&1.status == "needle"))
+        end)
+
+      assert found.id == "op-wide-1"
+
+      assert growth < 1_000_000,
+             "find_one grew the caller's heap by #{growth} bytes; it should stop at the match"
+    end
+
+    test "all/1 still returns every record" do
+      seed_wide_collection()
+
+      assert length(Archive.all(:ops)) == @records
+    end
+
+    test "filter/2 returns every match, not just the first" do
+      seed_wide_collection()
+
+      assert length(Archive.filter(:ops, &(&1.status == "haystack"))) == @records - 1
+    end
+
+    test "find_one/2 returns nil when nothing matches" do
+      seed_wide_collection()
+
+      assert Archive.find_one(:ops, &(&1.status == "absent")) == nil
+    end
+
+    test "a predicate that raises is not swallowed by the fold's rescue" do
+      # fold/3 rescues ArgumentError for a missing table. A caller's own
+      # ArgumentError must still surface rather than looking like an empty
+      # collection.
+      seed_wide_collection()
+
+      assert_raise ArgumentError, fn ->
+        Archive.filter(:ops, fn _ -> raise ArgumentError, "from the predicate" end)
+      end
     end
   end
 end
