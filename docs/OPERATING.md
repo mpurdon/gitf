@@ -6,8 +6,8 @@ runbook for *operating*, not for *building* — for architecture see
 [`docs/deploy-aws.md`](deploy-aws.md).
 
 Live facts in this doc were verified against the running box on **2026-08-24**
-at v0.65.175. Anything marked *(verify)* changes on its own and should be
-re-checked, not trusted.
+(v0.65.175 → v0.65.187 over that day). Anything marked *(verify)* changes on
+its own and should be re-checked, not trusted.
 
 ---
 
