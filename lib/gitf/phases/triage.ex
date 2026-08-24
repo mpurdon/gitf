@@ -28,7 +28,8 @@ defmodule GiTF.Phases.Triage do
   legacy orchestrator triage handler does:
 
     * sets `mission.pipeline_mode` from the triaged complexity
-      (`GiTF.Major.Orchestrator.Decisions.pipeline_mode_for_complexity/1`);
+      (`GiTF.Major.Orchestrator.Decisions.pipeline_mode_after_inference/2`),
+      leaving it alone when the operator forced a mode at start;
     * when the artifact says the bug isn't reproducible *and* the
       evidence is strong (`GiTF.Triage.strong_no_work_evidence?/1` — a
       regex check that can't live in a `next:` expression), writes
@@ -71,7 +72,10 @@ defmodule GiTF.Phases.Triage do
       when verdict in [:pass, :advance] and is_map(artifact) do
     complexity = Triage.complexity_from_string(artifact["complexity"]) || :complex
 
-    Missions.update(mission.id, %{pipeline_mode: Decisions.pipeline_mode_for_complexity(complexity)})
+    case Decisions.pipeline_mode_after_inference(mission, complexity) do
+      nil -> :ok
+      mode -> Missions.update(mission.id, %{pipeline_mode: mode})
+    end
 
     bug_reproducible = artifact["bug_reproducible"]
     evidence = artifact["bug_evidence"] || ""

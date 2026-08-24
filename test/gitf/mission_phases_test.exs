@@ -41,6 +41,24 @@ defmodule GiTF.MissionPhasesTest do
       assert transition.reason == "Starting research"
     end
 
+    test "an omitted reason is derived from the phase actually being left" do
+      # Callers used to hardcode the phase that usually precedes this one
+      # ("Design complete" entering review), which the timeline then reported
+      # as fact even when triage had skipped design entirely.
+      {:ok, mission} = Missions.create(%{goal: "Test mission"})
+
+      {:ok, _} = Missions.transition_phase(mission.id, "triage")
+      {:ok, _} = Missions.transition_phase(mission.id, "review")
+
+      reasons =
+        mission.id
+        |> Missions.get_phase_transitions()
+        |> Map.new(&{&1.to_phase, &1.reason})
+
+      assert reasons["triage"] == "pending complete"
+      assert reasons["review"] == "triage complete"
+    end
+
     test "can track multiple phase transitions" do
       {:ok, mission} = Missions.create(%{goal: "Test mission"})
 

@@ -28,14 +28,23 @@ defmodule GiTF.Major.Orchestrator.Decisions do
   any other value (false, nil, missing key, non-boolean) is treated as
   not-skipped so ambiguous LLM output falls safely toward the fuller
   pipeline.
+
+  `has_design?` says whether a design artifact already exists. Review reads
+  the design and nothing else, so review is only a coherent destination when
+  there is a design to read — that is true for a resumed mission whose design
+  already landed, and false for a fresh triage that skipped design. Without
+  this, `skip_design: true` with `skip_review` unset routes straight to a
+  review ghost that judges an empty artifact, rejects it, and bounces to
+  design anyway, having spent a thinking-tier call and one of the mission's
+  bounded redesign attempts.
   """
-  @spec next_phase_after_triage(map()) :: phase_after_triage()
-  def next_phase_after_triage(skip_flags) when is_map(skip_flags) do
+  @spec next_phase_after_triage(map(), boolean()) :: phase_after_triage()
+  def next_phase_after_triage(skip_flags, has_design? \\ false) when is_map(skip_flags) do
     cond do
       not skipped?(skip_flags, "skip_research") -> :research
       not skipped?(skip_flags, "skip_requirements") -> :requirements
       not skipped?(skip_flags, "skip_design") -> :design
-      not skipped?(skip_flags, "skip_review") -> :review
+      not skipped?(skip_flags, "skip_review") and has_design? -> :review
       not skipped?(skip_flags, "skip_planning") -> :planning
       true -> :implementation
     end
@@ -53,6 +62,33 @@ defmodule GiTF.Major.Orchestrator.Decisions do
   @spec pipeline_mode_for_complexity(Triage.complexity() | any()) :: String.t()
   def pipeline_mode_for_complexity(:complex), do: "full"
   def pipeline_mode_for_complexity(_), do: "fast"
+
+  @doc """
+  The `pipeline_mode` an inference step should write for `mission`, or `nil`
+  when the operator's explicit choice must stand.
+
+  `start_mission --full` / `--fast` (and the MCP `full` / `fast` arguments)
+  stamp `pipeline_mode_forced` on the mission. Triage and research both form
+  their own opinion afterwards, and without this an operator asking for the
+  full pipeline silently got whatever triage inferred — the option was
+  advertised and ignored. Inference still wins whenever the operator did not
+  ask for anything, which is the common case.
+  """
+  @spec pipeline_mode_after_inference(map(), Triage.complexity() | any()) :: String.t() | nil
+  def pipeline_mode_after_inference(mission, complexity) do
+    if forced_pipeline_mode?(mission) do
+      nil
+    else
+      pipeline_mode_for_complexity(complexity)
+    end
+  end
+
+  @doc """
+  True when the mission's `pipeline_mode` was set by an explicit operator
+  choice rather than inferred, and so must not be revised.
+  """
+  @spec forced_pipeline_mode?(map()) :: boolean()
+  def forced_pipeline_mode?(mission), do: Map.get(mission, :pipeline_mode_forced) == true
 
   @doc """
   True when the simplify phase can be elided for a mission of the given

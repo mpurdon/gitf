@@ -885,7 +885,14 @@ defmodule GiTF.Missions do
   # in the scoring phase, publish has already run and the user-visible status
   # is "completed" (set by `mark_user_visible_completed/1`). Suppressing the
   # computed "completed" there would regress an already-finalized state.
-  @pipeline_phases ["implementation", "validation", "awaiting_approval", "sync", "simplify", "publish"]
+  @pipeline_phases [
+    "implementation",
+    "validation",
+    "awaiting_approval",
+    "sync",
+    "simplify",
+    "publish"
+  ]
 
   @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(mission_id) do
@@ -927,7 +934,8 @@ defmodule GiTF.Missions do
               new_status = compute_status(op_statuses)
 
               new_status =
-                if new_status == "completed" and Map.get(mission, :current_phase) in @pipeline_phases do
+                if new_status == "completed" and
+                     Map.get(mission, :current_phase) in @pipeline_phases do
                   Logger.debug(
                     "Mission #{mission_id}: suppressing premature 'completed' — still in #{mission.current_phase} phase"
                   )
@@ -1123,6 +1131,14 @@ defmodule GiTF.Missions do
 
   Records the transition and updates the mission's current_phase.
   Returns `{:ok, mission}` or `{:error, reason}`.
+
+  A `nil` reason is filled in from the phase actually being left. Callers
+  used to pass a literal describing the phase that *usually* precedes this
+  one — "Design complete" on the way into review — which reads as fact in
+  the timeline and is wrong whenever triage skipped that phase. The
+  from-phase read here is the authoritative one, so a derived reason cannot
+  disagree with the transition it annotates the way a caller's stale copy
+  of the mission can.
   """
   @spec transition_phase(String.t(), String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
@@ -1137,6 +1153,7 @@ defmodule GiTF.Missions do
 
       mission ->
         from_phase = Map.get(mission, :current_phase, "pending")
+        reason = reason || "#{from_phase} complete"
 
         if !recent_duplicate_transition?(mission_id, from_phase, to_phase) do
           Archive.insert(:mission_phase_transitions, %{

@@ -64,7 +64,19 @@ defmodule GiTF.Major.Orchestrator do
           "full"
         end
 
-      GiTF.Missions.update(mission_id, %{pipeline_mode: pipeline_mode})
+      # An operator who named a mode outranks every later inference. Without
+      # this the mode is indistinguishable from an inferred one, and triage
+      # overwrites it — see Decisions.pipeline_mode_after_inference/2.
+      forced = force or force_full
+
+      if forced do
+        Logger.info("Quest #{mission_id} pipeline mode #{pipeline_mode} forced by operator")
+      end
+
+      GiTF.Missions.update(mission_id, %{
+        pipeline_mode: pipeline_mode,
+        pipeline_mode_forced: forced
+      })
 
       planning_artifact = GiTF.Missions.get_artifact(mission_id, "planning")
 
@@ -627,9 +639,17 @@ defmodule GiTF.Major.Orchestrator do
       complexity = GiTF.Triage.complexity_from_string(Map.get(artifact, "complexity")) || :complex
       skip_flags = Map.get(artifact, "skip_flags", %{}) || %{}
 
-      GiTF.Missions.update(mission.id, %{
-        pipeline_mode: Decisions.pipeline_mode_for_complexity(complexity)
-      })
+      case Decisions.pipeline_mode_after_inference(mission, complexity) do
+        nil ->
+          Logger.info(
+            "Triage complete for #{mission.id}: keeping operator-forced pipeline mode " <>
+              "#{Map.get(mission, :pipeline_mode)} over inferred " <>
+              "#{Decisions.pipeline_mode_for_complexity(complexity)}"
+          )
+
+        mode ->
+          GiTF.Missions.update(mission.id, %{pipeline_mode: mode})
+      end
 
       Logger.info(
         "Triage complete for #{mission.id}: complexity=#{complexity}, skip_flags=#{inspect(skip_flags)}"
@@ -668,7 +688,9 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp route_to_first_unskipped_phase(mission, skip_flags) do
-    case Decisions.next_phase_after_triage(skip_flags) do
+    has_design? = not is_nil(GiTF.Missions.get_artifact(mission.id, "design"))
+
+    case Decisions.next_phase_after_triage(skip_flags, has_design?) do
       :research -> start_research(mission)
       :requirements -> start_requirements(mission)
       :design -> start_design(mission)
@@ -684,7 +706,7 @@ defmodule GiTF.Major.Orchestrator do
     if is_nil(sector_id) do
       {:error, :no_sector_assigned}
     else
-      with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
+      with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research") do
         sector = Archive.get(:sectors, sector_id)
         ctx = GiTF.Intel.get_prompt_context(sector_id, "research", mission)
 
@@ -703,7 +725,7 @@ defmodule GiTF.Major.Orchestrator do
     research = GiTF.Missions.get_artifact(mission.id, "research")
 
     with {:ok, _} <-
-           GiTF.Missions.transition_phase(mission.id, "requirements", "Research complete") do
+           GiTF.Missions.transition_phase(mission.id, "requirements") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "requirements", mission)
       prompt = PhasePrompts.requirements_prompt(mission, research, ctx)
       spawn_phase_ghost(mission, "requirements", prompt, model: "general")
@@ -750,7 +772,7 @@ defmodule GiTF.Major.Orchestrator do
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     research = GiTF.Missions.get_artifact(mission.id, "research")
 
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "design", "Requirements complete") do
+    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "design") do
       review = GiTF.Missions.get_artifact(mission.id, "review")
 
       extra_instructions =
@@ -811,7 +833,7 @@ defmodule GiTF.Major.Orchestrator do
     # Collect all design variants (design_minimal, design_normal, design_complex)
     designs = collect_design_variants(mission.id)
 
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "review", "Design complete") do
+    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "review") do
       prompt = PhasePrompts.review_prompt(mission, designs, requirements, research)
 
       spawn_phase_ghost(mission, "review", prompt,
@@ -865,7 +887,7 @@ defmodule GiTF.Major.Orchestrator do
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     review = GiTF.Missions.get_artifact(mission.id, "review")
 
-    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning", "Review approved") do
+    with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "planning", mission)
       prompt = PhasePrompts.planning_prompt(mission, design, requirements, review, ctx)
 
@@ -881,7 +903,7 @@ defmodule GiTF.Major.Orchestrator do
     planning_artifact = GiTF.Missions.get_artifact(mission.id, "planning")
 
     with {:ok, _} <-
-           GiTF.Missions.transition_phase(mission.id, "implementation", "Planning complete") do
+           GiTF.Missions.transition_phase(mission.id, "implementation") do
       # Planning phase already scored and selected the best plan. Just
       # create ops from whatever planning artifact exists. In
       # tournament mode (`Tournament.enabled?`), the planned op list is
@@ -977,7 +999,7 @@ defmodule GiTF.Major.Orchestrator do
 
   defp do_start_validation(mission, requirements, planning) do
     with {:ok, _} <-
-           GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
+           GiTF.Missions.transition_phase(mission.id, "validation") do
       ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation", mission)
       diff_base = detect_diff_base(mission)
 
@@ -1346,8 +1368,10 @@ defmodule GiTF.Major.Orchestrator do
               # and validation judged a tree silently missing that work.
               # This synthetic entry rides the merge_conflicts list into the
               # validation prompt so the fix loop knows work is absent.
-              ["UNMERGED BRANCH #{branch} (merge failed: #{reason}) — its commits are " <>
-                 "missing from this tree; merge it or re-apply its work"]
+              [
+                "UNMERGED BRANCH #{branch} (merge failed: #{reason}) — its commits are " <>
+                  "missing from this tree; merge it or re-apply its work"
+              ]
           end
         end)
         |> Enum.uniq()
@@ -1539,7 +1563,11 @@ defmodule GiTF.Major.Orchestrator do
     if artifact && !artifact_failed?(artifact) do
       complexity = Map.get(artifact, "complexity") || "high"
 
-      if complexity == "low" and Map.get(mission, :pipeline_mode) != "full" do
+      # Guarded on the operator's explicit choice, not on the mode's current
+      # value: "full" is also what start_quest writes when the fast path
+      # simply wasn't eligible, and research finding low complexity is
+      # exactly the signal that should be allowed to revise that.
+      if complexity == "low" and not Decisions.forced_pipeline_mode?(mission) do
         Logger.info(
           "Quest #{mission.id}: Research identified low complexity, using streamlined pipeline"
         )

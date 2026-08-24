@@ -39,6 +39,45 @@ defmodule GiTF.Major.OrchestratorTriageRoutingTest do
       assert :design = Decisions.next_phase_after_triage(flags)
     end
 
+    test "skipping design without skipping review does not route to review" do
+      # Regression: msn-9b4375. Triage skipped design and left skip_review
+      # unset, so routing sent the mission to a review ghost with no design
+      # artifact to read. It rejected the empty design, which spent one of
+      # the mission's bounded redesign attempts, and bounced to design —
+      # arriving where it should have gone directly, one thinking-tier call
+      # poorer.
+      flags = %{
+        "skip_research" => true,
+        "skip_requirements" => true,
+        "skip_design" => true
+      }
+
+      assert :planning = Decisions.next_phase_after_triage(flags, false)
+    end
+
+    test "skipping design routes to review when a design already exists" do
+      # The resumed-mission case the guard must not break: design landed on
+      # an earlier run, so triage skips it and review has real input.
+      flags = %{
+        "skip_research" => true,
+        "skip_requirements" => true,
+        "skip_design" => true
+      }
+
+      assert :review = Decisions.next_phase_after_triage(flags, true)
+    end
+
+    test "a design that exists cannot conjure a review that was skipped" do
+      flags = %{
+        "skip_research" => true,
+        "skip_requirements" => true,
+        "skip_design" => true,
+        "skip_review" => true
+      }
+
+      assert :planning = Decisions.next_phase_after_triage(flags, true)
+    end
+
     test "skip up through skip_review routes to planning" do
       flags = %{
         "skip_research" => true,
@@ -112,6 +151,43 @@ defmodule GiTF.Major.OrchestratorTriageRoutingTest do
     end
   end
 
+  describe "pipeline_mode_after_inference/2" do
+    test "an unforced mission takes the inferred mode" do
+      assert "fast" = Decisions.pipeline_mode_after_inference(%{}, :simple)
+      assert "full" = Decisions.pipeline_mode_after_inference(%{}, :complex)
+    end
+
+    test "an explicitly forced mode is left alone" do
+      # Regression: msn-9b4375 was started with full: true and ran as "fast"
+      # because triage overwrote the operator's choice with its own read of
+      # complexity. The MCP tool advertised an option it then ignored.
+      mission = %{pipeline_mode: "full", pipeline_mode_forced: true}
+
+      assert nil == Decisions.pipeline_mode_after_inference(mission, :simple)
+    end
+
+    test "forcing fast is equally sticky against a complex triage" do
+      mission = %{pipeline_mode: "fast", pipeline_mode_forced: true}
+
+      assert nil == Decisions.pipeline_mode_after_inference(mission, :complex)
+    end
+
+    test "a mode that merely happens to be full is still inferable" do
+      # start_quest writes "full" whenever the fast path wasn't eligible,
+      # which is not the same as the operator asking for it.
+      mission = %{pipeline_mode: "full"}
+
+      assert "fast" = Decisions.pipeline_mode_after_inference(mission, :simple)
+    end
+
+    test "forced_pipeline_mode? only trusts a literal true" do
+      refute Decisions.forced_pipeline_mode?(%{})
+      refute Decisions.forced_pipeline_mode?(%{pipeline_mode_forced: false})
+      refute Decisions.forced_pipeline_mode?(%{pipeline_mode_forced: "true"})
+      assert Decisions.forced_pipeline_mode?(%{pipeline_mode_forced: true})
+    end
+  end
+
   describe "phases/0" do
     test "triage is the first phase" do
       assert "triage" = List.first(Orchestrator.phases())
@@ -119,6 +195,7 @@ defmodule GiTF.Major.OrchestratorTriageRoutingTest do
 
     test "triage precedes research" do
       phases = Orchestrator.phases()
+
       assert Enum.find_index(phases, &(&1 == "triage")) <
                Enum.find_index(phases, &(&1 == "research"))
     end
