@@ -199,9 +199,32 @@ defmodule GiTF.Archive do
   # caller's bug into silently empty results. The old code ran predicates in
   # Enum.filter, outside the rescue, and this preserves that.
   defp fold(collection, acc, fun) do
+    fold_table(collection, acc, fn {_key, record}, a -> fun.(record, a) end)
+  end
+
+  # Folds the raw {key, record} pairs of a collection's table.
+  #
+  # The table is fixed for the traversal. `:ets.tab2list/1` is a single BIF and
+  # therefore an atomic snapshot; a fold walks first/next, which is only safe
+  # against concurrent deletes on a fixed table. Writes here are lock-free and
+  # concurrent by design, so without the fix a delete landing mid-traversal
+  # could end the fold early and return partial results as though the
+  # collection were smaller — a silent wrong answer, not a crash.
+  #
+  # `find_one/2` throws out of this fold; `after` still unfixes.
+  defp fold_table(collection, acc, fun) do
     case :ets.whereis(table_name(collection)) do
-      :undefined -> acc
-      table -> :ets.foldl(fn {_key, record}, a -> fun.(record, a) end, acc, table)
+      :undefined ->
+        acc
+
+      table ->
+        :ets.safe_fixtable(table, true)
+
+        try do
+          :ets.foldl(fun, acc, table)
+        after
+          :ets.safe_fixtable(table, false)
+        end
     end
   end
 
@@ -508,8 +531,8 @@ defmodule GiTF.Archive do
     # map, and the binary — in the Archive process, once per second per
     # dirty collection.
     binary =
-      table_name(col)
-      |> then(&:ets.foldl(fn {key, record}, acc -> Map.put(acc, key, record) end, %{}, &1))
+      col
+      |> fold_table(%{}, fn {key, record}, acc -> Map.put(acc, key, record) end)
       |> :erlang.term_to_binary()
 
     path = collection_path(col)

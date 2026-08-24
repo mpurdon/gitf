@@ -90,11 +90,15 @@ defmodule GiTF.Major.ResearchTest do
     # Second call should refresh cache
     {:ok, result2} = Research.research_sector(sector.id)
 
-    # Two writes inside the same microsecond compare equal, which made this
-    # fail intermittently under load. The property under test is that the
-    # cache REFRESHED — the new file count proves that; the clock ticking
-    # between two fast writes does not.
-    assert result2.research.analyzed_at >= result1.research.analyzed_at
+    # DateTime.compare, not >=: comparison operators order DateTime structs
+    # as raw terms — map keys alphabetically, so :microsecond outranks
+    # :second — and a genuinely-later timestamp straddling a second boundary
+    # (x.948094 -> y.036269) compares "earlier". That is what made this
+    # intermittent.
+    assert DateTime.compare(result2.research.analyzed_at, result1.research.analyzed_at) in [
+             :gt,
+             :eq
+           ]
     assert result2.research.structure.total_files == 5
   end
 

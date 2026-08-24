@@ -725,6 +725,33 @@ defmodule GiTF.ArchiveTest do
       assert Archive.find_one(:ops, &(&1.status == "absent")) == nil
     end
 
+    test "a fold survives deletes landing mid-traversal" do
+      # tab2list was an atomic snapshot; folding walks first/next, which is
+      # only safe on a fixed table. Writes here are lock-free, so an unfixed
+      # fold could end early and report a short collection as fact.
+      seed_wide_collection()
+      ids = Enum.map(Archive.all(:ops), & &1.id)
+      assert length(ids) == @records
+
+      deleter =
+        Task.async(fn ->
+          # Delete from the middle outwards while the fold below is running.
+          ids
+          |> Enum.drop(@records - 500)
+          |> Enum.each(&Archive.delete(:ops, &1))
+        end)
+
+      survivors = Archive.filter(:ops, fn _ -> true end)
+      Task.await(deleter, 30_000)
+
+      # Every record either survived or was one of the 500 deleted; the fold
+      # must not have stopped early and reported far fewer than that.
+      assert length(survivors) >= @records - 500,
+             "fold returned #{length(survivors)} of #{@records} with 500 concurrent deletes"
+
+      assert Archive.count(:ops) == @records - 500
+    end
+
     test "a predicate that raises is not swallowed by the fold's rescue" do
       # fold/3 rescues ArgumentError for a missing table. A caller's own
       # ArgumentError must still surface rather than looking like an empty
