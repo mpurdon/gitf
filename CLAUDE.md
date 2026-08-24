@@ -21,6 +21,17 @@ until a release is installed on the box.
 `remote factory: Connection timed out` means *asleep*, not *broken*. Run
 `gitf wake` (~60s), then `health_check`. Waking is cheap and self-reversing.
 
+## Use the MCP, not the box
+
+Default to `mcp__gitf__*` for anything about factory state — status, version,
+missions, ops, ghosts, costs, host memory, disk, provider health. The tools
+return structured state, and the operator watches the session, so an MCP call
+is legible where a curl pipeline or an SSM round-trip is not.
+
+Shelling into the box is the last resort. It is genuinely required only for
+installing a release, boot-time env in `/etc/gitf/gitf.env`, systemd/tailscale,
+and AWS-side work — see the coverage table in `docs/OPERATING.md` §2.
+
 ## Two facts that catch people
 
 - **`create_mission` does not start the mission.** Call `start_mission`

@@ -26,13 +26,52 @@ proxies to the same box.
 Consequences that trip people up:
 
 - Editing code in this repo changes **nothing** about the running factory until
-  a release is built and installed on the box (§8).
+  a release is built and installed on the box (§9).
 - `~/Projects/gitf/.gitf/` is a stale local workspace. The real store is
   `/var/lib/gitf/.gitf/store` on the box.
 - Sectors are registered on the box, at `/var/lib/gitf/sectors/<name>`, not on
   your Mac.
 
-## 2. Cold start — do this at the beginning of every session
+## 2. Reach for the MCP first
+
+**Default to `mcp__gitf__*`. Shelling into the box is the last resort, not the
+diagnostic starting point.**
+
+Two reasons, and the second is the one that gets forgotten. The MCP tools return
+structured factory state that a shell command has to be assembled to
+approximate. And the operator watches the session — an MCP call shows exactly
+what was asked and what came back, where a `curl | grep | sed` pipeline or an
+SSM round-trip is opaque from outside.
+
+The reflex to break: reaching for SSM to answer a question the factory already
+answers about itself. The running version, whether the daemon is up, how much
+memory or disk it is using, why a provider is failing — all of these have tools.
+
+| Question | Use this | Not this |
+|---|---|---|
+| Is it up? What version? | `factory_status`, `health_check` | `systemctl is-active`, `/opt/gitf/bin/gitf version` |
+| Memory, CPU, uptime | `host_stats` | `free -m`, `uptime` |
+| Disk, per-mission worktrees | `disk_usage` | `df -h`, `du` |
+| What is a ghost doing? | `ghost_output`, `list_ops` | tailing worktrees |
+| Why did it fail? | `mission_diagnosis`, `mission_report` | `journalctl` |
+| Is the provider broken? | `test_provider`, `circuit_status` | reading env files |
+| Let the box stay awake | `idle_stop_override` | `touch /etc/gitf/idle-stop-disabled` |
+| Flip a feature flag | `/dashboard/settings` (live reload) | editing `/etc/gitf/gitf.env` + restart |
+
+What genuinely needs the box, because it has no MCP surface:
+
+- **Installing a release** — the one unavoidable case (§9).
+- **Boot-time env** in `/etc/gitf/gitf.env`: secrets, `GITF_EXECUTION_MODE`,
+  tailnet auth. Runtime feature flags do *not* belong here (§10).
+- **systemd, tailscale, Caddy** — unit state, certs, serve config.
+- **AWS-side work** — EC2, SSM, Bedrock, Route53, S3. No MCP coverage; the AWS
+  CLI is correct there.
+
+When you do need the box, prefer one scripted `aws ssm send-command` over an
+interactive session, and get everything in a single round-trip rather than
+logging in repeatedly to ask one more thing.
+
+## 3. Cold start — do this at the beginning of every session
 
 The box powers itself off when idle. A sleeping box looks exactly like a broken
 one, so check in this order:
@@ -74,7 +113,7 @@ For that case, use the `idle_stop_override` MCP tool — it requires both a new 
 no permanent hold. On the box itself the manual escape hatch is
 `sudo touch /etc/gitf/idle-stop-disabled`.
 
-## 3. Sectors — the repos the factory can work on
+## 4. Sectors — the repos the factory can work on
 
 *(verify with `mcp__gitf__list_sectors`)*
 
@@ -94,7 +133,7 @@ just running tests (see the verification track in project memory).
 
 To add a repo: `gitf sector add <path> --name <name>`, run against the box.
 
-## 4. Creating and running a mission
+## 5. Creating and running a mission
 
 ### The two-step that bites
 
@@ -103,7 +142,7 @@ Nothing happens until you call `start_mission`. Both require `confirm: true`.
 
 ```
 mcp__gitf__create_mission
-  goal:        "<the whole spec — see §5>"
+  goal:        "<the whole spec — see §6>"
   sector_id:   "sec-a0e680"
   name:        "short-kebab-name"
   review_plan: false          # true = pause at planning for dashboard review
@@ -138,7 +177,7 @@ with a roadmap: `create_project` → `approve_project` → Aramaki emits mission
 in dependency order. Use a project only when there genuinely are dependent
 stages; a single feature is a mission.
 
-## 5. Writing a mission goal that actually lands
+## 6. Writing a mission goal that actually lands
 
 The goal text *is* the spec — there is no follow-up conversation once a ghost is
 running. Every cora mission that completed shares the same shape. From the
@@ -169,7 +208,7 @@ Anti-pattern: multi-surface features (Rust command + TS binding + UI panel) in
 one goal. They are the deliberate frontier and they fail more often — run 13's
 postmortem is exactly this. Split them or accept the risk knowingly.
 
-## 6. Watching a run
+## 7. Watching a run
 
 | Want | Tool |
 |---|---|
@@ -191,7 +230,7 @@ gets saved to a file — query it with `jq` rather than re-reading:
 jq -r '.[] | "\(.id)\t\(.status)\t\(.name)"' <saved-file>
 ```
 
-## 7. When a mission fails
+## 8. When a mission fails
 
 **The doctrine: never rescue the mission.** Root-cause the *factory* defect,
 fix that, then re-run the same mission unchanged — the re-run is the test that
@@ -212,7 +251,7 @@ re-diagnosing something already understood.
   mission for what is a provider problem.
 - Lifetime spend $932.65 across 35 missions and 4,365 ghosts.
 
-## 8. Getting into the box
+## 9. Getting into the box
 
 **SSH is not set up for this Mac user** — `ssh ghost-in-the-factory` fails with
 `Permission denied (publickey)`. The documented path is SSM, which needs a live
@@ -251,7 +290,7 @@ enough, the daemon caches at boot.
 Upgrades: CI builds an arm64 tarball on every `main` push; install with
 `sudo rel/install-systemd.sh <tarball>`. State is untouched.
 
-## 9. Feature flags
+## 10. Feature flags
 
 Most of the differentiating intelligence layer ships **default-off**. The
 factory as it boots is a plain pipeline. Do not assume skills, outcomes,
@@ -267,7 +306,7 @@ is the ground truth for what is actually on.
 Confirmed off *(2026-08-24)*: outcome autonomy tiers — `autonomy_tier` for cora
 returns `reason: "feature_disabled"`, effective tier `normal`.
 
-## 10. Guards you should not route around
+## 11. Guards you should not route around
 
 - **Daily spend ceiling** — factory-wide, rolling 24h, **fail-closed**. Breach
   pauses the factory rather than burning on. Per-mission budget on top.
@@ -280,7 +319,7 @@ returns `reason: "feature_disabled"`, effective tier `normal`.
   `GITF_TAILNET_ADMINS`). There is no real SSO yet, so nothing goes beyond the
   tailnet.
 
-## 11. Landmines
+## 12. Landmines
 
 - **Two `gitf` binaries.** `~/.local/bin/gitf` is 0.65.175 (self-updated);
   Homebrew's `/opt/homebrew/bin/gitf` is 0.65.47. PATH order decides which you
@@ -301,7 +340,7 @@ returns `reason: "feature_disabled"`, effective tier `normal`.
 - **Never set `GITF_PATH`.** Use `gitf -w <path>` to target a workspace.
 - **Never test in this source repo.** Use `~/Projects/gitf-test`.
 
-## 12. The factory's own wiki is a different thing
+## 13. The factory's own wiki is a different thing
 
 `gitf knowledge` / `knowledge_search` / `knowledge_ingest_url` manage the
 **knowledge engine** — a wiki compiled from mission debriefs and injected into
