@@ -71,6 +71,20 @@ When you do need the box, prefer one scripted `aws ssm send-command` over an
 interactive session, and get everything in a single round-trip rather than
 logging in repeatedly to ask one more thing.
 
+**If a tool looks missing, check what the server actually advertises before
+concluding it is not there.** A session's tool registry can index a subset —
+`host_stats`, `disk_usage` and `idle_stop_override` were all absent from
+`ToolSearch` while the server was advertising 64 tools including them. Ask it
+directly rather than reaching for the box:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ~/.mix/escripts/gitf-mcp
+```
+
+The same pipe calls any tool the registry has not surfaced, with
+`"method":"tools/call","params":{"name":"host_stats","arguments":{}}` — still
+the MCP path, no shell on the box.
+
 ## 3. Cold start — do this at the beginning of every session
 
 The box powers itself off when idle. A sleeping box looks exactly like a broken
@@ -240,6 +254,21 @@ the defect.
 Postmortems live in [`docs/audits/`](audits/). Read the relevant one before
 re-diagnosing something already understood.
 
+### Reading the box's memory *(the shape to expect)*
+
+`host_stats` returns a `beam` breakdown; the field that matters is
+`processes_mb`. On an idle factory it should sit **under ~150MB** and stay
+flat. ETS (~300MB) is the store and is legitimate; `process_count` is ~489
+and constant.
+
+If `processes_mb` climbs while nothing runs, the question is *which
+long-lived process is holding a heap* — not which is leaking data. A steady
+`process_count` and flat `ets_mb` alongside rising `processes_mb` means heap
+ratcheting, and the usual cause is a whole-collection read (`Archive.all/1`,
+or the old `filter/2`) inside a process on a timer: a GenServer heap keeps
+its high-water mark, so the peak becomes the resting size. This is what took
+an idle box to 1.3GB and ~930MB of swap before v0.65.180.
+
 ### Current reliability signal *(2026-08-24 — verify)*
 
 - 7-day failure classes: `no_changes` 23, `unclassified` 89, `unknown` 13.
@@ -266,6 +295,39 @@ Only the `aws sso login` is interactive. Everything after it is scriptable —
 prefer `aws ssm send-command --document-name AWS-RunShellScript` over an
 interactive session when the work is a known sequence (installing a release,
 reading an env file, restarting a unit).
+
+**`gitf wake` returning "Factory is up" is not enough to run SSM.** That means
+the *daemon* is answering; the SSM agent registers later. `send-command`
+against a box that is still stopped fails with
+`InvalidInstanceId: Instances not in a valid state for account`, which reads
+like a permissions problem and is not. Wait for the agent first:
+
+```sh
+until aws ssm describe-instance-information \
+        --filters "Key=InstanceIds,Values=<instance-id>" \
+        --query 'InstanceInformationList[0].PingStatus' --output text | grep -q Online
+do sleep 10; done
+```
+
+### Deploying a release (the whole sequence)
+
+CI builds an arm64 tarball on every `main` push. What works end to end:
+
+```sh
+gh run download <run-id> -n gitf-release-arm64 -D /tmp/rel
+gh run download <run-id> -n gitf-installer    -D /tmp/inst   # box has no repo clone
+aws s3 cp /tmp/rel/gitf-<v>.tar.gz s3://<backup-bucket>/artifacts/ --sse AES256
+aws s3 cp /tmp/inst/gitf-installer.tar.gz s3://<backup-bucket>/artifacts/ --sse AES256
+```
+
+then one `send-command` that downloads both, untars the installer, and runs
+`rel/install-systemd.sh <tarball>`. The installer preserves existing secrets
+(`skip: SECRET_KEY_BASE already set`), so no client needs re-authenticating.
+State lives on the data volume and is untouched. Confirm with
+`mcp__gitf__factory_status` — the version field, not a shell command.
+
+The `gitf-installer` artifact is required: the box has no checkout, so
+`rel/install-systemd.sh` and the unit files have to arrive with the release.
 
 *(2026-08-24)* The fallback `gitf-prod` profile is **broken** — it references
 `source_profile = "org"`, which does not exist in the local AWS config. `gitf`
