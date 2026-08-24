@@ -588,47 +588,38 @@ defmodule GiTF.Sync.Resolver do
     end
   end
 
-  @validation_blocklist ~w(rm sudo chmod chown curl wget ssh scp rsync nc ncat mkfifo)
-
+  # Was a bare `System.cmd("sh", ["-c", command])` — the only path in the
+  # factory that ran a sector's validation command unsandboxed and with no
+  # OS-level deadline. The box sets GITF_SANDBOX_REQUIRED=1 so a degraded
+  # sandbox refuses rather than silently running unconfined; this bypassed it.
+  #
+  # The word blocklist that used to guard it is gone. It matched substrings,
+  # so cora's command failed on `rm` (it contains `rm -rf node_modules`), and
+  # `npm run format` would fail on the same `rm`, `concurrently` on `nc`.
+  # Silently: the AI tier is the only one that validates, so an affected
+  # sector lost conflict resolution entirely and was told only "contains
+  # blocked operation". It was also guarding the wrong thing —
+  # `validation_command` is set by onboarding detection or an operator, never
+  # by a model, and Validator, Audit and Debrief all run that same field with
+  # no blocklist at all. Confinement is the sandbox's job, and it is now
+  # doing it here too.
   defp validate_resolution(sector) do
     case Map.get(sector, :validation_command) do
-      nil ->
-        :ok
-
-      command when is_binary(command) ->
-        if command_safe?(command) do
-          task =
-            Task.async(fn ->
-              System.cmd("sh", ["-c", command], cd: sector.path, stderr_to_stdout: true, env: [])
-            end)
-
-          # Same budget the sector's own validation runs under — see
-          # GiTF.Validator.validation_timeout_ms/1.
-          timeout_ms = GiTF.Validator.validation_timeout_ms(sector)
-
-          case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
-            {:ok, {_, 0}} -> :ok
-            {:ok, {output, _}} -> {:error, String.slice(output, 0, 500)}
-            nil -> {:error, "validation command timed out"}
-          end
-        else
-          Logger.warning("Validation command rejected (contains blocked term): #{command}")
-          {:error, "validation command contains blocked operation"}
+      command when is_binary(command) and command != "" ->
+        case GiTF.Validator.run_validation(sector.path, command, sector) do
+          {:ok, _output} -> :ok
+          {:error, _kind, message, _exit_code} -> {:error, String.slice(message, 0, 500)}
         end
 
       _ ->
         :ok
     end
   rescue
-    _ -> :ok
-  end
-
-  defp command_safe?(command) do
-    lower = String.downcase(command)
-
-    not Enum.any?(@validation_blocklist, fn blocked ->
-      String.contains?(lower, blocked)
-    end)
+    # Fails CLOSED. This was `rescue _ -> :ok`, which committed a merge as
+    # though validation had passed whenever anything unexpected raised — on
+    # the only tier that validates at all.
+    e ->
+      {:error, "validation raised: #{Exception.message(e)}"}
   end
 
   defp with_sync_lock(sector_id, fun) do

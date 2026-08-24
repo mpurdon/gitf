@@ -27,7 +27,13 @@ defmodule GiTF.Sync.Queue do
   @registry GiTF.Registry
   @registry_key :sync_queue
   @max_history 100
+  # Floor for the whole tier escalation, and the budget when the sector can't
+  # be resolved. See merge_timeout_for/1.
   @merge_timeout_ms :timer.minutes(5)
+
+  # Headroom over the sector's validation budget for everything else a merge
+  # does: the tier-0/1 git work and up to five model calls on the AI tier.
+  @tier_overhead_ms :timer.minutes(5)
 
   # -- Child spec --------------------------------------------------------------
 
@@ -265,6 +271,30 @@ defmodule GiTF.Sync.Queue do
 
   # -- Private: queue processing -----------------------------------------------
 
+  # This deadline has to cover the whole tier escalation — tiers 0-2, up to
+  # five sequential model calls to resolve conflicted files, AND the sector's
+  # own validation run at the end. A flat five minutes was fine only while
+  # every sector validated in two; a sector whose validation budget is larger
+  # than this makes the kill below deterministic, and that kill is brutal —
+  # `Process.exit(:kill)` skips `abort_merge`, leaving the shared clone with
+  # MERGE_HEAD and a conflicted index for the next op to trip over.
+  #
+  # Derived from the sector's validation budget so the two cannot drift the
+  # way four copies of a 120s constant did.
+  defp merge_timeout_for(op_id) do
+    sector =
+      with op when is_map(op) <- GiTF.Archive.get(:ops, op_id),
+           id when is_binary(id) <- Map.get(op, :sector_id) do
+        GiTF.Archive.get(:sectors, id)
+      else
+        _ -> nil
+      end
+
+    max(@merge_timeout_ms, GiTF.Validator.validation_timeout_ms(sector) + @tier_overhead_ms)
+  rescue
+    _ -> @merge_timeout_ms
+  end
+
   defp maybe_process_next(%{active: nil, pending: []} = state), do: state
 
   defp maybe_process_next(%{active: nil, pending: pending} = state) do
@@ -281,7 +311,11 @@ defmodule GiTF.Sync.Queue do
           end)
 
         timer =
-          Process.send_after(self(), {:merge_timeout, task.ref, task.pid}, @merge_timeout_ms)
+          Process.send_after(
+            self(),
+            {:merge_timeout, task.ref, task.pid},
+            merge_timeout_for(op_id)
+          )
 
         %{state | active: {op_id, shell_id, task.ref}, pending: rest, merge_timer: timer}
 

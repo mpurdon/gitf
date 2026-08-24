@@ -1165,13 +1165,17 @@ defmodule GiTF.CLI do
 
         if report.ambiguous != [] do
           IO.puts("\n## Ambiguous (multiple orphans with the same hash — resolve manually)")
+
           Enum.each(report.ambiguous, fn {slug, paths} ->
             IO.puts("- [#{slug}] matches: #{Enum.join(paths, ", ")}")
           end)
         end
 
         if report.hash_drift != [] do
-          IO.puts("\n## Hash drift (file gone, no matching orphan — likely edited + renamed at once)")
+          IO.puts(
+            "\n## Hash drift (file gone, no matching orphan — likely edited + renamed at once)"
+          )
+
           Enum.each(report.hash_drift, fn slug -> IO.puts("- [#{slug}]") end)
         end
 
@@ -1187,7 +1191,9 @@ defmodule GiTF.CLI do
 
         cond do
           is_nil(sector) ->
-            Format.error("Usage: gitf knowledge ingest {--from <dir> | --url <url>} --sector <id>")
+            Format.error(
+              "Usage: gitf knowledge ingest {--from <dir> | --url <url>} --sector <id>"
+            )
 
           is_binary(url) ->
             opts = [depth: depth]
@@ -1220,7 +1226,9 @@ defmodule GiTF.CLI do
             end)
 
           true ->
-            Format.error("Usage: gitf knowledge ingest {--from <dir> | --url <url>} --sector <id>")
+            Format.error(
+              "Usage: gitf knowledge ingest {--from <dir> | --url <url>} --sector <id>"
+            )
         end
 
       _ ->
@@ -1549,11 +1557,24 @@ defmodule GiTF.CLI do
       # once caused a sector registered as pr_branch to land as manual and
       # then get boot-backfilled to auto_merge (unreviewed pushes to main).
       opts =
-        [:name, :sync_strategy, :validation_command, :github_owner, :github_repo]
+        [
+          :name,
+          :sync_strategy,
+          :validation_command,
+          :validation_timeout_ms,
+          :github_owner,
+          :github_repo
+        ]
         |> Enum.reduce([], fn key, acc ->
           case result_get(result, :options, key) do
-            nil -> acc
-            val -> Keyword.put(acc, key, val)
+            nil ->
+              acc
+
+            val when key == :validation_timeout_ms ->
+              Keyword.put(acc, key, parse_validation_timeout!(val))
+
+            val ->
+              Keyword.put(acc, key, val)
           end
         end)
 
@@ -1610,6 +1631,12 @@ defmodule GiTF.CLI do
             do: Keyword.put(opts, :validation_command, validation_command),
             else: opts
 
+        opts =
+          case parse_validation_timeout!(result_get(result, :options, :validation_timeout_ms)) do
+            nil -> opts
+            ms -> Keyword.put(opts, :validation_timeout_ms, ms)
+          end
+
         opts = Keyword.put(opts, :skip_research, true)
 
         case GiTF.Onboarding.onboard(path, opts) do
@@ -1637,6 +1664,9 @@ defmodule GiTF.CLI do
         github_owner = result_get(result, :options, :github_owner)
         github_repo = result_get(result, :options, :github_repo)
 
+        validation_timeout_ms =
+          parse_validation_timeout!(result_get(result, :options, :validation_timeout_ms))
+
         opts = []
         opts = if name, do: Keyword.put(opts, :name, name), else: opts
         opts = if sync_strategy, do: Keyword.put(opts, :sync_strategy, sync_strategy), else: opts
@@ -1644,6 +1674,11 @@ defmodule GiTF.CLI do
         opts =
           if validation_command,
             do: Keyword.put(opts, :validation_command, validation_command),
+            else: opts
+
+        opts =
+          if validation_timeout_ms,
+            do: Keyword.put(opts, :validation_timeout_ms, validation_timeout_ms),
             else: opts
 
         opts = if github_owner, do: Keyword.put(opts, :github_owner, github_owner), else: opts
@@ -1790,17 +1825,29 @@ defmodule GiTF.CLI do
     id = result_get(result, :args, :id)
 
     updates =
-      [:validation_command, :sync_strategy]
+      [:validation_command, :validation_timeout_ms, :sync_strategy]
       |> Enum.reduce(%{}, fn key, acc ->
         case result_get(result, :options, key) do
-          nil -> acc
-          "" when key == :validation_command -> Map.put(acc, key, nil)
-          value -> Map.put(acc, key, value)
+          nil ->
+            acc
+
+          "" when key in [:validation_command, :validation_timeout_ms] ->
+            # Clearing the timeout hands the sector back to the derived budget.
+            Map.put(acc, key, nil)
+
+          value when key == :validation_timeout_ms ->
+            Map.put(acc, key, parse_validation_timeout!(value))
+
+          value ->
+            Map.put(acc, key, value)
         end
       end)
 
     if updates == %{} do
-      Format.error("Nothing to set. Pass --validation-command and/or --sync-strategy.")
+      Format.error(
+        "Nothing to set. Pass --validation-command, --validation-timeout-ms and/or --sync-strategy."
+      )
+
       System.halt(1)
     end
 
@@ -2032,6 +2079,7 @@ defmodule GiTF.CLI do
 
       {:error, :not_in_gitf} ->
         IO.puts(GiTF.CLI.Errors.format_error(:store_not_initialized))
+
         Format.info(
           "Hint: run any gitf command with `-w <path>` (or GITF_PATH set) and accept the initialize prompt to create a workspace."
         )
@@ -3771,6 +3819,30 @@ defmodule GiTF.CLI do
     current ++ subdirs
   end
 
+  # Optimus' `:integer` parser accepts 0 and negatives, and `sector set` reads
+  # the value as a string so `""` can clear the override. Both roads come here:
+  # a non-positive deadline fires before validation can even start and reports
+  # every op as a timeout — precisely the failure this field exists to prevent.
+  defp parse_validation_timeout!(nil), do: nil
+  defp parse_validation_timeout!(ms) when is_integer(ms) and ms > 0, do: ms
+
+  defp parse_validation_timeout!(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {ms, ""} when ms > 0 -> ms
+      _ -> reject_validation_timeout(value)
+    end
+  end
+
+  defp parse_validation_timeout!(value), do: reject_validation_timeout(value)
+
+  defp reject_validation_timeout(value) do
+    Format.error(
+      "--validation-timeout-ms must be a positive whole number of milliseconds, got #{inspect(value)}."
+    )
+
+    System.halt(1)
+  end
+
   defp doctor_status_label(:ok), do: IO.ANSI.green() <> "OK" <> IO.ANSI.reset()
   defp doctor_status_label(:warn), do: IO.ANSI.yellow() <> "WARN" <> IO.ANSI.reset()
   defp doctor_status_label(:error), do: IO.ANSI.red() <> "FAIL" <> IO.ANSI.reset()
@@ -3845,6 +3917,13 @@ defmodule GiTF.CLI do
                   parser: :string,
                   required: false
                 ],
+                validation_timeout_ms: [
+                  long: "--validation-timeout-ms",
+                  help:
+                    "Override the derived validation deadline in milliseconds (default: derived from project type and command shape)",
+                  parser: :integer,
+                  required: false
+                ],
                 github_owner: [
                   long: "--github-owner",
                   help: "GitHub repository owner",
@@ -3914,7 +3993,8 @@ defmodule GiTF.CLI do
             ],
             set: [
               name: "set",
-              about: "Update a sector's tunable settings (validation_command, sync_strategy)",
+              about:
+                "Update a sector's tunable settings (validation_command, validation_timeout_ms, sync_strategy)",
               args: [
                 id: [
                   value_name: "ID",
@@ -3927,7 +4007,16 @@ defmodule GiTF.CLI do
                 validation_command: [
                   long: "--validation-command",
                   value_name: "CMD",
-                  help: "Shell command run in each ghost worktree during validation (\"\" to clear)",
+                  help:
+                    "Shell command run in each ghost worktree during validation (\"\" to clear)",
+                  parser: :string,
+                  required: false
+                ],
+                validation_timeout_ms: [
+                  long: "--validation-timeout-ms",
+                  value_name: "MS",
+                  help:
+                    "Override the derived validation deadline, in milliseconds (\"\" to fall back to the derived budget)",
                   parser: :string,
                   required: false
                 ],

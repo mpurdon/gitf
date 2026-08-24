@@ -85,17 +85,38 @@ defmodule GiTF.Validator do
 
   def validation_timeout_ms(_), do: @validation_timeout_ms
 
-  @doc """
-  Runs a custom shell command in the shell worktree.
+  @typedoc """
+  Why a validation run did not pass.
 
-  `timeout_ms` lets a sector opt into longer validation: a runtime smoke
-  probe that builds and launches the actual app (the cora probe) cannot fit
-  the 2-minute default that suits typecheck-only commands.
+    * `:failed`    — the command ran and returned non-zero. The ghost's code.
+    * `:timeout`   — the deadline fired. Says nothing about the code.
+    * `:tool_missing` — exit 126/127, a host provisioning gap.
+    * `:crashed`   — the runner itself raised.
   """
-  @spec run_custom_validation(map(), String.t(), pos_integer() | nil) ::
-          :ok | {:error, String.t()}
-  def run_custom_validation(shell, command, timeout_ms \\ nil) do
-    timeout_ms = timeout_ms || @validation_timeout_ms
+  @type failure_kind :: :failed | :timeout | :tool_missing | :crashed
+
+  @doc """
+  Runs a sector's validation command. **The** way to do that — every caller
+  routes through here.
+
+  There used to be three implementations with different guarantees:
+  `Audit.run_validation_command/2` was sandboxed but had no OS-level
+  deadline, and `Sync.Resolver.validate_resolution/1` was not sandboxed at
+  all. Whether a runaway validation was actually killed therefore depended on
+  which module happened to invoke it — and an orphan does not stay in its own
+  lane. A leaked probe held port :1420 and poisoned the following run once
+  already. For a factory running many sectors unattended, "it depends on the
+  call site" is the property to remove.
+
+  Returns `{:ok, output}` or `{:error, kind, message, exit_code}`, where
+  `message` is already shaped for a human or a prompt — tail-sliced, since
+  the verdict of a shell pipeline is at the end and the head is install
+  noise.
+  """
+  @spec run_validation(String.t(), String.t(), map() | nil, keyword()) ::
+          {:ok, String.t()} | {:error, failure_kind(), String.t(), integer()}
+  def run_validation(cwd, command, sector, opts \\ []) do
+    timeout_ms = Keyword.get(opts, :timeout_ms) || validation_timeout_ms(sector)
 
     # OS-enforced deadline INSIDE the sandbox. Task.shutdown/2 kills the
     # Elixir task but never the OS process behind System.cmd, so a timed-out
@@ -107,41 +128,50 @@ defmodule GiTF.Validator do
     inner_deadline_s = max(div(timeout_ms, 1000) - 5, 5)
     guarded = "timeout -k 10 #{inner_deadline_s} sh -c #{shell_quote(command)}"
 
-    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(guarded, cd: shell.worktree_path)
+    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(guarded, cd: cwd)
 
     task =
       Task.async(fn ->
-        System.cmd(cmd, cmd_args,
-          cd: shell.worktree_path,
-          stderr_to_stdout: true,
-          env: [{"MIX_ENV", "test"}]
-        )
+        System.cmd(cmd, cmd_args, cd: cwd, stderr_to_stdout: true, env: [{"MIX_ENV", "test"}])
       end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {_output, 0}} ->
-        :ok
+      {:ok, {output, 0}} ->
+        {:ok, output}
 
       {:ok, {output, exit_code}} when exit_code in [126, 127] ->
         # Shell "not executable"/"not found" — a HOST provisioning gap,
         # not the ghost's code. Blaming the diff sent missions into
         # fail-loops over a missing npm.
-        {:error,
+        {:error, :tool_missing,
          "TOOL MISSING on host (exit #{exit_code}) — the validation command's toolchain " <>
            "is not installed; this is an infrastructure problem, not a code problem: " <>
-           String.slice(output, 0, 300)}
+           String.slice(output, 0, 300), exit_code}
 
       {:ok, {output, exit_code}} ->
-        # The TAIL is where shell pipelines put their verdicts — a probe's
-        # "FAIL: ..." summary or a compiler's final error. Slicing the head
-        # fed the validation prompt 500 chars of npm install noise instead.
-        {:error, "Command failed (exit #{exit_code}): #{tail_slice(output, 900)}"}
+        {:error, :failed, "Command failed (exit #{exit_code}): #{tail_slice(output, 900)}",
+         exit_code}
 
       nil ->
-        {:error, "Validation command timed out after #{div(timeout_ms, 1000)}s"}
+        {:error, :timeout, "Validation command timed out after #{div(timeout_ms, 1000)}s", 124}
     end
   rescue
-    e -> {:error, "Validation command error: #{Exception.message(e)}"}
+    e -> {:error, :crashed, "Validation command error: #{Exception.message(e)}", 1}
+  end
+
+  @doc """
+  Runs a custom shell command in the shell worktree.
+
+  Thin shape adapter over `run_validation/4` for callers that only care
+  whether it passed.
+  """
+  @spec run_custom_validation(map(), String.t(), pos_integer() | nil) ::
+          :ok | {:error, String.t()}
+  def run_custom_validation(shell, command, timeout_ms \\ nil) do
+    case run_validation(shell.worktree_path, command, nil, timeout_ms: timeout_ms) do
+      {:ok, _output} -> :ok
+      {:error, _kind, message, _exit_code} -> {:error, message}
+    end
   end
 
   @doc "Runs model validation to assess whether the diff solves the op."

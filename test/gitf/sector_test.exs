@@ -39,6 +39,20 @@ defmodule GiTF.CombTest do
       assert {:error, :path_not_found} =
                Sector.add("/nonexistent/path/#{System.unique_integer()}")
     end
+
+    # The field is read by GiTF.Validator but used to be written nowhere, so
+    # every sector silently ran with the 120s default.
+    test "persists validation_timeout_ms", %{tmp: tmp} do
+      assert {:ok, sector} = Sector.add(tmp, validation_timeout_ms: 1_800_000)
+      assert sector.validation_timeout_ms == 1_800_000
+      assert Archive.get(:sectors, sector.id).validation_timeout_ms == 1_800_000
+    end
+
+    test "leaves validation_timeout_ms nil when not given", %{tmp: tmp} do
+      assert {:ok, sector} = Sector.add(tmp)
+      assert Map.has_key?(sector, :validation_timeout_ms)
+      assert sector.validation_timeout_ms == nil
+    end
   end
 
   describe "list/0" do

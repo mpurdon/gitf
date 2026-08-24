@@ -193,40 +193,18 @@ defmodule GiTF.Audit do
     end
   end
 
-  # The sector's own budget, not a second opinion about it. A sector that
-  # opted into a longer validation did so because its command genuinely takes
-  # longer — cora reinstalls ~200 npm packages before it can typecheck — and
-  # this module hardcoding its own 2 minutes is not a smaller timeout, it is a
-  # false failure report. msn-8e0eae is what that costs: every op came back
-  # "Validation command timed out after 120s", including the implementation
-  # that was fine, so the orchestrator spawned fix ghost after fix ghost for a
-  # defect that did not exist, and merging six same-base branches that had all
-  # made the same edit put conflict markers in the file. That was the real
-  # failure, and nothing upstream of it was ever broken.
+  # Delegates to the one runner rather than reimplementing it. This module's
+  # own version was sandboxed but had no OS-level deadline, so a timed-out
+  # validation left the process tree alive — and it used its own hardcoded
+  # 2 minutes regardless of the sector, which is what failed msn-8e0eae:
+  # every op came back "timed out after 120s", including the implementation
+  # that was correct, so the orchestrator spawned fix ghost after fix ghost
+  # for a defect that did not exist.
   defp run_validation_command(shell, command, sector) do
-    timeout_ms = GiTF.Validator.validation_timeout_ms(sector)
-    {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(command, cd: shell.worktree_path)
-
-    task =
-      Task.async(fn ->
-        System.cmd(cmd, cmd_args,
-          cd: shell.worktree_path,
-          stderr_to_stdout: true
-        )
-      end)
-
-    case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, 0}} ->
-        {:ok, output}
-
-      {:ok, {output, exit_code}} ->
-        {:error, {output, exit_code}}
-
-      nil ->
-        {:error, {"Validation command timed out after #{div(timeout_ms, 1000)}s", 1}}
+    case GiTF.Validator.run_validation(shell.worktree_path, command, sector) do
+      {:ok, output} -> {:ok, output}
+      {:error, _kind, message, exit_code} -> {:error, {message, exit_code}}
     end
-  rescue
-    e -> {:error, {Exception.message(e), 1}}
   end
 
   defp update_job_verification(op_id, status, result) do

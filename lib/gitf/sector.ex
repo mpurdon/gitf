@@ -101,13 +101,22 @@ defmodule GiTF.Sector do
     with {_, 0} <- GiTF.Git.safe_cmd(["init", "-b", "main"], cd: path),
          {_, 0} <-
            GiTF.Git.safe_cmd(
-             ["-c", "user.name=gitf", "-c", "user.email=gitf@localhost", "commit",
-              "--allow-empty", "-m", "chore: initialize sector"],
+             [
+               "-c",
+               "user.name=gitf",
+               "-c",
+               "user.email=gitf@localhost",
+               "commit",
+               "--allow-empty",
+               "-m",
+               "chore: initialize sector"
+             ],
              cd: path
            ) do
       :ok
     else
-      {output, code} -> {:error, {:git_init_failed, code, String.slice(to_string(output), 0, 200)}}
+      {output, code} ->
+        {:error, {:git_init_failed, code, String.slice(to_string(output), 0, 200)}}
     end
   end
 
@@ -307,6 +316,7 @@ defmodule GiTF.Sector do
         repo_url: nil,
         sync_strategy: sync_strategy,
         validation_command: Keyword.get(opts, :validation_command),
+        validation_timeout_ms: Keyword.get(opts, :validation_timeout_ms),
         github_owner: gh_owner,
         github_repo: gh_repo
       }
@@ -332,6 +342,7 @@ defmodule GiTF.Sector do
         path: cloned_path,
         sync_strategy: Keyword.get(opts, :sync_strategy, "manual"),
         validation_command: Keyword.get(opts, :validation_command),
+        validation_timeout_ms: Keyword.get(opts, :validation_timeout_ms),
         github_owner: Keyword.get(opts, :github_owner),
         github_repo: Keyword.get(opts, :github_repo)
       }

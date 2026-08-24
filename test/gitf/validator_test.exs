@@ -125,6 +125,38 @@ defmodule GiTF.ValidatorTest do
       assert Validator.validation_timeout_ms(nil) == 120_000
     end
 
+    test "no module runs a sector's validation_command on its own" do
+      # The orphan hole this closes: Task.shutdown/2 kills the Elixir task but
+      # never the OS process behind System.cmd, so only the `timeout -k` that
+      # run_validation/4 puts INSIDE the sandbox actually kills the tree. Audit
+      # had no OS deadline and Resolver was not sandboxed at all, so whether a
+      # runaway validation died depended on which module invoked it — and an
+      # orphan does not stay in its own sector. A leaked probe holding :1420
+      # poisoned a later run once already.
+      # Comment lines are stripped first: these modules explain in prose what
+      # they no longer do, and a guard that reads its own documentation as a
+      # violation is a guard that gets deleted.
+      code_of = fn path ->
+        path
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+        |> Enum.join("\n")
+      end
+
+      offenders =
+        for path <- ["lib/gitf/audit.ex", "lib/gitf/sync/resolver.ex"],
+            File.exists?(path),
+            code = code_of.(path),
+            String.contains?(code, "Task.yield") or String.contains?(code, "System.cmd(\"sh\""),
+            do: path
+
+      assert offenders == [],
+             "these run a shell command directly instead of GiTF.Validator.run_validation/4, " <>
+               "which is the only path that wraps the command in an OS-level timeout inside " <>
+               "the sandbox: #{inspect(offenders)}"
+    end
+
     test "every module that runs a sector's validation_command shares this one" do
       # A fourth hardcoded copy is the bug returning. Only Validator itself
       # may name the default.

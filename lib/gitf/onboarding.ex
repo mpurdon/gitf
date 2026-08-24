@@ -14,6 +14,7 @@ defmodule GiTF.Onboarding do
   - :name - Sector name (defaults to directory name)
   - :skip_research - Skip initial research cache generation
   - :validation_command - Override detected validation command
+  - :validation_timeout_ms - Override the derived validation deadline
   """
   def onboard(path, opts \\ []) do
     with {:ok, full_path} <- validate_path(path),
@@ -77,6 +78,12 @@ defmodule GiTF.Onboarding do
     sector_opts = [
       name: name,
       validation_command: validation_cmd,
+      # Derived from the command that will actually run, not the detected one —
+      # an operator override like `npm ci && … && bash probes/foo.sh` needs the
+      # cold-build budget just as much as a detected `cargo test` does.
+      validation_timeout_ms:
+        opts[:validation_timeout_ms] ||
+          Detector.derive_validation_timeout_ms(project_info, validation_cmd),
       sync_strategy: suggest_sync_strategy(project_info)
     ]
 
@@ -108,6 +115,7 @@ defmodule GiTF.Onboarding do
          suggestions: %{
            name: Path.basename(full_path),
            validation_command: project_info.validation_command,
+           validation_timeout_ms: project_info.validation_timeout_ms,
            sync_strategy: suggest_sync_strategy(project_info)
          }
        }}

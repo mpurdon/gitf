@@ -556,6 +556,7 @@ defmodule GiTF.Web.ApiController do
         {"name", v}, acc -> [{:name, v} | acc]
         {"sync_strategy", v}, acc -> [{:sync_strategy, v} | acc]
         {"validation_command", v}, acc -> [{:validation_command, v} | acc]
+        {"validation_timeout_ms", v}, acc -> [{:validation_timeout_ms, v} | acc]
         _, acc -> acc
       end)
 
@@ -568,6 +569,7 @@ defmodule GiTF.Web.ApiController do
   # Only operator-tunable fields; identity/paths are immutable after add.
   @sector_mutable_fields %{
     "validation_command" => :validation_command,
+    "validation_timeout_ms" => :validation_timeout_ms,
     "sync_strategy" => :sync_strategy
   }
 
@@ -592,10 +594,17 @@ defmodule GiTF.Web.ApiController do
         error(conn, 422, "unknown sector fields: #{Enum.join(unknown, ", ")}")
 
       updates == %{} ->
-        error(conn, 422, "no updatable fields given (#{Enum.join(Map.keys(@sector_mutable_fields), ", ")})")
+        error(
+          conn,
+          422,
+          "no updatable fields given (#{Enum.join(Map.keys(@sector_mutable_fields), ", ")})"
+        )
 
       not valid_sync_strategy?(updates) ->
         error(conn, 422, "sync_strategy must be auto_merge, pr_branch, or manual")
+
+      not valid_validation_timeout?(updates) ->
+        error(conn, 422, "validation_timeout_ms must be a positive integer (milliseconds)")
 
       true ->
         case GiTF.Archive.update(:sectors, id, &Map.merge(&1, updates)) do
@@ -610,6 +619,14 @@ defmodule GiTF.Web.ApiController do
     do: s in ["auto_merge", "pr_branch", "manual"]
 
   defp valid_sync_strategy?(_), do: true
+
+  # `nil` clears the override and hands the sector back to the derived default.
+  defp valid_validation_timeout?(%{validation_timeout_ms: nil}), do: true
+
+  defp valid_validation_timeout?(%{validation_timeout_ms: ms}),
+    do: is_integer(ms) and ms > 0
+
+  defp valid_validation_timeout?(_), do: true
 
   def list_sectors(conn, _params) do
     sectors = GiTF.Sector.list()
@@ -934,6 +951,7 @@ defmodule GiTF.Web.ApiController do
       repo_url: c[:repo_url],
       sync_strategy: c[:sync_strategy],
       validation_command: c[:validation_command],
+      validation_timeout_ms: c[:validation_timeout_ms],
       github_owner: c[:github_owner],
       github_repo: c[:github_repo]
     }

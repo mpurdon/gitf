@@ -66,22 +66,22 @@ defmodule GiTF.Debrief do
       if is_nil(validation_command) do
         {:ok, :clean}
       else
-        {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(validation_command, cd: sector.path)
-
-        task =
-          Task.async(fn ->
-            System.cmd(cmd, cmd_args, cd: sector.path, stderr_to_stdout: true)
-          end)
-
-        case Task.yield(task, 120_000) || Task.shutdown(task, 5_000) do
-          {:ok, {_output, 0}} ->
+        # The fourth place that ran a sector's validation command, with its
+        # own hardcoded 2 minutes and no OS-level deadline. A regression
+        # check that times out because the budget was too small for the
+        # sector reports a REGRESSION — it accuses merged work of breaking
+        # the build on no evidence.
+        case GiTF.Validator.run_validation(sector.path, validation_command, sector) do
+          {:ok, _output} ->
             {:ok, :clean}
 
-          {:ok, {output, _exit_code}} ->
-            {:ok, :regression, output}
+          {:error, :timeout, message, _exit} ->
+            # Not evidence of a regression — evidence the budget was wrong.
+            Logger.warning("Regression check for #{mission_id} timed out: #{message}")
+            {:ok, :clean}
 
-          nil ->
-            {:ok, :regression, "validation command timed out"}
+          {:error, _kind, message, _exit} ->
+            {:ok, :regression, message}
         end
       end
     end

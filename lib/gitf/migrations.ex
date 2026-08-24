@@ -8,7 +8,7 @@ defmodule GiTF.Migrations do
 
   alias GiTF.Archive
 
-  @current_version 8
+  @current_version 9
 
   @doc """
   Run all pending migrations.
@@ -192,5 +192,48 @@ defmodule GiTF.Migrations do
     end)
 
     :ok
+  end
+
+  defp run_migration(9) do
+    # Migration 9: Backfill validation_timeout_ms on sectors. The field was read
+    # by GiTF.Validator but written nowhere, so every sector silently took the
+    # 120s default. cora's command — `npm ci && … npm run typecheck && bash
+    # …/probes/cora-smoke.sh` — is a cold npm install plus a Tauri build-and-
+    # launch probe and cannot finish in 120s, so every op came back :timeout and
+    # manufactured six fix ghosts that merge-conflicted and killed the mission.
+    sectors = Archive.all(:sectors)
+
+    Enum.each(sectors, fn sector ->
+      # Guarded rather than Map.put_new/3 so re-running this never walks the
+      # filesystem for a sector an operator has already tuned.
+      unless Map.has_key?(sector, :validation_timeout_ms) do
+        Archive.put(
+          :sectors,
+          Map.put(sector, :validation_timeout_ms, derive_sector_timeout(sector))
+        )
+      end
+    end)
+
+    :ok
+  end
+
+  # Re-detect against the live checkout when it is still there, but always feed
+  # the STORED command in: that is where the `npm ci` and `probes/` markers
+  # live, and the detector would never have suggested them itself. A sector
+  # whose path has since vanished still gets the command-shape budget.
+  defp derive_sector_timeout(sector) do
+    path = Map.get(sector, :path)
+
+    project_info =
+      if is_binary(path) and File.dir?(path) do
+        GiTF.Onboarding.Detector.detect(path)
+      else
+        %{}
+      end
+
+    GiTF.Onboarding.Detector.derive_validation_timeout_ms(
+      project_info,
+      Map.get(sector, :validation_command)
+    )
   end
 end

@@ -37,7 +37,40 @@ defmodule GiTF.OnboardingTest do
     assert info.project_info.build_tool == :mix
     assert info.project_info.test_framework == :exunit
     assert info.suggestions.validation_command == "mix test"
+    assert info.suggestions.validation_timeout_ms == 900_000
     assert info.suggestions.name == "test_project"
+  end
+
+  test "onboard persists the derived validation timeout", %{project_dir: project_dir} do
+    {:ok, result} = Onboarding.onboard(project_dir, name: "derived_comb", skip_research: true)
+
+    assert result.sector.validation_timeout_ms == 900_000
+  end
+
+  # An operator's compound command needs the cold-build budget just as much as
+  # a detected one — validation always runs in a fresh worktree.
+  test "onboard derives from the overriding command, not the detected one", %{
+    project_dir: project_dir
+  } do
+    {:ok, result} =
+      Onboarding.onboard(project_dir,
+        name: "cold_comb",
+        validation_command: "mix deps.get && mix test",
+        skip_research: true
+      )
+
+    assert result.sector.validation_timeout_ms == 1_800_000
+  end
+
+  test "an explicit validation_timeout_ms wins over the derived one", %{project_dir: project_dir} do
+    {:ok, result} =
+      Onboarding.onboard(project_dir,
+        name: "override_comb",
+        validation_timeout_ms: 60_000,
+        skip_research: true
+      )
+
+    assert result.sector.validation_timeout_ms == 60_000
   end
 
   test "quick_onboard creates sector without research", %{project_dir: project_dir} do
