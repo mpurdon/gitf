@@ -81,6 +81,14 @@ defmodule GiTF.Web.Router do
     end
   end
 
+  # Deck download. A plain controller, not a LiveView: the response is a file
+  # meant to leave the tailnet, so it must be fetchable by a normal GET.
+  scope "/dashboard", GiTF.Web do
+    pipe_through(:dashboard)
+
+    get("/missions/:id/deck", DeckController, :show)
+  end
+
   scope "/floor", GiTF.Web do
     pipe_through(:browser)
 

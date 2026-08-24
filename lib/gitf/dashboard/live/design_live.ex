@@ -278,6 +278,13 @@ defmodule GiTF.Dashboard.DesignLive do
     <div class="panel" style="margin-bottom:1rem">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem">
         <div class="panel-title" style="margin:0">Decision Brief</div>
+        <a
+          :if={@report}
+          class="btn btn-grey"
+          style="font-size:0.8rem; text-decoration:none; margin-right:0.4rem"
+          href={"/dashboard/missions/#{@mission.id}/deck"}
+          title="Self-contained page — send it to someone who is not on the tailnet"
+        >Download deck</a>
         <button
           class="btn btn-grey"
           style="font-size:0.8rem"
