@@ -91,6 +91,24 @@ defmodule GiTF.Major.Orchestrator.Decisions do
   def forced_pipeline_mode?(mission), do: Map.get(mission, :pipeline_mode_forced) == true
 
   @doc """
+  The skip flags that actually apply to `mission`.
+
+  An operator who forced the full pipeline asked for every phase, and
+  triage's skip flags are precisely the inference that choice overrode —
+  honouring them means `--full` buys three design strategies only if triage
+  happened to route through design at all, which for a small change it does
+  not. Forcing *fast* is left alone: skipping is what that asks for.
+  """
+  @spec effective_skip_flags(map(), map()) :: map()
+  def effective_skip_flags(mission, skip_flags) do
+    if forced_pipeline_mode?(mission) and Map.get(mission, :pipeline_mode) == "full" do
+      %{}
+    else
+      skip_flags
+    end
+  end
+
+  @doc """
   True when the simplify phase can be elided for a mission of the given
   triage complexity. Scoring still runs so the learning loop keeps getting
   signal — this only skips the 3 parallel simplify review ghosts.

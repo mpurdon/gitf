@@ -180,6 +180,32 @@ defmodule GiTF.Major.OrchestratorTriageRoutingTest do
       assert "fast" = Decisions.pipeline_mode_after_inference(mission, :simple)
     end
 
+    test "forcing full drops triage's skip flags" do
+      # Otherwise --full buys three design strategies only when triage
+      # happened to route through design, which for a small change it does
+      # not — and the operator who asked for the full pipeline gets a single
+      # variant and no comparison to read.
+      mission = %{pipeline_mode: "full", pipeline_mode_forced: true}
+      flags = %{"skip_research" => true, "skip_design" => true}
+
+      assert %{} == Decisions.effective_skip_flags(mission, flags)
+      assert :research = Decisions.next_phase_after_triage(%{}, false)
+    end
+
+    test "forcing fast keeps them — skipping is what it asks for" do
+      mission = %{pipeline_mode: "fast", pipeline_mode_forced: true}
+      flags = %{"skip_research" => true}
+
+      assert ^flags = Decisions.effective_skip_flags(mission, flags)
+    end
+
+    test "an unforced mission keeps triage's skip flags" do
+      flags = %{"skip_research" => true}
+
+      assert ^flags = Decisions.effective_skip_flags(%{pipeline_mode: "full"}, flags)
+      assert ^flags = Decisions.effective_skip_flags(%{}, flags)
+    end
+
     test "forced_pipeline_mode? only trusts a literal true" do
       refute Decisions.forced_pipeline_mode?(%{})
       refute Decisions.forced_pipeline_mode?(%{pipeline_mode_forced: false})

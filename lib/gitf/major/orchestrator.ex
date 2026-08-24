@@ -677,7 +677,15 @@ defmodule GiTF.Major.Orchestrator do
         end
 
         {:ok, mission} = GiTF.Missions.get(mission.id)
-        route_to_first_unskipped_phase(mission, skip_flags)
+        effective = Decisions.effective_skip_flags(mission, skip_flags)
+
+        if effective != skip_flags do
+          Logger.info(
+            "Quest #{mission.id}: operator forced the full pipeline — ignoring triage skip flags"
+          )
+        end
+
+        route_to_first_unskipped_phase(mission, effective)
       end
     else
       # No artifact yet — wait or re-spawn via the generic check.

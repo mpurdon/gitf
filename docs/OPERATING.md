@@ -223,6 +223,16 @@ aws sso login --profile gitf            # the session expires regularly
 aws ssm start-session --target <instance-id>
 ```
 
+Only the `aws sso login` is interactive. Everything after it is scriptable —
+prefer `aws ssm send-command --document-name AWS-RunShellScript` over an
+interactive session when the work is a known sequence (installing a release,
+reading an env file, restarting a unit).
+
+*(2026-08-24)* The fallback `gitf-prod` profile is **broken** — it references
+`source_profile = "org"`, which does not exist in the local AWS config. `gitf`
+is the only working profile, so an expired SSO session is a hard stop for box
+access rather than something the second profile covers.
+
 Once in:
 
 | Thing | Where |
