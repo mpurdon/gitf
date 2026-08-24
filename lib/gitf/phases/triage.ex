@@ -40,13 +40,20 @@ defmodule GiTF.Phases.Triage do
   those missions fall through to the `skip_*` checks and run the full
   pipeline — matching the legacy behaviour.
 
-  ## Not yet captured
+  ## Which path actually runs
 
-  The `standard` workflow still routes triage via the legacy path
-  (`workflow_dispatch_active?/1` excludes `"standard"`); migrating it
-  means replacing `standard.yaml`'s `triage: next: research` with the
-  conditional list above and exercising the full suite against the
-  workflow dispatch path.
+  **This one, for `standard` too.** `workflow_dispatch_active?/1` requires
+  only `workflow_dsl_enabled` (default **true**) and a non-empty
+  `workflow_id`, so any mission carrying a workflow id — which `standard`
+  does — advances through `advance_via_workflow/2` and these callbacks.
+  `advance_via_legacy/2` is the fallback, not the default.
+
+  This docstring previously claimed the opposite ("still routes triage via
+  the legacy path; `workflow_dispatch_active?/1` excludes `standard`"), and
+  it cost a deploy: a routing fix was applied to the legacy orchestrator
+  only, shipped, and changed nothing, because the live path reads
+  `standard.yaml`'s `next:` rules. When fixing phase routing, fix **both**
+  the YAML and `Orchestrator.Decisions`, or confirm which one runs first.
   """
 
   @behaviour GiTF.Phase
@@ -80,9 +87,33 @@ defmodule GiTF.Phases.Triage do
     bug_reproducible = artifact["bug_reproducible"]
     evidence = artifact["bug_evidence"] || ""
 
-    if bug_reproducible == false and Triage.strong_no_work_evidence?(evidence) do
-      Missions.store_artifact(mission.id, "triage", Map.put(artifact, "no_work_needed", true))
-    end
+    artifact =
+      if bug_reproducible == false and Triage.strong_no_work_evidence?(evidence) do
+        Map.put(artifact, "no_work_needed", true)
+      else
+        artifact
+      end
+
+    # An operator who forced the full pipeline asked for every phase, and the
+    # skip flags are the inference that choice overrode. The legacy path drops
+    # them in the orchestrator; the workflow path routes off `artifact.
+    # skip_flags` in the YAML's `next:` rules, which cannot see the mission —
+    # so the flags are cleared on the artifact itself, and both paths agree.
+    artifact =
+      if Decisions.forced_pipeline_mode?(mission) and
+           Map.get(mission, :pipeline_mode) == "full" and artifact["skip_flags"] not in [nil, %{}] do
+        require Logger
+
+        Logger.info(
+          "#{mission.id}: operator forced the full pipeline — clearing triage skip flags"
+        )
+
+        Map.put(artifact, "skip_flags", %{})
+      else
+        artifact
+      end
+
+    Missions.store_artifact(mission.id, "triage", artifact)
 
     :ok
   end

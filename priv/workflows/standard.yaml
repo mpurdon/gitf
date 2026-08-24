@@ -27,8 +27,13 @@ phases:
         then: requirements
       - when: "artifact.skip_flags.skip_design != true"
         then: design
-      - when: "artifact.skip_flags.skip_review != true"
-        then: review
+      # No `review` rule on purpose. Review reads the design and nothing
+      # else, so it is only reachable AFTER design — reaching it from triage
+      # means design was skipped, and the review ghost then judges an empty
+      # artifact, rejects it, spends one of the mission's bounded redesign
+      # attempts, and routes to design anyway. That is what happened to
+      # msn-9b4375 and again to msn-8e0eae: a thinking-tier ghost burned to
+      # arrive where triage should have sent it directly.
       - when: "artifact.skip_flags.skip_planning != true"
         then: planning
       - else: implementation
