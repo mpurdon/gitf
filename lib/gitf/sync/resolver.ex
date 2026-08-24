@@ -130,127 +130,38 @@ defmodule GiTF.Sync.Resolver do
 
   # -- Private: individual tiers -----------------------------------------------
 
-  # Tier 0: Clean sync
-  defp run_tier(0, op_id, shell, sector, target) do
-    Logger.info("Tier 0 (clean sync) for op #{op_id}")
-    repo = sector.path
+  # Tiers 0-2 share one shape: the ENTIRE merge — conflict resolution and
+  # validation included — happens in a scratch worktree on a branch nothing
+  # else knows about, and the shared clone's target only ever advances by a
+  # fast-forward to the finished, validated commit.
+  #
+  # The previous shape did all of this in sector.path itself: checkout,
+  # merge --no-commit, model-authored rewrites of conflicted files, a
+  # validation run, then commit-or-abort — with reset --hard as the failure
+  # path. That made the shared clone's dirty window as long as a validation
+  # run (now up to 30 minutes for a sector like cora), left MERGE_HEAD and a
+  # conflicted index behind whenever the SyncQueue's deadline killed the
+  # task (Process.exit(:kill) runs no abort), and raced Debrief's regression
+  # check, which builds in sector.path on its own timer. In the scratch
+  # shape a kill at any point strands only a throwaway worktree, an abort is
+  # "remove the directory", and nothing that reads target can ever observe a
+  # half-merged or unvalidated state.
+  defp run_tier(tier, op_id, shell, sector, target) when tier in 0..2 do
+    Logger.info("Tier #{tier} (#{tier_name(tier)}) for op #{op_id}")
 
     with_sync_lock(sector.id, fn ->
-      original_head = get_head(repo)
+      in_scratch_worktree(sector, op_id, tier, target, fn scratch ->
+        case merge_branch(scratch.path, shell.branch) do
+          :clean ->
+            commit_and_publish(scratch, shell, sector, target)
 
-      with :ok <- GiTF.Git.checkout(repo, target),
-           :ok <- GiTF.Git.sync(repo, shell.branch, no_ff: true) do
-        Logger.info("Clean sync succeeded for #{shell.branch} into #{target}")
-        {:ok, :merged}
-      else
-        {:error, reason} ->
-          rollback(repo, original_head)
-          {:error, {:clean_merge_failed, reason}}
-      end
-    end)
-  end
+          {:conflicted, conflicted} ->
+            resolve_and_publish(tier, scratch, conflicted, shell, sector, target, op_id)
 
-  # Tier 1: Auto-resolve
-  defp run_tier(1, op_id, shell, sector, target) do
-    Logger.info("Tier 1 (auto-resolve) for op #{op_id}")
-    repo = sector.path
-
-    with_sync_lock(sector.id, fn ->
-      original_head = get_head(repo)
-
-      with :ok <- GiTF.Git.checkout(repo, target) do
-        # Attempt sync, expecting conflicts
-        case GiTF.Git.safe_cmd(["merge", "--no-commit", "--no-ff", "--no-edit", shell.branch],
-               cd: repo,
-               stderr_to_stdout: true
-             ) do
-          {_output, 0} ->
-            # No conflicts — just commit
-            commit_merge(repo, shell.branch, target)
-            {:ok, :merged}
-
-          {_output, _code} ->
-            # Get conflicted files
-            conflicted = get_conflicted_files(repo)
-
-            if conflicted == [] do
-              # Sync failed for other reasons
-              abort_merge(repo)
-              rollback(repo, original_head)
-              {:error, :no_conflicted_files}
-            else
-              resolved = auto_resolve_files(repo, conflicted, shell, sector, target)
-
-              if resolved == length(conflicted) do
-                # All resolved — commit
-                commit_merge(repo, shell.branch, target)
-                {:ok, :merged}
-              else
-                abort_merge(repo)
-                rollback(repo, original_head)
-                {:error, {:partial_resolve, resolved, length(conflicted)}}
-              end
-            end
+          {:error, reason} ->
+            {:error, reason}
         end
-      else
-        {:error, reason} ->
-          rollback(repo, original_head)
-          {:error, reason}
-      end
-    end)
-  end
-
-  # Tier 2: AI-resolve
-  defp run_tier(2, op_id, shell, sector, target) do
-    Logger.info("Tier 2 (AI-resolve) for op #{op_id}")
-    repo = sector.path
-
-    with_sync_lock(sector.id, fn ->
-      original_head = get_head(repo)
-
-      with :ok <- GiTF.Git.checkout(repo, target) do
-        case GiTF.Git.safe_cmd(["merge", "--no-commit", "--no-ff", "--no-edit", shell.branch],
-               cd: repo,
-               stderr_to_stdout: true
-             ) do
-          {_output, 0} ->
-            commit_merge(repo, shell.branch, target)
-            {:ok, :merged}
-
-          {_output, _code} ->
-            conflicted = get_conflicted_files(repo)
-
-            if length(conflicted) > @max_ai_resolve_files do
-              abort_merge(repo)
-              rollback(repo, original_head)
-              {:error, {:too_many_conflicts, length(conflicted)}}
-            else
-              resolved = ai_resolve_files(repo, conflicted, op_id)
-
-              if resolved == length(conflicted) do
-                # Validate the resolution compiles
-                case validate_resolution(sector) do
-                  :ok ->
-                    commit_merge(repo, shell.branch, target)
-                    {:ok, :merged}
-
-                  {:error, reason} ->
-                    abort_merge(repo)
-                    rollback(repo, original_head)
-                    {:error, {:validation_failed_after_ai_resolve, reason}}
-                end
-              else
-                abort_merge(repo)
-                rollback(repo, original_head)
-                {:error, {:ai_resolve_incomplete, resolved, length(conflicted)}}
-              end
-            end
-        end
-      else
-        {:error, reason} ->
-          rollback(repo, original_head)
-          {:error, reason}
-      end
+      end)
     end)
   end
 
@@ -260,7 +171,9 @@ defmodule GiTF.Sync.Resolver do
   defp run_tier(3, op_id, shell, sector, target) do
     Logger.info("Tier 3 (re-imagine) for op #{op_id}")
 
-    # Abort any pending sync state
+    # Tiers 0-2 no longer dirty the shared clone, so there should be nothing
+    # to abort — this sweeps stale state left by a pre-scratch-worktree
+    # release or by anything else that merged in sector.path directly.
     abort_merge(sector.path)
 
     with {:ok, op} <- GiTF.Ops.get(op_id),
@@ -317,6 +230,117 @@ defmodule GiTF.Sync.Resolver do
         {:error, reason} ->
           {:error, {:reimagine_failed, reason}}
       end
+    end
+  end
+
+  defp tier_name(0), do: "clean sync"
+  defp tier_name(1), do: "auto-resolve"
+  defp tier_name(2), do: "AI-resolve"
+
+  # Tier 0 resolves nothing: any conflict escalates.
+  defp resolve_and_publish(0, _scratch, conflicted, _shell, _sector, _target, _op_id),
+    do: {:error, {:clean_merge_failed, {:conflicts, length(conflicted)}}}
+
+  defp resolve_and_publish(1, scratch, conflicted, shell, sector, target, _op_id) do
+    resolved = auto_resolve_files(scratch.path, conflicted, shell, sector, target)
+
+    if resolved == length(conflicted) do
+      commit_and_publish(scratch, shell, sector, target)
+    else
+      {:error, {:partial_resolve, resolved, length(conflicted)}}
+    end
+  end
+
+  defp resolve_and_publish(2, scratch, conflicted, shell, sector, target, op_id) do
+    if length(conflicted) > @max_ai_resolve_files do
+      {:error, {:too_many_conflicts, length(conflicted)}}
+    else
+      resolved = ai_resolve_files(scratch.path, conflicted, op_id)
+
+      if resolved == length(conflicted) do
+        case validate_resolution(sector, scratch.path) do
+          :ok -> commit_and_publish(scratch, shell, sector, target)
+          {:error, reason} -> {:error, {:validation_failed_after_ai_resolve, reason}}
+        end
+      else
+        {:error, {:ai_resolve_incomplete, resolved, length(conflicted)}}
+      end
+    end
+  end
+
+  # Merge into the scratch worktree's own branch. --no-commit so a clean
+  # merge and a conflicted one land in the same "inspect before committing"
+  # state; nothing outside the scratch can see either.
+  defp merge_branch(scratch_path, branch) do
+    case GiTF.Git.safe_cmd(["merge", "--no-commit", "--no-ff", "--no-edit", branch],
+           cd: scratch_path,
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} ->
+        :clean
+
+      {_output, _code} ->
+        case get_conflicted_files(scratch_path) do
+          [] -> {:error, :no_conflicted_files}
+          conflicted -> {:conflicted, conflicted}
+        end
+    end
+  end
+
+  defp commit_and_publish(scratch, shell, sector, target) do
+    commit_merge(scratch.path, shell.branch, target)
+    publish_ff(sector.path, target, scratch.branch)
+  end
+
+  # The only write tiers 0-2 ever make to the shared clone. --ff-only is the
+  # invariant, not an optimisation: if it cannot fast-forward, target moved
+  # while we merged, and the answer is to fail the tier and re-merge from
+  # the new tip — never to force anything.
+  defp publish_ff(repo, target, scratch_branch) do
+    with :ok <- GiTF.Git.checkout(repo, target),
+         {_out, 0} <-
+           GiTF.Git.safe_cmd(["merge", "--ff-only", scratch_branch],
+             cd: repo,
+             stderr_to_stdout: true
+           ) do
+      {:ok, :merged}
+    else
+      {out, _code} when is_binary(out) -> {:error, {:publish_failed, String.trim(out)}}
+      {:error, reason} -> {:error, {:publish_failed, reason}}
+    end
+  end
+
+  # Creates the scratch worktree at target's tip, runs `fun`, and always
+  # tears it down — worktree, directory, and branch. Creation is idempotent:
+  # a killed predecessor's leftovers are removed first, and worktree_add's
+  # -B resets the branch rather than dying on it.
+  defp in_scratch_worktree(sector, op_id, tier, target, fun) do
+    suffix = "sync-#{op_id}-t#{tier}"
+    path = Path.join([sector.path, "ghosts", suffix])
+    branch = "gitf/#{suffix}"
+
+    if File.dir?(path) do
+      GiTF.Git.worktree_remove(sector.path, path, force: true)
+      File.rm_rf(path)
+    end
+
+    case GiTF.Git.worktree_add(sector.path, path, branch, target) do
+      {:ok, _} ->
+        try do
+          fun.(%{path: path, branch: branch})
+        after
+          GiTF.Git.worktree_remove(sector.path, path, force: true)
+          File.rm_rf(path)
+          # After a publish the branch tip equals target; after a failure it
+          # is abandoned by design. -D covers both.
+          GiTF.Git.safe_cmd(["branch", "-D", branch], cd: sector.path, stderr_to_stdout: true)
+        end
+
+      {:error, reason} ->
+        {:error, {:scratch_worktree_failed, reason}}
+
+      other ->
+        {:error, {:scratch_worktree_failed, other}}
     end
   end
 
@@ -494,21 +518,6 @@ defmodule GiTF.Sync.Resolver do
 
   # -- Private: git helpers ----------------------------------------------------
 
-  defp get_head(repo) do
-    case GiTF.Git.safe_cmd(["rev-parse", "HEAD"], cd: repo, stderr_to_stdout: true) do
-      {output, 0} -> String.trim(output)
-      _ -> nil
-    end
-  end
-
-  defp rollback(repo, nil), do: abort_merge(repo)
-
-  defp rollback(repo, head) do
-    abort_merge(repo)
-    GiTF.Git.safe_cmd(["reset", "--hard", head], cd: repo, stderr_to_stdout: true)
-    :ok
-  end
-
   defp abort_merge(repo) do
     GiTF.Git.safe_cmd(["merge", "--abort"], cd: repo, stderr_to_stdout: true)
     :ok
@@ -603,10 +612,13 @@ defmodule GiTF.Sync.Resolver do
   # by a model, and Validator, Audit and Debrief all run that same field with
   # no blocklist at all. Confinement is the sandbox's job, and it is now
   # doing it here too.
-  defp validate_resolution(sector) do
+  # `cwd` is the scratch worktree, not sector.path — the sandbox then binds
+  # only the scratch directory writable, instead of the whole sector tree
+  # with every ghost worktree and the shared .git inside it.
+  defp validate_resolution(sector, cwd) do
     case Map.get(sector, :validation_command) do
       command when is_binary(command) and command != "" ->
-        case GiTF.Validator.run_validation(sector.path, command, sector) do
+        case GiTF.Validator.run_validation(cwd, command, sector) do
           {:ok, _output} -> :ok
           {:error, _kind, message, _exit_code} -> {:error, String.slice(message, 0, 500)}
         end
