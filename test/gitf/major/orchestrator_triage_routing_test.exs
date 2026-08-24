@@ -151,33 +151,19 @@ defmodule GiTF.Major.OrchestratorTriageRoutingTest do
     end
   end
 
-  describe "pipeline_mode_after_inference/2" do
-    test "an unforced mission takes the inferred mode" do
-      assert "fast" = Decisions.pipeline_mode_after_inference(%{}, :simple)
-      assert "full" = Decisions.pipeline_mode_after_inference(%{}, :complex)
-    end
-
-    test "an explicitly forced mode is left alone" do
+  describe "forced_pipeline_mode?/1" do
+    test "an explicitly forced mode is recognised" do
       # Regression: msn-9b4375 was started with full: true and ran as "fast"
       # because triage overwrote the operator's choice with its own read of
       # complexity. The MCP tool advertised an option it then ignored.
-      mission = %{pipeline_mode: "full", pipeline_mode_forced: true}
-
-      assert nil == Decisions.pipeline_mode_after_inference(mission, :simple)
-    end
-
-    test "forcing fast is equally sticky against a complex triage" do
-      mission = %{pipeline_mode: "fast", pipeline_mode_forced: true}
-
-      assert nil == Decisions.pipeline_mode_after_inference(mission, :complex)
+      assert Decisions.forced_pipeline_mode?(%{pipeline_mode: "full", pipeline_mode_forced: true})
+      assert Decisions.forced_pipeline_mode?(%{pipeline_mode: "fast", pipeline_mode_forced: true})
     end
 
     test "a mode that merely happens to be full is still inferable" do
       # start_quest writes "full" whenever the fast path wasn't eligible,
       # which is not the same as the operator asking for it.
-      mission = %{pipeline_mode: "full"}
-
-      assert "fast" = Decisions.pipeline_mode_after_inference(mission, :simple)
+      refute Decisions.forced_pipeline_mode?(%{pipeline_mode: "full"})
     end
 
     test "forcing full drops triage's skip flags" do

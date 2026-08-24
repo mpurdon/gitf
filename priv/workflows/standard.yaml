@@ -13,7 +13,8 @@ phases:
   - id: triage
     handler: GiTF.Phases.Triage
     timeout_minutes: 5
-    # Routing matches Orchestrator.Decisions.next_phase_after_triage/1 +
+    # Routing mirrors Orchestrator.Decisions.next_phase_after_triage/2,
+    # minus the review rule (see below) +
     # the `bug_reproducible == false` + strong-evidence short-circuit
     # (Phases.Triage.before_advance stamps `no_work_needed` when the
     # evidence is strong enough; the `then: end` rule completes the
@@ -21,6 +22,13 @@ phases:
     next:
       - when: "artifact.no_work_needed == true"
         then: end
+      # An operator who forced the full pipeline asked for every phase, and
+      # the skip flags below are the inference that choice overrode. This
+      # rule outranks them rather than the handler rewriting skip_flags on
+      # the stored artifact — that artifact is the record of what triage
+      # actually concluded, and routing overrides belong in the router.
+      - when: "mission.pipeline_mode_forced == true and mission.pipeline_mode == \"full\""
+        then: research
       - when: "artifact.skip_flags.skip_research != true"
         then: research
       - when: "artifact.skip_flags.skip_requirements != true"

@@ -66,7 +66,7 @@ defmodule GiTF.Major.Orchestrator do
 
       # An operator who named a mode outranks every later inference. Without
       # this the mode is indistinguishable from an inferred one, and triage
-      # overwrites it — see Decisions.pipeline_mode_after_inference/2.
+      # overwrites it — see Decisions.forced_pipeline_mode?/1.
       forced = force or force_full
 
       if forced do
@@ -639,16 +639,15 @@ defmodule GiTF.Major.Orchestrator do
       complexity = GiTF.Triage.complexity_from_string(Map.get(artifact, "complexity")) || :complex
       skip_flags = Map.get(artifact, "skip_flags", %{}) || %{}
 
-      case Decisions.pipeline_mode_after_inference(mission, complexity) do
-        nil ->
-          Logger.info(
-            "Triage complete for #{mission.id}: keeping operator-forced pipeline mode " <>
-              "#{Map.get(mission, :pipeline_mode)} over inferred " <>
-              "#{Decisions.pipeline_mode_for_complexity(complexity)}"
-          )
+      inferred = Decisions.pipeline_mode_for_complexity(complexity)
 
-        mode ->
-          GiTF.Missions.update(mission.id, %{pipeline_mode: mode})
+      if Decisions.forced_pipeline_mode?(mission) do
+        Logger.info(
+          "Triage complete for #{mission.id}: keeping operator-forced pipeline mode " <>
+            "#{Map.get(mission, :pipeline_mode)} over inferred #{inferred}"
+        )
+      else
+        GiTF.Missions.update(mission.id, %{pipeline_mode: inferred})
       end
 
       Logger.info(
@@ -696,7 +695,10 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp route_to_first_unskipped_phase(mission, skip_flags) do
-    has_design? = not is_nil(GiTF.Missions.get_artifact(mission.id, "design"))
+    # Read off the mission in hand — the caller re-fetched it immediately
+    # before. `Missions.get_artifact/2` would deep-copy the whole record out
+    # of ETS, artifacts map and all, to look at one key.
+    has_design? = not is_nil(get_in(mission, [Access.key(:artifacts, %{}), "design"]))
 
     case Decisions.next_phase_after_triage(skip_flags, has_design?) do
       :research -> start_research(mission)
@@ -1153,7 +1155,11 @@ defmodule GiTF.Major.Orchestrator do
          %{worktree_path: _} = shell <- exec_validation_shell(mission, variant_id) do
       Logger.info("Running validation command for #{mission.id}: #{cmd}")
 
-      case GiTF.Validator.run_custom_validation(shell, cmd, sector[:validation_timeout_ms]) do
+      case GiTF.Validator.run_custom_validation(
+             shell,
+             cmd,
+             GiTF.Validator.validation_timeout_ms(sector)
+           ) do
         :ok ->
           Logger.info("Validation command passed for #{mission.id}")
           {:pass, cmd}

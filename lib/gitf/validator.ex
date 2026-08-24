@@ -32,7 +32,7 @@ defmodule GiTF.Validator do
           case run_custom_validation(
                  shell,
                  sector.validation_command,
-                 sector[:validation_timeout_ms]
+                 validation_timeout_ms(sector)
                ) do
             :ok -> results
             {:error, reason} -> [{:error, :custom_validation_failed, reason} | results]

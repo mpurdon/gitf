@@ -67,6 +67,59 @@ defmodule GiTF.Workflow.TriageRoutingTest do
     assert "research" in triage_targets(workflow)
   end
 
+  describe "standard.yaml triage rules, evaluated" do
+    # The `next:` rules are the live router, so assert on what they resolve
+    # to rather than on their text. Skipping research/requirements/design is
+    # the shape triage emits for a small change — the shape that used to end
+    # up at review with no design to read.
+    @skipped %{
+      "skip_flags" => %{
+        "skip_research" => true,
+        "skip_requirements" => true,
+        "skip_design" => true
+      }
+    }
+
+    defp route(mission, artifact) do
+      {:ok, workflow} = Workflow.load(Path.join(:code.priv_dir(:gitf), "workflows/standard.yaml"))
+      triage = Enum.find(workflow.phases, &(&1.id == "triage"))
+
+      Enum.find_value(triage.next, fn
+        {source, _ast, target} ->
+          case GiTF.Workflow.Expr.eval(source, %{artifact: artifact, mission: mission}) do
+            {:ok, true} -> target
+            _ -> nil
+          end
+
+        {:else, target} ->
+          target
+
+        target when is_binary(target) ->
+          target
+      end)
+    end
+
+    test "a forced full pipeline overrides triage's skip flags" do
+      mission = %{pipeline_mode: "full", pipeline_mode_forced: true}
+
+      assert route(mission, @skipped) == "research"
+    end
+
+    test "forcing fast leaves the skip flags alone" do
+      mission = %{pipeline_mode: "fast", pipeline_mode_forced: true}
+
+      assert route(mission, @skipped) == "planning"
+    end
+
+    test "a mode that merely happens to be full does not override" do
+      assert route(%{pipeline_mode: "full"}, @skipped) == "planning"
+    end
+
+    test "skipping design lands on planning, never review" do
+      assert route(%{}, @skipped) == "planning"
+    end
+  end
+
   test "standard keeps a path to design and to planning from triage" do
     {:ok, workflow} = Workflow.load(Path.join(:code.priv_dir(:gitf), "workflows/standard.yaml"))
     targets = triage_targets(workflow)

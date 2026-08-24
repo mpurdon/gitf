@@ -64,28 +64,14 @@ defmodule GiTF.Major.Orchestrator.Decisions do
   def pipeline_mode_for_complexity(_), do: "fast"
 
   @doc """
-  The `pipeline_mode` an inference step should write for `mission`, or `nil`
-  when the operator's explicit choice must stand.
-
-  `start_mission --full` / `--fast` (and the MCP `full` / `fast` arguments)
-  stamp `pipeline_mode_forced` on the mission. Triage and research both form
-  their own opinion afterwards, and without this an operator asking for the
-  full pipeline silently got whatever triage inferred — the option was
-  advertised and ignored. Inference still wins whenever the operator did not
-  ask for anything, which is the common case.
-  """
-  @spec pipeline_mode_after_inference(map(), Triage.complexity() | any()) :: String.t() | nil
-  def pipeline_mode_after_inference(mission, complexity) do
-    if forced_pipeline_mode?(mission) do
-      nil
-    else
-      pipeline_mode_for_complexity(complexity)
-    end
-  end
-
-  @doc """
   True when the mission's `pipeline_mode` was set by an explicit operator
   choice rather than inferred, and so must not be revised.
+
+  `start_mission --full` / `--fast` (and the MCP `full` / `fast` arguments)
+  stamp `pipeline_mode_forced`. Triage and research both form their own
+  opinion afterwards, and without this an operator asking for the full
+  pipeline silently got whatever triage inferred — the option was advertised
+  and ignored.
   """
   @spec forced_pipeline_mode?(map()) :: boolean()
   def forced_pipeline_mode?(mission), do: Map.get(mission, :pipeline_mode_forced) == true

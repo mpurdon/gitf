@@ -726,9 +726,10 @@ defmodule GiTF.ArchiveTest do
     end
 
     test "a fold survives deletes landing mid-traversal" do
-      # tab2list was an atomic snapshot; folding walks first/next, which is
-      # only safe on a fixed table. Writes here are lock-free, so an unfixed
-      # fold could end early and report a short collection as fact.
+      # Writes are lock-free, so reads race deletes by design. `:ets.foldl/3`
+      # fixes the table around its own traversal, which is what makes this
+      # safe — this test is here so that remains true if the traversal is
+      # ever reimplemented over raw first/next, where it would not be.
       seed_wide_collection()
       ids = Enum.map(Archive.all(:ops), & &1.id)
       assert length(ids) == @records

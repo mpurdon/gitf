@@ -18,8 +18,8 @@ defmodule GiTF.Phases.Triage do
             then: requirements
           - when: "artifact.skip_flags.skip_design != true"
             then: design
-          - when: "artifact.skip_flags.skip_review != true"
-            then: review
+          # No review rule — review reads the design, so reaching it from
+          # triage means there is nothing to review. See standard.yaml.
           - when: "artifact.skip_flags.skip_planning != true"
             then: planning
           - else: implementation
@@ -28,8 +28,8 @@ defmodule GiTF.Phases.Triage do
   legacy orchestrator triage handler does:
 
     * sets `mission.pipeline_mode` from the triaged complexity
-      (`GiTF.Major.Orchestrator.Decisions.pipeline_mode_after_inference/2`),
-      leaving it alone when the operator forced a mode at start;
+      (`Decisions.pipeline_mode_for_complexity/1`), leaving it alone when
+      the operator forced a mode at start;
     * when the artifact says the bug isn't reproducible *and* the
       evidence is strong (`GiTF.Triage.strong_no_work_evidence?/1` — a
       regex check that can't live in a `next:` expression), writes
@@ -52,8 +52,12 @@ defmodule GiTF.Phases.Triage do
   the legacy path; `workflow_dispatch_active?/1` excludes `standard`"), and
   it cost a deploy: a routing fix was applied to the legacy orchestrator
   only, shipped, and changed nothing, because the live path reads
-  `standard.yaml`'s `next:` rules. When fixing phase routing, fix **both**
-  the YAML and `Orchestrator.Decisions`, or confirm which one runs first.
+  `standard.yaml`'s `next:` rules.
+
+  Phase routing consequently lives in two places — these YAML rules and
+  `Orchestrator.Decisions.next_phase_after_triage/2` — which is one too
+  many. Until they are collapsed, `standard.yaml` is the one that decides;
+  change it first and treat `Decisions` as the emergency fallback it is.
   """
 
   @behaviour GiTF.Phase
@@ -79,41 +83,22 @@ defmodule GiTF.Phases.Triage do
       when verdict in [:pass, :advance] and is_map(artifact) do
     complexity = Triage.complexity_from_string(artifact["complexity"]) || :complex
 
-    case Decisions.pipeline_mode_after_inference(mission, complexity) do
-      nil -> :ok
-      mode -> Missions.update(mission.id, %{pipeline_mode: mode})
+    unless Decisions.forced_pipeline_mode?(mission) do
+      Missions.update(mission.id, %{
+        pipeline_mode: Decisions.pipeline_mode_for_complexity(complexity)
+      })
     end
 
     bug_reproducible = artifact["bug_reproducible"]
     evidence = artifact["bug_evidence"] || ""
 
-    artifact =
-      if bug_reproducible == false and Triage.strong_no_work_evidence?(evidence) do
-        Map.put(artifact, "no_work_needed", true)
-      else
-        artifact
-      end
-
-    # An operator who forced the full pipeline asked for every phase, and the
-    # skip flags are the inference that choice overrode. The legacy path drops
-    # them in the orchestrator; the workflow path routes off `artifact.
-    # skip_flags` in the YAML's `next:` rules, which cannot see the mission —
-    # so the flags are cleared on the artifact itself, and both paths agree.
-    artifact =
-      if Decisions.forced_pipeline_mode?(mission) and
-           Map.get(mission, :pipeline_mode) == "full" and artifact["skip_flags"] not in [nil, %{}] do
-        require Logger
-
-        Logger.info(
-          "#{mission.id}: operator forced the full pipeline — clearing triage skip flags"
-        )
-
-        Map.put(artifact, "skip_flags", %{})
-      else
-        artifact
-      end
-
-    Missions.store_artifact(mission.id, "triage", artifact)
+    # Only written when it changed. The artifact is the record of what triage
+    # concluded; a forced-full pipeline overrides the routing it implies via
+    # standard.yaml's `mission.pipeline_mode_forced` rule, not by rewriting
+    # the model's output here.
+    if bug_reproducible == false and Triage.strong_no_work_evidence?(evidence) do
+      Missions.store_artifact(mission.id, "triage", Map.put(artifact, "no_work_needed", true))
+    end
 
     :ok
   end

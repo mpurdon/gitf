@@ -152,21 +152,24 @@ defmodule GiTF.Archive do
   """
   @spec all(atom()) :: [map()]
   def all(collection) do
-    fold(collection, [], fn record, acc -> [record | acc] end)
+    # Deliberately NOT the fold the other readers use. all/1 materialises the
+    # whole collection either way, so folding saves only the intermediate cons
+    # cells — ~1% of the result — while costing ~56% more time: tab2list is one
+    # trapping BIF, where a fold pays a key hash and a closure call per record.
+    # Fold where the result is smaller than the collection; copy where it isn't.
+    :ets.tab2list(table_name(collection)) |> Enum.map(&elem(&1, 1))
+  rescue
+    ArgumentError -> []
   end
 
   @doc """
   Returns records matching a filter function.
 
-  Folds the ETS table and keeps only matches, rather than copying the whole
-  collection into this process and filtering it afterwards. The old form
-  (`all/1 |> Enum.filter/2`) allocated one list of every `{key, record}`
-  tuple plus a second of every record before discarding nearly all of it —
-  so a predicate matching three ops still paid for every op in the store, in
-  the caller's heap. With ~200 call sites and several on 30-second patrol
-  timers, that allocation is what drove the BEAM's process memory from 89MB
-  at boot to 1.3GB on an idle factory: the garbage is collectable, but the
-  heap it forced is not given back.
+  Folds the ETS table rather than copying the collection into the caller and
+  filtering it afterwards — with ~200 call sites, several on 30-second
+  timers, the old `all/1 |> Enum.filter/2` form is what took an idle
+  factory's process memory to 1.3GB. A heap grown to hold a whole collection
+  is never handed back.
   """
   @spec filter(atom(), (map() -> boolean())) :: [map()]
   def filter(collection, fun) do
@@ -198,33 +201,17 @@ defmodule GiTF.Archive do
   # ArgumentError raised by a *predicate* and return "no matches", turning a
   # caller's bug into silently empty results. The old code ran predicates in
   # Enum.filter, outside the rescue, and this preserves that.
+  #
+  # No safe_fixtable here: `:ets.foldl/3` already brackets its traversal in
+  # `safe_fixtable(T, true)` / `after safe_fixtable(T, false)` (stdlib
+  # ets.erl), so the fold is snapshot-safe against concurrent deletes on its
+  # own. Adding a second fixation only doubles the unfix, and unfixing takes
+  # the table's write lock — on a read_concurrency table that is every
+  # per-scheduler lock, measured at ~80x a lookup.
   defp fold(collection, acc, fun) do
-    fold_table(collection, acc, fn {_key, record}, a -> fun.(record, a) end)
-  end
-
-  # Folds the raw {key, record} pairs of a collection's table.
-  #
-  # The table is fixed for the traversal. `:ets.tab2list/1` is a single BIF and
-  # therefore an atomic snapshot; a fold walks first/next, which is only safe
-  # against concurrent deletes on a fixed table. Writes here are lock-free and
-  # concurrent by design, so without the fix a delete landing mid-traversal
-  # could end the fold early and return partial results as though the
-  # collection were smaller — a silent wrong answer, not a crash.
-  #
-  # `find_one/2` throws out of this fold; `after` still unfixes.
-  defp fold_table(collection, acc, fun) do
     case :ets.whereis(table_name(collection)) do
-      :undefined ->
-        acc
-
-      table ->
-        :ets.safe_fixtable(table, true)
-
-        try do
-          :ets.foldl(fun, acc, table)
-        after
-          :ets.safe_fixtable(table, false)
-        end
+      :undefined -> acc
+      table -> :ets.foldl(fn {_key, record}, a -> fun.(record, a) end, acc, table)
     end
   end
 
@@ -239,10 +226,14 @@ defmodule GiTF.Archive do
     ArgumentError -> 0
   end
 
-  @doc "Counts records matching a filter function."
+  @doc """
+  Counts records matching a filter function.
+
+  Counts during the fold rather than building a list to measure it.
+  """
   @spec count(atom(), (map() -> boolean())) :: non_neg_integer()
   def count(collection, fun) do
-    filter(collection, fun) |> length()
+    fold(collection, 0, fn record, n -> if fun.(record), do: n + 1, else: n end)
   end
 
   @doc "Returns records matching a secondary index value. O(k) instead of O(n)."
@@ -376,7 +367,7 @@ defmodule GiTF.Archive do
   end
 
   def apply_write({:update_matching, collection, filter_fun, update_fun}) do
-    matching = collection |> all() |> Enum.filter(filter_fun)
+    matching = filter(collection, filter_fun)
 
     for old <- matching do
       updated = update_fun.(old) |> ensure_updated_at()
@@ -444,8 +435,11 @@ defmodule GiTF.Archive do
 
   @impl true
   def handle_call(:flush, _from, state) do
-    flush_dirty()
-    {:reply, :ok, state}
+    # Hibernate for the same reason the timer path does — this is the one
+    # route that can otherwise strand a serialisation-sized heap, when a
+    # forced flush is not followed by any async write.
+    had_writes = flush_dirty()
+    if had_writes, do: {:reply, :ok, state, :hibernate}, else: {:reply, :ok, state}
   end
 
   @impl true
@@ -525,15 +519,14 @@ defmodule GiTF.Archive do
   end
 
   defp persist_collection(col) do
-    # Built by folding straight into the map. The previous form went
-    # :ets.tab2list |> Map.new |> term_to_binary, which held three full
-    # representations of the collection live at once — the tuple list, the
-    # map, and the binary — in the Archive process, once per second per
-    # dirty collection.
-    binary =
-      col
-      |> fold_table(%{}, fn {key, record}, acc -> Map.put(acc, key, record) end)
-      |> :erlang.term_to_binary()
+    # tab2list |> Map.new, not a fold: `Map.new/1` on a list is
+    # `:maps.from_list/1`, which builds the HAMT in one pass in C, where N
+    # incremental `Map.put`s rebuild a path per insert and leave the
+    # intermediate nodes as garbage. Measured on a 10k collection, folding
+    # cost +42% time and +56% heap — the opposite of the intent. The list and
+    # the map share the same record terms, so it is not a second copy, and
+    # term_to_binary's output is a refc binary held off-heap.
+    binary = :ets.tab2list(table_name(col)) |> Map.new() |> :erlang.term_to_binary()
 
     path = collection_path(col)
     tmp = path <> ".tmp"
