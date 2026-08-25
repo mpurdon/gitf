@@ -28,21 +28,27 @@ defmodule GiTF.Runtime.CallMetricsTest do
   end
 
   test "records carry a gap since the previous call to the same provider+model" do
-    :ok = CallMetrics.record(call(%{}))
-    :ok = CallMetrics.record(call(%{}))
+    # The gap chain is keyed per provider+model in a table that outlives
+    # tests, so fresh unique models make the assertions deterministic —
+    # sorting two same-instant inserts does not.
+    model_a = "test:gap-#{System.unique_integer([:positive])}"
+    model_b = "test:gap-#{System.unique_integer([:positive])}"
 
-    gaps =
-      GiTF.Archive.all(:llm_calls)
-      |> Enum.sort_by(& &1.inserted_at)
-      |> Enum.map(& &1[:gap_ms])
+    :ok = CallMetrics.record(call(%{model: model_a}))
+    :ok = CallMetrics.record(call(%{model: model_a}))
+    :ok = CallMetrics.record(call(%{model: model_b}))
 
-    # A different model does not inherit the gap chain.
-    :ok = CallMetrics.record(call(%{model: "google:gemini-2.5-pro", provider: "google"}))
-    other = GiTF.Archive.filter(:llm_calls, &(&1[:provider] == "google")) |> hd()
+    gaps_a =
+      GiTF.Archive.filter(:llm_calls, &(&1[:model] == model_a)) |> Enum.map(& &1[:gap_ms])
 
-    assert [_first, second] = gaps
-    assert is_number(second) or is_nil(hd(gaps))
-    assert is_nil(other[:gap_ms])
+    [gap_b] = GiTF.Archive.filter(:llm_calls, &(&1[:model] == model_b)) |> Enum.map(& &1[:gap_ms])
+
+    # First call to a pair has no predecessor; the second does. Order-free:
+    # assert the multiset, not the sequence.
+    assert Enum.count(gaps_a, &is_nil/1) == 1
+    assert Enum.count(gaps_a, &is_number/1) == 1
+    # A different model does not inherit the chain.
+    assert is_nil(gap_b)
   end
 
   test "stats: throughput, percentiles, and honest TTFT nulls" do
