@@ -222,6 +222,26 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         send(self(), :generate_report_for_phase)
         {:noreply, assign(socket, selected_phase: phase, artifact: nil)}
 
+      "simplify" ->
+        # The phase artifact only names the reviewers; what each one actually
+        # found lives in per-focus sub-artifacts. Join them so clicking the
+        # phase answers "what did simplify decide", not "who ran".
+        artifact = GiTF.Missions.get_artifact(mission.id, "simplify")
+
+        artifact =
+          if is_map(artifact) do
+            for focus <- List.wrap(artifact["agents"]),
+                sub = GiTF.Missions.get_artifact(mission.id, "simplify_#{focus}"),
+                is_map(sub),
+                reduce: artifact do
+              acc -> Map.put(acc, "#{focus} findings", sub)
+            end
+          else
+            artifact
+          end
+
+        {:noreply, assign(socket, selected_phase: phase, artifact: artifact)}
+
       _ ->
         artifact = GiTF.Missions.get_artifact(mission.id, phase)
         {:noreply, assign(socket, selected_phase: phase, artifact: artifact)}
@@ -529,6 +549,134 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp format_short_duration(seconds) when seconds < 60, do: "#{seconds}s"
   defp format_short_duration(seconds) when seconds < 3600, do: "#{div(seconds, 60)}m"
   defp format_short_duration(seconds), do: "#{div(seconds, 3600)}h#{rem(div(seconds, 60), 60)}m"
+
+  # -- Phase decision surfacing ----------------------------------------------
+
+  # The headline judgments a phase made, as {label, value, badge-tone}.
+  # These are the answers to "what was decided here?" — the verdicts, picks
+  # and skips that used to be findable only inside the raw artifact dump.
+  # Every accessor is against LLM-emitted JSON, so everything is optional.
+  @doc false
+  def decisions(phase, artifact) when is_map(artifact) do
+    case phase do
+      "triage" ->
+        skips =
+          if(is_map(artifact["skip_flags"]), do: artifact["skip_flags"], else: %{})
+          |> Enum.filter(fn {_k, v} -> v == true end)
+          |> Enum.map_join(", ", fn {k, _} -> String.replace_prefix(k, "skip_", "") end)
+
+        maybe(artifact["complexity"], &{"complexity", &1, tone_for_complexity(&1)}) ++
+          if(skips != "", do: [{"skipped", skips, "grey"}], else: []) ++
+          maybe(artifact["bug_reproducible"], &{"bug reproducible", to_string(&1), "grey"})
+
+      "review" ->
+        maybe(artifact["selected_design"], &{"selected", &1, "purple"}) ++
+          maybe(
+            artifact["approved"],
+            &{"approved", to_string(&1), if(&1, do: "green", else: "red")}
+          )
+
+      "validation" ->
+        reqs = artifact["requirements_met"] |> List.wrap() |> Enum.filter(&is_map/1)
+        met = Enum.count(reqs, &(&1["met"] == true))
+        total = length(reqs)
+        gaps = length(List.wrap(artifact["gaps"]))
+
+        maybe(
+          artifact["overall_verdict"],
+          &{"verdict", &1, if(&1 == "pass", do: "green", else: "red")}
+        ) ++
+          if(total > 0, do: [{"requirements", "#{met}/#{total} met", "grey"}], else: []) ++
+          if(gaps > 0, do: [{"gaps", to_string(gaps), "yellow"}], else: [])
+
+      "sync" ->
+        maybe(artifact["status"], &{"outcome", &1, "purple"}) ++
+          maybe(artifact["pr_url"], fn _ -> {"pr", "opened", "green"} end)
+
+      "simplify" ->
+        if artifact["skipped"] == true do
+          [{"skipped", artifact["skipped_reason"] || "yes", "grey"}]
+        else
+          artifact["agents"]
+          |> List.wrap()
+          |> Enum.filter(&is_binary/1)
+          |> maybe(fn a -> {"reviewers", Enum.join(a, ", "), "grey"} end)
+        end
+
+      "scoring" ->
+        for dim <- ["final_output", "trajectory", "tool_usage", "safety"],
+            %{"score" => sc} <- [artifact[dim]] do
+          {String.replace(dim, "_", " "), to_string(sc), tone_for_score(sc)}
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  def decisions(_phase, _artifact), do: []
+
+  defp maybe(nil, _fun), do: []
+  defp maybe([], _fun), do: []
+  defp maybe(value, fun), do: [fun.(value)]
+
+  defp tone_for_complexity(c) when c in ["trivial", "simple"], do: "green"
+  defp tone_for_complexity("moderate"), do: "yellow"
+  defp tone_for_complexity(_), do: "red"
+
+  defp tone_for_score(s) when is_number(s) and s >= 85, do: "green"
+  defp tone_for_score(s) when is_number(s) and s >= 60, do: "yellow"
+  defp tone_for_score(_), do: "red"
+
+  # Renders any artifact map as readable prose instead of an Elixir term
+  # dump: strings as paragraphs, string lists as bullets, lists of maps as
+  # nested blocks, scalars inline. Generic on purpose — phase artifact
+  # shapes track the prompts, and a bespoke view per phase would go stale
+  # the way the Triage moduledoc did. Everything is escaped by HEEx.
+  @doc false
+  def artifact_html(artifact), do: render_term(artifact, 0)
+
+  defp render_term(map, depth) when is_map(map) and depth < 4 do
+    entries =
+      map
+      |> Enum.sort_by(fn {k, _} -> k end)
+      |> Enum.reject(fn {_k, v} -> v in [nil, "", [], %{}] end)
+
+    assigns = %{entries: entries, depth: depth}
+
+    ~H"""
+    <div style={if @depth > 0, do: "border-left:2px solid var(--line, #333a45); padding-left:0.7rem; margin:0.3rem 0"}>
+      <div :for={{k, v} <- @entries} style="margin-bottom:0.45rem">
+        <span style="font-size:0.68rem; letter-spacing:0.06em; text-transform:uppercase; opacity:0.6">{humanize_key(k)}</span>
+        {render_term(v, @depth + 1)}
+      </div>
+    </div>
+    """
+  end
+
+  defp render_term(list, depth) when is_list(list) and depth < 4 do
+    assigns = %{list: list, depth: depth}
+
+    ~H"""
+    <ul style="margin:0.2rem 0 0; padding-left:1.1rem">
+      <li :for={item <- @list} style="margin-bottom:0.25rem">{render_term(item, @depth + 1)}</li>
+    </ul>
+    """
+  end
+
+  defp render_term(value, _depth) when is_binary(value) do
+    assigns = %{value: value}
+    ~H"<span style='white-space:pre-wrap'>{@value}</span>"
+  end
+
+  defp render_term(value, _depth) do
+    assigns = %{value: inspect(value, limit: 20)}
+    ~H"<span class='pre-block' style='display:inline; padding:0 0.25rem'>{@value}</span>"
+  end
+
+  defp humanize_key(key) do
+    key |> to_string() |> String.replace("_", " ")
+  end
 
   # When the mission actually ENDED: the timestamp of its transition into a
   # terminal phase. `updated_at` is not that — it is the last write to the
@@ -1069,12 +1217,30 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           </div>
         </div>
 
-        <%!-- Phase Artifact Viewer --%>
+        <%!-- Phase Artifact Viewer: the decision first, the evidence readable,
+             the raw JSON behind a disclosure. Clicking a phase used to dump
+             `inspect(artifact)`, which answers "what happened" only for
+             someone willing to read an Elixir map. --%>
         <%= if @selected_phase do %>
           <div class="panel" style="padding:0.85rem 1rem">
             <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.75rem; padding-bottom:0.4rem">Phase: {@selected_phase}</div>
             <%= if @artifact do %>
-              <div class="pre-block" style="max-height:400px; overflow-y:auto; font-size:0.75rem">{inspect(@artifact, pretty: true, limit: :infinity)}</div>
+              <%= if decisions(@selected_phase, @artifact) != [] do %>
+                <div style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.85rem">
+                  <%= for {label, value, tone} <- decisions(@selected_phase, @artifact) do %>
+                    <span class={"badge badge-#{tone}"} style="font-size:0.7rem">
+                      {label}: <b>{value}</b>
+                    </span>
+                  <% end %>
+                </div>
+              <% end %>
+              <div style="max-height:420px; overflow-y:auto; font-size:0.8rem">
+                {artifact_html(@artifact)}
+              </div>
+              <details style="margin-top:0.75rem">
+                <summary style="cursor:pointer; font-size:0.72rem; opacity:0.7">Raw artifact</summary>
+                <div class="pre-block" style="max-height:300px; overflow-y:auto; font-size:0.72rem; margin-top:0.4rem">{inspect(@artifact, pretty: true, limit: :infinity)}</div>
+              </details>
             <% else %>
               <div class="empty" style="padding:1rem 0">No artifact stored.</div>
             <% end %>
