@@ -203,6 +203,52 @@ defmodule GiTF.Dashboard.PlanLive do
       </div>
     </div>
 
+
+    <%!-- Execution lanes: the dependency DAG as columns. Ops sharing a lane
+         run as parallel ghosts; the flat checklist below cannot show that. --%>
+    <div :if={length(@lanes) > 0} class="panel" style="margin-bottom:1.25rem; padding:0.85rem 1.25rem">
+      <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.75rem; padding-bottom:0.4rem; display:flex; justify-content:space-between; align-items:baseline">
+        Execution Lanes
+        <span style="font-size:0.68rem; font-weight:400; color:#6b7280">
+          each column starts when the one before it finishes &middot; cards in a column run in parallel
+        </span>
+      </div>
+      <div style="display:flex; gap:0.9rem; overflow-x:auto; align-items:stretch; padding-bottom:0.25rem">
+        <%= for {{depth, items}, i} <- Enum.with_index(@lanes) do %>
+          <div :if={i > 0} style="align-self:center; color:#484f58; font-size:1.1rem">&rarr;</div>
+          <div style="flex:1; min-width:14rem; display:flex; flex-direction:column; gap:0.5rem">
+            <div style="font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; color:#6b7280">
+              stage {depth + 1}
+              <span :if={length(items) > 1} style="color:#58a6ff">&middot; {length(items)} in parallel</span>
+            </div>
+            <div
+              :for={item <- items}
+              phx-click="toggle_op"
+              phx-value-id={Map.get(item, :id) || Map.get(item, "title", "")}
+              style={"background:#161b22; border:1px solid #30363d; border-left:3px solid #{lane_color(item)}; border-radius:6px; padding:0.55rem 0.7rem; cursor:pointer"}
+            >
+              <div style="display:flex; align-items:center; gap:0.4rem">
+                <span style="flex:1; font-size:0.8rem; color:#f0f6fc; line-height:1.3">
+                  {Map.get(item, :title) || Map.get(item, "title", "Untitled")}
+                </span>
+                <span :if={item[:status]} class={"badge #{status_badge(item[:status])}"} style="font-size:0.62rem">{item[:status]}</span>
+              </div>
+              <div style="display:flex; flex-wrap:wrap; gap:0.3rem; margin-top:0.4rem">
+                <span
+                  :for={rid <- List.wrap(item[:requirement_ids] || item["requirement_ids"] || [])}
+                  style="font-size:0.62rem; font-family:monospace; color:#58a6ff; background:#1f6feb22; border-radius:3px; padding:0.05rem 0.3rem"
+                >{rid}</span>
+                <span
+                  :if={(item[:target_files] || item["target_files"] || []) != []}
+                  style="font-size:0.62rem; color:#6b7280"
+                >{length(List.wrap(item[:target_files] || item["target_files"]))} file(s)</span>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
     <%!-- Plan-only mode notice --%>
     <div :if={@mode == :plan_only} class="panel" style="padding:1.5rem; text-align:center; margin-bottom:1rem; color:#8b949e">
       Awaiting implementation — ops will appear when the mission enters the implementation phase.
@@ -336,6 +382,16 @@ defmodule GiTF.Dashboard.PlanLive do
       end
 
     dep_map = build_dep_map(impl_ops)
+
+    lanes =
+      case mode do
+        :live ->
+          compute_lanes(lane_nodes(:live, impl_ops, dep_map))
+
+        :plan_only ->
+          compute_lanes(lane_nodes(:plan_only, normalize_plan_specs(plan_artifact), dep_map))
+      end
+
     ghost_names = build_ghost_names(impl_ops)
     done_count = Enum.count(impl_ops, &(&1.status == "done"))
     running_count = Enum.count(impl_ops, &(&1.status in ["running", "assigned"]))
@@ -349,12 +405,80 @@ defmodule GiTF.Dashboard.PlanLive do
     |> assign(:ops, impl_ops)
     |> assign(:grouped_items, grouped_items)
     |> assign(:dep_map, dep_map)
+    |> assign(:lanes, lanes)
     |> assign(:ghost_names, ghost_names)
     |> assign(:done_count, done_count)
     |> assign(:running_count, running_count)
     |> assign(:blocked_count, blocked_count)
     |> assign(:failed_count, failed_count)
     |> assign(:total_count, max(total_count, 1))
+  end
+
+  # -- Execution lanes --------------------------------------------------------
+
+  # Arranges ops into dependency-depth lanes: lane 0 holds everything with no
+  # prerequisites, lane N holds work that must wait for something in lane
+  # N-1. Ops sharing a lane run as PARALLEL ghosts — which is the fact the
+  # flat checklist hid: a 4-op plan with two independent lanes reads there as
+  # one long queue, and the operator reasonably concluded the factory works
+  # one ghost at a time.
+  #
+  # Takes {key, dep_keys, item} tuples so live ops (id-keyed, deps from
+  # :op_dependencies) and plan-only specs (index-keyed, deps from
+  # depends_on_indices) both fit. A dep key that names a missing node is
+  # ignored; a cycle degrades to depth-so-far rather than looping.
+  @doc false
+  def compute_lanes(nodes) do
+    by_key = Map.new(nodes, fn {key, _deps, _item} = n -> {key, n} end)
+
+    depth_of = fn depth_of, key, seen ->
+      case Map.get(by_key, key) do
+        nil ->
+          -1
+
+        {_key, deps, _item} ->
+          deps
+          |> Enum.reject(&MapSet.member?(seen, &1))
+          |> Enum.map(&depth_of.(depth_of, &1, MapSet.put(seen, key)))
+          |> case do
+            [] -> 0
+            ds -> Enum.max(ds) + 1
+          end
+      end
+    end
+
+    nodes
+    |> Enum.group_by(fn {key, _deps, _item} -> depth_of.(depth_of, key, MapSet.new()) end)
+    |> Enum.sort_by(fn {depth, _} -> depth end)
+    |> Enum.map(fn {depth, lane_nodes} ->
+      {depth, Enum.map(lane_nodes, fn {_k, _d, item} -> item end)}
+    end)
+  end
+
+  defp lane_color(item) do
+    case item[:status] do
+      s when s in ["running", "assigned"] -> "#58a6ff"
+      "done" -> "#3fb950"
+      "failed" -> "#f85149"
+      "blocked" -> "#d29922"
+      _ -> "#484f58"
+    end
+  end
+
+  defp lane_nodes(:live, ops, dep_map) do
+    Enum.map(ops, fn op ->
+      dep_ids = dep_map |> Map.get(op.id, []) |> Enum.map(& &1.id)
+      {op.id, dep_ids, op}
+    end)
+  end
+
+  defp lane_nodes(:plan_only, specs, _dep_map) do
+    specs
+    |> Enum.with_index()
+    |> Enum.map(fn {spec, idx} ->
+      deps = List.wrap(spec[:depends_on_indices] || spec["depends_on_indices"] || [])
+      {idx, deps, spec}
+    end)
   end
 
   # -- Helpers ---------------------------------------------------------------
