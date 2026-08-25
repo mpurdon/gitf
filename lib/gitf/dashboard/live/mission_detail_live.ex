@@ -552,6 +552,35 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   # -- Phase decision surfacing ----------------------------------------------
 
+  # What clicking this phase opens, if anything — the stepper's affordance.
+  # :page for the dedicated design/plan views, :decisions when an artifact
+  # exists for the decision viewer, nil when a click would show "No artifact
+  # stored." A circle that does something should not look identical to one
+  # that does not.
+  @doc false
+  def phase_detail(mission, phase) do
+    artifacts = if is_map(mission[:artifacts]), do: mission[:artifacts], else: %{}
+
+    cond do
+      phase in ["design", "planning"] ->
+        # The dedicated pages render sensibly even mid-phase.
+        if phase == "design" and
+             not Enum.any?(artifacts, fn {k, _} -> String.starts_with?(k, "design") end) and
+             not phase_done?(mission, phase),
+           do: nil,
+           else: :page
+
+      phase == "completed" ->
+        :decisions
+
+      Map.has_key?(artifacts, phase) ->
+        :decisions
+
+      true ->
+        nil
+    end
+  end
+
   # The headline judgments a phase made, as {label, value, badge-tone}.
   # These are the answers to "what was decided here?" — the verdicts, picks
   # and skips that used to be findable only inside the raw artifact dump.
@@ -792,7 +821,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
       <%!-- Phase Stepper (full width) --%>
       <div class="panel">
-        <div class="panel-title">Phase Pipeline</div>
+        <div class="panel-title" style="display:flex; justify-content:space-between; align-items:baseline">
+          Phase Pipeline
+          <span style="font-size:0.68rem; font-weight:400; color:#6b7280">click a marked phase for its decisions</span>
+        </div>
         <div class="stepper">
           <%= for {phase, idx} <- Enum.with_index(@phases) do %>
             <%= if idx > 0 do %>
@@ -807,6 +839,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               class={"step #{phase_step_class(@mission, phase)}"}
               phx-click="select_phase"
               phx-value-phase={phase}
+              style={if phase_detail(@mission, phase), do: "cursor:pointer"}
+              title={
+                case phase_detail(@mission, phase) do
+                  :page -> "Open the #{phase} page"
+                  :decisions -> "View #{phase} decisions"
+                  nil -> nil
+                end
+              }
             >
               <div class="step-circle">
                 <%= cond do %>
@@ -820,7 +860,24 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                     <.phase_icon phase={phase} />
                 <% end %>
               </div>
-              <div class="step-label">{phase}</div>
+              <div class="step-label" style={if @selected_phase == phase, do: "font-weight:700"}>
+                {phase}
+                <%= case phase_detail(@mission, phase) do %>
+                  <% :page -> %>
+                    <Heroicons.arrow_top_right_on_square
+                      mini
+                      class="w-3 h-3"
+                      style="display:inline; vertical-align:-1px; opacity:0.65"
+                    />
+                  <% :decisions -> %>
+                    <Heroicons.document_text
+                      mini
+                      class="w-3 h-3"
+                      style="display:inline; vertical-align:-1px; opacity:0.65"
+                    />
+                  <% nil -> %>
+                <% end %>
+              </div>
               <%= if @phase_durations[phase] do %>
                 <div style="font-size:0.6rem; color:#6b7280; margin-top:0.1rem">{@phase_durations[phase]}</div>
               <% end %>

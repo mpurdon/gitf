@@ -79,4 +79,33 @@ defmodule GiTF.Dashboard.PhaseDecisionsTest do
       assert Live.decisions(phase, nil) == []
     end
   end
+
+  describe "phase_detail/2 — the stepper affordance" do
+    # "I don't see the reports for the pipeline": nothing marked which
+    # circles opened anything. The affordance must reflect THIS mission's
+    # artifacts, not the phase's potential.
+    test "phases with an artifact offer the decision view" do
+      mission = %{artifacts: %{"validation" => %{}, "triage" => %{}}}
+
+      assert Live.phase_detail(mission, "validation") == :decisions
+      assert Live.phase_detail(mission, "triage") == :decisions
+      assert Live.phase_detail(mission, "scoring") == nil
+    end
+
+    test "design and planning point at their dedicated pages" do
+      mission = %{artifacts: %{"design_minimal" => %{}}}
+
+      assert Live.phase_detail(mission, "design") == :page
+      assert Live.phase_detail(mission, "planning") == :page
+    end
+
+    test "design before any design artifact offers nothing" do
+      assert Live.phase_detail(%{artifacts: %{}, status: "active"}, "design") == nil
+    end
+
+    test "hostile mission shapes yield nil, never a crash" do
+      assert Live.phase_detail(%{artifacts: "nope"}, "validation") == nil
+      assert Live.phase_detail(%{}, "sync") == nil
+    end
+  end
 end
