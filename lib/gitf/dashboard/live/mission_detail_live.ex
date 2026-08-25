@@ -348,15 +348,15 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           end
 
         # Duration + phase timings
-        duration = compute_duration(mission)
-
-        phase_durations =
+        transitions =
           try do
             GiTF.Missions.get_phase_transitions(id)
-            |> compute_phase_durations()
           rescue
-            _ -> %{}
+            _ -> []
           end
+
+        duration = compute_duration(mission, transitions)
+        phase_durations = compute_phase_durations(transitions)
 
         # Tournament rank is derived from the mission record; computing
         # it here (once per reload) avoids recomputing on every LV
@@ -530,14 +530,29 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp format_short_duration(seconds) when seconds < 3600, do: "#{div(seconds, 60)}m"
   defp format_short_duration(seconds), do: "#{div(seconds, 3600)}h#{rem(div(seconds, 60), 60)}m"
 
-  defp compute_duration(mission) do
+  # When the mission actually ENDED: the timestamp of its transition into a
+  # terminal phase. `updated_at` is not that — it is the last write to the
+  # record, and outcome tracking, boot-time sweeps, and PR polling all keep
+  # writing to finished missions, so a 28-minute run reads as "4h 44m" the
+  # next time the operator opens the page after a wake.
+  @doc false
+  def terminal_transition_at(transitions) do
+    transitions
+    |> Enum.reverse()
+    |> Enum.find_value(fn t ->
+      if t[:to_phase] in ["completed", "failed", "closed", "killed"], do: t[:inserted_at]
+    end)
+  end
+
+  @doc false
+  def compute_duration(mission, transitions) do
     started = mission[:inserted_at]
 
     case started do
       %DateTime{} ->
         ended =
           if mission[:status] in ["completed", "failed"],
-            do: mission[:updated_at],
+            do: terminal_transition_at(transitions) || mission[:updated_at],
             else: DateTime.utc_now()
 
         case ended do
@@ -1199,11 +1214,16 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     cond do
       # Mission failed on this phase
-      status == "failed" and current == phase -> true
+      status == "failed" and current == phase ->
+        true
+
       # Validation failed and we're back in implementation (fix loop)
       phase == "validation" and current == "implementation" and
-          Map.get(mission, :fix_context) != nil -> true
-      true -> false
+          Map.get(mission, :fix_context) != nil ->
+        true
+
+      true ->
+        false
     end
   end
 
@@ -1255,7 +1275,6 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   defp format_tokens_mb(_), do: "-"
-
 
   defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"
   defp context_gauge_color(pct) when pct >= 35, do: "#f59e0b"
