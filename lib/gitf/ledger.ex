@@ -128,6 +128,43 @@ defmodule GiTF.Ledger do
         0
       end
 
+    # One fetch feeds both the per-phase map and the wall clock.
+    transitions = mission_transitions(mission.id)
+
+    # Wall clock = first transition (the start) to last transition (the
+    # terminal), on wall-clock inserted_at rather than monotonic seq —
+    # monotonic time is not comparable across daemon restarts, and
+    # updated_at (the duration_seconds source above) moves every time
+    # anything writes to a finished mission. Queue wait is created→started,
+    # kept separate: a mission that sat pending for a day did not RUN for
+    # a day, and a serverless-provider comparison cares about execution.
+    {wall_clock_seconds, queue_wait_seconds} =
+      case transitions do
+        [first | _] = list ->
+          last = List.last(list)
+
+          wall =
+            with %DateTime{} = a <- first[:inserted_at],
+                 %DateTime{} = b <- last[:inserted_at] do
+              max(DateTime.diff(b, a, :second), 0)
+            else
+              _ -> nil
+            end
+
+          wait =
+            with %DateTime{} = created <- started,
+                 %DateTime{} = began <- first[:inserted_at] do
+              max(DateTime.diff(began, created, :second), 0)
+            else
+              _ -> nil
+            end
+
+          {wall, wait}
+
+        [] ->
+          {nil, nil}
+      end
+
     # Compute cost from Archive
     all_costs = Archive.all(:costs)
     mission_costs = Enum.filter(all_costs, &(&1[:mission_id] == mission.id))
@@ -143,7 +180,7 @@ defmodule GiTF.Ledger do
     total_files = impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
 
     # Phase durations from transitions
-    phase_durations = compute_phase_durations(mission.id)
+    phase_durations = compute_phase_durations(transitions)
 
     outcome = if mission.status == "completed", do: :completed, else: :failed
 
@@ -153,6 +190,8 @@ defmodule GiTF.Ledger do
       mode: mission[:pipeline_mode] || "full",
       outcome: outcome,
       duration_seconds: duration_seconds,
+      wall_clock_seconds: wall_clock_seconds,
+      queue_wait_seconds: queue_wait_seconds,
       total_cost: total_cost,
       rework_cost: rework_cost,
       total_ops: length(impl_ops),
@@ -163,13 +202,22 @@ defmodule GiTF.Ledger do
     }
   rescue
     e ->
-      Logger.warning("Ledger: failed to build entry for #{inspect(mission[:id])}: #{Exception.message(e)}")
+      Logger.warning(
+        "Ledger: failed to build entry for #{inspect(mission[:id])}: #{Exception.message(e)}"
+      )
+
       nil
   end
 
-  defp compute_phase_durations(mission_id) do
+  defp mission_transitions(mission_id) do
     Archive.filter(:mission_phase_transitions, fn t -> t.mission_id == mission_id end)
     |> Enum.sort_by(& &1[:seq])
+  rescue
+    _ -> []
+  end
+
+  defp compute_phase_durations(transitions) do
+    transitions
     |> Enum.chunk_every(2, 1, :discard)
     |> Enum.map(fn [from_t, to_t] ->
       duration = (to_t[:seq] || 0) - (from_t[:seq] || 0)

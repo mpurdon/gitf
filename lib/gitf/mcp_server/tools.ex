@@ -108,6 +108,27 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "provider_perf",
+        description:
+          "Per provider+model performance over a window: p50/p95 call duration, p50 TTFT " <>
+            "(nil until a path streams — nothing does today), mean output tokens/sec, " <>
+            "cold-start rate (gap > 5min AND duration > 3x that pair's median), error rate, " <>
+            "and $/1M effective tokens (input + output + 10% of cache reads, joined from " <>
+            "costs). Plus mission wall-clock p50/p95 by pipeline mode, measured start " <>
+            "transition to terminal transition with queue wait separated out. The baseline " <>
+            "table for evaluating a serverless-provider migration.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            hours: %{
+              type: "integer",
+              description: "Window in hours (default 168 — the costs retention)",
+              default: 168
+            }
+          }
+        }
+      },
+      %{
         name: "show_artifact",
         description:
           "Get a phase artifact for a mission (research, requirements, design, planning, validation, sync, scoring). Shows the actual output from that phase.",

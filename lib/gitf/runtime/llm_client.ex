@@ -68,22 +68,77 @@ defmodule GiTF.Runtime.LLMClient.Default do
   @impl true
   def generate_text(model, messages, opts) do
     GiTF.Runtime.ProviderCircuit.call(model, fn routed_model ->
-      if is_binary(routed_model) and String.starts_with?(routed_model, "arn:aws:bedrock:") do
-        GiTF.Runtime.BedrockDirect.converse(routed_model, messages, opts)
-      else
-        opts = inject_api_key(routed_model, opts)
-        routed_model = GiTF.Runtime.ProviderManager.normalize_model_for_reqllm(routed_model)
+      # Timed inside the circuit's call_fn on purpose: this measures ONE
+      # attempt against the model that actually served it (the circuit can
+      # reroute away from the requested spec), not retries and backoff
+      # sleeps. Every non-CLI completion in the factory flows through here,
+      # so this one wrap is the whole latency picture.
+      started = System.monotonic_time(:millisecond)
 
-        case Keyword.pop(opts, :gemini_cache) do
-          {nil, _} ->
-            ReqLLM.generate_text(routed_model, messages, opts)
+      result =
+        if is_binary(routed_model) and String.starts_with?(routed_model, "arn:aws:bedrock:") do
+          GiTF.Runtime.BedrockDirect.converse(routed_model, messages, opts)
+        else
+          opts = inject_api_key(routed_model, opts)
+          routed_model = GiTF.Runtime.ProviderManager.normalize_model_for_reqllm(routed_model)
 
-          {cache_name, clean_opts} ->
-            run_gemini_cached(routed_model, messages, cache_name, clean_opts)
+          case Keyword.pop(opts, :gemini_cache) do
+            {nil, _} ->
+              ReqLLM.generate_text(routed_model, messages, opts)
+
+            {cache_name, clean_opts} ->
+              run_gemini_cached(routed_model, messages, cache_name, clean_opts)
+          end
         end
-      end
+
+      record_call(routed_model, started, result)
+      result
     end)
   end
+
+  # Nothing here streams, so TTFT is honestly nil rather than a round-trip
+  # time wearing a first-token costume. Usage is best-effort off whatever
+  # shape the provider returned; a metrics write never fails the call.
+  defp record_call(routed_model, started, result) do
+    usage = extract_usage(result)
+
+    GiTF.Runtime.CallMetrics.record(%{
+      provider: GiTF.Runtime.ProviderCircuit.extract_provider(routed_model),
+      model: to_string(routed_model),
+      mode: GiTF.Runtime.ModelResolver.execution_mode(),
+      kind: :api_call,
+      duration_ms: System.monotonic_time(:millisecond) - started,
+      ttft_ms: nil,
+      streaming: false,
+      input_tokens: usage[:input],
+      output_tokens: usage[:output],
+      outcome: outcome_of(result)
+    })
+  rescue
+    _ -> :ok
+  end
+
+  defp outcome_of({:ok, _}), do: :ok
+  defp outcome_of({:error, %{__struct__: mod}}), do: mod |> Module.split() |> List.last()
+  defp outcome_of({:error, reason}) when is_atom(reason), do: reason
+  defp outcome_of(_), do: :error
+
+  defp extract_usage({:ok, %{usage: %{} = u}}),
+    do: %{
+      input: u[:input_tokens] || u["input_tokens"],
+      output: u[:output_tokens] || u["output_tokens"]
+    }
+
+  defp extract_usage({:ok, %ReqLLM.Response{} = resp}) do
+    case Map.get(resp, :usage) do
+      %{} = u -> %{input: u[:input_tokens], output: u[:output_tokens]}
+      _ -> %{}
+    end
+  rescue
+    _ -> %{}
+  end
+
+  defp extract_usage(_), do: %{}
 
   defp run_gemini_cached(model, messages, cache_name, opts) do
     # Minimal implementation for Gemini Context Caching

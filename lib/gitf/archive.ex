@@ -1090,6 +1090,7 @@ defmodule GiTF.Archive do
   defp collection_prefix(:missions), do: :msn
   defp collection_prefix(:links), do: :lnk
   defp collection_prefix(:costs), do: :cst
+  defp collection_prefix(:llm_calls), do: :llm
   defp collection_prefix(:shells), do: :cel
   defp collection_prefix(:op_dependencies), do: :dep
   defp collection_prefix(:mission_phase_transitions), do: :mpt

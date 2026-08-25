@@ -40,10 +40,29 @@ defmodule GiTF.Runtime.CLIClient do
 
     cwd = Keyword.get(opts, :cwd, System.tmp_dir!())
 
-    with {:ok, port} <- GiTF.Runtime.Claude.spawn_headless(cwd, prompt, spawn_opts),
-         {:ok, raw} <- collect(port) do
-      {:ok, build_response(model, raw)}
-    end
+    started = System.monotonic_time(:millisecond)
+
+    result =
+      with {:ok, port} <- GiTF.Runtime.Claude.spawn_headless(cwd, prompt, spawn_opts),
+           {:ok, raw} <- collect(port) do
+        {:ok, build_response(model, raw)}
+      end
+
+    # A CLI invocation is a whole agentic session, not one completion —
+    # recorded as kind: :cli_session so stats never average it against
+    # single HTTP calls. Per-turn latency is invisible from out here.
+    GiTF.Runtime.CallMetrics.record(%{
+      provider: "cli",
+      model: to_string(cli_model || model),
+      mode: :cli,
+      kind: :cli_session,
+      duration_ms: System.monotonic_time(:millisecond) - started,
+      ttft_ms: nil,
+      streaming: false,
+      outcome: if(match?({:ok, _}, result), do: :ok, else: :error)
+    })
+
+    result
   end
 
   @impl true

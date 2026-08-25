@@ -231,6 +231,7 @@ postmortem is exactly this. Split them or accept the risk knowingly.
 | What a ghost actually did | `list_ghosts`, `ghost_output` |
 | Why it went wrong | `mission_diagnosis`, `mission_report` |
 | Money | `costs_summary`, `ledger_stats` |
+| Provider latency / serverless baseline | `provider_perf` — p50/p95 duration, tok/s, $/1M effective, cold-start rate, mission wall-clock |
 | Everything at once | `https://factory.ghostinthefactory.com/dashboard` |
 
 Dashboard sections worth knowing: `/dashboard/approvals` (gates waiting on

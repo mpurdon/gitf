@@ -340,7 +340,11 @@ defmodule GiTF.Runtime.ProviderCircuit do
 
   # -- Private: Helpers --------------------------------------------------------
 
-  defp extract_provider(model) when is_binary(model) do
+  @doc false
+  # Public for CallMetrics: the stats key must name the provider that
+  # actually served a routed model, and this is the one extractor that
+  # understands every spec shape (provider:model, ARNs, bare tiers).
+  def extract_provider(model) when is_binary(model) do
     cond do
       String.starts_with?(model, "arn:aws:bedrock:") ->
         "bedrock"
@@ -357,7 +361,7 @@ defmodule GiTF.Runtime.ProviderCircuit do
     end
   end
 
-  defp extract_provider(_model), do: ModelResolver.configured_provider()
+  def extract_provider(_model), do: ModelResolver.configured_provider()
 
   defp infer_tier(model, provider) do
     models = ProviderManager.tier_models(provider)

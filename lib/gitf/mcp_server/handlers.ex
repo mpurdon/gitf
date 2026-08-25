@@ -209,6 +209,39 @@ defmodule GiTF.MCPServer.Handlers do
     {:ok, json_text(stats)}
   end
 
+  def call("provider_perf", args) do
+    hours = args["hours"] || 168
+
+    providers = GiTF.Runtime.CallMetrics.stats(hours: hours)
+
+    missions =
+      GiTF.Ledger.entries()
+      |> Enum.group_by(& &1.mode)
+      |> Map.new(fn {mode, entries} ->
+        walls =
+          entries
+          |> Enum.map(& &1[:wall_clock_seconds])
+          |> Enum.filter(&is_number/1)
+          |> Enum.sort()
+
+        waits =
+          entries
+          |> Enum.map(& &1[:queue_wait_seconds])
+          |> Enum.filter(&is_number/1)
+          |> Enum.sort()
+
+        {mode,
+         %{
+           missions: length(entries),
+           p50_wall_clock_seconds: percentile_of(walls, 0.5),
+           p95_wall_clock_seconds: percentile_of(walls, 0.95),
+           p50_queue_wait_seconds: percentile_of(waits, 0.5)
+         }}
+      end)
+
+    {:ok, json_text(%{window_hours: hours, providers: providers, mission_wall_clock: missions})}
+  end
+
   def call("show_artifact", %{"mission_id" => mid, "phase" => phase} = args) do
     safe_handler("show_artifact", args, fn ->
       case GiTF.Missions.get_artifact(mid, phase) do
@@ -1402,6 +1435,13 @@ defmodule GiTF.MCPServer.Handlers do
     do:
       {:error,
        "timeout_ms must be an integer between 1_000 and 1_800_000, got: #{inspect(timeout_ms)} (or pass clear: true)"}
+
+  defp percentile_of([], _p), do: nil
+
+  defp percentile_of(sorted, p) do
+    idx = min(length(sorted) - 1, max(0, round(p * (length(sorted) - 1))))
+    Enum.at(sorted, idx)
+  end
 
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}

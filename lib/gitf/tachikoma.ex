@@ -934,6 +934,7 @@ defmodule GiTF.Tachikoma do
 
     pruned_costs = prune_collection(:costs, cost_cutoff, completed_mission_ids)
     pruned_audits = prune_collection(:audit_results, cost_cutoff, completed_mission_ids)
+    pruned_llm_calls = prune_collection(:llm_calls, cost_cutoff, completed_mission_ids)
 
     # Prune old debriefs (>30 days)
     thirty_day_cutoff = DateTime.shift(DateTime.utc_now(), day: -30)
@@ -963,7 +964,7 @@ defmodule GiTF.Tachikoma do
     compacted = GiTF.Missions.compact_old_artifacts(compact_days)
 
     total =
-      length(pruned_links) + length(pruned_runs) + pruned_costs + pruned_audits +
+      length(pruned_links) + length(pruned_runs) + pruned_costs + pruned_audits + pruned_llm_calls +
         pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_backups +
         pruned_patterns + compacted
 
