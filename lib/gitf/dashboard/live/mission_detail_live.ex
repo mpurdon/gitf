@@ -860,23 +860,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                     <.phase_icon phase={phase} />
                 <% end %>
               </div>
-              <div class="step-label" style={if @selected_phase == phase, do: "font-weight:700"}>
-                {phase}
-                <%= case phase_detail(@mission, phase) do %>
-                  <% :page -> %>
-                    <Heroicons.arrow_top_right_on_square
-                      mini
-                      class="w-3 h-3"
-                      style="display:inline; vertical-align:-1px; opacity:0.65"
-                    />
-                  <% :decisions -> %>
-                    <Heroicons.document_text
-                      mini
-                      class="w-3 h-3"
-                      style="display:inline; vertical-align:-1px; opacity:0.65"
-                    />
-                  <% nil -> %>
-                <% end %>
+              <div
+                class="step-label"
+                style={"white-space:nowrap; #{if @selected_phase == phase, do: "font-weight:700"}"}
+              >
+                {phase}<span :if={phase_detail(@mission, phase)} style="font-size:0.62rem; opacity:0.55; margin-left:0.18rem">{if phase_detail(@mission, phase) == :page, do: "↗", else: "≡"}</span>
               </div>
               <%= if @phase_durations[phase] do %>
                 <div style="font-size:0.6rem; color:#6b7280; margin-top:0.1rem">{@phase_durations[phase]}</div>
