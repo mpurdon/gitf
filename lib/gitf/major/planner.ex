@@ -333,7 +333,11 @@ defmodule GiTF.Major.Planner do
         ]
         ```
 
-        Keep the number of ops minimal. Prefer fewer, larger ops over many small ones.
+        Split ops by file ownership: two ops must NOT both list the same file in
+        target_files unless one depends_on the other (parallel ghosts editing the
+        same file produce merge conflicts), and ops with disjoint target_files and
+        no data dependency must NOT depend on each other (artificial serialization
+        wastes wall-clock). Size each op for one ghost in one session.
         """
     end
   end
@@ -424,24 +428,37 @@ defmodule GiTF.Major.Planner do
     sector_id = if mission, do: mission.sector_id
     variant = Keyword.get(opts, :variant)
 
-    # Structural enforcement of complexity-proportional decomposition: the
-    # planning prompt asks for one op on single-agent-scope missions, but
-    # the LLM's output is a suggestion — merge is the guarantee. Every op
-    # boundary is a worktree/branch/feedback handoff, and the run-13→18
-    # defect catalog was handoff failures, never capability failures.
+    # Structural enforcement of the ownership-split doctrine: the planning
+    # prompt states the rules, but the LLM's output is a suggestion —
+    # enforcement is the guarantee. Two layers:
+    #
+    #   * trivial/simple missions (or plans whose whole footprint fits a
+    #     couple of files) still collapse to ONE op — splitting one-session
+    #     work adds handoffs without capability, the run-13→18 lesson.
+    #   * everything else keeps its ops, but any two that touch the SAME
+    #     file without a dependency path between them get serialized by an
+    #     added dependency. That targets the actual hazard — parallel
+    #     ghosts editing one file wrote the conflict markers that killed
+    #     msn-8e0eae — without flattening the parallelism of disjoint
+    #     surfaces, which merges trivially.
     job_specs =
-      if mission != nil and variant == nil and length(job_specs) > 1 and
-           single_agent_scope?(mission, job_specs) do
-        require Logger
+      cond do
+        mission != nil and variant == nil and length(job_specs) > 1 and
+            single_agent_scope?(mission, job_specs) ->
+          require Logger
 
-        Logger.info(
-          "Planner: merging #{length(job_specs)} op specs into ONE for " <>
-            "single-agent-scope mission #{mission_id}"
-        )
+          Logger.info(
+            "Planner: merging #{length(job_specs)} op specs into ONE for " <>
+              "single-agent-scope mission #{mission_id}"
+          )
 
-        [merge_specs_into_one(mission, job_specs)]
-      else
-        job_specs
+          [merge_specs_into_one(mission, job_specs)]
+
+        length(job_specs) > 1 ->
+          serialize_shared_files(job_specs)
+
+        true ->
+          job_specs
       end
 
     {ops, _id_map} =
@@ -512,7 +529,11 @@ defmodule GiTF.Major.Planner do
   # alone can't gate single-op mode. The plan's own footprint is the
   # honest measure: a feature whose specs touch ≤ this many distinct files
   # fits one agent's session regardless of what triage called it.
-  @single_agent_max_files 10
+  # Was 10, which swallowed every plan for a small repo — cora's entire
+  # feature surface is 1-3 files, so no cora mission could ever produce a
+  # multi-op plan no matter what the planner emitted. Two files is the
+  # honest bar for "one session, unconditionally".
+  @single_agent_max_files 2
 
   defp single_agent_scope?(mission, job_specs) do
     distinct_files =
@@ -523,6 +544,44 @@ defmodule GiTF.Major.Planner do
 
     GiTF.Major.PhasePrompts.single_op_scope?(mission) or
       distinct_files <= @single_agent_max_files
+  end
+
+  # Adds a dependency from each op to any EARLIER op that touches one of
+  # its files, unless a dependency path already exists. Emission order is
+  # the tiebreak — the planner lists prerequisite work first.
+  @doc false
+  def serialize_shared_files(specs) do
+    indexed = Enum.with_index(specs)
+
+    Enum.map(indexed, fn {spec, j} ->
+      files_j = spec |> Map.get("target_files", []) |> MapSet.new()
+
+      forced =
+        for {earlier, i} <- indexed,
+            i < j,
+            not MapSet.disjoint?(files_j, MapSet.new(Map.get(earlier, "target_files", []))),
+            not depends_transitively?(specs, j, i),
+            do: i
+
+      case forced do
+        [] ->
+          spec
+
+        _ ->
+          deps = (List.wrap(Map.get(spec, "depends_on_indices", [])) ++ forced) |> Enum.uniq()
+          Map.put(spec, "depends_on_indices", deps)
+      end
+    end)
+  end
+
+  defp depends_transitively?(specs, from, to, seen \\ MapSet.new()) do
+    deps = specs |> Enum.at(from, %{}) |> Map.get("depends_on_indices", []) |> List.wrap()
+
+    cond do
+      to in deps -> true
+      MapSet.member?(seen, from) -> false
+      true -> Enum.any?(deps, &depends_transitively?(specs, &1, to, MapSet.put(seen, from)))
+    end
   end
 
   # Collapses a multi-op plan into one complete implementation brief:

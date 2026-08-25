@@ -270,6 +270,13 @@ defmodule GiTF.Major.PhasePrompts do
   def requirements_prompt(mission, research_artifact, historical_context \\ "") do
     research_json = encode_or(research_artifact, "{}")
 
+    # The EARS fields (ears_pattern/trigger/response) are strictly additive:
+    # every downstream consumer — the design and validation prompts, the
+    # DesignDeck question slides, Helpers.requirement_index, the design
+    # artifact's requirement_mapping — reads requirements as {"id",
+    # "description"} maps, so "description" must remain the full assembled
+    # EARS sentence rather than being split across the new fields.
+
     """
     # Requirements Phase
 
@@ -286,13 +293,41 @@ defmodule GiTF.Major.PhasePrompts do
 
     ## Instructions
 
-    1. Break the goal into specific functional requirements
+    1. Break the goal into specific functional requirements, each written as
+       a single EARS statement (syntax below)
     2. Each requirement must have testable acceptance criteria
     3. Identify non-functional requirements (performance, security, etc.)
     4. Note constraints from the existing codebase
     5. Explicitly list what is OUT of scope
     6. Name the work in 3-5 words, as a human would title the pull request —
        the feature or fix itself, not the files it touches
+
+    ## EARS Syntax (Easy Approach to Requirements Syntax)
+
+    Every requirement uses one of five patterns:
+
+    - **ubiquitous** — always active, no trigger: "The system SHALL log every
+      authentication attempt."
+    - **event** — response to a trigger: "WHEN a user submits invalid
+      credentials, the system SHALL display an error message."
+    - **state** — active during a state: "WHILE a deployment is in progress,
+      the system SHALL queue incoming requests."
+    - **unwanted** — handling a failure or unwanted condition: "IF the
+      configuration file is missing, THEN the system SHALL fall back to
+      built-in defaults."
+    - **optional** — applies only when a feature is present: "WHERE SSO is
+      configured, the system SHALL redirect login to the identity provider."
+
+    Requirements must be testable and singular: exactly ONE SHALL per
+    requirement, no "and" chains — split compound behavior into separate
+    requirements.
+
+    For each requirement, alongside "id" emit:
+    - "description": the full assembled EARS sentence (the complete
+      human-readable statement, trigger included)
+    - "ears_pattern": one of "ubiquitous" | "event" | "state" | "unwanted" | "optional"
+    - "trigger": the WHEN/WHILE/IF/WHERE clause text (null for ubiquitous)
+    - "response": the "the <system> SHALL <response>" clause text
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 
@@ -304,7 +339,10 @@ defmodule GiTF.Major.PhasePrompts do
       "functional_requirements": [
         {
           "id": "FR-1",
-          "description": "Description of the requirement",
+          "description": "WHEN a reviewer approves a PR, the system SHALL post the configured approval message.",
+          "ears_pattern": "event",
+          "trigger": "WHEN a reviewer approves a PR",
+          "response": "the system SHALL post the configured approval message",
           "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
           "priority": "must-have"
         }
@@ -312,7 +350,10 @@ defmodule GiTF.Major.PhasePrompts do
       "non_functional": [
         {
           "id": "NFR-1",
-          "description": "Non-functional requirement",
+          "description": "The system SHALL render the approval settings page within 200ms.",
+          "ears_pattern": "ubiquitous",
+          "trigger": null,
+          "response": "the system SHALL render the approval settings page within 200ms",
           "acceptance_criteria": ["Testable criterion"]
         }
       ],
@@ -567,11 +608,20 @@ defmodule GiTF.Major.PhasePrompts do
   end
 
   @doc false
-  # Complexity-proportional decomposition. A single agent holding the whole
-  # task in one context is strictly more reliable than a multi-op relay:
-  # every op boundary is a worktree/branch/feedback handoff, and the entire
-  # run-13→18 defect catalog was handoff failures, never capability
-  # failures. Decompose only when the work genuinely exceeds one session.
+  # Complexity-proportional decomposition. The run-13→18 defect catalog was
+  # handoff failures, never capability failures — and the lesson it taught
+  # is narrower than the rule it produced. Handoffs WITHIN a surface (two
+  # ops relaying edits to the same files) caused every one of those
+  # deaths; handoffs BETWEEN surfaces (Rust op, TS op, disjoint files)
+  # merge trivially, and serializing them only wastes wall-clock. So:
+  # trivial/simple stay one op — splitting one-session work adds
+  # coordination without capability. Moderate and complex split along
+  # ownership boundaries only, per the rules in the planning prompt.
+  # Moderate was in the one-op bucket until 2026-08-25; the failures that
+  # justified that (conflict-abort consolidation, canonical-shell ranking,
+  # retry DAG orphans) are fixed, and scratch-worktree merges with a
+  # working AI resolution tier make the remaining risk recoverable. The
+  # next multi-surface mission run is this change's acceptance test.
   def decomposition_instructions(mission) do
     if single_op_scope?(mission) do
       """
@@ -583,10 +633,13 @@ defmodule GiTF.Major.PhasePrompts do
       """
     else
       """
-      1. Break the design into as FEW ops as the work truly requires —
-         prefer one op per independent deliverable; never split what one
-         agent can complete in a session.
-      2. Each op should be completable by a single developer in one session
+      1. Split ops along FILE/SURFACE OWNERSHIP boundaries: one op per
+         independent deliverable whose target_files no other op touches.
+         Two ops naming the same file MUST be linked by depends_on_indices;
+         ops with disjoint files and no data dependency MUST NOT depend on
+         each other — they will execute as parallel ghosts.
+      2. Never split what one agent can complete in a session; each op must
+         be completable by a single agent in one session.
       """
     end
   end
@@ -599,7 +652,7 @@ defmodule GiTF.Major.PhasePrompts do
         _ -> nil
       end
 
-    complexity in ["trivial", "simple", "moderate"]
+    complexity in ["trivial", "simple"]
   rescue
     _ -> false
   end
@@ -668,6 +721,10 @@ defmodule GiTF.Major.PhasePrompts do
     - Define clear acceptance criteria derived from requirements
     - Specify target files from the design — these must be real files in the project
     - Set up dependencies (op indices, 0-based)
+    - Tag each op with "requirement_ids": the requirement ids THIS op delivers,
+      drawn ONLY from the ids in the Requirements artifact above. Every
+      functional requirement must be covered by at least one op. State coverage
+      honestly — never pad requirement_ids to make coverage look complete
     - Recommend model complexity: "general" for straightforward changes, "thinking" for complex logic
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
@@ -681,13 +738,38 @@ defmodule GiTF.Major.PhasePrompts do
         "description": "Detailed implementation instructions referencing specific files and functions",
         "target_files": ["path/to/actual/file.ext"],
         "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
+        "requirement_ids": ["FR-1"],
         "depends_on_indices": [],
         "model_recommendation": "general"
       }
     ]
     ```
 
-    Keep the number of ops minimal (2-4). Prefer fewer, larger ops over many small ones.
+    #{ownership_split_guidance()}
+    """
+  end
+
+  # This deliberately re-opens multi-op parallelism: the previous "keep ops
+  # minimal (2-4), prefer fewer larger ops" guidance was a defense against
+  # run 13, where consolidation ABORTED on the first merge conflict and
+  # validation never saw the frontend branch. Consolidation now merges in
+  # scratch worktrees with a working AI conflict-resolution tier
+  # (2026-08-25), so the residual rule is ownership, not count: same-file
+  # parallel ghosts still produce conflicts, and serializing disjoint files
+  # still wastes wall-clock. The next mission run is the acceptance test.
+  defp ownership_split_guidance do
+    """
+    Split ops by FILE/SURFACE OWNERSHIP, not by size:
+
+    - Two ops must NOT both list the same file in target_files unless one
+      depends_on the other. Parallel ghosts editing the same file produce
+      merge conflicts — this has killed real mission runs.
+    - Ops with disjoint target_files and no data dependency must NOT depend
+      on each other: they will run as parallel ghosts, and artificial
+      serialization of disjoint files wastes wall-clock time.
+    - Size each op so a single ghost can complete it in one session.
+    - Keep genuinely sequential work sequential via depends_on_indices
+      (e.g. an op that consumes an interface another op creates).
     """
   end
 
@@ -843,10 +925,13 @@ defmodule GiTF.Major.PhasePrompts do
 
     1. Run `git_diff(ref: "#{diff_base}")` to inspect the implementation's changes.
     2. Check each functional requirement was implemented.
-    3. Review the code changes for correctness.
-    4. Verify acceptance criteria are met.
-    5. Run tests if available.
-    6. Identify any gaps between requirements and implementation.
+    3. Verify per-requirement coverage: each planned op's `requirement_ids`
+       declares which requirements that op delivers — use them as the map of
+       intent, then confirm the diff actually delivers each one.
+    4. Review the code changes for correctness.
+    5. Verify acceptance criteria are met.
+    6. Run tests if available.
+    7. Identify any gaps between requirements and implementation.
 
     **You are NOT here to modify code.** If a requirement is missing, report
     it in `gaps`; a fix ghost will handle the repair in a later step.
@@ -864,11 +949,16 @@ defmodule GiTF.Major.PhasePrompts do
           "evidence": "How this was verified"
         }
       ],
+      "uncovered_requirements": ["FR-2"],
       "gaps": ["Any unmet requirements or issues found"],
       "overall_verdict": "pass",
       "summary": "Brief summary of validation results"
     }
     ```
+
+    `uncovered_requirements` lists requirement ids that NO op claimed in its
+    `requirement_ids` AND for which no evidence shows the work was delivered
+    anyway. Use `[]` when every requirement is covered.
 
     Set `overall_verdict` to "fail" if any must-have requirements are not met.
     """

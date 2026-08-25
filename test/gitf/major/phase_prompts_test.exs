@@ -139,6 +139,42 @@ defmodule GiTF.Major.PhasePromptsTest do
       assert prompt =~ "MVC"
       assert prompt =~ "functional_requirements"
     end
+
+    test "requires EARS structure with all five patterns" do
+      prompt = PhasePrompts.requirements_prompt(@mission, %{})
+
+      assert prompt =~ "EARS"
+      # The five pattern names must all be declared for the enum field
+      assert prompt =~ "ubiquitous"
+      assert prompt =~ "event"
+      assert prompt =~ "state"
+      assert prompt =~ "unwanted"
+      assert prompt =~ "optional"
+      # And their keyword clauses
+      assert prompt =~ "WHEN"
+      assert prompt =~ "WHILE"
+      assert prompt =~ "IF"
+      assert prompt =~ "WHERE"
+    end
+
+    test "declares the additive EARS fields alongside id and description" do
+      prompt = PhasePrompts.requirements_prompt(@mission, %{})
+
+      assert prompt =~ "ears_pattern"
+      assert prompt =~ "trigger"
+      assert prompt =~ "response"
+      # Compatibility contract: description stays the full assembled sentence
+      assert prompt =~ ~r/"description".*full assembled EARS sentence/s
+      assert prompt =~ ~s("id")
+    end
+
+    test "requires singular, testable requirements (one SHALL, no and-chains)" do
+      prompt = PhasePrompts.requirements_prompt(@mission, %{})
+
+      assert prompt =~ ~r/ONE SHALL per\s+requirement/
+      assert prompt =~ ~r/no "and" chains/
+      assert prompt =~ "testable"
+    end
   end
 
   describe "design_prompt/3" do
@@ -179,15 +215,43 @@ defmodule GiTF.Major.PhasePromptsTest do
   end
 
   describe "planning_prompt/4" do
+    @planning_args [
+      %{"components" => []},
+      %{"functional_requirements" => []},
+      %{"approved" => true}
+    ]
+
     test "produces planning instructions with op format" do
-      design = %{"components" => []}
-      requirements = %{"functional_requirements" => []}
-      review = %{"approved" => true}
+      [design, requirements, review] = @planning_args
 
       prompt = PhasePrompts.planning_prompt(@mission, design, requirements, review)
       assert prompt =~ "Planning Phase"
       assert prompt =~ "depends_on_indices"
       assert prompt =~ "model_recommendation"
+    end
+
+    test "requires requirement_ids per op with honest full coverage" do
+      [design, requirements, review] = @planning_args
+      prompt = PhasePrompts.planning_prompt(@mission, design, requirements, review)
+
+      assert prompt =~ "requirement_ids"
+      assert prompt =~ ~r/[Ee]very\s+functional requirement must be covered by at least one op/
+      assert prompt =~ ~r/never pad requirement_ids/
+    end
+
+    test "splits ops by file ownership instead of minimizing op count" do
+      [design, requirements, review] = @planning_args
+      prompt = PhasePrompts.planning_prompt(@mission, design, requirements, review)
+
+      assert prompt =~ "FILE/SURFACE OWNERSHIP"
+      # Same file in two ops requires a dependency between them
+      assert prompt =~ ~r/must NOT both list the same file in target_files unless one\s+depends_on the other/
+      # Disjoint files must not be artificially serialized
+      assert prompt =~ ~r/disjoint target_files and no data dependency must NOT depend\s+on each other/
+      assert prompt =~ "merge conflicts"
+      # The pre-2026-08-25 anti-parallelism doctrine is gone
+      refute prompt =~ "fewer, larger ops"
+      refute prompt =~ "Keep the number of ops minimal"
     end
   end
 
@@ -202,6 +266,15 @@ defmodule GiTF.Major.PhasePromptsTest do
       assert prompt =~ "overall_verdict"
       assert prompt =~ "FR-1"
       assert prompt =~ "Implement feature"
+    end
+
+    test "verifies coverage via requirement_ids and reports uncovered_requirements" do
+      prompt = PhasePrompts.validation_prompt(@mission, %{}, [])
+
+      assert prompt =~ "uncovered_requirements"
+      assert prompt =~ "requirement_ids"
+      # Uncovered = unclaimed by any op AND no evidence of delivery
+      assert prompt =~ ~r/NO op claimed.*AND.*no evidence/s
     end
 
     test "omits the LSP diagnostics section when none are provided" do
