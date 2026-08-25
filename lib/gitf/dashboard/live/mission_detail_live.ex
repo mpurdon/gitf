@@ -864,7 +864,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 class="step-label"
                 style={"white-space:nowrap; #{if @selected_phase == phase, do: "font-weight:700"}"}
               >
-                {phase}<span :if={phase_detail(@mission, phase)} style="font-size:0.62rem; opacity:0.55; margin-left:0.18rem">{if phase_detail(@mission, phase) == :page, do: "↗", else: "≡"}</span>
+                {phase}<span :if={phase_detail(@mission, phase)} style="font-size:1.05rem; line-height:0; vertical-align:-0.12em; opacity:0.7; margin-left:0.22rem">{if phase_detail(@mission, phase) == :page, do: "↗", else: "≡"}</span>
               </div>
               <%= if @phase_durations[phase] do %>
                 <div style="font-size:0.6rem; color:#6b7280; margin-top:0.1rem">{@phase_durations[phase]}</div>
