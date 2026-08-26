@@ -208,10 +208,17 @@ defmodule GiTF.Workflow.Schema do
 
     structural =
       cond do
-        transitions == [] -> [{:empty_conditional_branch, id, field}]
-        else_count != 1 -> [{:conditional_branch_needs_one_else, id, field}]
-        not match?({:else, _}, List.last(transitions)) -> [{:conditional_branch_else_not_last, id, field}]
-        true -> []
+        transitions == [] ->
+          [{:empty_conditional_branch, id, field}]
+
+        else_count != 1 ->
+          [{:conditional_branch_needs_one_else, id, field}]
+
+        not match?({:else, _}, List.last(transitions)) ->
+          [{:conditional_branch_else_not_last, id, field}]
+
+        true ->
+          []
       end
 
     if errs == [] and structural == [], do: {transitions, []}, else: {nil, structural ++ errs}
@@ -295,7 +302,8 @@ defmodule GiTF.Workflow.Schema do
        when is_binary(branch) or is_nil(branch),
        do: check_target(phase_id, branch, kind, valid, errors)
 
-  defp check_branch_targets(phase_id, transitions, kind, valid, errors) when is_list(transitions) do
+  defp check_branch_targets(phase_id, transitions, kind, valid, errors)
+       when is_list(transitions) do
     Enum.reduce(transitions, errors, fn
       {:else, target}, acc -> check_target(phase_id, target, kind, valid, acc)
       {_source, _ast, target}, acc -> check_target(phase_id, target, kind, valid, acc)

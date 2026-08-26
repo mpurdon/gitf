@@ -9,7 +9,10 @@ defmodule GiTF.Phases.PublishTest do
     {:ok, m} =
       GiTF.Archive.insert(
         :missions,
-        Map.merge(%{name: "p", goal: "x", status: "active", sector_id: "fe", artifacts: %{}}, attrs)
+        Map.merge(
+          %{name: "p", goal: "x", status: "active", sector_id: "fe", artifacts: %{}},
+          attrs
+        )
       )
 
     m
@@ -18,13 +21,21 @@ defmodule GiTF.Phases.PublishTest do
   describe "verdict/2" do
     test "advance on a normal publish artifact" do
       m = insert_mission!(%{})
-      assert Publish.verdict(m, %{"status" => "pr_opened", "pr_url" => "https://github.com/x/y/pull/1"}) == :advance
+
+      assert Publish.verdict(m, %{
+               "status" => "pr_opened",
+               "pr_url" => "https://github.com/x/y/pull/1"
+             }) == :advance
+
       assert Publish.verdict(m, %{"status" => "pushed_to_main"}) == :advance
     end
 
     test "terminal_fail on pr_failed / push_failed / failed" do
       m = insert_mission!(%{})
-      assert Publish.verdict(m, %{"status" => "pr_failed", "error" => "rate limit"}) == :terminal_fail
+
+      assert Publish.verdict(m, %{"status" => "pr_failed", "error" => "rate limit"}) ==
+               :terminal_fail
+
       assert Publish.verdict(m, %{"status" => "push_failed"}) == :terminal_fail
       assert Publish.verdict(m, %{"status" => "failed"}) == :terminal_fail
     end

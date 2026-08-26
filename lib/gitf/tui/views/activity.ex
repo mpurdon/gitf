@@ -20,7 +20,13 @@ defmodule GiTF.TUI.Views.Activity do
       if Enum.empty?(activity.missions) and Enum.empty?(activity.ghosts) do
         label(content: "Idle")
       else
-        render_quests(activity.missions, ghosts_by_mission, activity.ghost_logs, budget_status, backups) ++
+        render_quests(
+          activity.missions,
+          ghosts_by_mission,
+          activity.ghost_logs,
+          budget_status,
+          backups
+        ) ++
           render_orphan_ghosts(ghosts_by_mission, activity.ghost_logs, backups) ++
           render_runs(runs)
       end

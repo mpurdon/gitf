@@ -99,6 +99,7 @@ defmodule GiTF.Major.ResearchTest do
              :gt,
              :eq
            ]
+
     assert result2.research.structure.total_files == 5
   end
 

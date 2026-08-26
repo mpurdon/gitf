@@ -49,9 +49,15 @@ defmodule GiTF.Visual.Capture do
   @spec screenshot(String.t(), Path.t(), opts()) :: {:ok, Path.t()} | {:error, term()}
   def screenshot(url, output_path, opts \\ []) when is_binary(url) and is_binary(output_path) do
     cond do
-      not enabled?() -> {:error, :disabled}
-      not available?() -> {:error, :driver_unavailable}
-      not allowed_url?(url) -> {:error, {:url_not_allowed, url}}
+      not enabled?() ->
+        {:error, :disabled}
+
+      not available?() ->
+        {:error, :driver_unavailable}
+
+      not allowed_url?(url) ->
+        {:error, {:url_not_allowed, url}}
+
       true ->
         case allowed_output_path(output_path) do
           {:ok, expanded} -> do_screenshot(url, expanded, opts)

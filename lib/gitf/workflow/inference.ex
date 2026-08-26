@@ -143,6 +143,8 @@ defmodule GiTF.Workflow.Inference do
   @spec enabled?() :: boolean()
   def enabled?, do: Application.get_env(:gitf, :workflow_inference_enabled, false) == true
 
-  defp threshold, do: Application.get_env(:gitf, :workflow_inference_threshold, @default_threshold)
+  defp threshold,
+    do: Application.get_env(:gitf, :workflow_inference_threshold, @default_threshold)
+
   defp model, do: Application.get_env(:gitf, :workflow_inference_model, @default_model)
 end

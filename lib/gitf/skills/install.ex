@@ -42,9 +42,7 @@ defmodule GiTF.Skills.Install do
         installed_ids
 
       {:error, reason} ->
-        Logger.warning(
-          "Skills.Install: failed to create #{dst_dir}: #{inspect(reason)}"
-        )
+        Logger.warning("Skills.Install: failed to create #{dst_dir}: #{inspect(reason)}")
 
         []
     end
@@ -102,5 +100,4 @@ defmodule GiTF.Skills.Install do
         err
     end
   end
-
 end

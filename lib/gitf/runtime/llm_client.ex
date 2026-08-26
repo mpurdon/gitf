@@ -15,6 +15,10 @@ defmodule GiTF.Runtime.LLMClient do
   @type messages :: String.t() | ReqLLM.Context.t() | [map()]
   @type opts :: keyword()
 
+  # Implementations own metrics: each impl records its calls via
+  # GiTF.Runtime.CallMetrics (Default per HTTP attempt against the routed
+  # model, CLIClient per session) — a new impl that skips this produces no
+  # latency data and no one will notice until the provider_perf table lies.
   @callback generate_text(model(), messages(), opts()) ::
               {:ok, struct()} | {:error, term()}
   @callback stream_text(model(), messages(), opts()) ::
@@ -123,19 +127,9 @@ defmodule GiTF.Runtime.LLMClient.Default do
   defp outcome_of({:error, reason}) when is_atom(reason), do: reason
   defp outcome_of(_), do: :error
 
-  defp extract_usage({:ok, %{usage: %{} = u}}),
-    do: %{
-      input: u[:input_tokens] || u["input_tokens"],
-      output: u[:output_tokens] || u["output_tokens"]
-    }
-
-  defp extract_usage({:ok, %ReqLLM.Response{} = resp}) do
-    case Map.get(resp, :usage) do
-      %{} = u -> %{input: u[:input_tokens], output: u[:output_tokens]}
-      _ -> %{}
-    end
-  rescue
-    _ -> %{}
+  defp extract_usage({:ok, response}) do
+    u = GiTF.Runtime.Usage.normalize(response)
+    %{input: u.input_tokens, output: u.output_tokens}
   end
 
   defp extract_usage(_), do: %{}

@@ -100,7 +100,8 @@ defmodule GiTF.CLI.ProjectChat do
               "decisions" => %{
                 "type" => "array",
                 "items" => %{"type" => "string"},
-                "description" => "Key decisions made in this conversation (stack, scope, tradeoffs)"
+                "description" =>
+                  "Key decisions made in this conversation (stack, scope, tradeoffs)"
               },
               "constraints" => %{"type" => "array", "items" => %{"type" => "string"}},
               "open_questions" => %{
@@ -186,7 +187,11 @@ defmodule GiTF.CLI.ProjectChat do
 
     IO.puts(dim.("Sector: #{sector_line}"))
 
-    for {label, key} <- [{"Decisions", "decisions"}, {"Constraints", "constraints"}, {"Open questions", "open_questions"}],
+    for {label, key} <- [
+          {"Decisions", "decisions"},
+          {"Constraints", "constraints"},
+          {"Open questions", "open_questions"}
+        ],
         items = brief[key] || [],
         items != [] do
       IO.puts("")

@@ -50,13 +50,20 @@ defmodule GiTF.Dashboard.Helpers do
   def format_score(score, decimals \\ 1)
   def format_score(:disqualified, _), do: "DQ"
   def format_score(nil, _), do: "—"
+
   def format_score(n, decimals) when is_number(n),
     do: Float.round(n * 1.0, decimals) |> Float.to_string()
+
   def format_score(_, _), do: "—"
 
   def format_cost(cost, decimals \\ 4)
-  def format_cost(cost, decimals) when is_float(cost), do: "$#{:erlang.float_to_binary(cost, decimals: decimals)}"
-  def format_cost(cost, decimals) when is_integer(cost), do: "$#{:erlang.float_to_binary(cost * 1.0, decimals: decimals)}"
+
+  def format_cost(cost, decimals) when is_float(cost),
+    do: "$#{:erlang.float_to_binary(cost, decimals: decimals)}"
+
+  def format_cost(cost, decimals) when is_integer(cost),
+    do: "$#{:erlang.float_to_binary(cost * 1.0, decimals: decimals)}"
+
   def format_cost(_, decimals), do: "$#{:erlang.float_to_binary(0.0, decimals: decimals)}"
 
   def format_tokens(count) when count >= 1_000_000, do: "#{Float.round(count / 1_000_000, 1)}M"

@@ -159,10 +159,17 @@ defmodule GiTF.Infra.HostStats do
 
   defp headroom(%{available_mb: avail, swap_used_mb: swap}) when is_number(avail) do
     cond do
-      avail < 400 -> %{status: "critical", note: "under 400MB available — a build will OOM the BEAM"}
-      swap > 200 -> %{status: "degraded", note: "swapping #{swap}MB — memory pressure is real"}
-      avail < 700 -> %{status: "tight", note: "under 700MB available — avoid concurrent builds"}
-      true -> %{status: "ok", note: "#{avail}MB available"}
+      avail < 400 ->
+        %{status: "critical", note: "under 400MB available — a build will OOM the BEAM"}
+
+      swap > 200 ->
+        %{status: "degraded", note: "swapping #{swap}MB — memory pressure is real"}
+
+      avail < 700 ->
+        %{status: "tight", note: "under 700MB available — avoid concurrent builds"}
+
+      true ->
+        %{status: "ok", note: "#{avail}MB available"}
     end
   end
 
@@ -177,6 +184,7 @@ defmodule GiTF.Infra.HostStats do
   defp bytes_mb(_), do: nil
 
   defp pct(_, 0), do: nil
+
   defp pct(part, whole) when is_integer(part) and is_integer(whole),
     do: Float.round(part / whole * 100, 1)
 

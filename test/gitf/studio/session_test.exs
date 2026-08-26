@@ -83,19 +83,23 @@ defmodule GiTF.Studio.SessionTest do
     end)
 
     {:ok, id} = Session.start_session()
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.status == :idle and s.proposals != [], do: s
-    end)
+
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.status == :idle and s.proposals != [], do: s
+      end)
 
     assert [%{tool: "add_decision", id: prp_id}] = state.proposals
     assert state.brief.decisions == []
 
     Session.confirm_proposal(id, prp_id)
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.proposals == [], do: s
-    end)
+
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.proposals == [], do: s
+      end)
 
     assert state.brief.decisions == ["Use Phoenix LiveView"]
 
@@ -132,18 +136,20 @@ defmodule GiTF.Studio.SessionTest do
 
     {:ok, id} = Session.start_session()
 
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.status == :idle and s.proposals != [], do: s
-    end)
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.status == :idle and s.proposals != [], do: s
+      end)
 
     [%{id: prp_id}] = state.proposals
     Session.dismiss_proposal(id, prp_id)
 
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.proposals == [], do: s
-    end)
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.proposals == [], do: s
+      end)
 
     assert state.brief.parti == nil
   end
@@ -164,10 +170,11 @@ defmodule GiTF.Studio.SessionTest do
 
     {:ok, id} = Session.start_session()
 
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.status == :idle and s.proposals != [], do: s
-    end)
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.status == :idle and s.proposals != [], do: s
+      end)
 
     [%{id: prp_id}] = state.proposals
     Session.confirm_proposal(id, prp_id)
@@ -189,10 +196,11 @@ defmodule GiTF.Studio.SessionTest do
 
     {:ok, id} = Session.start_session()
 
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.status == :idle and s.proposals != [], do: s
-    end)
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.status == :idle and s.proposals != [], do: s
+      end)
 
     # Proposal exists but the phase has NOT moved yet.
     assert state.phase == "brief"
@@ -213,15 +221,18 @@ defmodule GiTF.Studio.SessionTest do
     }
 
     GiTF.Runtime.LLMClient.Mock
-    |> expect(:generate_text, fn _, _, _ -> {:ok, tool_response("propose_schemes", schemes_args)} end)
+    |> expect(:generate_text, fn _, _, _ ->
+      {:ok, tool_response("propose_schemes", schemes_args)}
+    end)
     |> expect(:generate_text, fn _, _, _ -> {:ok, text_response("pick one")} end)
 
     {:ok, id} = Session.start_session()
 
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.status == :idle and s.proposals != [], do: s
-    end)
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.status == :idle and s.proposals != [], do: s
+      end)
 
     [%{id: prp_id}] = state.proposals
     Session.choose_scheme(id, prp_id, "Pile")
@@ -240,15 +251,18 @@ defmodule GiTF.Studio.SessionTest do
     }
 
     GiTF.Runtime.LLMClient.Mock
-    |> expect(:generate_text, fn _, _, _ -> {:ok, tool_response("propose_storyboard", board_args)} end)
+    |> expect(:generate_text, fn _, _, _ ->
+      {:ok, tool_response("propose_storyboard", board_args)}
+    end)
     |> expect(:generate_text, fn _, _, _ -> {:ok, text_response("boarded")} end)
 
     {:ok, id} = Session.start_session()
 
-    state = await(fn ->
-      s = Session.get_state(id)
-      if s.status == :idle and s.proposals != [], do: s
-    end)
+    state =
+      await(fn ->
+        s = Session.get_state(id)
+        if s.status == :idle and s.proposals != [], do: s
+      end)
 
     [%{id: prp_id}] = state.proposals
     Session.confirm_proposal(id, prp_id)

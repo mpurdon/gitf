@@ -156,7 +156,6 @@ defmodule GiTF.Simulator.ValidatorCrossCheckTest do
       simplify_rule("Code Reuse Review"),
       simplify_rule("Code Quality Review"),
       simplify_rule("(?:Code\\s)?Efficiency Review"),
-
       %{
         match: ~r/# Final Scoring/,
         response:

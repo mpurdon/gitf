@@ -28,7 +28,12 @@ defmodule GiTF.Vault.Renderer.KanbanTest do
 
     test "always includes the four standard lanes in order" do
       out = Kanban.render("frontend", [])
-      lanes = ~r/## (Todo|Doing|Review|Done)/ |> Regex.scan(out, capture: :all_but_first) |> List.flatten()
+
+      lanes =
+        ~r/## (Todo|Doing|Review|Done)/
+        |> Regex.scan(out, capture: :all_but_first)
+        |> List.flatten()
+
       assert lanes == ["Todo", "Doing", "Review", "Done"]
     end
 
@@ -68,7 +73,9 @@ defmodule GiTF.Vault.Renderer.KanbanTest do
     end
 
     test "closed_section: false suppresses the Closed lane" do
-      out = Kanban.render("frontend", [mission("msn-f", %{status: "failed"})], closed_section: false)
+      out =
+        Kanban.render("frontend", [mission("msn-f", %{status: "failed"})], closed_section: false)
+
       refute out =~ "## Closed"
     end
 

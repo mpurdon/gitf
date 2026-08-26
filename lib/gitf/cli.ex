@@ -3824,20 +3824,28 @@ defmodule GiTF.CLI do
   # a non-positive deadline fires before validation can even start and reports
   # every op as a timeout — precisely the failure this field exists to prevent.
   defp parse_validation_timeout!(nil), do: nil
-  defp parse_validation_timeout!(ms) when is_integer(ms) and ms > 0, do: ms
 
   defp parse_validation_timeout!(value) when is_binary(value) do
     case Integer.parse(String.trim(value)) do
-      {ms, ""} when ms > 0 -> ms
+      {ms, ""} -> parse_validation_timeout!(ms)
       _ -> reject_validation_timeout(value)
     end
   end
 
-  defp parse_validation_timeout!(value), do: reject_validation_timeout(value)
+  defp parse_validation_timeout!(value) do
+    # Bounds live with the read side (GiTF.Validator) so this surface, the
+    # HTTP API and the MCP tool cannot drift — they already had: two of the
+    # three accepted an 11-day deadline the ceiling exists to forbid.
+    case GiTF.Validator.validate_timeout_override(value) do
+      {:ok, ms} -> ms
+      {:error, _} -> reject_validation_timeout(value)
+    end
+  end
 
   defp reject_validation_timeout(value) do
     Format.error(
-      "--validation-timeout-ms must be a positive whole number of milliseconds, got #{inspect(value)}."
+      "--validation-timeout-ms must be 1000..#{GiTF.Validator.max_validation_timeout_ms()} " <>
+        "milliseconds, got #{inspect(value)}."
     )
 
     System.halt(1)

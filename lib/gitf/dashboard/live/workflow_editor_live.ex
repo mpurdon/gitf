@@ -132,7 +132,9 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
       end)
 
     new_workflow = %{workflow | phases: new_phases}
-    selected = if socket.assigns.selected_phase_id == id, do: nil, else: socket.assigns.selected_phase_id
+
+    selected =
+      if socket.assigns.selected_phase_id == id, do: nil, else: socket.assigns.selected_phase_id
 
     {:noreply,
      socket
@@ -416,6 +418,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
 
   defp unique_phase_id(phases) do
     existing = MapSet.new(phases, & &1.id)
+
     Enum.find(Stream.iterate(1, &(&1 + 1)), &(not MapSet.member?(existing, "phase-#{&1}")))
     |> then(&"phase-#{&1}")
   end
@@ -430,7 +433,9 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
     end
   end
 
-  defp rewrite_target(target, removed_id) when is_binary(target) and target == removed_id, do: "end"
+  defp rewrite_target(target, removed_id) when is_binary(target) and target == removed_id,
+    do: "end"
+
   defp rewrite_target(target, _removed_id) when is_binary(target) or is_nil(target), do: target
 
   defp rewrite_target(transitions, removed_id) when is_list(transitions) do
@@ -453,8 +458,10 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
         # form yet — the text input is disabled when the value is a list — so
         # preserve them through phx-change cycles.
         next: if(is_list(phase.next), do: phase.next, else: blank_to_nil(params["next"])),
-        on_pass: if(is_list(phase.on_pass), do: phase.on_pass, else: blank_to_nil(params["on_pass"])),
-        on_fail: if(is_list(phase.on_fail), do: phase.on_fail, else: blank_to_nil(params["on_fail"])),
+        on_pass:
+          if(is_list(phase.on_pass), do: phase.on_pass, else: blank_to_nil(params["on_pass"])),
+        on_fail:
+          if(is_list(phase.on_fail), do: phase.on_fail, else: blank_to_nil(params["on_fail"])),
         inject_knowledge: params["inject_knowledge"] == "true",
         inject_skills: params["inject_skills"] == "true"
     }
@@ -567,7 +574,9 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
   end
 
   defp handler_str(nil), do: nil
-  defp handler_str(mod) when is_atom(mod), do: mod |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
+
+  defp handler_str(mod) when is_atom(mod),
+    do: mod |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
 
   defp format_advance(%{next: "end"}), do: "(end)"
   defp format_advance(%{next: next}) when is_binary(next), do: next

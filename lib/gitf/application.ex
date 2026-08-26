@@ -219,7 +219,12 @@ defmodule GiTF.Application do
            # A generous restart budget: for a long-running autonomous system a
            # flapping endpoint must not collapse the whole interface subtree via
            # the tight default 3/5s.
-           [strategy: :one_for_one, name: GiTF.Interface.Supervisor, max_restarts: 10, max_seconds: 60]
+           [
+             strategy: :one_for_one,
+             name: GiTF.Interface.Supervisor,
+             max_restarts: 10,
+             max_seconds: 60
+           ]
          ]}
     }
 
@@ -234,7 +239,12 @@ defmodule GiTF.Application do
              {GiTF.Plugin.ChannelSupervisor, []},
              {GiTF.Plugin.Manager, []}
            ],
-           [strategy: :one_for_one, name: GiTF.Plugin.Supervisor, max_restarts: 10, max_seconds: 60]
+           [
+             strategy: :one_for_one,
+             name: GiTF.Plugin.Supervisor,
+             max_restarts: 10,
+             max_seconds: 60
+           ]
          ]}
     }
 

@@ -87,8 +87,14 @@ defmodule GiTF.Studio.Tools do
         "set_parti",
         "Set the parti: the single organizing idea of the product, one sentence."
       ),
-      text_tool("add_decision", "Record a decision made in the conversation (stack, scope, tradeoff)."),
-      text_tool("add_constraint", "Record a hard constraint (budget, tech, compliance, deadline)."),
+      text_tool(
+        "add_decision",
+        "Record a decision made in the conversation (stack, scope, tradeoff)."
+      ),
+      text_tool(
+        "add_constraint",
+        "Record a hard constraint (budget, tech, compliance, deadline)."
+      ),
       text_tool("add_open_question", "Record a question deliberately left open."),
       text_tool(
         "resolve_question",
@@ -189,7 +195,10 @@ defmodule GiTF.Studio.Tools do
                 "properties" => %{
                   "name" => %{"type" => "string"},
                   "thesis" => %{"type" => "string", "description" => "2-line strategy statement"},
-                  "sacrifice" => %{"type" => "string", "description" => "What this scheme gives up"}
+                  "sacrifice" => %{
+                    "type" => "string",
+                    "description" => "What this scheme gives up"
+                  }
                 },
                 "required" => ["name", "thesis", "sacrifice"]
               }
@@ -213,7 +222,10 @@ defmodule GiTF.Studio.Tools do
                 "type" => "object",
                 "properties" => %{
                   "caption" => %{"type" => "string", "description" => "What happens in this beat"},
-                  "description" => %{"type" => "string", "description" => "What the user sees/feels"}
+                  "description" => %{
+                    "type" => "string",
+                    "description" => "What the user sees/feels"
+                  }
                 },
                 "required" => ["caption"]
               }

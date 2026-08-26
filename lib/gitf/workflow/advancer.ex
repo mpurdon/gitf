@@ -100,7 +100,11 @@ defmodule GiTF.Workflow.Advancer do
   # `when` expression is active and the operator has not cleared the gate.
   defp gate_blocks?(%Phase{gate: nil}, _mission, _ctx), do: false
 
-  defp gate_blocks?(%Phase{gate: %{when: when_expr, action: :await_operator}, id: phase_id}, mission, ctx) do
+  defp gate_blocks?(
+         %Phase{gate: %{when: when_expr, action: :await_operator}, id: phase_id},
+         mission,
+         ctx
+       ) do
     gate_active?(when_expr, ctx) and not GiTF.Missions.gate_cleared?(mission, phase_id)
   end
 

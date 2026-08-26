@@ -8,7 +8,15 @@ defmodule GiTF.Phases.DesignTest do
       GiTF.Archive.insert(
         :missions,
         Map.merge(
-          %{name: "d", goal: "x", status: "active", sector_id: "fe", current_phase: "design", artifacts: %{}, ops: ops},
+          %{
+            name: "d",
+            goal: "x",
+            status: "active",
+            sector_id: "fe",
+            current_phase: "design",
+            artifacts: %{},
+            ops: ops
+          },
           extra
         )
       )

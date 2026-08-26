@@ -65,7 +65,8 @@ defmodule GiTF.Outcomes.Alerts do
   `overall_verdict` agreed with the real outcome. Returns
   `%{accuracy: float, sample_count: n}` or `nil` when there's no signal.
   """
-  @spec calibration(String.t() | nil) :: %{accuracy: float(), sample_count: non_neg_integer()} | nil
+  @spec calibration(String.t() | nil) ::
+          %{accuracy: float(), sample_count: non_neg_integer()} | nil
   def calibration(sector_filter \\ nil) do
     pool = Outcomes.terminal_outcomes(sector_filter)
 

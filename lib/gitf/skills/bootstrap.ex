@@ -70,7 +70,9 @@ defmodule GiTF.Skills.Bootstrap do
         :skipped
       else
         case Skills.create(attrs) do
-          {:ok, _} -> :loaded
+          {:ok, _} ->
+            :loaded
+
           {:error, reason} ->
             Logger.warning("Skills.Bootstrap: create failed for #{path}: #{inspect(reason)}")
             :error

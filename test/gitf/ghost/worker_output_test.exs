@@ -11,7 +11,11 @@ defmodule GiTF.Ghost.WorkerOutputTest do
   defp fat_event(n) do
     # A realistic CLI stream event: an assistant message carrying a large
     # text block, the shape that grew the BEAM from 588MB to 1.9GB.
-    %{"type" => "assistant", "seq" => n, "message" => %{"content" => String.duplicate("x", 200_000)}}
+    %{
+      "type" => "assistant",
+      "seq" => n,
+      "message" => %{"content" => String.duplicate("x", 200_000)}
+    }
   end
 
   test "a count-only cap would be hundreds of MB; the byte cap holds it" do

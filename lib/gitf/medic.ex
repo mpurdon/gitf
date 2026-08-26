@@ -388,7 +388,11 @@ defmodule GiTF.Medic do
             result(:disk_space, :error, "Critical: low disk space (#{available_mb} MB available)")
 
           available_mb && available_mb < 3_000 ->
-            result(:disk_space, :warn, "Low disk: #{available_mb} MB available — a probe build needs ~2GB")
+            result(
+              :disk_space,
+              :warn,
+              "Low disk: #{available_mb} MB available — a probe build needs ~2GB"
+            )
 
           size_mb > 1024 ->
             result(

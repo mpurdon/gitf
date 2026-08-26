@@ -8,7 +8,15 @@ defmodule GiTF.Phases.SimplifyTest do
       GiTF.Archive.insert(
         :missions,
         Map.merge(
-          %{name: "s", goal: "x", status: "active", sector_id: "fe", current_phase: "simplify", artifacts: %{}, ops: ops},
+          %{
+            name: "s",
+            goal: "x",
+            status: "active",
+            sector_id: "fe",
+            current_phase: "simplify",
+            artifacts: %{},
+            ops: ops
+          },
           attrs
         )
       )

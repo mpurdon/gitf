@@ -14,7 +14,8 @@ defmodule GiTF.Web.CacheBodyReader do
 
   @prefixes ["/api/v1/webhooks"]
 
-  @spec read_body(Plug.Conn.t(), keyword()) :: {:ok, binary(), Plug.Conn.t()} | {:more, binary(), Plug.Conn.t()} | {:error, term()}
+  @spec read_body(Plug.Conn.t(), keyword()) ::
+          {:ok, binary(), Plug.Conn.t()} | {:more, binary(), Plug.Conn.t()} | {:error, term()}
   def read_body(conn, opts) do
     case Plug.Conn.read_body(conn, opts) do
       {:ok, body, conn} ->

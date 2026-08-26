@@ -32,7 +32,9 @@ defmodule GiTF.Knowledge.PromptContextTest do
     Application.put_env(:gitf, :knowledge_context_enabled, true)
 
     on_exit(fn ->
-      if prior_path, do: System.put_env("GITF_PATH", prior_path), else: System.delete_env("GITF_PATH")
+      if prior_path,
+        do: System.put_env("GITF_PATH", prior_path),
+        else: System.delete_env("GITF_PATH")
 
       if prior_client,
         do: Application.put_env(:gitf, :embedding_client, prior_client),
@@ -67,7 +69,9 @@ defmodule GiTF.Knowledge.PromptContextTest do
 
     test "renders an Indexes section listing each curated TOC" do
       {:ok, _} = Index.put(%{name: "API Endpoints", sector_id: "fe", body: "- [[a]]\n- [[b]]"})
-      {:ok, _} = Index.put(%{name: "Glossary", sector_id: "fe", body: "- [[term1]]", kind: :glossary})
+
+      {:ok, _} =
+        Index.put(%{name: "Glossary", sector_id: "fe", body: "- [[term1]]", kind: :glossary})
 
       out = PromptContext.for_mission("fe", %{goal: "anything"})
 
@@ -80,10 +84,21 @@ defmodule GiTF.Knowledge.PromptContextTest do
     end
 
     test "renders a Likely-relevant pages section using semantic search" do
-      {:ok, _} = Page.put(%{slug: "auth-flow", sector_id: "fe", title: "Auth Flow", body: "auth login session"})
+      {:ok, _} =
+        Page.put(%{
+          slug: "auth-flow",
+          sector_id: "fe",
+          title: "Auth Flow",
+          body: "auth login session"
+        })
 
       {:ok, _} =
-        Page.put(%{slug: "billing-overview", sector_id: "fe", title: "Billing", body: "billing invoices"})
+        Page.put(%{
+          slug: "billing-overview",
+          sector_id: "fe",
+          title: "Billing",
+          body: "billing invoices"
+        })
 
       out = PromptContext.for_mission("fe", %{goal: "investigate auth bug"}, top_k: 1)
 

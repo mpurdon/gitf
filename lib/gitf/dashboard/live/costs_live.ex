@@ -95,9 +95,13 @@ defmodule GiTF.Dashboard.CostsLive do
     summary = compute_summary(all_costs)
 
     # Burn rate: total filtered spend / active factory hours (not wall-clock)
-    total_filtered_cost = all_costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float()
+    total_filtered_cost =
+      all_costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float()
+
     active_hours = compute_active_hours(missions, hours)
-    burn_rate = if active_hours > 0, do: Float.round(total_filtered_cost / active_hours, 4), else: 0.0
+
+    burn_rate =
+      if active_hours > 0, do: Float.round(total_filtered_cost / active_hours, 4), else: 0.0
 
     # Peak burn rate: highest hourly cost across all time (for gauge reference)
     peak_burn = compute_peak_hourly_burn(all_costs_raw)
@@ -110,7 +114,14 @@ defmodule GiTF.Dashboard.CostsLive do
       |> Enum.filter(&(&1.status in ["active", "completed", "failed"]))
       |> Enum.map(fn m ->
         mission_costs_list = costs_by_mission[m.id] || []
-        spent = mission_costs_list |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float() |> Float.round(6)
+
+        spent =
+          mission_costs_list
+          |> Enum.map(&(&1[:cost_usd] || 0.0))
+          |> Enum.sum()
+          |> to_float()
+          |> Float.round(6)
+
         budget = GiTF.Budget.budget_for(m.id)
         remaining = Float.round(to_float(budget) - spent, 6)
         pct = if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
@@ -142,14 +153,19 @@ defmodule GiTF.Dashboard.CostsLive do
     # Budget usage across all missions
     total_budget = Enum.sum(Enum.map(mission_costs, & &1.budget))
     total_spent = Enum.sum(Enum.map(mission_costs, & &1.spent))
-    budget_pct = if total_budget > 0, do: Float.round(total_spent / total_budget * 100, 1), else: 0.0
+
+    budget_pct =
+      if total_budget > 0, do: Float.round(total_spent / total_budget * 100, 1), else: 0.0
 
     # Productive vs overhead vs rework percentages for stacked bar
     prod_data = summary.by_phase_type["productive"]
     overhead_data = summary.by_phase_type["overhead"]
     rework_data = summary.by_phase_type["rework"]
     prod_pct = if prod_data, do: cost_pct(summary.total_cost, prod_data.cost), else: 0.0
-    overhead_pct = if overhead_data, do: cost_pct(summary.total_cost, overhead_data.cost), else: 0.0
+
+    overhead_pct =
+      if overhead_data, do: cost_pct(summary.total_cost, overhead_data.cost), else: 0.0
+
     rework_pct = if rework_data, do: cost_pct(summary.total_cost, rework_data.cost), else: 0.0
 
     socket
@@ -179,7 +195,10 @@ defmodule GiTF.Dashboard.CostsLive do
 
   defp filter_costs_by_range(costs, hours) do
     cutoff = DateTime.shift(DateTime.utc_now(), hour: -hours)
-    Enum.filter(costs, fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, cutoff) != :lt end)
+
+    Enum.filter(costs, fn c ->
+      c[:recorded_at] && DateTime.compare(c.recorded_at, cutoff) != :lt
+    end)
   end
 
   # Compute hours the factory was actively running missions within the range.
@@ -196,7 +215,11 @@ defmodule GiTF.Dashboard.CostsLive do
         stop = if m.status == "active", do: now, else: m[:updated_at] || now
 
         # Clamp to the selected range window
-        start = if window_start && DateTime.compare(start, window_start) == :lt, do: window_start, else: start
+        start =
+          if window_start && DateTime.compare(start, window_start) == :lt,
+            do: window_start,
+            else: start
+
         stop = if DateTime.compare(stop, now) == :gt, do: now, else: stop
 
         {start, stop}
@@ -267,11 +290,12 @@ defmodule GiTF.Dashboard.CostsLive do
     |> Enum.group_by(key_fn)
     |> Map.delete(nil)
     |> Map.new(fn {k, group} ->
-      {k, %{
-        cost: group |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float(),
-        input_tokens: group |> Enum.map(&(&1[:input_tokens] || 0)) |> Enum.sum(),
-        output_tokens: group |> Enum.map(&(&1[:output_tokens] || 0)) |> Enum.sum()
-      }}
+      {k,
+       %{
+         cost: group |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float(),
+         input_tokens: group |> Enum.map(&(&1[:input_tokens] || 0)) |> Enum.sum(),
+         output_tokens: group |> Enum.map(&(&1[:output_tokens] || 0)) |> Enum.sum()
+       }}
     end)
   end
 
@@ -323,7 +347,13 @@ defmodule GiTF.Dashboard.CostsLive do
             if diff >= 0 and DateTime.compare(ts, window_start) != :lt do
               idx = buckets - 1 - min(div(diff, bucket_seconds), buckets - 1)
               {cost, tokens} = Map.get(acc, idx, {0.0, 0})
-              Map.put(acc, idx, {cost + (c[:cost_usd] || 0.0), tokens + (c[:input_tokens] || 0) + (c[:output_tokens] || 0)})
+
+              Map.put(
+                acc,
+                idx,
+                {cost + (c[:cost_usd] || 0.0),
+                 tokens + (c[:input_tokens] || 0) + (c[:output_tokens] || 0)}
+              )
             else
               acc
             end
@@ -336,11 +366,12 @@ defmodule GiTF.Dashboard.CostsLive do
       {cost, tokens} = Map.get(filled, i, {0.0, 0})
       reverse_i = buckets - 1 - i
 
-      label = cond do
-        reverse_i == 0 -> "now"
-        bucket_hours >= 24 -> "#{div(reverse_i * bucket_hours, 24)}d"
-        true -> "#{reverse_i * bucket_hours}h"
-      end
+      label =
+        cond do
+          reverse_i == 0 -> "now"
+          bucket_hours >= 24 -> "#{div(reverse_i * bucket_hours, 24)}d"
+          true -> "#{reverse_i * bucket_hours}h"
+        end
 
       %{label: label, cost: cost, tokens: tokens}
     end)
@@ -643,13 +674,13 @@ defmodule GiTF.Dashboard.CostsLive do
 
   # -- SVG Gauge (function component) ------------------------------------------
 
-  attr :pct, :float, required: true
-  attr :color, :string, required: true
+  attr(:pct, :float, required: true)
+  attr(:color, :string, required: true)
 
   defp gauge(assigns) do
     pct = min(max(assigns.pct, 0), 100)
     arc_pct = pct / 100.0
-    angle = :math.pi * (1.0 - arc_pct)
+    angle = :math.pi() * (1.0 - arc_pct)
 
     assigns =
       assigns

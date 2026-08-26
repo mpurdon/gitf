@@ -76,7 +76,10 @@ defmodule GiTF.Vault.Renderer.DailyNote do
     else
       lines =
         Enum.map(merged, &"- ✅ Merged [[#{file_base(&1)}]] in [[#{sector_index_link(&1)}]]") ++
-          Enum.map(failed, &"- ❌ [[#{file_base(&1)}]] failed (sector [[#{sector_index_link(&1)}]])")
+          Enum.map(
+            failed,
+            &"- ❌ [[#{file_base(&1)}]] failed (sector [[#{sector_index_link(&1)}]])"
+          )
 
       "## Yesterday\n\n" <> Enum.join(lines, "\n")
     end

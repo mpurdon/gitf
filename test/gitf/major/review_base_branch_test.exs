@@ -17,7 +17,8 @@ defmodule GiTF.Major.ReviewBaseBranchTest do
   test "phase ghosts inherit the branch being amended" do
     # Every phase — triage, design, validation — spawns through here, so one
     # default covers them all rather than each caller remembering.
-    assert @source =~ ~r/spawn_opts =\s*\n\s*\[prompt: prompt\]\s*\n\s*\|> Keyword\.merge\(mission_base_branch_opts\(mission\)\)/
+    assert @source =~
+             ~r/spawn_opts =\s*\n\s*\[prompt: prompt\]\s*\n\s*\|> Keyword\.merge\(mission_base_branch_opts\(mission\)\)/
   end
 
   test "an explicit base_branch from the caller still wins" do
@@ -37,6 +38,7 @@ defmodule GiTF.Major.ReviewBaseBranchTest do
   end
 
   test "the helper only applies when a branch is actually set" do
-    assert @source =~ ~r/branch when is_binary\(branch\) and branch != "" -> \[base_branch: branch\]/
+    assert @source =~
+             ~r/branch when is_binary\(branch\) and branch != "" -> \[base_branch: branch\]/
   end
 end

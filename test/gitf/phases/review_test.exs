@@ -37,10 +37,13 @@ defmodule GiTF.Phases.ReviewTest do
           artifacts: %{}
         })
 
-      :ok = GiTF.Missions.store_artifact(m.id, "design_minimal", %{"approach" => "minimal"}) |> elem(0) |> case do
-        :ok -> :ok
-        _ -> :ok
-      end
+      :ok =
+        GiTF.Missions.store_artifact(m.id, "design_minimal", %{"approach" => "minimal"})
+        |> elem(0)
+        |> case do
+          :ok -> :ok
+          _ -> :ok
+        end
 
       {:ok, _} = GiTF.Missions.store_artifact(m.id, "design_minimal", %{"approach" => "minimal"})
       {:ok, _} = GiTF.Missions.store_artifact(m.id, "design_normal", %{"approach" => "normal"})
@@ -56,7 +59,9 @@ defmodule GiTF.Phases.ReviewTest do
       assert %{"approach" => "complex"} = GiTF.Missions.get_artifact(mission.id, "design")
     end
 
-    test "on :advance (exhaustion fallback) also promotes the selected variant", %{mission: mission} do
+    test "on :advance (exhaustion fallback) also promotes the selected variant", %{
+      mission: mission
+    } do
       review = %{"approved" => false, "selected_design" => "minimal"}
       :ok = Review.before_advance(mission, :advance, review)
 

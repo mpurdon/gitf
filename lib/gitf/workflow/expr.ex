@@ -105,9 +105,14 @@ defmodule GiTF.Workflow.Expr do
 
   defp parse(source) do
     case Code.string_to_quoted(source) do
-      {:ok, ast} -> {:ok, ast}
-      {:error, {_meta, msg, token}} -> {:error, {:parse_error, "#{inspect(msg)} #{inspect(token)}"}}
-      {:error, reason} -> {:error, {:parse_error, reason}}
+      {:ok, ast} ->
+        {:ok, ast}
+
+      {:error, {_meta, msg, token}} ->
+        {:error, {:parse_error, "#{inspect(msg)} #{inspect(token)}"}}
+
+      {:error, reason} ->
+        {:error, {:parse_error, reason}}
     end
   end
 
@@ -148,8 +153,9 @@ defmodule GiTF.Workflow.Expr do
 
   # -- Recognizers -----------------------------------------------------------
 
-  defp literal?(v) when is_integer(v) or is_float(v) or is_binary(v) or is_boolean(v) or is_nil(v),
-    do: true
+  defp literal?(v)
+       when is_integer(v) or is_float(v) or is_binary(v) or is_boolean(v) or is_nil(v),
+       do: true
 
   defp literal?(_), do: false
 
@@ -166,13 +172,15 @@ defmodule GiTF.Workflow.Expr do
 
   # -- Evaluation ------------------------------------------------------------
 
-  defp do_eval(v, _b) when is_integer(v) or is_float(v) or is_binary(v) or is_boolean(v) or is_nil(v),
-    do: v
+  defp do_eval(v, _b)
+       when is_integer(v) or is_float(v) or is_binary(v) or is_boolean(v) or is_nil(v),
+       do: v
 
   defp do_eval(list, b) when is_list(list), do: Enum.map(list, &do_eval(&1, b))
 
-  defp do_eval({var, _, ctx}, b) when var in [:artifact, :mission] and (is_nil(ctx) or is_atom(ctx)),
-    do: fetch_root(var, b)
+  defp do_eval({var, _, ctx}, b)
+       when var in [:artifact, :mission] and (is_nil(ctx) or is_atom(ctx)),
+       do: fetch_root(var, b)
 
   defp do_eval({{:., _, [base, key]}, _, []}, b) when is_atom(key) do
     case do_eval(base, b) do

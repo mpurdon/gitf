@@ -80,7 +80,11 @@ defmodule GiTF.Vault.Layout do
       )
 
       write_if_missing(VPath.sector_index_file(gitf_root, sector_id), sector_index_body(sector))
-      write_if_missing(VPath.sector_kanban_file(gitf_root, sector_id), empty_kanban_body(sector_id))
+
+      write_if_missing(
+        VPath.sector_kanban_file(gitf_root, sector_id),
+        empty_kanban_body(sector_id)
+      )
     end
 
     :ok
@@ -104,8 +108,11 @@ defmodule GiTF.Vault.Layout do
       :ok
     else
       case VFile.write(path, body) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Logger.warning("Vault.Layout write #{path} failed: #{inspect(reason)}")
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Vault.Layout write #{path} failed: #{inspect(reason)}")
       end
     end
   end

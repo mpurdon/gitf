@@ -35,6 +35,34 @@ defmodule GiTF.Missions do
   # they still show up in operator views, and still let the box sleep.
   @paused_statuses ~w(paused paused_budget)
 
+  # Phases (not statuses) that mean the pipeline is over. The dashboard, the
+  # MCP handlers and the ledger each grew their own copy of this list with
+  # different membership; this is the one that counts.
+  @terminal_phases ~w(completed failed closed killed)
+
+  @doc "Phases that end a mission's pipeline."
+  @spec terminal_phases() :: [String.t()]
+  def terminal_phases, do: @terminal_phases
+
+  @doc """
+  When the mission actually ENDED: the timestamp of its transition into a
+  terminal phase, from a pre-sorted transition list or a mission id. Nil when
+  no terminal transition exists. `updated_at` is not this — it moves whenever
+  anything writes to a finished mission (outcome polls, boot sweeps), which
+  is how a 28-minute run once read as "4h 44m".
+  """
+  @spec terminal_transition_at([map()] | String.t()) :: DateTime.t() | nil
+  def terminal_transition_at(mission_id) when is_binary(mission_id),
+    do: mission_id |> get_phase_transitions() |> terminal_transition_at()
+
+  def terminal_transition_at(transitions) when is_list(transitions) do
+    transitions
+    |> Enum.reverse()
+    |> Enum.find_value(fn t ->
+      if t[:to_phase] in @terminal_phases, do: t[:inserted_at]
+    end)
+  end
+
   @doc "True when the mission will see no further work from anyone."
   @spec finished?(map()) :: boolean()
   def finished?(mission), do: Map.get(mission, :status) in @finished_statuses

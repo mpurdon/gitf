@@ -551,16 +551,22 @@ defmodule GiTF.Major.Planner do
   # the tiebreak — the planner lists prerequisite work first.
   @doc false
   def serialize_shared_files(specs) do
-    indexed = Enum.with_index(specs)
+    file_sets = Enum.map(specs, &MapSet.new(Map.get(&1, "target_files", [])))
 
-    Enum.map(indexed, fn {spec, j} ->
-      files_j = spec |> Map.get("target_files", []) |> MapSet.new()
+    deps_by_index =
+      specs
+      |> Enum.with_index()
+      |> Map.new(fn {spec, i} -> {i, List.wrap(Map.get(spec, "depends_on_indices", []))} end)
+
+    specs
+    |> Enum.with_index()
+    |> Enum.map(fn {spec, j} ->
+      files_j = Enum.at(file_sets, j)
 
       forced =
-        for {earlier, i} <- indexed,
-            i < j,
-            not MapSet.disjoint?(files_j, MapSet.new(Map.get(earlier, "target_files", []))),
-            not depends_transitively?(specs, j, i),
+        for i <- 0..(j - 1)//1,
+            not MapSet.disjoint?(files_j, Enum.at(file_sets, i)),
+            not depends_transitively?(deps_by_index, j, i),
             do: i
 
       case forced do
@@ -568,19 +574,24 @@ defmodule GiTF.Major.Planner do
           spec
 
         _ ->
-          deps = (List.wrap(Map.get(spec, "depends_on_indices", [])) ++ forced) |> Enum.uniq()
+          deps = (Map.fetch!(deps_by_index, j) ++ forced) |> Enum.uniq()
           Map.put(spec, "depends_on_indices", deps)
       end
     end)
   end
 
-  defp depends_transitively?(specs, from, to, seen \\ MapSet.new()) do
-    deps = specs |> Enum.at(from, %{}) |> Map.get("depends_on_indices", []) |> List.wrap()
+  defp depends_transitively?(deps_by_index, from, to, seen \\ MapSet.new()) do
+    deps = Map.get(deps_by_index, from, [])
 
     cond do
-      to in deps -> true
-      MapSet.member?(seen, from) -> false
-      true -> Enum.any?(deps, &depends_transitively?(specs, &1, to, MapSet.put(seen, from)))
+      to in deps ->
+        true
+
+      MapSet.member?(seen, from) ->
+        false
+
+      true ->
+        Enum.any?(deps, &depends_transitively?(deps_by_index, &1, to, MapSet.put(seen, from)))
     end
   end
 

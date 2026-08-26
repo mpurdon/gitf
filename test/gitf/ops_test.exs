@@ -254,7 +254,10 @@ defmodule GiTF.OpsTest do
       assert {:ok, %{status: "pending", ghost_id: nil, retry_count: 1}} = Ops.reset(op.id)
     end
 
-    test "can reset a running op (aborts ghost + returns to pending)", %{mission: mission, sector: sector} do
+    test "can reset a running op (aborts ghost + returns to pending)", %{
+      mission: mission,
+      sector: sector
+    } do
       ghost = create_bee()
       {:ok, op} = create_job(mission, sector)
       {:ok, _} = Ops.assign(op.id, ghost.id)

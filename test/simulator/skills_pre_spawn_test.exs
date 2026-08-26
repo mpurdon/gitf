@@ -112,7 +112,9 @@ defmodule GiTF.Simulator.SkillsPreSpawnTest do
     # Snapshot every ghost worktree under the sector during the run so we
     # can verify skills landed somewhere — capturing inside side_effect at
     # impl-call time can race with phase advancement and pick the wrong shell.
-    snapshot_dir = Path.join(System.tmp_dir!(), "skills_snap_#{:erlang.unique_integer([:positive])}")
+    snapshot_dir =
+      Path.join(System.tmp_dir!(), "skills_snap_#{:erlang.unique_integer([:positive])}")
+
     File.mkdir_p!(snapshot_dir)
     on_exit(fn -> File.rm_rf!(snapshot_dir) end)
 

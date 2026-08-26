@@ -71,6 +71,7 @@ defmodule GiTF.LSP.Edits do
   defp edit_anchor(edit) do
     range = Map.get(edit, "range") || Map.get(edit, :range) || %{}
     start = Map.get(range, "start") || Map.get(range, :start) || %{}
+
     {Map.get(start, "line") || Map.get(start, :line) || 0,
      Map.get(start, "character") || Map.get(start, :character) || 0}
   end

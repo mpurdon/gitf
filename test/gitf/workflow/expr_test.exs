@@ -46,7 +46,10 @@ defmodule GiTF.Workflow.ExprTest do
 
     test "in a list literal" do
       art = %{"complexity" => "normal"}
-      assert Expr.eval("artifact.complexity in [\"minimal\", \"normal\"]", bind(art)) == {:ok, true}
+
+      assert Expr.eval("artifact.complexity in [\"minimal\", \"normal\"]", bind(art)) ==
+               {:ok, true}
+
       assert Expr.eval("artifact.complexity in [\"complex\"]", bind(art)) == {:ok, false}
     end
   end

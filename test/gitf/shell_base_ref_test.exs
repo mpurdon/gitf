@@ -16,7 +16,8 @@ defmodule GiTF.ShellBaseRefTest do
   @source File.read!("lib/gitf/shell.ex")
 
   test "an explicit base is recorded as the base_ref" do
-    assert @source =~ ~r/defp detect_base_ref\(_sector_path, base\) when is_binary\(base\) and base != "", do: base/
+    assert @source =~
+             ~r/defp detect_base_ref\(_sector_path, base\) when is_binary\(base\) and base != "", do: base/
   end
 
   test "create/3 passes the resolved base through" do
@@ -25,7 +26,10 @@ defmodule GiTF.ShellBaseRefTest do
 
   test "no explicit base still falls back to detection" do
     # Ordinary missions branch from sector HEAD and must keep the old label.
-    assert @source =~ ~r/defp detect_base_ref\(sector_path, _base\), do: detect_base_ref\(sector_path\)/
-    assert @source =~ ~r/match\?\(\{:ok, _\}, Git\.rev_parse\(sector_path, "origin\/main"\)\) -> "origin\/main"/
+    assert @source =~
+             ~r/defp detect_base_ref\(sector_path, _base\), do: detect_base_ref\(sector_path\)/
+
+    assert @source =~
+             ~r/match\?\(\{:ok, _\}, Git\.rev_parse\(sector_path, "origin\/main"\)\) -> "origin\/main"/
   end
 end

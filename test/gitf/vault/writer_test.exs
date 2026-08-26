@@ -63,34 +63,50 @@ defmodule GiTF.Vault.WriterTest do
 
   defp insert_mission(attrs) do
     {:ok, m} =
-      Archive.insert(:missions, Map.merge(%{
-        name: "Mission",
-        goal: "do the thing",
-        status: "pending",
-        sector_id: "fe",
-        current_phase: "pending",
-        priority: :normal,
-        artifacts: %{},
-        phase_jobs: %{}
-      }, attrs))
+      Archive.insert(
+        :missions,
+        Map.merge(
+          %{
+            name: "Mission",
+            goal: "do the thing",
+            status: "pending",
+            sector_id: "fe",
+            current_phase: "pending",
+            priority: :normal,
+            artifacts: %{},
+            phase_jobs: %{}
+          },
+          attrs
+        )
+      )
 
     m
   end
 
   defp insert_ghost(attrs \\ %{}) do
     {:ok, g} =
-      Archive.insert(:ghosts, Map.merge(%{
-        name: "calm-builder-#{:erlang.unique_integer([:positive])}",
-        model: "claude-opus-4-7",
-        tier: :opus,
-        status: :running
-      }, attrs))
+      Archive.insert(
+        :ghosts,
+        Map.merge(
+          %{
+            name: "calm-builder-#{:erlang.unique_integer([:positive])}",
+            model: "claude-opus-4-7",
+            tier: :opus,
+            status: :running
+          },
+          attrs
+        )
+      )
 
     g
   end
 
-  defp call_render_mission(writer, mission_id), do: GenServer.cast(writer, {:render_mission, mission_id})
-  defp call_render_kanban(writer, sector_id), do: GenServer.cast(writer, {:render_kanban, sector_id})
+  defp call_render_mission(writer, mission_id),
+    do: GenServer.cast(writer, {:render_mission, mission_id})
+
+  defp call_render_kanban(writer, sector_id),
+    do: GenServer.cast(writer, {:render_kanban, sector_id})
+
   defp call_render_ghost(writer, ghost_id), do: GenServer.cast(writer, {:render_ghost, ghost_id})
   defp call_flush(writer), do: GenServer.call(writer, :flush)
 
@@ -110,7 +126,10 @@ defmodule GiTF.Vault.WriterTest do
       assert body =~ "phase: \"pending\""
     end
 
-    test "coalesces multiple events for the same mission into one write", %{gitf_root: root, writer: w} do
+    test "coalesces multiple events for the same mission into one write", %{
+      gitf_root: root,
+      writer: w
+    } do
       m = insert_mission(%{name: "M"})
 
       for _ <- 1..10, do: call_render_mission(w, m.id)

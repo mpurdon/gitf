@@ -102,7 +102,13 @@ defmodule GiTF.Test.ScriptedLLMClient do
             }
 
             response = {:error, {:simulator_no_matching_rule, String.slice(prompt, 0, 200)}}
-            new_state = %{state | calls: [call_record | state.calls], unmatched: state.unmatched + 1}
+
+            new_state = %{
+              state
+              | calls: [call_record | state.calls],
+                unmatched: state.unmatched + 1
+            }
+
             {{response, nil}, new_state}
         end
       end)

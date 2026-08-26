@@ -206,9 +206,12 @@ defmodule GiTF.Runtime.CallMetrics do
     _ -> "unknown"
   end
 
-  defp percentile([], _p), do: nil
+  @doc false
+  # Nearest-rank on a pre-sorted list. Public so Ledger's wall-clock stats
+  # do not grow a byte-identical private twin (the MCP handler already had).
+  def percentile([], _p), do: nil
 
-  defp percentile(sorted, p) do
+  def percentile(sorted, p) do
     idx = min(length(sorted) - 1, max(0, round(p * (length(sorted) - 1))))
     Enum.at(sorted, idx)
   end

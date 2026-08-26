@@ -27,7 +27,9 @@ defmodule GiTF.GitHubTest do
       System.put_env("GITHUB_TOKEN", "ghp_test_token")
 
       on_exit(fn ->
-        if prior, do: System.put_env("GITHUB_TOKEN", prior), else: System.delete_env("GITHUB_TOKEN")
+        if prior,
+          do: System.put_env("GITHUB_TOKEN", prior),
+          else: System.delete_env("GITHUB_TOKEN")
       end)
 
       assert {:ok, %Req.Request{}} = GitHub.client(sector)

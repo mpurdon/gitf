@@ -66,25 +66,21 @@ defmodule GiTF.Major.DesignDeck do
     slides = Enum.reject(slides, &is_nil/1)
     total = length(slides)
 
-    sections =
-      slides
-      |> Enum.with_index(1)
-      |> Enum.map_join("\n", fn {{label, class, inner}, n} ->
-        no = String.pad_leading(Integer.to_string(n), 2, "0")
-
-        "<section class=\"slide #{class}\" data-label=\"#{esc(label)}\">" <>
-          "<div class=\"no\">#{no}</div>#{inner}</section>"
-      end)
-
-    rail =
+    {sections, rail} =
       slides
       |> Enum.with_index()
-      |> Enum.map_join("\n", fn {{label, _class, _inner}, i} ->
-        no = String.pad_leading(Integer.to_string(i + 1), 2, "0")
+      |> Enum.map(fn {{label, class, inner}, i} ->
+        no = String.pad_leading("#{i + 1}", 2, "0")
 
-        "<button class=\"rail-item\" data-i=\"#{i}\">" <>
-          "<span class=\"rail-no\">#{no}</span><span>#{esc(label)}</span></button>"
+        {"<section class=\"slide #{class}\" data-label=\"#{esc(label)}\">" <>
+           "<div class=\"no\">#{no}</div>#{inner}</section>",
+         "<button class=\"rail-item\" data-i=\"#{i}\">" <>
+           "<span class=\"rail-no\">#{no}</span><span>#{esc(label)}</span></button>"}
       end)
+      |> Enum.unzip()
+
+    sections = Enum.join(sections, "\n")
+    rail = Enum.join(rail, "\n")
 
     """
     <!doctype html>

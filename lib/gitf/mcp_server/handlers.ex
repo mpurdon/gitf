@@ -212,34 +212,12 @@ defmodule GiTF.MCPServer.Handlers do
   def call("provider_perf", args) do
     hours = args["hours"] || 168
 
-    providers = GiTF.Runtime.CallMetrics.stats(hours: hours)
-
-    missions =
-      GiTF.Ledger.entries()
-      |> Enum.group_by(& &1.mode)
-      |> Map.new(fn {mode, entries} ->
-        walls =
-          entries
-          |> Enum.map(& &1[:wall_clock_seconds])
-          |> Enum.filter(&is_number/1)
-          |> Enum.sort()
-
-        waits =
-          entries
-          |> Enum.map(& &1[:queue_wait_seconds])
-          |> Enum.filter(&is_number/1)
-          |> Enum.sort()
-
-        {mode,
-         %{
-           missions: length(entries),
-           p50_wall_clock_seconds: percentile_of(walls, 0.5),
-           p95_wall_clock_seconds: percentile_of(walls, 0.95),
-           p50_queue_wait_seconds: percentile_of(waits, 0.5)
-         }}
-      end)
-
-    {:ok, json_text(%{window_hours: hours, providers: providers, mission_wall_clock: missions})}
+    {:ok,
+     json_text(%{
+       window_hours: hours,
+       providers: GiTF.Runtime.CallMetrics.stats(hours: hours),
+       mission_wall_clock: GiTF.Ledger.wall_clock_stats()
+     })}
   end
 
   def call("show_artifact", %{"mission_id" => mid, "phase" => phase} = args) do
@@ -1427,20 +1405,11 @@ defmodule GiTF.MCPServer.Handlers do
 
   defp validate_timeout_arg(true = _clear, _timeout_ms), do: :ok
 
-  defp validate_timeout_arg(false, timeout_ms)
-       when is_integer(timeout_ms) and timeout_ms >= 1_000 and timeout_ms <= 1_800_000,
-       do: :ok
-
-  defp validate_timeout_arg(false, timeout_ms),
-    do:
-      {:error,
-       "timeout_ms must be an integer between 1_000 and 1_800_000, got: #{inspect(timeout_ms)} (or pass clear: true)"}
-
-  defp percentile_of([], _p), do: nil
-
-  defp percentile_of(sorted, p) do
-    idx = min(length(sorted) - 1, max(0, round(p * (length(sorted) - 1))))
-    Enum.at(sorted, idx)
+  defp validate_timeout_arg(false, timeout_ms) do
+    case GiTF.Validator.validate_timeout_override(timeout_ms) do
+      {:ok, _} -> :ok
+      {:error, msg} -> {:error, msg <> " (or pass clear: true)"}
+    end
   end
 
   defp require_confirm(%{"confirm" => true}), do: :ok

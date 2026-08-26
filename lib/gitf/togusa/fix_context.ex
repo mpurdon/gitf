@@ -114,7 +114,7 @@ defmodule GiTF.Togusa.FixContext do
       max_attempts: Map.get(map, :max_attempts, map["max_attempts"] || 3),
       original_op_id: Map.get(map, :original_op_id, map["original_op_id"]),
       history:
-        (Map.get(map, :history, map["history"] || []))
+        Map.get(map, :history, map["history"] || [])
         |> Enum.map(fn r ->
           phase =
             case Map.get(r, :phase, r["phase"]) do
@@ -140,7 +140,10 @@ defmodule GiTF.Togusa.FixContext do
       # from_map(...) || new(...) would silently reset the fix budget and
       # unbound the fix loop. Preserve at least the attempt counter.
       require Logger
-      Logger.warning("FixContext decode failed (#{Exception.message(e)}); preserving attempt count")
+
+      Logger.warning(
+        "FixContext decode failed (#{Exception.message(e)}); preserving attempt count"
+      )
 
       %__MODULE__{
         attempt: Map.get(map, :attempt, map["attempt"] || 0),

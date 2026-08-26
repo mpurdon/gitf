@@ -8,7 +8,12 @@ defmodule GiTF.Workflow.InferenceTest do
 
     @impl true
     def generate_text(_model, _messages, _opts) do
-      payload = Process.get(:mock_inference_payload, ~s({"workflow":"standard","confidence":0.5,"rationale":"default"}))
+      payload =
+        Process.get(
+          :mock_inference_payload,
+          ~s({"workflow":"standard","confidence":0.5,"rationale":"default"})
+        )
+
       {:ok, %{message: %{content: [%{text: payload}]}}}
     end
   end
@@ -55,7 +60,9 @@ defmodule GiTF.Workflow.InferenceTest do
       set_payload(~s({"workflow":"bug-fix","confidence":0.9,"rationale":"500 on Safari iOS"}))
 
       assert {:ok, "bug-fix", 0.9, "500 on Safari iOS"} =
-               Inference.classify("Login returns 500 on Safari iOS — fix it", templates: standard_templates())
+               Inference.classify("Login returns 500 on Safari iOS — fix it",
+                 templates: standard_templates()
+               )
     end
 
     test ":no_match when below threshold" do

@@ -223,21 +223,31 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         {:noreply, assign(socket, selected_phase: phase, artifact: nil)}
 
       "simplify" ->
-        # The phase artifact only names the reviewers; what each one actually
-        # found lives in per-focus sub-artifacts. Join them so clicking the
-        # phase answers "what did simplify decide", not "who ran".
-        artifact = GiTF.Missions.get_artifact(mission.id, "simplify")
+        # The phase artifact only names the reviewers; each reviewer's
+        # findings live in per-focus sub-artifacts. One read of the mission
+        # record serves all of them — get_artifact/2 copies the ENTIRE
+        # mission (every phase artifact included) out of ETS per call, and
+        # this handler used to do that once per focus.
+        artifacts =
+          case GiTF.Archive.get(:missions, mission.id) do
+            %{artifacts: %{} = a} -> a
+            _ -> %{}
+          end
 
         artifact =
-          if is_map(artifact) do
-            for focus <- List.wrap(artifact["agents"]),
-                sub = GiTF.Missions.get_artifact(mission.id, "simplify_#{focus}"),
-                is_map(sub),
-                reduce: artifact do
-              acc -> Map.put(acc, "#{focus} findings", sub)
-            end
-          else
-            artifact
+          case artifacts["simplify"] do
+            %{} = main ->
+              subs =
+                for focus <- List.wrap(main["agents"]),
+                    sub = artifacts["simplify_#{focus}"],
+                    is_map(sub),
+                    into: %{},
+                    do: {"#{focus} findings", sub}
+
+              Map.merge(main, subs)
+
+            other ->
+              other
           end
 
         {:noreply, assign(socket, selected_phase: phase, artifact: artifact)}
@@ -562,18 +572,15 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     artifacts = if is_map(mission[:artifacts]), do: mission[:artifacts], else: %{}
 
     cond do
-      phase in ["design", "planning"] ->
-        # The dedicated pages render sensibly even mid-phase.
-        if phase == "design" and
-             not Enum.any?(artifacts, fn {k, _} -> String.starts_with?(k, "design") end) and
-             not phase_done?(mission, phase),
-           do: nil,
-           else: :page
+      phase == "planning" ->
+        :page
 
-      phase == "completed" ->
-        :decisions
+      phase == "design" ->
+        if Enum.any?(artifacts, fn {k, _} -> String.starts_with?(k, "design") end) or
+             phase_done?(mission, phase),
+           do: :page
 
-      Map.has_key?(artifacts, phase) ->
+      phase == "completed" or Map.has_key?(artifacts, phase) ->
         :decisions
 
       true ->
@@ -707,19 +714,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     key |> to_string() |> String.replace("_", " ")
   end
 
-  # When the mission actually ENDED: the timestamp of its transition into a
-  # terminal phase. `updated_at` is not that — it is the last write to the
-  # record, and outcome tracking, boot-time sweeps, and PR polling all keep
-  # writing to finished missions, so a 28-minute run reads as "4h 44m" the
-  # next time the operator opens the page after a wake.
   @doc false
-  def terminal_transition_at(transitions) do
-    transitions
-    |> Enum.reverse()
-    |> Enum.find_value(fn t ->
-      if t[:to_phase] in ["completed", "failed", "closed", "killed"], do: t[:inserted_at]
-    end)
-  end
+  def terminal_transition_at(transitions), do: GiTF.Missions.terminal_transition_at(transitions)
 
   @doc false
   def compute_duration(mission, transitions) do
@@ -835,13 +831,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 true -> ""
               end}"}></div>
             <% end %>
+            <% detail = phase_detail(@mission, phase) %>
             <div
               class={"step #{phase_step_class(@mission, phase)}"}
               phx-click="select_phase"
               phx-value-phase={phase}
-              style={if phase_detail(@mission, phase), do: "cursor:pointer"}
+              style={if detail, do: "cursor:pointer"}
               title={
-                case phase_detail(@mission, phase) do
+                case detail do
                   :page -> "Open the #{phase} page"
                   :decisions -> "View #{phase} decisions"
                   nil -> nil
@@ -864,7 +861,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 class="step-label"
                 style={"white-space:nowrap; #{if @selected_phase == phase, do: "font-weight:700"}"}
               >
-                {phase}<span :if={phase_detail(@mission, phase)} style="font-size:1.05rem; line-height:0; vertical-align:-0.12em; opacity:0.7; margin-left:0.22rem">{if phase_detail(@mission, phase) == :page, do: "↗", else: "≡"}</span>
+                {phase}<span :if={detail} style="font-size:1.05rem; line-height:0; vertical-align:-0.12em; opacity:0.7; margin-left:0.22rem">{if detail == :page, do: "↗", else: "≡"}</span>
               </div>
               <%= if @phase_durations[phase] do %>
                 <div style="font-size:0.6rem; color:#6b7280; margin-top:0.1rem">{@phase_durations[phase]}</div>
@@ -1270,9 +1267,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <div class="panel" style="padding:0.85rem 1rem">
             <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.75rem; padding-bottom:0.4rem">Phase: {@selected_phase}</div>
             <%= if @artifact do %>
-              <%= if decisions(@selected_phase, @artifact) != [] do %>
+              <% badges = decisions(@selected_phase, @artifact) %>
+              <%= if badges != [] do %>
                 <div style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.85rem">
-                  <%= for {label, value, tone} <- decisions(@selected_phase, @artifact) do %>
+                  <%= for {label, value, tone} <- badges do %>
                     <span class={"badge badge-#{tone}"} style="font-size:0.7rem">
                       {label}: <b>{value}</b>
                     </span>

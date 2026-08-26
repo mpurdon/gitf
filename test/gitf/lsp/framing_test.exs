@@ -5,7 +5,9 @@ defmodule GiTF.LSP.FramingTest do
 
   describe "encode/1" do
     test "wraps payload with Content-Length header + CRLF separators" do
-      blob = Framing.encode(%{jsonrpc: "2.0", id: 1, method: "test", params: %{}}) |> IO.iodata_to_binary()
+      blob =
+        Framing.encode(%{jsonrpc: "2.0", id: 1, method: "test", params: %{}})
+        |> IO.iodata_to_binary()
 
       assert blob =~ ~r/^Content-Length: \d+\r\n\r\n/
       [_, body] = String.split(blob, "\r\n\r\n", parts: 2)
@@ -45,7 +47,10 @@ defmodule GiTF.LSP.FramingTest do
     test "decodes multiple consecutive messages" do
       a = ~s({"id":1,"result":"a"})
       b = ~s({"id":2,"result":"b"})
-      buf = "Content-Length: #{byte_size(a)}\r\n\r\n#{a}Content-Length: #{byte_size(b)}\r\n\r\n#{b}"
+
+      buf =
+        "Content-Length: #{byte_size(a)}\r\n\r\n#{a}Content-Length: #{byte_size(b)}\r\n\r\n#{b}"
+
       {msgs, leftover} = Framing.parse(buf)
       assert length(msgs) == 2
       assert leftover == ""

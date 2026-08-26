@@ -69,6 +69,33 @@ defmodule GiTF.Validator do
 
   @validation_timeout_ms 120_000
 
+  # The override ceiling: nothing a ghost runs unattended gets more than half
+  # an hour before we call it hung. Enforced here — the read side's owner —
+  # because the write surfaces drifted: the MCP tool enforced it while the
+  # CLI and HTTP API accepted an 11-day deadline the derivation path could
+  # never produce.
+  @max_validation_timeout_ms 1_800_000
+
+  @doc "The override ceiling, exported for the derivation seed in Detector."
+  @spec max_validation_timeout_ms() :: pos_integer()
+  def max_validation_timeout_ms, do: @max_validation_timeout_ms
+
+  @doc """
+  Validates an operator-supplied validation-timeout override. Every write
+  surface (CLI, HTTP API, MCP) calls this; keeping the bounds in one place
+  is the point.
+  """
+  @spec validate_timeout_override(term()) :: {:ok, pos_integer()} | {:error, String.t()}
+  def validate_timeout_override(ms)
+      when is_integer(ms) and ms >= 1_000 and ms <= @max_validation_timeout_ms,
+      do: {:ok, ms}
+
+  def validate_timeout_override(ms),
+    do:
+      {:error,
+       "validation timeout must be an integer between 1_000 and " <>
+         "#{@max_validation_timeout_ms} ms, got: #{inspect(ms)}"}
+
   @doc """
   The validation deadline for a sector, in milliseconds.
 

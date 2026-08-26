@@ -191,6 +191,7 @@ defmodule GiTF.Tournament do
     # Disqualified variants sort last regardless of numeric score; live
     # variants sort by score desc with the lower index breaking ties.
     {live, dq} = Enum.split_with(scored, &(&1.score != :disqualified))
+
     Enum.sort_by(live, &{-&1.score, variant_index(&1.variant)}) ++
       Enum.sort_by(dq, &variant_index(&1.variant))
   end

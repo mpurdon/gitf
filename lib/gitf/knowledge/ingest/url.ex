@@ -183,7 +183,18 @@ defmodule GiTF.Knowledge.Ingest.URL do
   # We DO keep <main> / <article> if present.
   defp strip_noise(tree) do
     Floki.traverse_and_update(tree, fn
-      {tag, _attrs, _children} when tag in ["script", "style", "nav", "footer", "aside", "header", "noscript", "iframe", "svg"] ->
+      {tag, _attrs, _children}
+      when tag in [
+             "script",
+             "style",
+             "nav",
+             "footer",
+             "aside",
+             "header",
+             "noscript",
+             "iframe",
+             "svg"
+           ] ->
         nil
 
       other ->
@@ -366,7 +377,9 @@ defmodule GiTF.Knowledge.Ingest.URL do
     Enum.find_value(children, fn
       {"code", attrs, _} ->
         case attr(attrs, "class") do
-          "language-" <> lang -> lang
+          "language-" <> lang ->
+            lang
+
           c when is_binary(c) ->
             case Regex.run(~r/language-([\w+-]+)/, c) do
               [_, lang] -> lang

@@ -87,7 +87,10 @@ defmodule GiTF.Sentry.Inbound do
   end
 
   defp extract_issue(%{"data" => %{"issue" => issue}}) when is_map(issue), do: {:ok, issue}
-  defp extract_issue(%{"data" => %{"event" => %{"issue" => issue}}}) when is_map(issue), do: {:ok, issue}
+
+  defp extract_issue(%{"data" => %{"event" => %{"issue" => issue}}}) when is_map(issue),
+    do: {:ok, issue}
+
   defp extract_issue(_), do: {:error, :missing_issue}
 
   defp extract_project_slug(%{"project" => %{"slug" => slug}}) when is_binary(slug),

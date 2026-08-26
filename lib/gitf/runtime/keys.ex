@@ -134,7 +134,11 @@ defmodule GiTF.Runtime.Keys do
     # (~1h) and, left in place, permanently shadow both a re-export and
     # the EC2 instance-role path. Clear known-expired ones and reload.
     if env_creds_expired?() do
-      Enum.each(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"], &System.delete_env/1)
+      Enum.each(
+        ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"],
+        &System.delete_env/1
+      )
+
       :persistent_term.erase({__MODULE__, :aws_env_expiry})
       Logger.info("AWS env credentials expired — clearing and reloading from profile/IMDS")
     end

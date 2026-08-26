@@ -107,9 +107,7 @@ defmodule GiTF.Publish do
         Orchestrator.dispatch_phase("simplify", mission)
       else
         {:error, reason} ->
-          Logger.warning(
-            "Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}"
-          )
+          Logger.warning("Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}")
 
           Missions.store_artifact(mission.id, "sync", %{
             "status" => "failed",
@@ -183,7 +181,10 @@ defmodule GiTF.Publish do
         "Quest #{mission.id} sync failed #{attempts}x (#{inspect(reason)}) — sealing failed"
       )
 
-      Missions.fail_quest(mission.id, "Sync failed after #{attempts} attempts: #{inspect(reason)}")
+      Missions.fail_quest(
+        mission.id,
+        "Sync failed after #{attempts} attempts: #{inspect(reason)}"
+      )
     else
       Logger.warning(
         "Quest #{mission.id} sync failed (attempt #{attempts}/#{@max_sync_attempts}): " <>
@@ -367,7 +368,10 @@ defmodule GiTF.Publish do
           publish_pr_verified(mission, repo_path, branch, main_branch)
         else
           {output, code} when is_integer(code) ->
-            Logger.error("Quest #{mission.id} push failed (exit #{code}): #{String.slice(to_string(output), 0, 300)}")
+            Logger.error(
+              "Quest #{mission.id} push failed (exit #{code}): #{String.slice(to_string(output), 0, 300)}"
+            )
+
             %{"status" => "push_failed", "branch" => branch, "error" => to_string(output)}
 
           {:error, reason} ->
@@ -376,7 +380,11 @@ defmodule GiTF.Publish do
         end
 
       {:error, reason} ->
-        %{"status" => "push_failed", "branch" => branch, "error" => "no main branch: #{inspect(reason)}"}
+        %{
+          "status" => "push_failed",
+          "branch" => branch,
+          "error" => "no main branch: #{inspect(reason)}"
+        }
     end
   end
 
@@ -386,34 +394,38 @@ defmodule GiTF.Publish do
   defp verify_branch_pushed(repo_path, branch) do
     with {:ok, local} <- GiTF.Git.rev_parse(repo_path, branch),
          {:ok, remote} <- GiTF.Git.rev_parse(repo_path, "origin/#{branch}") do
-      if local == remote, do: :ok, else: {:error, "origin/#{branch} is at #{String.slice(remote, 0, 8)}, local at #{String.slice(local, 0, 8)}"}
+      if local == remote,
+        do: :ok,
+        else:
+          {:error,
+           "origin/#{branch} is at #{String.slice(remote, 0, 8)}, local at #{String.slice(local, 0, 8)}"}
     else
       _ -> {:error, "could not resolve #{branch} / origin/#{branch} after push"}
     end
   end
 
   defp publish_pr_verified(mission, repo_path, branch, main_branch) do
-        # Idempotent: if a PR already exists for this branch, reuse its
-        # URL instead of hitting duplicate-PR error on recreate.
-        result =
-          case find_existing_pr(repo_path, branch) do
+    # Idempotent: if a PR already exists for this branch, reuse its
+    # URL instead of hitting duplicate-PR error on recreate.
+    result =
+      case find_existing_pr(repo_path, branch) do
+        {:ok, url} ->
+          Logger.info("Quest #{mission.id} reusing existing PR: #{url}")
+          %{"status" => "pr_exists", "branch" => branch, "pr_url" => url}
+
+        :none ->
+          title = "gitf: #{mission.name || mission.goal}" |> String.slice(0, 200)
+          body = build_pr_body(mission) |> String.slice(0, 4000)
+
+          case run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body) do
             {:ok, url} ->
-              Logger.info("Quest #{mission.id} reusing existing PR: #{url}")
-              %{"status" => "pr_exists", "branch" => branch, "pr_url" => url}
+              %{"status" => "pr_created", "branch" => branch, "pr_url" => url}
 
-            :none ->
-              title = "gitf: #{mission.name || mission.goal}" |> String.slice(0, 200)
-              body = build_pr_body(mission) |> String.slice(0, 4000)
-
-              case run_gh_pr_create_with_retry(repo_path, branch, main_branch, title, body) do
-                {:ok, url} ->
-                  %{"status" => "pr_created", "branch" => branch, "pr_url" => url}
-
-                {:error, reason} ->
-                  Logger.warning("Quest #{mission.id} publish PR failed: #{inspect(reason)}")
-                  %{"status" => "pr_failed", "branch" => branch, "error" => inspect(reason)}
-              end
+            {:error, reason} ->
+              Logger.warning("Quest #{mission.id} publish PR failed: #{inspect(reason)}")
+              %{"status" => "pr_failed", "branch" => branch, "error" => inspect(reason)}
           end
+      end
 
     # Verify the URL we got back actually points at an OPEN PR.
     # `gh pr view <url> --json state` will fail if the URL is bogus

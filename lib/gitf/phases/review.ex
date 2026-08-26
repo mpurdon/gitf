@@ -86,7 +86,12 @@ defmodule GiTF.Phases.Review do
     if text do
       GiTF.Archive.update(:missions, mission.id, fn m ->
         artifacts = Map.get(m, :artifacts, %{})
-        Map.put(m, :artifacts, Map.put(artifacts, "review_unresolved", String.slice(text, 0, 2_000)))
+
+        Map.put(
+          m,
+          :artifacts,
+          Map.put(artifacts, "review_unresolved", String.slice(text, 0, 2_000))
+        )
       end)
     end
   rescue
@@ -128,7 +133,12 @@ defmodule GiTF.Phases.Review do
     GiTF.Archive.update(:missions, mission.id, fn m ->
       history = get_in(m, [Access.key(:artifacts, %{}), "review_rejections"]) || []
       artifacts = Map.get(m, :artifacts, %{})
-      Map.put(m, :artifacts, Map.put(artifacts, "review_rejections", Enum.take([fp | history], 5)))
+
+      Map.put(
+        m,
+        :artifacts,
+        Map.put(artifacts, "review_rejections", Enum.take([fp | history], 5))
+      )
     end)
   rescue
     _ -> :ok

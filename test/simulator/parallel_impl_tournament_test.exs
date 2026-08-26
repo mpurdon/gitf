@@ -181,8 +181,15 @@ defmodule GiTF.Simulator.ParallelImplTournamentTest do
         {_, code} =
           System.cmd(
             "/usr/bin/git",
-            ["-c", "user.email=sim@test", "-c", "user.name=Simulator",
-             "commit", "-m", "sim: variant #{variant}"],
+            [
+              "-c",
+              "user.email=sim@test",
+              "-c",
+              "user.name=Simulator",
+              "commit",
+              "-m",
+              "sim: variant #{variant}"
+            ],
             cd: path,
             stderr_to_stdout: true
           )

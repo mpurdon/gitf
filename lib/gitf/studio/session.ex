@@ -216,7 +216,10 @@ defmodule GiTF.Studio.Session do
               |> queue_feedback("Confirmed: #{describe(proposal)}")
 
             :dismiss ->
-              queue_feedback(state, "Dismissed (do not re-propose without new information): #{describe(proposal)}")
+              queue_feedback(
+                state,
+                "Dismissed (do not re-propose without new information): #{describe(proposal)}"
+              )
           end
 
         broadcast(state)
@@ -308,7 +311,12 @@ defmodule GiTF.Studio.Session do
 
   defp llm_error(state, reason) do
     Logger.warning("Studio session #{state.id} LLM error: #{inspect(reason, limit: 20)}")
-    add_transcript(state, :system, "The planner hit an error (#{summarize_error(reason)}). Say something to retry.")
+
+    add_transcript(
+      state,
+      :system,
+      "The planner hit an error (#{summarize_error(reason)}). Say something to retry."
+    )
   end
 
   defp summarize_error(%{status: status}) when is_integer(status), do: "HTTP #{status}"
@@ -455,14 +463,17 @@ defmodule GiTF.Studio.Session do
       Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
         case generate_mockup_html(mockup_model, target, style, brief_context) do
           {:ok, html} ->
-            send(session, {:mockup_ready,
-             %{
-               id: "mck-#{version + idx}",
-               target: target,
-               style: style,
-               html: html,
-               at: DateTime.utc_now()
-             }})
+            send(
+              session,
+              {:mockup_ready,
+               %{
+                 id: "mck-#{version + idx}",
+                 target: target,
+                 style: style,
+                 html: html,
+                 at: DateTime.utc_now()
+               }}
+            )
 
           {:error, reason} ->
             Logger.warning("Studio mockup generation failed: #{inspect(reason, limit: 10)}")

@@ -33,14 +33,20 @@ defmodule GiTF.Workflow.OrchestratorDispatchTest do
 
   defp insert_mission!(attrs) do
     {:ok, m} =
-      Archive.insert(:missions, Map.merge(%{
-        name: "test",
-        goal: "x",
-        status: "active",
-        sector_id: nil,
-        artifacts: %{},
-        phase_jobs: %{}
-      }, attrs))
+      Archive.insert(
+        :missions,
+        Map.merge(
+          %{
+            name: "test",
+            goal: "x",
+            status: "active",
+            sector_id: nil,
+            artifacts: %{},
+            phase_jobs: %{}
+          },
+          attrs
+        )
+      )
 
     m
   end

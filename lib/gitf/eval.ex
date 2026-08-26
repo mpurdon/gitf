@@ -93,8 +93,16 @@ defmodule GiTF.Eval do
         ordered: true
       )
       |> Enum.map(fn
-        {:ok, result} -> result
-        {:exit, reason} -> %{id: "?", result: :fail, meta: %{reason: "task exited: #{inspect(reason)}"}, elapsed_ms: 0}
+        {:ok, result} ->
+          result
+
+        {:exit, reason} ->
+          %{
+            id: "?",
+            result: :fail,
+            meta: %{reason: "task exited: #{inspect(reason)}"},
+            elapsed_ms: 0
+          }
       end)
 
     elapsed_ms = System.monotonic_time(:millisecond) - started_at

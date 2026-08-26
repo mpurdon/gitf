@@ -25,6 +25,7 @@ defmodule GiTF.Skills.RetrievalTest do
 
     prev = Application.get_env(:gitf, :embedding_client)
     Application.put_env(:gitf, :embedding_client, MockClient)
+
     on_exit(fn ->
       if prev,
         do: Application.put_env(:gitf, :embedding_client, prev),

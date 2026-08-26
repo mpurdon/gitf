@@ -101,7 +101,7 @@ defmodule GiTF.Web.StudioVoiceChannelTest do
       |> subscribe_and_join(GiTF.Web.StudioVoiceChannel, "studio_voice:#{studio_id}")
 
     assert_receive {:adapter_started, _owner}
-    assert_push "ready", %{}
+    assert_push("ready", %{})
     socket
   end
 
@@ -119,13 +119,13 @@ defmodule GiTF.Web.StudioVoiceChannelTest do
 
     send(channel_pid, {:voice_audio, <<9, 9>>})
     expected = Base.encode64(<<9, 9>>)
-    assert_push "audio", %{data: ^expected}
+    assert_push("audio", %{data: ^expected})
 
     send(channel_pid, :voice_interrupted)
-    assert_push "interrupted", %{}
+    assert_push("interrupted", %{})
 
     send(channel_pid, {:voice_transcript, :user, "make it blue"})
-    assert_push "transcript", %{role: "user", text: "make it blue"}
+    assert_push("transcript", %{role: "user", text: "make it blue"})
 
     # Transcript also lands in the studio session (one board for voice + text).
     assert Enum.any?(

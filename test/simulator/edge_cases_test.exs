@@ -160,9 +160,20 @@ defmodule GiTF.Simulator.EdgeCasesTest do
         # Wait for impl ghost to have made its commit, then drop a
         # conflicting commit on main right before sync runs.
         Process.sleep(2_000)
-        {_, 0} = System.cmd("/usr/bin/git", ["checkout", "main"], cd: sector_path, stderr_to_stdout: true)
+
+        {_, 0} =
+          System.cmd("/usr/bin/git", ["checkout", "main"],
+            cd: sector_path,
+            stderr_to_stdout: true
+          )
+
         File.write!(Path.join(sector_path, "app/main.js"), "// version B (conflicting)\n")
-        {_, 0} = System.cmd("/usr/bin/git", ["add", "app/main.js"], cd: sector_path, stderr_to_stdout: true)
+
+        {_, 0} =
+          System.cmd("/usr/bin/git", ["add", "app/main.js"],
+            cd: sector_path,
+            stderr_to_stdout: true
+          )
 
         {_, _} =
           System.cmd(

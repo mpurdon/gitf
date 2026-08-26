@@ -41,7 +41,9 @@ defmodule GiTF.Knowledge.PromptContext do
 
   def for_mission(sector_id, mission, opts) when is_map(mission) do
     if enabled?() do
-      max_chars = Keyword.get(opts, :max_chars, config(:knowledge_context_max_chars, @default_max_chars))
+      max_chars =
+        Keyword.get(opts, :max_chars, config(:knowledge_context_max_chars, @default_max_chars))
+
       top_k = Keyword.get(opts, :top_k, config(:knowledge_top_k_for_prompt, @default_top_k))
 
       query = build_query(mission)
@@ -106,7 +108,8 @@ defmodule GiTF.Knowledge.PromptContext do
     if sections == [] do
       ""
     else
-      header = "## Knowledge\n\nPre-compiled wiki for this sector. Read any page via its file under `Sectors/<sector>/Pages/<slug>.md`."
+      header =
+        "## Knowledge\n\nPre-compiled wiki for this sector. Read any page via its file under `Sectors/<sector>/Pages/<slug>.md`."
 
       ([header | sections] ++ [""])
       |> Enum.intersperse("\n\n")
@@ -123,6 +126,7 @@ defmodule GiTF.Knowledge.PromptContext do
       |> Enum.sort_by(& &1.position)
       |> Enum.map(fn idx ->
         count = length(idx.entries || [])
+
         "- [[#{Path.basename(idx.file_path, ".md")}]] · #{count} entr#{if count == 1, do: "y", else: "ies"}"
       end)
 

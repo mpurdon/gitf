@@ -90,7 +90,9 @@ defmodule GiTF.Knowledge.Compile do
         Enum.each(pages, &apply_page(&1, mission[:sector_id]))
 
         index_updates = Map.get(payload, "index_updates", [])
-        if is_list(index_updates), do: Enum.each(index_updates, &apply_index_update(&1, mission[:sector_id]))
+
+        if is_list(index_updates),
+          do: Enum.each(index_updates, &apply_index_update(&1, mission[:sector_id]))
 
         emit_telemetry(mission, length(pages), length(index_updates(payload)))
         :ok
@@ -275,10 +277,14 @@ defmodule GiTF.Knowledge.Compile do
   # -- Telemetry / config ----------------------------------------------------
 
   defp emit_telemetry(mission, page_count, index_count) do
-    GiTF.Telemetry.emit([:gitf, :knowledge, :compile], %{pages: page_count, indexes: index_count}, %{
-      mission_id: mission[:id],
-      sector_id: mission[:sector_id]
-    })
+    GiTF.Telemetry.emit(
+      [:gitf, :knowledge, :compile],
+      %{pages: page_count, indexes: index_count},
+      %{
+        mission_id: mission[:id],
+        sector_id: mission[:sector_id]
+      }
+    )
   rescue
     _ -> :ok
   end

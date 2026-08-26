@@ -640,6 +640,7 @@ defmodule GiTF.Dashboard.DesignLive do
     # straight to its detail.
     default_tab =
       if length(active_strategies) == 1, do: hd(active_strategies), else: "compare"
+
     active_tab = Map.get(socket.assigns, :active_tab, default_tab)
 
     socket

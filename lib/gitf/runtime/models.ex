@@ -295,7 +295,8 @@ defmodule GiTF.Runtime.Models do
       true -> @cli_plugin_name
     end
   rescue
-    _ -> if GiTF.Runtime.ModelResolver.api_mode?(), do: @default_plugin_name, else: @cli_plugin_name
+    _ ->
+      if GiTF.Runtime.ModelResolver.api_mode?(), do: @default_plugin_name, else: @cli_plugin_name
   end
 
   # -- Resolution --------------------------------------------------------------

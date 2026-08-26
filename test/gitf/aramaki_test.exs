@@ -104,7 +104,12 @@ defmodule GiTF.AramakiTest do
   describe "admit_pending/0 capacity gate" do
     test "does not start more than max_concurrent", %{sector: sector} do
       # Two pending github_issue missions, cap of 1 → only one admitted.
-      Application.put_env(:gitf, :aramaki, enabled: true, trigger_label: "gitf:build", max_concurrent: 1)
+      Application.put_env(:gitf, :aramaki,
+        enabled: true,
+        trigger_label: "gitf:build",
+        max_concurrent: 1
+      )
+
       on_exit(fn -> Application.delete_env(:gitf, :aramaki) end)
 
       for n <- [1, 2] do

@@ -68,11 +68,13 @@ defmodule GiTF.Vault.Path do
 
   @doc "Per-sector Missions directory."
   @spec missions_dir(String.t(), String.t()) :: String.t()
-  def missions_dir(gitf_root, sector_id), do: Path.join(sector_dir(gitf_root, sector_id), "Missions")
+  def missions_dir(gitf_root, sector_id),
+    do: Path.join(sector_dir(gitf_root, sector_id), "Missions")
 
   @doc "Per-sector Indexes directory."
   @spec indexes_dir(String.t(), String.t()) :: String.t()
-  def indexes_dir(gitf_root, sector_id), do: Path.join(sector_dir(gitf_root, sector_id), "Indexes")
+  def indexes_dir(gitf_root, sector_id),
+    do: Path.join(sector_dir(gitf_root, sector_id), "Indexes")
 
   @doc "Global pages directory (cross-sector concepts)."
   @spec global_pages_dir(String.t()) :: String.t()

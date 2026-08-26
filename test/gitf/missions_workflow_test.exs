@@ -49,7 +49,11 @@ defmodule GiTF.MissionsWorkflowTest do
 
       prior = System.get_env("GITF_PATH")
       System.put_env("GITF_PATH", gitf_root)
-      on_exit(fn -> if prior, do: System.put_env("GITF_PATH", prior), else: System.delete_env("GITF_PATH") end)
+
+      on_exit(fn ->
+        if prior, do: System.put_env("GITF_PATH", prior), else: System.delete_env("GITF_PATH")
+      end)
+
       on_exit(fn -> File.rm_rf!(gitf_root) end)
 
       :ok

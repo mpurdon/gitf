@@ -23,7 +23,7 @@ defmodule GiTF.CLI.ProjectHandler do
       if GiTF.Client.remote?() do
         case GiTF.Client.list_projects() do
           {:ok, p} -> p
-          {:error, reason} -> (Format.error("Remote error: #{inspect(reason)}") && [])
+          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}") && []
         end
       else
         GiTF.Project.list()
@@ -90,7 +90,9 @@ defmodule GiTF.CLI.ProjectHandler do
           mission = item[:mission_id] || item["mission_id"]
           mission_note = if mission, do: "  → #{mission}", else: ""
 
-          IO.puts("  #{marker} [#{item[:id] || item["id"]}] #{item[:title] || item["title"]}#{deps}#{mission_note}")
+          IO.puts(
+            "  #{marker} [#{item[:id] || item["id"]}] #{item[:title] || item["title"]}#{deps}#{mission_note}"
+          )
         end)
     end
   end

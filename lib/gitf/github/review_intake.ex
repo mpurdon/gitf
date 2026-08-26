@@ -409,7 +409,8 @@ defmodule GiTF.GitHub.ReviewIntake do
 
   # -- Field access across both shapes ---------------------------------------
 
-  defp changes_requested?(review), do: Policy.admit_review?(review) != {:reject, :not_changes_requested}
+  defp changes_requested?(review),
+    do: Policy.admit_review?(review) != {:reject, :not_changes_requested}
 
   defp author(review) do
     case Map.get(review, "user") do

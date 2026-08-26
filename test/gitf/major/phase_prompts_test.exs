@@ -245,9 +245,13 @@ defmodule GiTF.Major.PhasePromptsTest do
 
       assert prompt =~ "FILE/SURFACE OWNERSHIP"
       # Same file in two ops requires a dependency between them
-      assert prompt =~ ~r/must NOT both list the same file in target_files unless one\s+depends_on the other/
+      assert prompt =~
+               ~r/must NOT both list the same file in target_files unless one\s+depends_on the other/
+
       # Disjoint files must not be artificially serialized
-      assert prompt =~ ~r/disjoint target_files and no data dependency must NOT depend\s+on each other/
+      assert prompt =~
+               ~r/disjoint target_files and no data dependency must NOT depend\s+on each other/
+
       assert prompt =~ "merge conflicts"
       # The pre-2026-08-25 anti-parallelism doctrine is gone
       refute prompt =~ "fewer, larger ops"

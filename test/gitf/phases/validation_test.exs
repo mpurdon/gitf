@@ -8,7 +8,15 @@ defmodule GiTF.Phases.ValidationTest do
       GiTF.Archive.insert(
         :missions,
         Map.merge(
-          %{name: "v", goal: "x", status: "active", sector_id: "fe", current_phase: "validation", artifacts: %{}, ops: []},
+          %{
+            name: "v",
+            goal: "x",
+            status: "active",
+            sector_id: "fe",
+            current_phase: "validation",
+            artifacts: %{},
+            ops: []
+          },
           attrs
         )
       )
@@ -183,7 +191,8 @@ defmodule GiTF.Phases.ValidationTest do
 
       assert Validation.infrastructure_failure?(%{
                "failures" => %{
-                 "output" => "only 900MB disk free; this is an infrastructure problem, not a code problem"
+                 "output" =>
+                   "only 900MB disk free; this is an infrastructure problem, not a code problem"
                }
              })
     end
@@ -199,5 +208,4 @@ defmodule GiTF.Phases.ValidationTest do
       refute Validation.infrastructure_failure?(%{})
     end
   end
-
 end

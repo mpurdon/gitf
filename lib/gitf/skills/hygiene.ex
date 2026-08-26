@@ -45,7 +45,11 @@ defmodule GiTF.Skills.Hygiene do
   Runs a full compaction pass. Returns a map of counts per action for
   operators and telemetry.
   """
-  @spec compact() :: %{demoted: non_neg_integer(), deduped: non_neg_integer(), capped: non_neg_integer()}
+  @spec compact() :: %{
+          demoted: non_neg_integer(),
+          deduped: non_neg_integer(),
+          capped: non_neg_integer()
+        }
   def compact do
     t = thresholds()
 
@@ -73,7 +77,11 @@ defmodule GiTF.Skills.Hygiene do
 
     Enum.reduce(active, 0, fn skill, count ->
       if low_utility?(skill, min_applies, min_rate) do
-        archive!(skill, "low_utility: #{skill.applied_count} applies, #{success_rate(skill)} success")
+        archive!(
+          skill,
+          "low_utility: #{skill.applied_count} applies, #{success_rate(skill)} success"
+        )
+
         count + 1
       else
         count

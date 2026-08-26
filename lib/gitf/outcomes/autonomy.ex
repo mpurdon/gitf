@@ -27,7 +27,12 @@ defmodule GiTF.Outcomes.Autonomy do
   Returns the current tier for a sector, along with the reasoning map
   (rate, sample count, reason atom). Safe for any sector id.
   """
-  @spec tier_for(String.t() | nil) :: %{tier: tier(), rate: float() | nil, sample_count: non_neg_integer(), reason: atom()}
+  @spec tier_for(String.t() | nil) :: %{
+          tier: tier(),
+          rate: float() | nil,
+          sample_count: non_neg_integer(),
+          reason: atom()
+        }
   def tier_for(nil), do: %{tier: :normal, rate: nil, sample_count: 0, reason: :no_sector}
 
   def tier_for(sector_id) when is_binary(sector_id) do

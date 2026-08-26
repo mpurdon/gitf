@@ -101,7 +101,10 @@ defmodule GiTF.Knowledge.Ingest do
           else: []
 
       {:ok, %File.Stat{type: :regular}} ->
-        Logger.warning("Knowledge.Ingest: skipping #{full} — exceeds #{@max_ingest_size}-byte cap")
+        Logger.warning(
+          "Knowledge.Ingest: skipping #{full} — exceeds #{@max_ingest_size}-byte cap"
+        )
+
         []
 
       _ ->

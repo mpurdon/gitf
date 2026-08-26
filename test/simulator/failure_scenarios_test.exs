@@ -208,7 +208,6 @@ defmodule GiTF.Simulator.FailureScenariosTest do
         consume: true,
         side_effect: bump
       },
-
       validation_pass_rule(),
       simplify_reuse_rule(),
       simplify_quality_rule(),

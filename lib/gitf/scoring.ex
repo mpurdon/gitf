@@ -127,9 +127,7 @@ defmodule GiTF.Scoring do
     end)
   rescue
     e ->
-      Logger.warning(
-        "ingest_mission_outcome failed for #{mission.id}: #{Exception.message(e)}"
-      )
+      Logger.warning("ingest_mission_outcome failed for #{mission.id}: #{Exception.message(e)}")
 
       :ok
   end

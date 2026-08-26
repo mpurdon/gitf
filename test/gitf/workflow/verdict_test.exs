@@ -6,14 +6,20 @@ defmodule GiTF.Workflow.VerdictTest do
 
   defp mission!(attrs \\ %{}) do
     {:ok, m} =
-      Archive.insert(:missions, Map.merge(%{
-        name: "test",
-        goal: "x",
-        status: "active",
-        sector_id: "fe",
-        current_phase: "research",
-        artifacts: %{}
-      }, attrs))
+      Archive.insert(
+        :missions,
+        Map.merge(
+          %{
+            name: "test",
+            goal: "x",
+            status: "active",
+            sector_id: "fe",
+            current_phase: "research",
+            artifacts: %{}
+          },
+          attrs
+        )
+      )
 
     m
   end

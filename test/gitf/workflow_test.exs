@@ -254,7 +254,9 @@ defmodule GiTF.WorkflowTest do
           next: end
       """
 
-      tmp = Path.join(System.tmp_dir!(), "workflow-next-#{:erlang.unique_integer([:positive])}.yaml")
+      tmp =
+        Path.join(System.tmp_dir!(), "workflow-next-#{:erlang.unique_integer([:positive])}.yaml")
+
       File.write!(tmp, yaml)
       on_exit(fn -> File.rm!(tmp) end)
       {:ok, w} = Workflow.load(tmp)
@@ -356,7 +358,9 @@ defmodule GiTF.WorkflowTest do
 
       # Pin the vault to a known workspace so the test doesn't depend on the
       # surrounding checkout having a .gitf (it doesn't in CI).
-      vault_ws = Path.join(System.tmp_dir!(), "gitf-vault-ws-#{System.unique_integer([:positive])}")
+      vault_ws =
+        Path.join(System.tmp_dir!(), "gitf-vault-ws-#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(Path.join(vault_ws, ".gitf"))
       File.write!(Path.join(vault_ws, ".gitf/config.toml"), "")
       prior = System.get_env("GITF_PATH")
@@ -388,12 +392,17 @@ defmodule GiTF.WorkflowTest do
       # sector/global/priv file resolves on disk. The embedded default must
       # still load, otherwise every mission silently falls back to legacy
       # phase advancement.
-      empty = Path.join(System.tmp_dir!(), "gitf-empty-vault-#{System.unique_integer([:positive])}")
+      empty =
+        Path.join(System.tmp_dir!(), "gitf-empty-vault-#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(Path.join(empty, ".gitf"))
       File.write!(Path.join([empty, ".gitf", "config.toml"]), "")
       prior = System.get_env("GITF_PATH")
       System.put_env("GITF_PATH", empty)
-      on_exit(fn -> if prior, do: System.put_env("GITF_PATH", prior), else: System.delete_env("GITF_PATH") end)
+
+      on_exit(fn ->
+        if prior, do: System.put_env("GITF_PATH", prior), else: System.delete_env("GITF_PATH")
+      end)
 
       assert {:ok, %Workflow{phases: [_ | _]}} = Workflow.resolve("standard")
     end

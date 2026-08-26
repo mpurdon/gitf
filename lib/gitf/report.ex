@@ -80,7 +80,9 @@ defmodule GiTF.Report do
         completed_at: report.timing.completed_at && format_time(report.timing.completed_at)
       },
       tokens: report.tokens,
-      total_tokens: report.tokens.input + report.tokens.output + report.tokens.cache_read + report.tokens.cache_create,
+      total_tokens:
+        report.tokens.input + report.tokens.output + report.tokens.cache_read +
+          report.tokens.cache_create,
       ops: Enum.map(report.ops, &format_op_for_display/1),
       files: report.files,
       file_summary: summarize_files(report.files),
@@ -356,11 +358,12 @@ defmodule GiTF.Report do
   defp format_files_section(%{files: files}) when is_list(files) and files != [] do
     lines =
       Enum.map(files, fn f ->
-        icon = case f.status do
-          "A" -> "+"
-          "D" -> "-"
-          _ -> "~"
-        end
+        icon =
+          case f.status do
+            "A" -> "+"
+            "D" -> "-"
+            _ -> "~"
+          end
 
         "  #{icon} #{f.path}"
       end)

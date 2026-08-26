@@ -322,7 +322,8 @@ defmodule GiTF.Budget do
 
   defp provider_usage_setting(provider, key, default) do
     with quotas when is_map(quotas) <- GiTF.Config.Provider.get([:costs, :provider_quotas]),
-         settings when is_map(settings) <- Map.get(quotas, provider) || Map.get(quotas, :"#{provider}"),
+         settings when is_map(settings) <-
+           Map.get(quotas, provider) || Map.get(quotas, :"#{provider}"),
          val when is_number(val) and val > 0 <-
            Map.get(settings, key) || Map.get(settings, to_string(key)) do
       trunc(val)

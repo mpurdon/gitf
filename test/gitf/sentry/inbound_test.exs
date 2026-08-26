@@ -41,7 +41,10 @@ defmodule GiTF.Sentry.InboundTest do
           "permalink" => "https://sentry.io/organizations/acme/issues/#{issue_id}/",
           "level" => "error",
           "culprit" => "src/components/Foo.tsx in render",
-          "metadata" => %{"type" => "TypeError", "value" => "cannot read property 'foo' of undefined"},
+          "metadata" => %{
+            "type" => "TypeError",
+            "value" => "cannot read property 'foo' of undefined"
+          },
           "project" => %{"slug" => project}
         }
       }

@@ -232,5 +232,4 @@ defmodule GiTF.Intel.SuccessPatterns do
 
     suggestions
   end
-
 end

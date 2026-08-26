@@ -18,15 +18,19 @@ defmodule GiTF.Onboarding.Detector do
   def detect(path) do
     files = list_files(path)
 
-    %{
+    info = %{
       language: detect_language(files, path),
       framework: detect_framework(files, path),
       build_tool: detect_build_tool(files, path),
       test_framework: detect_test_framework(files, path),
       validation_command: suggest_validation_command(files, path),
-      validation_timeout_ms: suggest_validation_timeout_ms(files, path),
       project_type: detect_project_type(files, path)
     }
+
+    # Derived from the map just built — the timeout helper used to re-run
+    # every detector (re-reading package.json and mix.exs off disk) to
+    # rebuild the same map it was standing next to.
+    Map.put(info, :validation_timeout_ms, derive_validation_timeout_ms(info))
   end
 
   defp list_files(path) do
@@ -116,18 +120,8 @@ defmodule GiTF.Onboarding.Detector do
     end
   end
 
-  defp suggest_validation_timeout_ms(files, path) do
-    derive_validation_timeout_ms(%{
-      language: detect_language(files, path),
-      framework: detect_framework(files, path),
-      build_tool: detect_build_tool(files, path),
-      validation_command: suggest_validation_command(files, path)
-    })
-  end
-
-  # The ceiling. Nothing a ghost runs unattended gets more than half an hour
-  # before we call it hung.
-  @max_validation_timeout_ms 1_800_000
+  # The ceiling lives with the read side — GiTF.Validator — so the write
+  # surfaces and this derivation cannot drift apart.
 
   # What every sector silently got, because nothing ever wrote the field.
   @no_command_timeout_ms 120_000
@@ -166,7 +160,11 @@ defmodule GiTF.Onboarding.Detector do
       # the shape of the command overrules the project type when it announces a
       # cold dependency fetch or a native build.
       multiplier = if cold_build_command?(command), do: 2, else: 1
-      min(base_validation_timeout_ms(project_info) * multiplier, @max_validation_timeout_ms)
+
+      min(
+        base_validation_timeout_ms(project_info) * multiplier,
+        GiTF.Validator.max_validation_timeout_ms()
+      )
     end
   end
 

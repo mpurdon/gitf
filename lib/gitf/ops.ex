@@ -180,54 +180,14 @@ defmodule GiTF.Ops do
   @spec reject(String.t()) :: {:ok, map()} | {:error, atom()}
   def reject(op_id), do: transition(op_id, :reject)
 
-  @doc """
-  Creates a retry op copying attrs from the original, with `retry_of` linkage.
-
-  Increments retry_count. Appends failure feedback to the description so the
-  next ghost has context on what went wrong. Returns `{:ok, new_job}` or
-  `{:error, reason}`.
-
-  ## Options
-
-    * `:max_retries` — maximum allowed retries (default: 3)
-    * `:feedback` — failure context to append to description
-  """
-  @spec create_retry(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def create_retry(op_id, opts \\ []) do
-    with {:ok, op} <- get(op_id) do
-      retry_count = Map.get(op, :retry_count, 0) + 1
-      max_retries = Keyword.get(opts, :max_retries, @max_retries)
-
-      if retry_count > max_retries do
-        {:error, :max_retries_exceeded}
-      else
-        feedback = Keyword.get(opts, :feedback)
-
-        description =
-          if feedback do
-            (op.description || "") <>
-              "\n\n## Feedback from attempt #{retry_count}:\n" <> feedback
-          else
-            op.description
-          end
-
-        attrs = %{
-          title: op.title,
-          description: description,
-          mission_id: op.mission_id,
-          sector_id: op.sector_id,
-          retry_count: retry_count,
-          retry_of: op.id,
-          acceptance_criteria: Map.get(op, :acceptance_criteria, []),
-          target_files: Map.get(op, :target_files, []),
-          verification_criteria: Map.get(op, :verification_criteria, []),
-          verification_contract: op[:verification_contract]
-        }
-
-        create(attrs)
-      end
-    end
-  end
+  # NOTE: `create_retry/2` was deleted here (2026-08-26). It had zero
+  # callers — the live retry path is `reset/2`, which reuses the op in place
+  # so its :op_dependencies rows survive — and it copied an op WITHOUT its
+  # dependency edges. If it had ever gained a caller, a retried chain op
+  # would have bypassed the planner's same-file serialization guarantee,
+  # which is the exact hole that produced msn-8e0eae's conflict markers.
+  # Reintroduce only with edge mirroring (see Intel.Retry.retry_job, which
+  # learned this lesson in run 22).
 
   @doc """
   Resets a failed op back to pending so it can be retried.

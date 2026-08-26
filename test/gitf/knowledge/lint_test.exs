@@ -49,7 +49,8 @@ defmodule GiTF.Knowledge.LintTest do
 
   describe "lint/2 — broken links" do
     test "flags a forward reference to a missing page" do
-      {:ok, _} = Page.put(%{slug: "src", sector_id: "fe", body: "see [[ghost]] and [[also-missing]]"})
+      {:ok, _} =
+        Page.put(%{slug: "src", sector_id: "fe", body: "see [[ghost]] and [[also-missing]]"})
 
       assert %{broken_links: broken} = Lint.lint("fe")
       pairs = Enum.map(broken, fn %{from: f, to: t} -> {f, t} end)
@@ -97,7 +98,12 @@ defmodule GiTF.Knowledge.LintTest do
 
     test "does not suggest a self-link" do
       {:ok, _} =
-        Page.put(%{slug: "auth-flow", sector_id: "fe", title: "Auth Flow", body: "Auth Flow is..."})
+        Page.put(%{
+          slug: "auth-flow",
+          sector_id: "fe",
+          title: "Auth Flow",
+          body: "Auth Flow is..."
+        })
 
       assert %{suggested_backlinks: suggestions} = Lint.lint("fe")
       refute Enum.any?(suggestions, fn s -> s.from == "auth-flow" and s.to == "auth-flow" end)

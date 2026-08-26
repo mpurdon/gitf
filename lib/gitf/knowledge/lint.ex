@@ -57,7 +57,9 @@ defmodule GiTF.Knowledge.Lint do
     indexes = Index.list(sector_id)
 
     page_slugs = MapSet.new(pages, & &1.slug)
-    index_slugs = MapSet.new(Enum.flat_map(indexes, fn idx -> Enum.map(idx.entries || [], & &1.slug) end))
+
+    index_slugs =
+      MapSet.new(Enum.flat_map(indexes, fn idx -> Enum.map(idx.entries || [], & &1.slug) end))
 
     %{
       sector_id: sector_id,

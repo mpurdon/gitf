@@ -872,40 +872,40 @@ defmodule GiTF.CLI.Chat do
   defp submit_plan_tool do
     ReqLLM.Tool.new!(
       name: "submit_plan",
-        description:
-          "Submit the final implementation plan. Call after gathering enough information from the user.",
-        parameter_schema: %{
-          "type" => "object",
-          "properties" => %{
-            "name" => %{"type" => "string", "description" => "Short mission name"},
-            "summary" => %{"type" => "string", "description" => "1-2 sentence summary"},
-            "ops" => %{
-              "type" => "array",
-              "items" => %{
-                "type" => "object",
-                "properties" => %{
-                  "title" => %{"type" => "string"},
-                  "description" => %{
-                    "type" => "string",
-                    "description" => "Detailed description for an AI agent to execute"
-                  },
-                  "op_type" => %{
-                    "type" => "string",
-                    "enum" => ["research", "implementation", "verification"]
-                  },
-                  "depends_on" => %{
-                    "type" => "array",
-                    "items" => %{"type" => "integer"},
-                    "description" => "0-based indices of prerequisite ops"
-                  }
+      description:
+        "Submit the final implementation plan. Call after gathering enough information from the user.",
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "name" => %{"type" => "string", "description" => "Short mission name"},
+          "summary" => %{"type" => "string", "description" => "1-2 sentence summary"},
+          "ops" => %{
+            "type" => "array",
+            "items" => %{
+              "type" => "object",
+              "properties" => %{
+                "title" => %{"type" => "string"},
+                "description" => %{
+                  "type" => "string",
+                  "description" => "Detailed description for an AI agent to execute"
                 },
-                "required" => ["title", "description", "op_type"]
-              }
+                "op_type" => %{
+                  "type" => "string",
+                  "enum" => ["research", "implementation", "verification"]
+                },
+                "depends_on" => %{
+                  "type" => "array",
+                  "items" => %{"type" => "integer"},
+                  "description" => "0-based indices of prerequisite ops"
+                }
+              },
+              "required" => ["title", "description", "op_type"]
             }
-          },
-          "required" => ["name", "summary", "ops"]
+          }
         },
-        callback: fn _args -> {:ok, "handled"} end
+        "required" => ["name", "summary", "ops"]
+      },
+      callback: fn _args -> {:ok, "handled"} end
     )
   end
 

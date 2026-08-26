@@ -65,7 +65,9 @@ defmodule GiTF.Visual.CaptureTest do
       if not Capture.available?() do
         :ok
       else
-        root = Path.join(System.tmp_dir!(), "gitf_visual_root_#{:erlang.unique_integer([:positive])}")
+        root =
+          Path.join(System.tmp_dir!(), "gitf_visual_root_#{:erlang.unique_integer([:positive])}")
+
         File.mkdir_p!(root)
         Application.put_env(:gitf, :visual_screenshots_root, root)
         path = Path.join(root, "shot.png")

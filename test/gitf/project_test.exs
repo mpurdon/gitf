@@ -330,7 +330,9 @@ defmodule GiTF.ProjectTest do
       System.put_env("GITF_PATH", workspace)
 
       on_exit(fn ->
-        if original, do: System.put_env("GITF_PATH", original), else: System.delete_env("GITF_PATH")
+        if original,
+          do: System.put_env("GITF_PATH", original),
+          else: System.delete_env("GITF_PATH")
       end)
 
       %{workspace: workspace}

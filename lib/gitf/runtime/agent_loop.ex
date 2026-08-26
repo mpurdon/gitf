@@ -448,35 +448,9 @@ defmodule GiTF.Runtime.AgentLoop do
 
   # -- Usage Tracking ----------------------------------------------------------
 
-  # Normalize usage from any provider format into canonical atom-keyed map
-  defp normalize_usage(%{usage: %{input_tokens: _} = usage}), do: usage
-  defp normalize_usage(%{usage: usage}) when is_map(usage), do: normalize_usage_keys(usage)
-  # Google/Gemini returns raw JSON with "usageMetadata" string key
-  defp normalize_usage(%{"usageMetadata" => meta}) when is_map(meta) do
-    %{
-      input_tokens: Map.get(meta, "promptTokenCount", 0),
-      output_tokens:
-        Map.get(meta, "candidatesTokenCount", 0) ||
-          max(0, Map.get(meta, "totalTokenCount", 0) - Map.get(meta, "promptTokenCount", 0)),
-      total_cost: 0
-    }
-  end
-
-  defp normalize_usage(_), do: %{input_tokens: 0, output_tokens: 0, total_cost: 0}
-
-  defp normalize_usage_keys(usage) do
-    input =
-      Map.get(usage, :input_tokens) || Map.get(usage, "input_tokens") ||
-        Map.get(usage, :prompt_tokens) || Map.get(usage, "prompt_tokens") || 0
-
-    output =
-      Map.get(usage, :output_tokens) || Map.get(usage, "output_tokens") ||
-        Map.get(usage, :completion_tokens) || Map.get(usage, "completion_tokens") ||
-        Map.get(usage, :candidates_tokens) || Map.get(usage, "candidates_tokens") || 0
-
-    cost = Map.get(usage, :total_cost) || Map.get(usage, "total_cost") || 0
-    %{input_tokens: input, output_tokens: output, total_cost: cost}
-  end
+  # Normalization lives in GiTF.Runtime.Usage — the metrics recorder grew a
+  # second, incomplete copy of this once already.
+  defp normalize_usage(response), do: GiTF.Runtime.Usage.normalize(response)
 
   defp accumulate_usage(state, usage) do
     current = state.total_usage

@@ -42,7 +42,9 @@ defmodule GiTF.Workflow.TemplatesGoldenTest do
   defp walk(workflow, [{phase_id, depth, path} | rest], seen) do
     cond do
       depth > @max_steps ->
-        flunk("Path exceeded #{@max_steps} steps in #{workflow.name}: #{Enum.join(Enum.reverse(path), " -> ")}")
+        flunk(
+          "Path exceeded #{@max_steps} steps in #{workflow.name}: #{Enum.join(Enum.reverse(path), " -> ")}"
+        )
 
       MapSet.member?(seen, {phase_id, walked_signature(path)}) ->
         walk(workflow, rest, seen)

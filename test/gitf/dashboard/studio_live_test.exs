@@ -74,8 +74,12 @@ defmodule GiTF.Dashboard.StudioLiveTest do
     state = Session.get_state(id)
 
     cond do
-      state.status == :idle -> state
-      tries == 0 -> raise "session never went idle"
+      state.status == :idle ->
+        state
+
+      tries == 0 ->
+        raise "session never went idle"
+
       true ->
         Process.sleep(20)
         await_session_idle(id, tries - 1)
@@ -138,5 +142,4 @@ defmodule GiTF.Dashboard.StudioLiveTest do
     {:error, {:redirect, %{to: "/dashboard/studio"}}} =
       live(conn, "/dashboard/studio/std-deadbeef")
   end
-
 end

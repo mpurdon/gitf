@@ -361,12 +361,15 @@ defmodule GiTF.Workflow do
     expanded = Path.expand(path)
 
     with {:ok, vault_root} <- vault_root_path(),
-         true <- String.starts_with?(expanded, vault_root <> "/") or
-                 {:error, {:workflow_path_outside_vault, path}},
-         true <- Path.basename(Path.dirname(expanded)) == @workflows_subdir or
-                 {:error, {:workflow_parent_not_workflows_dir, path}},
-         true <- String.ends_with?(expanded, ".yaml") or
-                 {:error, {:workflow_path_not_yaml, path}} do
+         true <-
+           String.starts_with?(expanded, vault_root <> "/") or
+             {:error, {:workflow_path_outside_vault, path}},
+         true <-
+           Path.basename(Path.dirname(expanded)) == @workflows_subdir or
+             {:error, {:workflow_parent_not_workflows_dir, path}},
+         true <-
+           String.ends_with?(expanded, ".yaml") or
+             {:error, {:workflow_path_not_yaml, path}} do
       {:ok, expanded}
     else
       {:error, _} = err -> err
@@ -423,7 +426,9 @@ defmodule GiTF.Workflow do
     conditional_lines =
       [{"next", p.next}, {"on_pass", p.on_pass}, {"on_fail", p.on_fail}]
       |> Enum.flat_map(fn {k, v} ->
-        if is_list(v) and v != [], do: ["    #{k}:" | Enum.map(v, &serialize_transition/1)], else: []
+        if is_list(v) and v != [],
+          do: ["    #{k}:" | Enum.map(v, &serialize_transition/1)],
+          else: []
       end)
 
     fields = Enum.join(scalar_lines ++ conditional_lines, "\n")
@@ -449,7 +454,9 @@ defmodule GiTF.Workflow do
   end
 
   defp handler_str(nil), do: nil
-  defp handler_str(mod) when is_atom(mod), do: mod |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
+
+  defp handler_str(mod) when is_atom(mod),
+    do: mod |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
 
   defp yaml_string(s) do
     if String.contains?(s, "\n") do

@@ -31,7 +31,10 @@ defmodule GiTF.Workflow.ConditionalNextTest do
     {:ok, m} =
       GiTF.Archive.insert(
         :missions,
-        Map.merge(%{name: "c", goal: "x", status: "active", sector_id: "fe", artifacts: %{}}, attrs)
+        Map.merge(
+          %{name: "c", goal: "x", status: "active", sector_id: "fe", artifacts: %{}},
+          attrs
+        )
       )
 
     m
@@ -42,10 +45,16 @@ defmodule GiTF.Workflow.ConditionalNextTest do
       w = workflow()
       ctx = fn art -> %{artifact: art, mission: %{}} end
 
-      assert {:ok, :end} = Workflow.next_phase(w, "triage", :advance, ctx.(%{"bug_reproducible" => false}))
+      assert {:ok, :end} =
+               Workflow.next_phase(w, "triage", :advance, ctx.(%{"bug_reproducible" => false}))
 
       assert {:ok, "requirements"} =
-               Workflow.next_phase(w, "triage", :advance, ctx.(%{"skip_flags" => %{"research" => true}}))
+               Workflow.next_phase(
+                 w,
+                 "triage",
+                 :advance,
+                 ctx.(%{"skip_flags" => %{"research" => true}})
+               )
 
       assert {:ok, "research"} = Workflow.next_phase(w, "triage", :advance, ctx.(%{}))
     end
@@ -53,7 +62,8 @@ defmodule GiTF.Workflow.ConditionalNextTest do
     test "falls through to :else when an expression errors at runtime is impossible — bad data just doesn't match" do
       w = workflow()
       # No artifact at all → conditions are nil-comparisons → none match → :else.
-      assert {:ok, "research"} = Workflow.next_phase(w, "triage", :advance, %{artifact: nil, mission: %{}})
+      assert {:ok, "research"} =
+               Workflow.next_phase(w, "triage", :advance, %{artifact: nil, mission: %{}})
     end
 
     test "string next still works and ignores ctx" do
@@ -74,12 +84,22 @@ defmodule GiTF.Workflow.ConditionalNextTest do
     end
 
     test "short-circuits to :end when the artifact says so" do
-      m = insert_mission!(%{current_phase: "triage", artifacts: %{"triage" => %{"bug_reproducible" => false}}})
+      m =
+        insert_mission!(%{
+          current_phase: "triage",
+          artifacts: %{"triage" => %{"bug_reproducible" => false}}
+        })
+
       assert :complete = Advancer.decide(m, workflow())
     end
 
     test "default route when no rule matches" do
-      m = insert_mission!(%{current_phase: "triage", artifacts: %{"triage" => %{"complexity" => "complex"}}})
+      m =
+        insert_mission!(%{
+          current_phase: "triage",
+          artifacts: %{"triage" => %{"complexity" => "complex"}}
+        })
+
       assert {:dispatch, "research"} = Advancer.decide(m, workflow())
     end
 
@@ -109,13 +129,17 @@ defmodule GiTF.Workflow.ConditionalNextTest do
                  ])
                )
 
-      assert [{"artifact.skip_flags.research == true", _ast, "research"}, {:else, "research"}] = triage.next
+      assert [{"artifact.skip_flags.research == true", _ast, "research"}, {:else, "research"}] =
+               triage.next
     end
 
     test "rejects an unknown target inside a rule" do
       assert {:error, errors} =
                Schema.validate(
-                 raw([%{"when" => "artifact.x == true", "then" => "nowhere"}, %{"else" => "research"}])
+                 raw([
+                   %{"when" => "artifact.x == true", "then" => "nowhere"},
+                   %{"else" => "research"}
+                 ])
                )
 
       assert Enum.any?(errors, &match?({:unknown_target, "triage", "next", "nowhere"}, &1))
@@ -123,18 +147,31 @@ defmodule GiTF.Workflow.ConditionalNextTest do
 
     test "rejects a bad when: expression" do
       assert {:error, errors} =
-               Schema.validate(raw([%{"when" => "File.read!(\"x\")", "then" => "research"}, %{"else" => "research"}]))
+               Schema.validate(
+                 raw([
+                   %{"when" => "File.read!(\"x\")", "then" => "research"},
+                   %{"else" => "research"}
+                 ])
+               )
 
-      assert Enum.any?(errors, &match?({:bad_transition, "triage", "next", {:bad_when_expr, _, _}}, &1))
+      assert Enum.any?(
+               errors,
+               &match?({:bad_transition, "triage", "next", {:bad_when_expr, _, _}}, &1)
+             )
     end
 
     test "requires exactly one else, last" do
-      assert {:error, e1} = Schema.validate(raw([%{"when" => "artifact.x == true", "then" => "research"}]))
+      assert {:error, e1} =
+               Schema.validate(raw([%{"when" => "artifact.x == true", "then" => "research"}]))
+
       assert Enum.any?(e1, &match?({:conditional_branch_needs_one_else, "triage", "next"}, &1))
 
       assert {:error, e2} =
                Schema.validate(
-                 raw([%{"else" => "research"}, %{"when" => "artifact.x == true", "then" => "research"}])
+                 raw([
+                   %{"else" => "research"},
+                   %{"when" => "artifact.x == true", "then" => "research"}
+                 ])
                )
 
       assert Enum.any?(e2, &match?({:conditional_branch_else_not_last, "triage", "next"}, &1))

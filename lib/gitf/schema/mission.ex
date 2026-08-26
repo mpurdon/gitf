@@ -96,7 +96,8 @@ defmodule GiTF.Schema.Mission do
          implementation_plan: attrs[:implementation_plan] || attrs["implementation_plan"],
          artifacts: attrs[:artifacts] || attrs["artifacts"] || %{},
          phase_jobs: attrs[:phase_jobs] || attrs["phase_jobs"] || %{},
-         post_processing_status: attrs[:post_processing_status] || attrs["post_processing_status"],
+         post_processing_status:
+           attrs[:post_processing_status] || attrs["post_processing_status"],
          cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"],
          issue_ref: attrs[:issue_ref] || attrs["issue_ref"]
        }}

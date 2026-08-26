@@ -224,7 +224,10 @@ defmodule GiTF.Sync do
             :ok
 
           true ->
-            Logger.error("Git push failed and origin/#{branch} does not match local: #{String.slice(push_output, 0, 200)}")
+            Logger.error(
+              "Git push failed and origin/#{branch} does not match local: #{String.slice(push_output, 0, 200)}"
+            )
+
             {:error, "push failed: #{String.slice(push_output, 0, 200)}"}
         end
     end
@@ -677,8 +680,11 @@ defmodule GiTF.Sync do
       Logger.warning("Stale rebase state found in #{repo_path}, aborting interrupted rebase")
 
       case GiTF.Git.safe_cmd(["rebase", "--abort"], cd: repo_path, stderr_to_stdout: true) do
-        {_, 0} -> :ok
-        {out, _} -> Logger.error("Failed to abort stale rebase in #{repo_path}: #{String.trim(out)}")
+        {_, 0} ->
+          :ok
+
+        {out, _} ->
+          Logger.error("Failed to abort stale rebase in #{repo_path}: #{String.trim(out)}")
       end
     end
   rescue

@@ -55,9 +55,12 @@ defmodule GiTF.Simulator.SkillsValidatorLoopTest do
 
     # Refinement is async under TaskSupervisor — give it up to 30s to land
     found =
-      eventually(fn ->
-        Enum.any?(GiTF.Skills.all(), &(&1.name == "lockfile-enforcement"))
-      end, 30_000)
+      eventually(
+        fn ->
+          Enum.any?(GiTF.Skills.all(), &(&1.name == "lockfile-enforcement"))
+        end,
+        30_000
+      )
 
     # Clean up the runner regardless of assertion outcome
     _ = Task.yield(runner, 5_000) || Task.shutdown(runner, :brutal_kill)
@@ -163,8 +166,7 @@ defmodule GiTF.Simulator.SkillsValidatorLoopTest do
       %{
         match: ~r/You are maintaining a library of reusable skills/,
         consume: false,
-        response:
-          ScriptedLLMClient.ok_text(~s({
+        response: ScriptedLLMClient.ok_text(~s({
             "action":"draft_new",
             "target_skill_id":null,
             "name":"lockfile-enforcement",
@@ -191,11 +193,9 @@ defmodule GiTF.Simulator.SkillsValidatorLoopTest do
         consume: false,
         response: ScriptedLLMClient.ok_text("Tried fix.")
       },
-
       simplify_rule("Code Reuse Review"),
       simplify_rule("Code Quality Review"),
       simplify_rule("(?:Code\\s)?Efficiency Review"),
-
       %{
         match: ~r/# Final Scoring/,
         consume: false,

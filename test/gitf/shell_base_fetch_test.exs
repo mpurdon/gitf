@@ -16,11 +16,13 @@ defmodule GiTF.ShellBaseFetchTest do
 
   test "create/3 fetches before building the worktree" do
     # Unconditional, not hidden behind the no-explicit-base path.
-    assert @source =~ ~r/:ok <- fetch_origin\(sector\.path\),\s*\n\s*base_branch = resolve_base_branch/
+    assert @source =~
+             ~r/:ok <- fetch_origin\(sector\.path\),\s*\n\s*base_branch = resolve_base_branch/
   end
 
   test "the fetch is non-fatal so offline sectors still work" do
-    assert @source =~ ~r/defp fetch_origin\(repo_path\) do\s*\n\s*_ = Git\.fetch\(repo_path, "origin"\)\s*\n\s*:ok/
+    assert @source =~
+             ~r/defp fetch_origin\(repo_path\) do\s*\n\s*_ = Git\.fetch\(repo_path, "origin"\)\s*\n\s*:ok/
   end
 
   test "an explicit branch base prefers the remote's version" do

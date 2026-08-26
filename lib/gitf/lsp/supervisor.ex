@@ -35,9 +35,7 @@ defmodule GiTF.LSP.Supervisor do
   def start_client(sector_id, root_path) when is_binary(sector_id) and is_binary(root_path) do
     spec = %{
       id: {GiTF.LSP.Client, sector_id},
-      start:
-        {GiTF.LSP.Client, :start_link,
-         [[root_path: root_path, name: via_name(sector_id)]]},
+      start: {GiTF.LSP.Client, :start_link, [[root_path: root_path, name: via_name(sector_id)]]},
       restart: :transient
     }
 

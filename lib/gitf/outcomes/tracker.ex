@@ -99,7 +99,9 @@ defmodule GiTF.Outcomes.Tracker do
       Outcomes.list_open()
       |> Enum.filter(&due?(&1, now))
       |> Task.async_stream(
-        fn outcome -> safe_run(fn -> poll_one(outcome, now) end, "poll outcome #{outcome.id}") end,
+        fn outcome ->
+          safe_run(fn -> poll_one(outcome, now) end, "poll outcome #{outcome.id}")
+        end,
         max_concurrency: @poll_concurrency,
         timeout: @poll_stream_timeout_ms,
         on_timeout: :kill_task,

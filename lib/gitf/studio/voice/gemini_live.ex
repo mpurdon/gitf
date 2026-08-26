@@ -96,12 +96,15 @@ defmodule GiTF.Studio.Voice.GeminiLive do
     calls = Map.get(tool_call, :function_calls) || []
 
     Enum.each(calls, fn call ->
-      send(owner, {:voice_tool_call,
-       %{
-         id: call[:id] || call["id"],
-         name: call[:name] || call["name"],
-         arguments: call[:args] || call["args"] || %{}
-       }})
+      send(
+        owner,
+        {:voice_tool_call,
+         %{
+           id: call[:id] || call["id"],
+           name: call[:name] || call["name"],
+           arguments: call[:args] || call["args"] || %{}
+         }}
+      )
     end)
 
     # Results are sent asynchronously via send_tool_result/2 once the studio

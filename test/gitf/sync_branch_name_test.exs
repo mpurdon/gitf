@@ -58,7 +58,11 @@ defmodule GiTF.SyncBranchNameTest do
     test "a follow-up builds on the branch under review and keeps its name" do
       # Same branch for both: the PR's head must gain commits, not be
       # replaced by a second branch that opens a second PR.
-      mission = %{id: "msn-bbbbbb", name: "address-review", target_branch: "mission/msn-x-feature"}
+      mission = %{
+        id: "msn-bbbbbb",
+        name: "address-review",
+        target_branch: "mission/msn-x-feature"
+      }
 
       assert {"mission/msn-x-feature", "mission/msn-x-feature"} =
                Sync.quest_target(mission, "main")

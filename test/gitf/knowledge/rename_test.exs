@@ -172,5 +172,4 @@ defmodule GiTF.Knowledge.RenameTest do
       assert Page.get(sector, "q") == nil
     end
   end
-
 end

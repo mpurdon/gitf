@@ -20,7 +20,8 @@ defmodule GiTF.LSP do
   @type position_result :: {:ok, [map()] | map() | nil} | {:error, term()}
 
   @doc "Symbol definition lookup at file/line/character."
-  @spec definition(String.t(), String.t(), non_neg_integer(), non_neg_integer()) :: position_result()
+  @spec definition(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          position_result()
   def definition(sector_id, file_path, line, character) do
     with_client(sector_id, &Client.definition(&1, file_path, line, character))
   end

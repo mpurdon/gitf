@@ -115,7 +115,8 @@ defmodule GiTF.Knowledge.IngestTest do
     end
 
     test "tolerates a non-directory input" do
-      assert %{imported: 0, errors: [{_, :enotdir}]} = Ingest.ingest_directory("/no/such/dir", "fe")
+      assert %{imported: 0, errors: [{_, :enotdir}]} =
+               Ingest.ingest_directory("/no/such/dir", "fe")
     end
   end
 

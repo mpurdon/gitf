@@ -51,6 +51,35 @@ defmodule GiTF.Ledger do
     :exit, _ -> []
   end
 
+  @doc """
+  Per-mode wall-clock and queue-wait percentiles over the ledger's entries.
+
+  Lives here rather than in the MCP handler because the Ledger owns
+  per-mode aggregation — the handler was reimplementing it with its own
+  copy of the percentile function.
+  """
+  @spec wall_clock_stats() :: %{optional(String.t()) => map()}
+  def wall_clock_stats do
+    entries()
+    |> Enum.group_by(& &1.mode)
+    |> Map.new(fn {mode, entries} ->
+      sorted = fn key ->
+        entries |> Enum.map(& &1[key]) |> Enum.filter(&is_number/1) |> Enum.sort()
+      end
+
+      walls = sorted.(:wall_clock_seconds)
+      waits = sorted.(:queue_wait_seconds)
+
+      {mode,
+       %{
+         missions: length(entries),
+         p50_wall_clock_seconds: GiTF.Runtime.CallMetrics.percentile(walls, 0.5),
+         p95_wall_clock_seconds: GiTF.Runtime.CallMetrics.percentile(walls, 0.95),
+         p50_queue_wait_seconds: GiTF.Runtime.CallMetrics.percentile(waits, 0.5)
+       }}
+    end)
+  end
+
   @doc "Manually record a mission outcome (used by orchestrator on completion)."
   @spec record(map()) :: :ok
   def record(mission) do
@@ -141,11 +170,16 @@ defmodule GiTF.Ledger do
     {wall_clock_seconds, queue_wait_seconds} =
       case transitions do
         [first | _] = list ->
-          last = List.last(list)
+          # End at the terminal transition when one exists — a transition
+          # recorded after sealing (rollback bookkeeping, reopened phases)
+          # must not stretch the wall clock the way updated_at drift did.
+          ended =
+            GiTF.Missions.terminal_transition_at(list) ||
+              List.last(list)[:inserted_at]
 
           wall =
             with %DateTime{} = a <- first[:inserted_at],
-                 %DateTime{} = b <- last[:inserted_at] do
+                 %DateTime{} = b <- ended do
               max(DateTime.diff(b, a, :second), 0)
             else
               _ -> nil

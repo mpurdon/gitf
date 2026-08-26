@@ -191,8 +191,11 @@ defmodule GiTF.Knowledge.Index do
 
   defp upsert(record) do
     case get(record.sector_id, record.name) do
-      nil -> Archive.insert(@collection, record)
-      existing -> Archive.update(@collection, existing[:id], fn _ -> Map.put(record, :id, existing[:id]) end)
+      nil ->
+        Archive.insert(@collection, record)
+
+      existing ->
+        Archive.update(@collection, existing[:id], fn _ -> Map.put(record, :id, existing[:id]) end)
     end
   end
 
@@ -221,7 +224,6 @@ defmodule GiTF.Knowledge.Index do
   defp normalize_kind("glossary"), do: :glossary
   defp normalize_kind("map"), do: :map
   defp normalize_kind(_), do: @default_kind
-
 
   defp ignore(_), do: :ok
 end

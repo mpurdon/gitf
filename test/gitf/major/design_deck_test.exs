@@ -57,8 +57,17 @@ defmodule GiTF.Major.DesignDeckTest do
           "headline" => "Same shape, different rigor.",
           "convergence" => "All three touched the same files.",
           "decision" => "normal won on rigor.",
-          "designs" => [%{"strategy" => "normal", "character" => "careful", "notable" => ["saw the race"], "missed" => []}],
-          "watch_items" => [%{"concern" => "cross-window save", "why_it_matters" => "lost update"}]
+          "designs" => [
+            %{
+              "strategy" => "normal",
+              "character" => "careful",
+              "notable" => ["saw the race"],
+              "missed" => []
+            }
+          ],
+          "watch_items" => [
+            %{"concern" => "cross-window save", "why_it_matters" => "lost update"}
+          ]
         },
         "review" => %{"selected_design" => "normal", "approved" => true}
       })

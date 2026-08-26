@@ -130,7 +130,12 @@ defmodule GiTF.Intel.PromptContext do
 
   defp add_risky_patterns(sections, _), do: sections
 
-  defp add_merge_success(sections, %{rate: rate, sample_count: n, reverted_count: rev, trend: trend})
+  defp add_merge_success(sections, %{
+         rate: rate,
+         sample_count: n,
+         reverted_count: rev,
+         trend: trend
+       })
        when is_number(rate) and n > 0 do
     trend_part =
       case trend do

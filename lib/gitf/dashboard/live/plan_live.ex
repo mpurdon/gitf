@@ -386,10 +386,10 @@ defmodule GiTF.Dashboard.PlanLive do
     lanes =
       case mode do
         :live ->
-          compute_lanes(lane_nodes(:live, impl_ops, dep_map))
+          compute_lanes(live_lane_nodes(impl_ops, dep_map))
 
         :plan_only ->
-          compute_lanes(lane_nodes(:plan_only, normalize_plan_specs(plan_artifact), dep_map))
+          compute_lanes(spec_lane_nodes(normalize_plan_specs(plan_artifact)))
       end
 
     ghost_names = build_ghost_names(impl_ops)
@@ -431,28 +431,25 @@ defmodule GiTF.Dashboard.PlanLive do
   def compute_lanes(nodes) do
     by_key = Map.new(nodes, fn {key, _deps, _item} = n -> {key, n} end)
 
-    depth_of = fn depth_of, key, seen ->
-      case Map.get(by_key, key) do
-        nil ->
-          -1
-
-        {_key, deps, _item} ->
-          deps
-          |> Enum.reject(&MapSet.member?(seen, &1))
-          |> Enum.map(&depth_of.(depth_of, &1, MapSet.put(seen, key)))
-          |> case do
-            [] -> 0
-            ds -> Enum.max(ds) + 1
-          end
-      end
-    end
-
     nodes
-    |> Enum.group_by(fn {key, _deps, _item} -> depth_of.(depth_of, key, MapSet.new()) end)
+    |> Enum.group_by(fn {key, _deps, _item} -> depth_of(by_key, key, MapSet.new()) end)
     |> Enum.sort_by(fn {depth, _} -> depth end)
     |> Enum.map(fn {depth, lane_nodes} ->
       {depth, Enum.map(lane_nodes, fn {_k, _d, item} -> item end)}
     end)
+  end
+
+  defp depth_of(by_key, key, seen) do
+    case Map.get(by_key, key) do
+      nil ->
+        -1
+
+      {_key, deps, _item} ->
+        case Enum.reject(deps, &MapSet.member?(seen, &1)) do
+          [] -> 0
+          ds -> 1 + Enum.max(Enum.map(ds, &depth_of(by_key, &1, MapSet.put(seen, key))))
+        end
+    end
   end
 
   defp lane_color(item) do
@@ -465,14 +462,14 @@ defmodule GiTF.Dashboard.PlanLive do
     end
   end
 
-  defp lane_nodes(:live, ops, dep_map) do
+  defp live_lane_nodes(ops, dep_map) do
     Enum.map(ops, fn op ->
       dep_ids = dep_map |> Map.get(op.id, []) |> Enum.map(& &1.id)
       {op.id, dep_ids, op}
     end)
   end
 
-  defp lane_nodes(:plan_only, specs, _dep_map) do
+  defp spec_lane_nodes(specs) do
     specs
     |> Enum.with_index()
     |> Enum.map(fn {spec, idx} ->

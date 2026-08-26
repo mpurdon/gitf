@@ -21,8 +21,12 @@ defmodule GiTF.GitHub.CLITest do
         "closedAt" => nil,
         "title" => "x",
         "reviews" => [
-          %{"author" => %{"login" => "alice"}, "state" => "CHANGES_REQUESTED",
-            "submittedAt" => "2026-04-23T11:00:00Z", "body" => "fix this"},
+          %{
+            "author" => %{"login" => "alice"},
+            "state" => "CHANGES_REQUESTED",
+            "submittedAt" => "2026-04-23T11:00:00Z",
+            "body" => "fix this"
+          },
           %{"state" => "APPROVED"}
         ],
         "statusCheckRollup" => []
@@ -34,8 +38,10 @@ defmodule GiTF.GitHub.CLITest do
       reviews = decoded["reviews"]
       normalized = apply_normalize(reviews)
 
-      assert [%{author: "alice", state: "CHANGES_REQUESTED", body: "fix this"},
-              %{author: nil, state: "APPROVED"}] = normalized
+      assert [
+               %{author: "alice", state: "CHANGES_REQUESTED", body: "fix this"},
+               %{author: nil, state: "APPROVED"}
+             ] = normalized
     end
   end
 

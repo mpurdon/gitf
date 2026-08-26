@@ -17,9 +17,15 @@ defmodule GiTF.MCPServer.LspToolsTest do
     test "each new tool declares required parameters" do
       tools = Tools.all() |> Enum.into(%{}, fn t -> {t.name, t} end)
 
-      assert ["sector_id", "file_path"] == Map.get(tools["lsp_diagnostics"].inputSchema, :required)
-      assert ["sector_id", "file_path"] == Map.get(tools["lsp_document_symbol"].inputSchema, :required)
-      assert ["sector_id", "query"] == Map.get(tools["lsp_workspace_symbol"].inputSchema, :required)
+      assert ["sector_id", "file_path"] ==
+               Map.get(tools["lsp_diagnostics"].inputSchema, :required)
+
+      assert ["sector_id", "file_path"] ==
+               Map.get(tools["lsp_document_symbol"].inputSchema, :required)
+
+      assert ["sector_id", "query"] ==
+               Map.get(tools["lsp_workspace_symbol"].inputSchema, :required)
+
       assert ["edit"] == Map.get(tools["lsp_apply_code_action"].inputSchema, :required)
     end
   end

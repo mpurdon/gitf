@@ -24,7 +24,8 @@ defmodule GiTF.MCPServer.ProjectToolsTest do
         assert Map.has_key?(tools, name), "expected MCP tool #{inspect(name)} to be registered"
       end
 
-      for name <- ~w(create_project approve_project update_project_roadmap pause_project resume_project) do
+      for name <-
+            ~w(create_project approve_project update_project_roadmap pause_project resume_project) do
         required = Map.get(tools[name].inputSchema, :required) || []
         assert "confirm" in required, "#{name} must require confirm"
       end

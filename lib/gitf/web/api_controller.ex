@@ -620,11 +620,12 @@ defmodule GiTF.Web.ApiController do
 
   defp valid_sync_strategy?(_), do: true
 
-  # `nil` clears the override and hands the sector back to the derived default.
+  # `nil` clears the override and hands the sector back to the derived
+  # default. Bounds are GiTF.Validator's — one owner for all three surfaces.
   defp valid_validation_timeout?(%{validation_timeout_ms: nil}), do: true
 
   defp valid_validation_timeout?(%{validation_timeout_ms: ms}),
-    do: is_integer(ms) and ms > 0
+    do: match?({:ok, _}, GiTF.Validator.validate_timeout_override(ms))
 
   defp valid_validation_timeout?(_), do: true
 

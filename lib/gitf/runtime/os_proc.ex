@@ -147,8 +147,12 @@ defmodule GiTF.Runtime.OsProc do
 
   defp do_wait(os_pid, deadline) do
     cond do
-      not alive?(os_pid) -> true
-      System.monotonic_time(:millisecond) >= deadline -> false
+      not alive?(os_pid) ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        false
+
       true ->
         Process.sleep(100)
         do_wait(os_pid, deadline)

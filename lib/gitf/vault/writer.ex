@@ -239,8 +239,11 @@ defmodule GiTF.Vault.Writer do
       file = VPath.mission_file(gitf_root, sector_id, mission_id, title)
 
       case VFile.write(file, body) do
-        {:ok, _hash} -> :ok
-        {:error, reason} -> Logger.warning("Vault.Writer mission write failed: #{inspect(reason)}")
+        {:ok, _hash} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Vault.Writer mission write failed: #{inspect(reason)}")
       end
     else
       _ -> :ok
@@ -391,5 +394,4 @@ defmodule GiTF.Vault.Writer do
   defp active_ghosts do
     Archive.filter(:ghosts, fn g -> g[:status] in [:running, "running", :provisioning] end)
   end
-
 end

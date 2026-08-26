@@ -288,7 +288,7 @@ defmodule GiTF.Test.Simulator do
     impl_op =
       ops
       |> Enum.filter(fn op ->
-        (op[:phase_job] in [nil, false]) and
+        op[:phase_job] in [nil, false] and
           op.status in ["running", "assigned"] and
           is_binary(op[:ghost_id])
       end)

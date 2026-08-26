@@ -49,7 +49,8 @@ defmodule GiTF.Dashboard.WorkflowsLive do
         {:noreply, push_toast(socket, "Workflow name is required", :error)}
 
       not Regex.match?(~r/^[a-z0-9][a-z0-9-]*$/, name) ->
-        {:noreply, push_toast(socket, "Name must be lowercase letters, digits, and hyphens", :error)}
+        {:noreply,
+         push_toast(socket, "Name must be lowercase letters, digits, and hyphens", :error)}
 
       true ->
         create_from_template(socket, name, template, sector)
@@ -195,7 +196,8 @@ defmodule GiTF.Dashboard.WorkflowsLive do
        |> push_navigate(to: "/dashboard/workflows/" <> name)}
     else
       {:error, :exists} ->
-        {:noreply, push_toast(socket, "Workflow \"#{name}\" already exists at that scope", :error)}
+        {:noreply,
+         push_toast(socket, "Workflow \"#{name}\" already exists at that scope", :error)}
 
       {:error, reason} ->
         {:noreply, push_toast(socket, "Create failed: #{inspect(reason)}", :error)}

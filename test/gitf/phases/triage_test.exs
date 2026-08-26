@@ -10,7 +10,14 @@ defmodule GiTF.Phases.TriageTest do
       GiTF.Archive.insert(
         :missions,
         Map.merge(
-          %{name: "t", goal: "x", status: "active", sector_id: "fe", current_phase: "triage", artifacts: %{}},
+          %{
+            name: "t",
+            goal: "x",
+            status: "active",
+            sector_id: "fe",
+            current_phase: "triage",
+            artifacts: %{}
+          },
           attrs
         )
       )
@@ -96,7 +103,12 @@ defmodule GiTF.Phases.TriageTest do
     end
 
     test "before_advance's no_work_needed stamp is visible to the conditional next (Advancer re-reads the artifact)" do
-      art = %{"bug_reproducible" => false, "bug_evidence" => "lib/foo.ex:42 — already handled", "complexity" => "simple"}
+      art = %{
+        "bug_reproducible" => false,
+        "bug_evidence" => "lib/foo.ex:42 — already handled",
+        "complexity" => "simple"
+      }
+
       m = insert_mission!(%{current_phase: "triage", artifacts: %{"triage" => art}})
       assert :complete = Advancer.decide(m, triage_workflow())
     end
@@ -108,7 +120,12 @@ defmodule GiTF.Phases.TriageTest do
     end
 
     test "no skip flags → research" do
-      m = insert_mission!(%{current_phase: "triage", artifacts: %{"triage" => %{"complexity" => "complex"}}})
+      m =
+        insert_mission!(%{
+          current_phase: "triage",
+          artifacts: %{"triage" => %{"complexity" => "complex"}}
+        })
+
       assert {:dispatch, "research"} = Advancer.decide(m, triage_workflow())
     end
 

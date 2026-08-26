@@ -18,7 +18,9 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
       raise "SKIP: #{@source_store}/section.etf not found"
     end
 
-    tmp_dir = Path.join(System.tmp_dir!(), "gitf_migration_test_#{System.unique_integer([:positive])}")
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "gitf_migration_test_#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(tmp_dir)
     File.cp!(Path.join(@source_store, "section.etf"), Path.join(tmp_dir, "section.etf"))
 
@@ -35,9 +37,19 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
     stop_archive()
 
     # Clean stale ETS
-    for col <- (try do :persistent_term.get({GiTF.Archive, :collections}, MapSet.new()) rescue _ -> MapSet.new() end) do
-      try do :ets.delete(:"gitf_archive_#{col}") rescue _ -> :ok end
+    for col <-
+          (try do
+             :persistent_term.get({GiTF.Archive, :collections}, MapSet.new())
+           rescue
+             _ -> MapSet.new()
+           end) do
+      try do
+        :ets.delete(:"gitf_archive_#{col}")
+      rescue
+        _ -> :ok
+      end
     end
+
     GiTF.Archive.Indexes.delete_tables()
 
     # Start Archive — triggers migration
@@ -53,11 +65,25 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
 
   defp stop_archive do
     case Process.whereis(GiTF.Archive) do
-      nil -> :ok
+      nil ->
+        :ok
+
       pid ->
-        try do GenServer.stop(pid, :normal, 5_000) rescue _ -> :ok catch :exit, _ -> :ok end
+        try do
+          GenServer.stop(pid, :normal, 5_000)
+        rescue
+          _ -> :ok
+        catch
+          :exit, _ -> :ok
+        end
+
         ref = Process.monitor(pid)
-        receive do {:DOWN, ^ref, _, _, _} -> :ok after 5_000 -> :ok end
+
+        receive do
+          {:DOWN, ^ref, _, _, _} -> :ok
+        after
+          5_000 -> :ok
+        end
     end
   end
 
@@ -65,9 +91,13 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
   test "migration from old format preserves all data", ctx do
     old_data = ctx.old_data
     old_collections = Map.keys(old_data) |> Enum.filter(&is_atom/1)
-    old_record_count = Enum.sum(for {col, records} <- old_data, is_atom(col), do: map_size(records))
 
-    IO.puts("\n  Old format: #{length(old_collections)} collections, #{old_record_count} total records, #{ctx.old_binary_size} bytes")
+    old_record_count =
+      Enum.sum(for {col, records} <- old_data, is_atom(col), do: map_size(records))
+
+    IO.puts(
+      "\n  Old format: #{length(old_collections)} collections, #{old_record_count} total records, #{ctx.old_binary_size} bytes"
+    )
 
     # Verify migration happened
     assert File.exists?(Path.join(ctx.store_dir, "manifest.etf"))
@@ -80,7 +110,9 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
     end
 
     # Verify manifest
-    manifest = File.read!(Path.join(ctx.store_dir, "manifest.etf")) |> :erlang.binary_to_term([:safe])
+    manifest =
+      File.read!(Path.join(ctx.store_dir, "manifest.etf")) |> :erlang.binary_to_term([:safe])
+
     assert manifest.schema_version == 1
     assert Enum.sort(manifest.collections) == Enum.sort(old_collections)
 
@@ -93,7 +125,9 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
       end
     end
 
-    IO.puts("  Migration: #{length(old_collections)} collections, #{old_record_count} records — all verified")
+    IO.puts(
+      "  Migration: #{length(old_collections)} collections, #{old_record_count} records — all verified"
+    )
   end
 
   @tag :integration
@@ -106,8 +140,10 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
       for status <- statuses do
         by_filter = GiTF.Archive.filter(:ops, &(&1.status == status))
         by_index = GiTF.Archive.by_index(:ops, :status, status)
+
         assert length(by_index) == length(by_filter),
-          "ops status=#{status}: filter=#{length(by_filter)}, index=#{length(by_index)}"
+               "ops status=#{status}: filter=#{length(by_filter)}, index=#{length(by_index)}"
+
         assert MapSet.new(by_index, & &1.id) == MapSet.new(by_filter, & &1.id)
       end
 
@@ -119,7 +155,9 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
         assert length(by_index) == length(by_filter)
       end
 
-      IO.puts("\n  Indexes verified: #{length(all_ops)} ops, #{length(statuses)} statuses, #{length(mission_ids)} missions")
+      IO.puts(
+        "\n  Indexes verified: #{length(all_ops)} ops, #{length(statuses)} statuses, #{length(mission_ids)} missions"
+      )
     else
       IO.puts("\n  SKIP: no ops data for index verification")
     end
@@ -150,13 +188,15 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
       GiTF.Archive.filter(:ops, &(&1.status == status))
       GiTF.Archive.by_index(:ops, :status, status)
 
-      {filter_us, _} = :timer.tc(fn ->
-        for _ <- 1..100, do: GiTF.Archive.filter(:ops, &(&1.status == status))
-      end)
+      {filter_us, _} =
+        :timer.tc(fn ->
+          for _ <- 1..100, do: GiTF.Archive.filter(:ops, &(&1.status == status))
+        end)
 
-      {index_us, _} = :timer.tc(fn ->
-        for _ <- 1..100, do: GiTF.Archive.by_index(:ops, :status, status)
-      end)
+      {index_us, _} =
+        :timer.tc(fn ->
+          for _ <- 1..100, do: GiTF.Archive.by_index(:ops, :status, status)
+        end)
 
       filter_avg = filter_us / 100
       index_avg = index_us / 100
@@ -180,8 +220,13 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
     stop_archive()
 
     for col <- :persistent_term.get({GiTF.Archive, :collections}, MapSet.new()) do
-      try do :ets.delete(:"gitf_archive_#{col}") rescue _ -> :ok end
+      try do
+        :ets.delete(:"gitf_archive_#{col}")
+      rescue
+        _ -> :ok
+      end
     end
+
     GiTF.Archive.Indexes.delete_tables()
 
     assert File.exists?(Path.join(ctx.store_dir, "section.etf.pre_migration"))
@@ -196,11 +241,12 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
 
   @tag :integration
   test "write to migrated store persists correctly", ctx do
-    {:ok, record} = GiTF.Archive.insert(:ops, %{
-      status: "test_status",
-      mission_id: "test_mission",
-      description: "integration test record"
-    })
+    {:ok, record} =
+      GiTF.Archive.insert(:ops, %{
+        status: "test_status",
+        mission_id: "test_mission",
+        description: "integration test record"
+      })
 
     by_index = GiTF.Archive.by_index(:ops, :status, "test_status")
     assert length(by_index) == 1
@@ -213,9 +259,10 @@ defmodule GiTF.Archive.MigrationIntegrationTest do
     ops_data = File.read!(ops_etf) |> :erlang.binary_to_term([:safe])
     assert Map.has_key?(ops_data, record.id)
 
-    {:ok, updated, %{transitioned: true}} = GiTF.Archive.update(:ops, record.id, fn op ->
-      {:ok, %{op | status: "updated_status"}, %{transitioned: true}}
-    end)
+    {:ok, updated, %{transitioned: true}} =
+      GiTF.Archive.update(:ops, record.id, fn op ->
+        {:ok, %{op | status: "updated_status"}, %{transitioned: true}}
+      end)
 
     assert updated.status == "updated_status"
     assert GiTF.Archive.by_index(:ops, :status, "test_status") == []

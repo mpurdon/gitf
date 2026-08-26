@@ -228,11 +228,17 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
         end
 
       {:ok, %{status: 401}} ->
-        Logger.error("Telegram poll: bot token rejected (401) — inbound commands are dead until the token is fixed")
+        Logger.error(
+          "Telegram poll: bot token rejected (401) — inbound commands are dead until the token is fixed"
+        )
+
         state
 
       {:ok, %{status: 409}} ->
-        Logger.error("Telegram poll: another instance is polling this bot token (409) — updates are being stolen")
+        Logger.error(
+          "Telegram poll: another instance is polling this bot token (409) — updates are being stolen"
+        )
+
         state
 
       _ ->

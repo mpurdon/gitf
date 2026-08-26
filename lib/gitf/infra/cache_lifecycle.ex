@@ -88,7 +88,10 @@ defmodule GiTF.Infra.CacheLifecycle do
 
     npm_dropped =
       if gb(report.npm_cache.bytes) > @npm_cache_max_gb do
-        Logger.warning("npm cache #{gb(report.npm_cache.bytes)}GB over #{@npm_cache_max_gb}GB — purging")
+        Logger.warning(
+          "npm cache #{gb(report.npm_cache.bytes)}GB over #{@npm_cache_max_gb}GB — purging"
+        )
+
         purge_npm_cache(report.npm_cache.path)
         true
       else

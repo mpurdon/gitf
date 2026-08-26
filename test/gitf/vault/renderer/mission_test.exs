@@ -109,7 +109,7 @@ defmodule GiTF.Vault.Renderer.MissionTest do
       out = Mission.render(base_mission(), linked: ["auth-flow", "auth-flow", "indexes/api"])
       assert out =~ "- [[auth-flow]]"
       assert out =~ "- [[indexes/api]]"
-      assert (out |> String.split("\n") |> Enum.count(&String.contains?(&1, "[[auth-flow]]"))) == 1
+      assert out |> String.split("\n") |> Enum.count(&String.contains?(&1, "[[auth-flow]]")) == 1
     end
   end
 

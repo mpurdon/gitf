@@ -8,7 +8,15 @@ defmodule GiTF.Phases.AwaitingApprovalTest do
       GiTF.Archive.insert(
         :missions,
         Map.merge(
-          %{name: "a", goal: "x", status: "active", sector_id: "fe", current_phase: "awaiting_approval", artifacts: %{}, ops: []},
+          %{
+            name: "a",
+            goal: "x",
+            status: "active",
+            sector_id: "fe",
+            current_phase: "awaiting_approval",
+            artifacts: %{},
+            ops: []
+          },
           attrs
         )
       )

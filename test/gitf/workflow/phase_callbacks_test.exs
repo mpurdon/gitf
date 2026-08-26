@@ -51,7 +51,10 @@ defmodule GiTF.Workflow.PhaseCallbacksTest do
     {:ok, m} =
       GiTF.Archive.insert(
         :missions,
-        Map.merge(%{name: "p", goal: "x", status: "active", sector_id: "fe", artifacts: %{}}, attrs)
+        Map.merge(
+          %{name: "p", goal: "x", status: "active", sector_id: "fe", artifacts: %{}},
+          attrs
+        )
       )
 
     m

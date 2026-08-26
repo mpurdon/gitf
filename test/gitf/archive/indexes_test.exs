@@ -100,6 +100,7 @@ defmodule GiTF.Archive.IndexesTest do
 
       assert Archive.count_by_index(:ops, :status, "pending") == 2
       assert Archive.count_by_index(:ops, :status, "done") == 1
+
       assert Archive.count_by_index(:ops, :status, "pending") ==
                length(Archive.by_index(:ops, :status, "pending"))
     end

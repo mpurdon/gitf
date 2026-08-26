@@ -16,7 +16,12 @@ defmodule GiTF.MissionsInferenceAsyncTest do
 
     @impl true
     def generate_text(_model, _messages, _opts) do
-      payload = Process.get(:mock_payload, ~s({"workflow":"bug-fix","confidence":0.9,"rationale":"fast fix"}))
+      payload =
+        Process.get(
+          :mock_payload,
+          ~s({"workflow":"bug-fix","confidence":0.9,"rationale":"fast fix"})
+        )
+
       {:ok, %{message: %{content: [%{text: payload}]}}}
     end
   end

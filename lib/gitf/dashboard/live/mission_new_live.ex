@@ -83,7 +83,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
 
       name = "GH-#{number}: #{String.slice(title, 0, 60)}"
 
-      label_names = Enum.map(issue["labels"] || [], & String.downcase(&1["name"] || ""))
+      label_names = Enum.map(issue["labels"] || [], &String.downcase(&1["name"] || ""))
       is_bug = "bug" in label_names
 
       form =
@@ -214,14 +214,20 @@ defmodule GiTF.Dashboard.MissionNewLive do
     end)
   end
 
-  defp issue_row_style(true), do: "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid #21262d; background:#1a2a3a"
-  defp issue_row_style(false), do: "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid #21262d"
+  defp issue_row_style(true),
+    do:
+      "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid #21262d; background:#1a2a3a"
+
+  defp issue_row_style(false),
+    do:
+      "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid #21262d"
 
   defp issue_title_style(true), do: "font-size:0.85rem; color:#58a6ff; font-weight:600"
   defp issue_title_style(false), do: "font-size:0.85rem; color:#c9d1d9"
 
   defp label_style(color) do
     c = color || "6b7280"
+
     "font-size:0.7rem; padding:0 0.4rem; border-radius:10px; background:##{c}22; color:##{c}; border:1px solid ##{c}55"
   end
 

@@ -8,7 +8,9 @@ defmodule GiTF.Skills.InstallTest do
     GiTF.Archive.all(:skills)
     |> Enum.each(fn s -> GiTF.Archive.delete(:skills, s.id) end)
 
-    worktree = Path.join(System.tmp_dir!(), "gitf_skills_install_#{:erlang.unique_integer([:positive])}")
+    worktree =
+      Path.join(System.tmp_dir!(), "gitf_skills_install_#{:erlang.unique_integer([:positive])}")
+
     File.mkdir_p!(worktree)
     on_exit(fn -> File.rm_rf!(worktree) end)
 
@@ -35,7 +37,9 @@ defmodule GiTF.Skills.InstallTest do
       assert reloaded.applied_count == 1
     end
 
-    test "is idempotent — second install with identical content does not bump counter", %{worktree: wt} do
+    test "is idempotent — second install with identical content does not bump counter", %{
+      worktree: wt
+    } do
       {:ok, skill} = Skills.create(%{name: "y", description: "d", body: "stable", scope: :global})
 
       Install.install_into_worktree([skill], wt)

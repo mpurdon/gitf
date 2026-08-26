@@ -54,7 +54,8 @@ defmodule GiTF.Dashboard.AppLayout do
 
     GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
       type: :emergency_stop,
-      message: "Stop All triggered from the dashboard: #{stopped}/#{length(working)} ghosts stopped"
+      message:
+        "Stop All triggered from the dashboard: #{stopped}/#{length(working)} ghosts stopped"
     })
 
     # Result stays in the component's own assigns. Messaging the parent would

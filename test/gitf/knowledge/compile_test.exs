@@ -16,7 +16,10 @@ defmodule GiTF.Knowledge.CompileTest do
 
   setup do
     gitf_root =
-      Path.join(System.tmp_dir!(), "knowledge-compile-test-#{:erlang.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "knowledge-compile-test-#{:erlang.unique_integer([:positive])}"
+      )
 
     File.mkdir_p!(Path.join(gitf_root, ".gitf"))
     File.write!(Path.join([gitf_root, ".gitf", "config.toml"]), "")
@@ -30,8 +33,13 @@ defmodule GiTF.Knowledge.CompileTest do
     Application.put_env(:gitf, :knowledge_compile_enabled, true)
 
     on_exit(fn ->
-      if prior_path, do: System.put_env("GITF_PATH", prior_path), else: System.delete_env("GITF_PATH")
-      if prior_llm, do: Application.put_env(:gitf, :llm_client, prior_llm), else: Application.delete_env(:gitf, :llm_client)
+      if prior_path,
+        do: System.put_env("GITF_PATH", prior_path),
+        else: System.delete_env("GITF_PATH")
+
+      if prior_llm,
+        do: Application.put_env(:gitf, :llm_client, prior_llm),
+        else: Application.delete_env(:gitf, :llm_client)
 
       if prior_enabled,
         do: Application.put_env(:gitf, :knowledge_compile_enabled, prior_enabled),
@@ -68,7 +76,9 @@ defmodule GiTF.Knowledge.CompileTest do
     test "is a no-op when feature flag is off" do
       Application.put_env(:gitf, :knowledge_compile_enabled, false)
 
-      set_llm_payload(~s({"pages": [{"slug": "auth-flow", "title": "Auth Flow", "body": "x", "tags": []}]}))
+      set_llm_payload(
+        ~s({"pages": [{"slug": "auth-flow", "title": "Auth Flow", "body": "x", "tags": []}]})
+      )
 
       assert :ok = Compile.compile_after_merge(mission(), outcome())
       assert Page.get("fe", "auth-flow") == nil
@@ -146,7 +156,8 @@ defmodule GiTF.Knowledge.CompileTest do
 
   describe "compile_after_merge/2 — index updates" do
     test "appends an entry to an existing index" do
-      {:ok, _idx} = Index.put(%{name: "API Endpoints", sector_id: "fe", body: "- [[existing]] — old"})
+      {:ok, _idx} =
+        Index.put(%{name: "API Endpoints", sector_id: "fe", body: "- [[existing]] — old"})
 
       set_llm_payload(~s({
         "pages": [{"slug": "auth-flow", "title": "Auth", "body": "x", "tags": []}],

@@ -124,56 +124,75 @@ defmodule GiTF.Intel.FailureAnalysis do
   # `:keywords` is a list of strings; classification matches the first
   # type whose keywords ALL appear in the combined error/feedback text.
   @failure_specs [
-    {:empty_completion, %{
+    {:empty_completion,
+     %{
        keywords: ["0 file changes"],
-       root_cause: "Ghost reported success but produced 0 file changes — model failed to invoke edit tools",
+       root_cause:
+         "Ghost reported success but produced 0 file changes — model failed to invoke edit tools",
        suggestions: [
          "Use a more capable model that reliably invokes file-edit tools",
          "Verify the prompt explicitly requires file edits before claiming completion",
          "Check that the model received the expected target files"
        ]
      }},
-    {:timeout, %{
+    {:timeout,
+     %{
        keywords: ["timeout"],
        root_cause: "Job exceeded time limit",
-       suggestions: ["Break op into smaller tasks", "Increase timeout limit", "Simplify requirements"]
+       suggestions: [
+         "Break op into smaller tasks",
+         "Increase timeout limit",
+         "Simplify requirements"
+       ]
      }},
-    {:compilation_error, %{
+    {:compilation_error,
+     %{
        keywords: ["compilation"],
        root_cause: &__MODULE__.extract_compilation_error/1,
        suggestions: ["Review syntax errors", "Check dependencies", "Verify imports"]
      }},
-    {:test_failure, %{
+    {:test_failure,
+     %{
        keywords: ["test", "failed"],
        root_cause: &__MODULE__.extract_test_failure/1,
        suggestions: ["Review test expectations", "Check test data", "Verify logic"]
      }},
-    {:context_overflow, %{
+    {:context_overflow,
+     %{
        keywords: ["context"],
        root_cause: "Context usage exceeded limit",
        suggestions: ["Create transfer", "Simplify op scope", "Use more focused context"]
      }},
-    {:validation_failure, %{
+    {:validation_failure,
+     %{
        keywords: ["validation"],
        root_cause: "Validation command failed",
        suggestions: ["Fix validation errors", "Update validation command", "Review changes"]
      }},
-    {:quality_gate_failure, %{
+    {:quality_gate_failure,
+     %{
        keywords: ["quality"],
        root_cause: "Code quality below threshold",
        suggestions: ["Improve code quality", "Fix linting issues", "Refactor complex code"]
      }},
-    {:security_gate_failure, %{
+    {:security_gate_failure,
+     %{
        keywords: ["security"],
        root_cause: "Security issues detected",
        suggestions: ["Remove secrets", "Update dependencies", "Fix vulnerabilities"]
      }},
-    {:merge_conflict, %{
+    {:merge_conflict,
+     %{
        keywords: ["sync"],
        root_cause: "Git merge conflict",
-       suggestions: ["Resolve conflicts manually", "Rebase on latest", "Retry with fresh worktree"]
+       suggestions: [
+         "Resolve conflicts manually",
+         "Rebase on latest",
+         "Retry with fresh worktree"
+       ]
      }},
-    {:unknown, %{
+    {:unknown,
+     %{
        keywords: [],
        root_cause: "Unknown failure cause",
        suggestions: ["Review error logs", "Check ghost status", "Retry with different model"]
@@ -185,7 +204,10 @@ defmodule GiTF.Intel.FailureAnalysis do
 
   defp classify_failure(op, feedback) do
     combined =
-      Enum.join([Map.get(op, :error_message, ""), Map.get(op, :audit_result, ""), feedback || ""], " ")
+      Enum.join(
+        [Map.get(op, :error_message, ""), Map.get(op, :audit_result, ""), feedback || ""],
+        " "
+      )
 
     Enum.find_value(@failure_specs, :unknown, fn {type, %{keywords: kws}} ->
       if kws != [] and Enum.all?(kws, &String.contains?(combined, &1)), do: type
@@ -254,5 +276,4 @@ defmodule GiTF.Intel.FailureAnalysis do
     |> Enum.take(3)
     |> Enum.map(fn {cause, _} -> cause end)
   end
-
 end

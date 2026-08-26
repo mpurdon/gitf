@@ -127,7 +127,10 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
         "body" => "still wrong",
         "submitted_at" => "2026-08-23T11:30:00Z"
       })
-    assert {:ok, :mission_created, m} = ReviewIntake.dispatch(payload(ctx.url, %{"review" => later}))
+
+    assert {:ok, :mission_created, m} =
+             ReviewIntake.dispatch(payload(ctx.url, %{"review" => later}))
+
     assert m.goal =~ "still wrong"
   end
 
@@ -175,7 +178,12 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
     outcome = Outcomes.get_by_pr_url(ctx.url)
 
     reviews = [
-      %{author: "mpurdon", state: "CHANGES_REQUESTED", submitted_at: "2026-08-23T12:00:00Z", body: "fix the drawer"},
+      %{
+        author: "mpurdon",
+        state: "CHANGES_REQUESTED",
+        submitted_at: "2026-08-23T12:00:00Z",
+        body: "fix the drawer"
+      },
       %{author: "someone", state: "APPROVED", submitted_at: "2026-08-23T12:05:00Z", body: "lgtm"}
     ]
 
@@ -242,6 +250,7 @@ defmodule GiTF.GitHub.ReviewIntakeTest do
   test "an unactionable review is not marked handled, so it can be retried", ctx do
     tracked_pr(ctx.url)
     blank = review(ctx.url, %{"body" => "   "})
+
     assert {:ok, :ignored, :no_actionable_content} =
              ReviewIntake.dispatch(payload(ctx.url, %{"review" => blank}))
 

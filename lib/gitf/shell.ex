@@ -261,6 +261,7 @@ defmodule GiTF.Shell do
             %DateTime{} = t -> GiTF.Clock.awake_elapsed(t) < @branch_protection_ttl_seconds
             _ -> true
           end
+
         active? = m[:status] in ["active", "running"] or m[:phase] in active_phases
         recent? and active?
       end)
@@ -304,7 +305,8 @@ defmodule GiTF.Shell do
   defp resolve_base_branch(repo_path, nil), do: remote_base_branch(repo_path)
 
   defp resolve_base_branch(repo_path, base) when is_binary(base) do
-    if String.starts_with?(base, "origin/") or not Git.remote_branch_exists?(repo_path, "origin/#{base}") do
+    if String.starts_with?(base, "origin/") or
+         not Git.remote_branch_exists?(repo_path, "origin/#{base}") do
       base
     else
       "origin/#{base}"

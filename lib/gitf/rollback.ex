@@ -213,7 +213,9 @@ defmodule GiTF.Rollback do
         true
 
       {output, _} ->
-        Logger.error("Revert push FAILED — origin still carries the bad merge: #{String.slice(output, 0, 200)}")
+        Logger.error(
+          "Revert push FAILED — origin still carries the bad merge: #{String.slice(output, 0, 200)}"
+        )
 
         GiTF.Observability.Alerts.dispatch_webhook(
           :revert_push_failed,

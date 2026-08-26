@@ -131,7 +131,9 @@ defmodule GiTF.Aramaki do
   end
 
   defp admit(mission) do
-    Logger.info("Aramaki: starting mission #{mission.id} (priority #{Map.get(mission, :aramaki_priority, 2)})")
+    Logger.info(
+      "Aramaki: starting mission #{mission.id} (priority #{Map.get(mission, :aramaki_priority, 2)})"
+    )
 
     case GiTF.Major.Orchestrator.start_quest(mission.id) do
       {:ok, _} ->

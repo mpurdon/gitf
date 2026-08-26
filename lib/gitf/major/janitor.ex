@@ -358,9 +358,7 @@ defmodule GiTF.Major.Janitor do
   end
 
   defp handle_hard_stall(ghost, seconds_since) do
-    Logger.warning(
-      "Hard-stall: ghost #{ghost.id} unresponsive for #{seconds_since}s, failing op"
-    )
+    Logger.warning("Hard-stall: ghost #{ghost.id} unresponsive for #{seconds_since}s, failing op")
 
     GiTF.Observability.Alerts.dispatch_webhook(
       :ghost_hard_stalled,

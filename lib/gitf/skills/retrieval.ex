@@ -112,7 +112,10 @@ defmodule GiTF.Skills.Retrieval do
     end)
   rescue
     e ->
-      Logger.warning("Skills.Retrieval: persist_embedding for #{id} failed: #{Exception.message(e)}")
+      Logger.warning(
+        "Skills.Retrieval: persist_embedding for #{id} failed: #{Exception.message(e)}"
+      )
+
       :ok
   end
 

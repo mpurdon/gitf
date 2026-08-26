@@ -19,7 +19,10 @@ defmodule GiTF.Knowledge.RetrievalTest do
 
   setup do
     gitf_root =
-      Path.join(System.tmp_dir!(), "knowledge-retrieval-test-#{:erlang.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "knowledge-retrieval-test-#{:erlang.unique_integer([:positive])}"
+      )
 
     File.mkdir_p!(Path.join(gitf_root, ".gitf"))
     File.write!(Path.join([gitf_root, ".gitf", "config.toml"]), "")
@@ -31,7 +34,9 @@ defmodule GiTF.Knowledge.RetrievalTest do
     Application.put_env(:gitf, :embedding_client, MockClient)
 
     on_exit(fn ->
-      if prior_path, do: System.put_env("GITF_PATH", prior_path), else: System.delete_env("GITF_PATH")
+      if prior_path,
+        do: System.put_env("GITF_PATH", prior_path),
+        else: System.delete_env("GITF_PATH")
 
       if prior_client,
         do: Application.put_env(:gitf, :embedding_client, prior_client),
@@ -98,17 +103,34 @@ defmodule GiTF.Knowledge.RetrievalTest do
 
   describe "search/3" do
     setup do
-      {:ok, _} = Page.put(%{slug: "auth-flow", sector_id: "fe", title: "Auth", body: "auth login session"})
+      {:ok, _} =
+        Page.put(%{slug: "auth-flow", sector_id: "fe", title: "Auth", body: "auth login session"})
 
       {:ok, _} =
-        Page.put(%{slug: "billing-overview", sector_id: "fe", title: "Billing", body: "billing invoices"})
+        Page.put(%{
+          slug: "billing-overview",
+          sector_id: "fe",
+          title: "Billing",
+          body: "billing invoices"
+        })
 
-      {:ok, _} = Page.put(%{slug: "search-ranking", sector_id: "fe", title: "Search", body: "search ranking"})
+      {:ok, _} =
+        Page.put(%{
+          slug: "search-ranking",
+          sector_id: "fe",
+          title: "Search",
+          body: "search ranking"
+        })
+
       :ok
     end
 
     test "ranks the most-relevant page first" do
-      assert {:ok, results} = Retrieval.search("fe", "what does the auth flow look like?", top_k: 1, min_similarity: 0.0)
+      assert {:ok, results} =
+               Retrieval.search("fe", "what does the auth flow look like?",
+                 top_k: 1,
+                 min_similarity: 0.0
+               )
 
       assert length(results) == 1
       [{_score, page}] = results
@@ -116,7 +138,9 @@ defmodule GiTF.Knowledge.RetrievalTest do
     end
 
     test "returns multiple results when top_k > 1" do
-      assert {:ok, results} = Retrieval.search("fe", "auth and billing concerns", top_k: 3, min_similarity: 0.0)
+      assert {:ok, results} =
+               Retrieval.search("fe", "auth and billing concerns", top_k: 3, min_similarity: 0.0)
+
       slugs = Enum.map(results, fn {_, p} -> p.slug end) |> Enum.sort()
       assert "auth-flow" in slugs
       assert "billing-overview" in slugs
@@ -139,7 +163,13 @@ defmodule GiTF.Knowledge.RetrievalTest do
     end
 
     test "include_global=true mixes in nil-sector pages" do
-      {:ok, _} = Page.put(%{slug: "global-style", sector_id: nil, title: "Global", body: "auth styling guide"})
+      {:ok, _} =
+        Page.put(%{
+          slug: "global-style",
+          sector_id: nil,
+          title: "Global",
+          body: "auth styling guide"
+        })
 
       assert {:ok, results} =
                Retrieval.search("fe", "auth", top_k: 5, min_similarity: 0.0, include_global: true)
@@ -149,10 +179,20 @@ defmodule GiTF.Knowledge.RetrievalTest do
     end
 
     test "include_global=false excludes nil-sector pages" do
-      {:ok, _} = Page.put(%{slug: "global-style", sector_id: nil, title: "Global", body: "auth styling guide"})
+      {:ok, _} =
+        Page.put(%{
+          slug: "global-style",
+          sector_id: nil,
+          title: "Global",
+          body: "auth styling guide"
+        })
 
       assert {:ok, results} =
-               Retrieval.search("fe", "auth", top_k: 5, min_similarity: 0.0, include_global: false)
+               Retrieval.search("fe", "auth",
+                 top_k: 5,
+                 min_similarity: 0.0,
+                 include_global: false
+               )
 
       slugs = Enum.map(results, fn {_, p} -> p.slug end)
       refute "global-style" in slugs

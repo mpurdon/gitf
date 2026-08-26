@@ -123,8 +123,11 @@ defmodule GiTF.Workflow.Phase do
   @spec transition!(String.t(), String.t()) :: transition()
   def transition!(source, target) when is_binary(source) and is_binary(target) do
     case GiTF.Workflow.Expr.compile(source) do
-      {:ok, ast} -> {source, ast, target}
-      {:error, reason} -> raise ArgumentError, "bad when-expr #{inspect(source)}: #{inspect(reason)}"
+      {:ok, ast} ->
+        {source, ast, target}
+
+      {:error, reason} ->
+        raise ArgumentError, "bad when-expr #{inspect(source)}: #{inspect(reason)}"
     end
   end
 end

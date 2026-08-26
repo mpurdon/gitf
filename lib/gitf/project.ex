@@ -252,8 +252,12 @@ defmodule GiTF.Project do
     base = "#{item.title}\n\n#{item.goal}"
 
     case context do
-      [] -> base
-      lines -> base <> "\n\n## Context from completed prerequisite missions\n\n" <> Enum.join(lines, "\n")
+      [] ->
+        base
+
+      lines ->
+        base <>
+          "\n\n## Context from completed prerequisite missions\n\n" <> Enum.join(lines, "\n")
     end
   end
 
@@ -360,7 +364,8 @@ defmodule GiTF.Project do
 
   # -- Validation ----------------------------------------------------------------
 
-  defp normalize_brief(nil), do: %{vision: nil, constraints: [], decisions: [], open_questions: [], precedents: []}
+  defp normalize_brief(nil),
+    do: %{vision: nil, constraints: [], decisions: [], open_questions: [], precedents: []}
 
   defp normalize_brief(brief) when is_map(brief) do
     %{

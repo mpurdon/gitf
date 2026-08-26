@@ -36,7 +36,8 @@ defmodule GiTF.Dashboard.StudioLive do
        |> assign(:voice_on, false)
        |> init_toasts()}
     else
-      {:ok, socket |> put_flash(:error, "Studio session expired") |> redirect(to: "/dashboard/studio")}
+      {:ok,
+       socket |> put_flash(:error, "Studio session expired") |> redirect(to: "/dashboard/studio")}
     end
   end
 
@@ -465,7 +466,6 @@ defmodule GiTF.Dashboard.StudioLive do
 
   # -- Helpers -----------------------------------------------------------------------
 
-
   defp tabs(studio) do
     [
       {"brief", "Brief", length(studio.brief.decisions) + length(studio.brief.open_questions)},
@@ -516,15 +516,18 @@ defmodule GiTF.Dashboard.StudioLive do
   defp commitment(_), do: "expensive"
 
   defp transcript_style(:user),
-    do: "align-self:flex-end; background:#1f6feb22; border:1px solid #1f6feb55; border-radius:10px 10px 2px 10px; padding:0.45rem 0.65rem; max-width:90%"
+    do:
+      "align-self:flex-end; background:#1f6feb22; border:1px solid #1f6feb55; border-radius:10px 10px 2px 10px; padding:0.45rem 0.65rem; max-width:90%"
 
   defp transcript_style(:assistant),
-    do: "align-self:flex-start; background:#161b22; border:1px solid #30363d; border-radius:10px 10px 10px 2px; padding:0.45rem 0.65rem; max-width:95%"
+    do:
+      "align-self:flex-start; background:#161b22; border:1px solid #30363d; border-radius:10px 10px 10px 2px; padding:0.45rem 0.65rem; max-width:95%"
 
   defp transcript_style(_),
     do: "align-self:center; color:#d29922; font-size:0.75rem; padding:0.2rem"
 
-  defp card_label(tool), do: tool |> String.replace(["upsert_", "add_", "set_"], "") |> String.replace("_", " ")
+  defp card_label(tool),
+    do: tool |> String.replace(["upsert_", "add_", "set_"], "") |> String.replace("_", " ")
 
   defp card_text(%{args: args}) do
     args["text"] || args["title"] || args["label"] ||
@@ -539,7 +542,8 @@ defmodule GiTF.Dashboard.StudioLive do
   defp edge_color("shares_data"), do: "#d29922"
   defp edge_color(_), do: "#58a6ff"
 
-  defp em(text), do: Phoenix.HTML.raw("<span style=\"color:#8b949e; font-style:italic\">#{text}</span>")
+  defp em(text),
+    do: Phoenix.HTML.raw("<span style=\"color:#8b949e; font-style:italic\">#{text}</span>")
 
   defp safe_sectors do
     GiTF.Sector.list()

@@ -141,8 +141,7 @@ defmodule GiTF.LSP.Client do
   def document_symbol(server, file_path) when is_binary(file_path) do
     GenServer.call(
       server,
-      {:request, "textDocument/documentSymbol",
-       %{textDocument: %{uri: file_uri(file_path)}}},
+      {:request, "textDocument/documentSymbol", %{textDocument: %{uri: file_uri(file_path)}}},
       @request_timeout_ms + 1_000
     )
   end
@@ -197,8 +196,7 @@ defmodule GiTF.LSP.Client do
   def execute_command(server, command, arguments \\ []) when is_binary(command) do
     GenServer.call(
       server,
-      {:request, "workspace/executeCommand",
-       %{command: command, arguments: arguments}},
+      {:request, "workspace/executeCommand", %{command: command, arguments: arguments}},
       @request_timeout_ms + 1_000
     )
   end
@@ -289,6 +287,7 @@ defmodule GiTF.LSP.Client do
     case do_initialize(state) do
       {:ok, ready_state} ->
         ready_state = %{ready_state | status: :ready}
+
         Enum.each(Enum.reverse(ready_state.queued), fn {from, method, params} ->
           send(self(), {:flush_queued, from, method, params})
         end)
@@ -450,7 +449,11 @@ defmodule GiTF.LSP.Client do
     fail_pending(state, :stopped)
 
     try do
-      Port.command(port, Framing.encode(%{jsonrpc: "2.0", id: 0, method: "shutdown", params: nil}))
+      Port.command(
+        port,
+        Framing.encode(%{jsonrpc: "2.0", id: 0, method: "shutdown", params: nil})
+      )
+
       Port.command(port, Framing.encode(%{jsonrpc: "2.0", method: "exit", params: nil}))
     rescue
       _ -> :ok

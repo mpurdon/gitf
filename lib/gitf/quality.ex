@@ -335,5 +335,4 @@ defmodule GiTF.Quality do
       end
     end)
   end
-
 end

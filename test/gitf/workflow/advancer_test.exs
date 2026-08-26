@@ -10,14 +10,20 @@ defmodule GiTF.Workflow.AdvancerTest do
 
   defp insert_mission!(attrs \\ %{}) do
     {:ok, m} =
-      GiTF.Archive.insert(:missions, Map.merge(%{
-        name: "decision",
-        goal: "x",
-        status: "active",
-        sector_id: "fe",
-        current_phase: "research",
-        artifacts: %{}
-      }, attrs))
+      GiTF.Archive.insert(
+        :missions,
+        Map.merge(
+          %{
+            name: "decision",
+            goal: "x",
+            status: "active",
+            sector_id: "fe",
+            current_phase: "research",
+            artifacts: %{}
+          },
+          attrs
+        )
+      )
 
     m
   end

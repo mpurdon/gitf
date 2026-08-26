@@ -22,8 +22,11 @@ defmodule GiTF.CLI.SectorTimeoutOptionTest do
     assert @cli =~ ~r/:validation_command,\s*:validation_timeout_ms,\s*:github_owner/
   end
 
-  test "a non-positive or non-numeric value is rejected rather than stored" do
+  test "bounds come from the single owner, not a local guard" do
+    # The CLI, HTTP API and MCP tool each grew their own bounds check and
+    # drifted (two of three accepted an 11-day deadline). The invariant now
+    # is delegation: this surface parses strings, Validator judges numbers.
     assert @cli =~ "defp parse_validation_timeout!"
-    assert @cli =~ "{ms, \"\"} when ms > 0 -> ms"
+    assert @cli =~ "GiTF.Validator.validate_timeout_override("
   end
 end

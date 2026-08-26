@@ -38,7 +38,8 @@ defmodule GiTF.GitHub do
           {:ok, url}
 
         {:ok, %{status: status}} when status in [301, 307, 308] ->
-          {:error, "repository moved (HTTP #{status}) — cached owner/repo is stale; re-add or update the sector"}
+          {:error,
+           "repository moved (HTTP #{status}) — cached owner/repo is stale; re-add or update the sector"}
 
         {:ok, %{status: 422, body: %{"errors" => [%{"message" => msg} | _]}}} ->
           {:error, "PR already exists or validation failed: #{msg}"}
@@ -296,7 +297,8 @@ defmodule GiTF.GitHub do
   def list_review_comments(sector, pr_number) do
     with {:ok, client} <- client(sector) do
       case Req.get(client,
-             url: "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls/#{pr_number}/comments",
+             url:
+               "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls/#{pr_number}/comments",
              params: [per_page: 100]
            ) do
         {:ok, %{status: 200, body: comments}} when is_list(comments) ->
@@ -342,9 +344,14 @@ defmodule GiTF.GitHub do
                "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls/#{pr_number}/comments/#{comment_id}/replies",
              json: %{body: body}
            ) do
-        {:ok, %{status: 201}} -> :ok
-        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
-        {:error, reason} -> {:error, reason}
+        {:ok, %{status: 201}} ->
+          :ok
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -379,9 +386,14 @@ defmodule GiTF.GitHub do
                "/repos/#{sector.github_owner}/#{sector.github_repo}/issues/#{issue_number}/labels",
              json: %{labels: [label]}
            ) do
-        {:ok, %{status: status}} when status in [200, 201] -> :ok
-        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
-        {:error, reason} -> {:error, reason}
+        {:ok, %{status: status}} when status in [200, 201] ->
+          :ok
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -487,7 +499,10 @@ defmodule GiTF.GitHub do
 
       gh_path ->
         try do
-          case System.cmd(gh_path, ["auth", "token"], stderr_to_stdout: true, env: [{"LC_ALL", "C"}]) do
+          case System.cmd(gh_path, ["auth", "token"],
+                 stderr_to_stdout: true,
+                 env: [{"LC_ALL", "C"}]
+               ) do
             {token, 0} -> token |> String.trim() |> sanitize()
             _ -> nil
           end

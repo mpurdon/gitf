@@ -36,7 +36,12 @@ defmodule GiTF.Runtime.AgentLoopHeartbeatTest do
     # scheduler ate one often enough to fail intermittently and cost real
     # diagnostic time. A wider window buys ~10 expected ticks for the same
     # assertion, so jitter no longer decides the outcome.
-    task = Task.async(fn -> Process.sleep(400); {:ok, :finished} end)
+    task =
+      Task.async(fn ->
+        Process.sleep(400)
+        {:ok, :finished}
+      end)
+
     result = AgentLoop.wait_for_llm(task, on_progress, 30)
 
     assert result == {:ok, :finished}
@@ -84,7 +89,12 @@ defmodule GiTF.Runtime.AgentLoopHeartbeatTest do
   test "heartbeat omitted cleanly when on_progress is nil" do
     # AgentLoop allows on_progress to be nil. Ensure wait_for_llm handles
     # that without crashing when a heartbeat tick fires.
-    task = Task.async(fn -> Process.sleep(80); {:ok, :ok} end)
+    task =
+      Task.async(fn ->
+        Process.sleep(80)
+        {:ok, :ok}
+      end)
+
     assert {:ok, :ok} = AgentLoop.wait_for_llm(task, nil, 20)
   end
 end

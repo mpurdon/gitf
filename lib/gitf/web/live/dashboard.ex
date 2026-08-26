@@ -1304,8 +1304,9 @@ defmodule GiTF.Web.Live.Dashboard do
   defp event_type_badge(type) when type in [:merge_started, :merge_succeeded, :merge_failed],
     do: "bg-purple-900 text-purple-300"
 
-  defp event_type_badge(type) when type in [:scout_dispatched, :scout_complete, :validation_verdict],
-    do: "bg-cyan-900 text-cyan-300"
+  defp event_type_badge(type)
+       when type in [:scout_dispatched, :scout_complete, :validation_verdict],
+       do: "bg-cyan-900 text-cyan-300"
 
   defp event_type_badge(:error), do: "bg-red-900 text-red-300"
   defp event_type_badge(_), do: "bg-gray-700 text-gray-400"

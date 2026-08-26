@@ -77,9 +77,7 @@ defmodule GiTF.Skills.Refinement do
         maybe_commit(action, proposal, mission)
 
       {:ok, other} ->
-        Logger.warning(
-          "Skills.Refinement: refiner returned unexpected shape: #{inspect(other)}"
-        )
+        Logger.warning("Skills.Refinement: refiner returned unexpected shape: #{inspect(other)}")
 
         :ok
 
@@ -130,7 +128,9 @@ defmodule GiTF.Skills.Refinement do
       end
 
     sector_id = Map.get(mission, :sector_id)
-    sector_scope_suggestion = if sector_id, do: "or :sector (with sector_id=#{sector_id})", else: ""
+
+    sector_scope_suggestion =
+      if sector_id, do: "or :sector (with sector_id=#{sector_id})", else: ""
 
     """
     You are maintaining a library of reusable skills for an LLM agent factory.
@@ -250,15 +250,16 @@ defmodule GiTF.Skills.Refinement do
           end
 
         {:ok, other_verdict, reason} ->
-          Logger.info(
-            "Skills.Refinement: critic #{other_verdict} for #{kind} — #{reason}"
-          )
+          Logger.info("Skills.Refinement: critic #{other_verdict} for #{kind} — #{reason}")
 
           Telemetry.emit_critic_rejected(reason, kind)
           :ok
 
         {:error, reason} ->
-          Logger.warning("Skills.Refinement: critic errored (#{inspect(reason)}); treating as reject")
+          Logger.warning(
+            "Skills.Refinement: critic errored (#{inspect(reason)}); treating as reject"
+          )
+
           Telemetry.emit_critic_rejected("critic_error", kind)
           :ok
       end
@@ -282,7 +283,11 @@ defmodule GiTF.Skills.Refinement do
     case Skills.create(Map.drop(draft, [:id])) do
       {:ok, created} ->
         Telemetry.emit_drafted(created.id, created.scope, reason)
-        Logger.info("Skills.Refinement: drafted skill #{created.id} (#{created.name}) — #{reason}")
+
+        Logger.info(
+          "Skills.Refinement: drafted skill #{created.id} (#{created.name}) — #{reason}"
+        )
+
         :ok
 
       {:error, reason} ->

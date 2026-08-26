@@ -27,10 +27,12 @@ defmodule GiTF.Simulator.MoreScenariosTest do
              "expected quick no-work-needed completion, got: #{inspect(outcome.status)}"
 
       phases = outcome.phases_seen
+
       refute "implementation" in phases,
              "pipeline should have short-circuited, but reached implementation: #{inspect(phases)}"
 
       preflight = GiTF.Missions.get_artifact(mission.id, "preflight") || %{}
+
       assert preflight["resolution"] == "no_work_needed",
              "expected preflight artifact recording no-work-needed: #{inspect(preflight)}"
     end

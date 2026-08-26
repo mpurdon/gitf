@@ -136,7 +136,9 @@ defmodule GiTF.MissionsIssueRefTest do
           issue_ref: %{"owner" => "baz", "repo" => "qux", "number" => 5}
         })
 
-      [found] = Missions.find_by_issue_ref(sector.id, %{"owner" => "baz", "repo" => "qux", "number" => 5})
+      [found] =
+        Missions.find_by_issue_ref(sector.id, %{"owner" => "baz", "repo" => "qux", "number" => 5})
+
       assert found.id == m2.id
     end
 

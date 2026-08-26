@@ -147,8 +147,12 @@ defmodule GiTF.GitHub.CLI do
         # stderr is merged in, and gh prints notices/upgrade nags there —
         # extract the PR URL rather than trusting the whole blob.
         case Regex.run(~r{https://github\.com/[^/\s]+/[^/\s]+/pull/\d+}, output) do
-          [url] -> {:ok, url}
-          _ -> {:error, "gh pr create succeeded but no PR URL in output: #{String.slice(output, 0, 200)}"}
+          [url] ->
+            {:ok, url}
+
+          _ ->
+            {:error,
+             "gh pr create succeeded but no PR URL in output: #{String.slice(output, 0, 200)}"}
         end
 
       {:ok, {output, _}} ->
