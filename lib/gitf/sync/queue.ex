@@ -231,6 +231,11 @@ defmodule GiTF.Sync.Queue do
           Map.get(j, :merged_at) == nil and
           not Map.get(j, :phase_job, false)
       end)
+      # Same policy as the primary (tachikoma) path: pr_branch missions
+      # deliver ONE mission-level PR. Without this gate the sweep re-found
+      # ops the quality gate had deliberately skipped and opened a stray
+      # PR from each raw ghost branch (cora PRs #13-15, #17).
+      |> Enum.reject(&GiTF.Sync.mission_level_pr?/1)
       |> Enum.flat_map(fn op ->
         case GiTF.Archive.find_one(:shells, fn c ->
                c.ghost_id == op.ghost_id and c.status == "active"

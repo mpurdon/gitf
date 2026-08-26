@@ -79,6 +79,36 @@ defmodule GiTF.Sync do
   end
 
   @doc """
+  True when this op's work is delivered through a single mission-level PR
+  (its mission's sector uses the `pr_branch` strategy), so per-op sync
+  must NOT touch it.
+
+  Every path that feeds per-op sync must check this — not just the
+  primary one. Tachikoma's quality gate checked it and skipped the
+  broadcast, but SyncQueue's recover_pending sweep did not: it re-found
+  the same done+verified ops five minutes later and opened a stray PR
+  from each raw ghost branch (cora PRs #13-15 from failed run 7, #17
+  duplicating run 8's mission PR #16).
+  """
+  @spec mission_level_pr?(map() | String.t()) :: boolean()
+  def mission_level_pr?(op_id) when is_binary(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} -> mission_level_pr?(op)
+      _ -> false
+    end
+  end
+
+  def mission_level_pr?(op) when is_map(op) do
+    with mid when is_binary(mid) <- op[:mission_id],
+         mission when not is_nil(mission) <- Archive.get(:missions, mid),
+         {:ok, sector} <- GiTF.Sector.get(mission.sector_id) do
+      Map.get(sector, :sync_strategy) == "pr_branch"
+    else
+      _ -> false
+    end
+  end
+
+  @doc """
   Creates a PR for a ghost branch, either via `gh` CLI or the GitHub API.
 
   Pushes the branch to origin first, then creates the PR. Falls back to

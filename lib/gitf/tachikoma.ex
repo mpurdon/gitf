@@ -1311,16 +1311,9 @@ defmodule GiTF.Tachikoma do
       Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
   end
 
-  defp mission_uses_pr_branch?(op_id) do
-    with {:ok, op} <- GiTF.Ops.get(op_id),
-         mid when is_binary(mid) <- op[:mission_id],
-         mission when not is_nil(mission) <- GiTF.Archive.get(:missions, mid),
-         {:ok, sector} <- GiTF.Sector.get(mission.sector_id) do
-      Map.get(sector, :sync_strategy) == "pr_branch"
-    else
-      _ -> false
-    end
-  end
+# One owner for the "is this delivered via a mission-level PR?" policy;
+  # SyncQueue's recovery sweep applies the same predicate.
+  defp mission_uses_pr_branch?(op_id), do: GiTF.Sync.mission_level_pr?(op_id)
 
   defp load_fix_context(op_id) do
     case GiTF.Ops.get(op_id) do
