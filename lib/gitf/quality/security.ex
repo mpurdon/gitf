@@ -283,7 +283,7 @@ defmodule GiTF.Quality.Security do
     ]
   end
 
-# Vendored/generated trees are not the mission's code. Scanning them made the
+  # Vendored/generated trees are not the mission's code. Scanning them made the
   # verdict depend on install state: a worktree audited before `npm ci` passed,
   # then re-audited after validation installed node_modules the same wildcard's
   # first 500 files were vendor JS, vuln patterns lit up on minified dependency

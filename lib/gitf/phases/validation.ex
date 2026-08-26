@@ -273,7 +273,7 @@ defmodule GiTF.Phases.Validation do
     hard_cap = fix_ctx.max_attempts * @max_total_fix_ops_factor
 
     cond do
-      infrastructure_failure?(artifact) ->
+      infrastructure_failure?(artifact) or exec_infra_failure?(mission) ->
         # The tree was never judged: the toolchain was missing, the disk was
         # full, a probe lock starved. Spending a fix attempt sends a ghost
         # to "fix" code that was never found wanting, and it returns empty —
@@ -283,6 +283,12 @@ defmodule GiTF.Phases.Validation do
         Logger.warning(
           "Quest #{mission.id} validation hit an INFRASTRUCTURE failure — " <>
             "re-validating without burning a fix attempt (#{fix_ctx.attempt}/#{fix_ctx.max_attempts} intact)"
+        )
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :validation_infra_failure,
+          "Quest #{mission.id}: validation infrastructure failure (toolchain/probe) — " <>
+            "fix attempts held at #{fix_ctx.attempt}/#{fix_ctx.max_attempts}, re-validating"
         )
 
         :wait
@@ -320,12 +326,18 @@ defmodule GiTF.Phases.Validation do
   @doc false
   @spec infrastructure_failure?(map() | nil) :: boolean()
   def infrastructure_failure?(artifact) when is_map(artifact) do
+    gaps =
+      case artifact["gaps"] do
+        list when is_list(list) -> Enum.filter(list, &is_binary/1)
+        _ -> []
+      end
+
     text =
-      [
-        artifact["exec_validation_output"],
-        artifact["summary"],
-        get_in(artifact, ["failures", "output"])
-      ]
+      ([
+         artifact["exec_validation_output"],
+         artifact["summary"],
+         get_in(artifact, ["failures", "output"])
+       ] ++ gaps)
       |> Enum.filter(&is_binary/1)
       |> Enum.join(" ")
       |> String.downcase()
@@ -335,6 +347,23 @@ defmodule GiTF.Phases.Validation do
   end
 
   def infrastructure_failure?(_), do: false
+
+  # The factory's own out-of-band verdict, written by run_exec_validation
+  # every round. This is the authoritative signal — the string sniffing
+  # above is only a fallback for artifacts produced before the verdict
+  # existed. Run 7 (msn-4fda11) burned 4 fix attempts because the LLM
+  # validator paraphrased the sentinel out of its summary and the guard
+  # relied on prose.
+  @doc false
+  @spec exec_infra_failure?(map()) :: boolean()
+  def exec_infra_failure?(mission) when is_map(mission) do
+    case get_in(mission, [Access.key(:artifacts, %{}), "exec_validation"]) do
+      %{"status" => "fail", "infra_failure" => true} -> true
+      _ -> false
+    end
+  end
+
+  def exec_infra_failure?(_), do: false
 
   @impl true
   def terminal(mission, :retries_exhausted, artifact) do

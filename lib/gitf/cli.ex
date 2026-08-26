@@ -601,6 +601,13 @@ defmodule GiTF.CLI do
               Format.info("  Performance score: #{result.performance_score}/100")
             end
 
+          {:ok, :infra, result} ->
+            Format.warn("Job #{op_id} verification inconclusive — infrastructure failure")
+
+            if result[:output] && result.output != "" do
+              Format.warn("  #{String.slice(result.output, 0, 300)}")
+            end
+
           {:ok, :fail, result} ->
             Format.error("Job #{op_id} verification failed")
 

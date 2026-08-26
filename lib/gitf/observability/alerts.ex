@@ -51,6 +51,9 @@ defmodule GiTF.Observability.Alerts do
     # Validation and re-validation disagreed — auto-approve is withheld and
     # the mission blocks on a human, so this must reach the operator.
     approval_revalidation_disagreement: :high,
+    # Toolchain/probe broke under validation — code was never judged; fix
+    # attempts are held but rounds burn tokens until it clears.
+    validation_infra_failure: :high,
     budget_blocked: :high,
     budget_warning: :medium,
     clarification_needed: :high,

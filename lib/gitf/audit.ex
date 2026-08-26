@@ -14,7 +14,10 @@ defmodule GiTF.Audit do
   Verifies a completed op.
 
   Runs validation command and quality checks.
-  Returns {:ok, :pass | :fail, result} or {:error, reason}.
+  Returns `{:ok, :pass | :fail | :infra, result}` or `{:error, reason}`.
+  `:infra` means the validation toolchain itself broke (exit 126/127) —
+  the op is marked inconclusive, never rejected, because the code was
+  never actually judged.
   """
   @spec verify_job(String.t(), keyword()) :: {:ok, atom(), map()} | {:error, term()}
   def verify_job(op_id, opts \\ []) do
@@ -49,65 +52,99 @@ defmodule GiTF.Audit do
 
         skip_validation = Keyword.get(opts, :skip_validation_command, false)
 
-        # Run validation command if configured (skip if already run by Validator)
-        validation_result =
-          if not skip_validation and Map.get(sector, :validation_command) do
-            case run_validation_command(shell, sector.validation_command, sector) do
-              {:ok, output} ->
-                %{result | status: "passed", output: output, exit_code: 0}
+        # Sector lock around everything that shells out into the worktree:
+        # this same validation command also runs from the validation phase,
+        # and two concurrent npm ci runs corrupted node_modules on run 7
+        # (msn-4fda11), turning every later tool call into exit 127.
+        {validation_result, quality_result} =
+          GiTF.WorktreeLock.with_lock({:sector, op.sector_id}, fn ->
+            validation_result =
+              if not skip_validation and Map.get(sector, :validation_command) do
+                case run_validation_command(shell, sector.validation_command, sector) do
+                  {:ok, output} ->
+                    %{result | status: "passed", output: output, exit_code: 0}
 
-              {:error, {output, exit_code}} ->
-                %{result | status: "failed", output: output, exit_code: exit_code}
+                  {:error, {output, exit_code}} ->
+                    %{result | status: "failed", output: output, exit_code: exit_code}
+                end
+              else
+                %{result | status: "passed", output: "No validation command configured"}
+              end
+
+            if infra_exit?(validation_result.exit_code) do
+              # Toolchain broke — the code was never judged. Skip the
+              # quality analyzers (same broken environment) and let the
+              # caller see :infra instead of a bogus :fail.
+              {validation_result, nil}
+            else
+              quality_result = run_quality_checks(op_id, shell, sector)
+
+              # Proof of Test: verify that tests were actually run and passed
+              # (This parses shell execution history from the ghost's session)
+              proof_of_test = verify_proof_of_test(op_id)
+              {validation_result, Map.put(quality_result, :proof_of_test, proof_of_test)}
             end
-          else
-            %{result | status: "passed", output: "No validation command configured"}
-          end
+          end)
 
-        # Run quality checks
-        quality_result = run_quality_checks(op_id, shell, sector)
+        if quality_result == nil do
+          # Infra verdict: record it, mark the op inconclusive (NOT failed —
+          # run 7's attempt-4 fix op was rejected over "probe lock busy",
+          # discarding correct work), and tell the operator.
+          infra_result = %{validation_result | status: "infra_failure"}
+          {:ok, _} = record_result(op_id, infra_result)
+          mark_job_inconclusive(op_id, infra_result)
 
-        # Proof of Test: verify that tests were actually run and passed
-        # (This parses shell execution history from the ghost's session)
-        proof_of_test = verify_proof_of_test(op_id)
-        quality_result = Map.put(quality_result, :proof_of_test, proof_of_test)
+          GiTF.Observability.Alerts.dispatch_webhook(
+            :validation_infra_failure,
+            "Op #{op_id}: verification hit an infrastructure failure (exit #{validation_result.exit_code}) — op marked inconclusive, not rejected"
+          )
 
-        # Run cross-model audit if enabled
-        cross_audit_result =
-          if GiTF.Runtime.CrossModelAudit.enabled?(sector.id) do
-            case GiTF.Runtime.CrossModelAudit.audit_job(op_id) do
-              {:ok, audit} ->
-                %{cross_audit_score: audit.score, cross_audit_issues: audit.issues}
-
-              {:error, reason} ->
-                Logger.warning("Cross-model audit failed for op #{op_id}: #{inspect(reason)}")
-                %{cross_audit_error: inspect(reason)}
-            end
-          else
-            %{}
-          end
-
-        # Combine results
-        final_result =
-          validation_result
-          |> Map.merge(quality_result)
-          |> Map.merge(cross_audit_result)
-
-        # Build verification contract and evaluate
-        contract = GiTF.AuditContract.build_contract(op)
-        adjusted_contract = adjust_contract_thresholds(contract, authority_level)
-        final_status = evaluate_contract_status(final_result, adjusted_contract)
-        final_result = %{final_result | status: final_status}
-
-        # Archive result
-        {:ok, _} = record_result(op_id, final_result)
-
-        # Update op
-        status = if final_status == "passed", do: :pass, else: :fail
-        update_job_verification(op_id, status, final_result)
-
-        {:ok, status, final_result}
+          {:ok, :infra, infra_result}
+        else
+          verify_job_finalize(op, op_id, authority_level, validation_result, quality_result)
+        end
       end
     end
+  end
+
+  defp infra_exit?(exit_code), do: exit_code in [126, 127]
+
+  defp verify_job_finalize(op, op_id, authority_level, validation_result, quality_result) do
+    # Run cross-model audit if enabled
+    cross_audit_result =
+      if GiTF.Runtime.CrossModelAudit.enabled?(op.sector_id) do
+        case GiTF.Runtime.CrossModelAudit.audit_job(op_id) do
+          {:ok, audit} ->
+            %{cross_audit_score: audit.score, cross_audit_issues: audit.issues}
+
+          {:error, reason} ->
+            Logger.warning("Cross-model audit failed for op #{op_id}: #{inspect(reason)}")
+            %{cross_audit_error: inspect(reason)}
+        end
+      else
+        %{}
+      end
+
+    # Combine results
+    final_result =
+      validation_result
+      |> Map.merge(quality_result)
+      |> Map.merge(cross_audit_result)
+
+    # Build verification contract and evaluate
+    contract = GiTF.AuditContract.build_contract(op)
+    adjusted_contract = adjust_contract_thresholds(contract, authority_level)
+    final_status = evaluate_contract_status(final_result, adjusted_contract)
+    final_result = %{final_result | status: final_status}
+
+    # Archive result
+    {:ok, _} = record_result(op_id, final_result)
+
+    # Update op
+    status = if final_status == "passed", do: :pass, else: :fail
+    update_job_verification(op_id, status, final_result)
+
+    {:ok, status, final_result}
   end
 
   @doc """
@@ -204,6 +241,25 @@ defmodule GiTF.Audit do
     case GiTF.Validator.run_validation(shell.worktree_path, command, sector) do
       {:ok, output} -> {:ok, output}
       {:error, _kind, message, exit_code} -> {:error, {message, exit_code}}
+    end
+  end
+
+  # Infra verdict: verification could not run, so the op is neither passed
+  # nor failed. "inconclusive" keeps it out of both the auto-approve
+  # sample-pass path and the rejection path.
+  defp mark_job_inconclusive(op_id, result) do
+    case Archive.get(:ops, op_id) do
+      nil ->
+        :error
+
+      op ->
+        updated =
+          op
+          |> Map.put(:verification_status, "inconclusive")
+          |> Map.put(:audit_result, result.output)
+          |> Map.put(:verified_at, DateTime.utc_now())
+
+        Archive.put(:ops, updated)
     end
   end
 
@@ -379,6 +435,7 @@ defmodule GiTF.Audit do
   def verify_job!(op_id) do
     case verify_job(op_id) do
       {:ok, :pass, result} -> result
+      {:ok, :infra, result} -> result
       {:ok, :fail, result} -> raise "Audit failed for op #{op_id}: #{inspect(result[:output])}"
       {:error, reason} -> raise "Audit error for op #{op_id}: #{inspect(reason)}"
     end

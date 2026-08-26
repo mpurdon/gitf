@@ -35,7 +35,7 @@ defmodule GiTF.Validator do
                  validation_timeout_ms(sector)
                ) do
             :ok -> results
-            {:error, reason} -> [{:error, :custom_validation_failed, reason} | results]
+            {:error, _kind, reason} -> [{:error, :custom_validation_failed, reason} | results]
           end
         else
           # Without a validation_command NOTHING is executed — the phase
@@ -190,14 +190,18 @@ defmodule GiTF.Validator do
   Runs a custom shell command in the shell worktree.
 
   Thin shape adapter over `run_validation/4` for callers that only care
-  whether it passed.
+  whether it passed. The failure kind is preserved — `:tool_missing`
+  means the command's toolchain broke (exit 126/127), which is a HOST
+  problem: run 7 (msn-4fda11) burned its whole fix budget because this
+  classification was flattened to a string and the fix loop had to fish
+  for sentinel text in LLM prose to rediscover it.
   """
   @spec run_custom_validation(map(), String.t(), pos_integer() | nil) ::
-          :ok | {:error, String.t()}
+          :ok | {:error, atom(), String.t()}
   def run_custom_validation(shell, command, timeout_ms \\ nil) do
     case run_validation(shell.worktree_path, command, nil, timeout_ms: timeout_ms) do
       {:ok, _output} -> :ok
-      {:error, _kind, message, _exit_code} -> {:error, message}
+      {:error, kind, message, _exit_code} -> {:error, kind, message}
     end
   end
 

@@ -207,5 +207,42 @@ defmodule GiTF.Phases.ValidationTest do
       refute Validation.infrastructure_failure?(nil)
       refute Validation.infrastructure_failure?(%{})
     end
+
+    test "the sentinel is found in gaps too — run 7 hid it there" do
+      # msn-4fda11: the LLM validator paraphrased its summary ("host
+      # toolchain error") but quoted the sentinel verbatim inside gaps.
+      assert Validation.infrastructure_failure?(%{
+               "summary" => "validation failed with a host toolchain error",
+               "gaps" => [
+                 "Execution validation FAILED per ground truth: `TOOL MISSING on host (exit 127)`"
+               ]
+             })
+    end
+  end
+
+  describe "exec_infra_failure?/1" do
+    test "reads the factory's own out-of-band verdict" do
+      assert Validation.exec_infra_failure?(%{
+               artifacts: %{
+                 "exec_validation" => %{"status" => "fail", "infra_failure" => true}
+               }
+             })
+
+      # A genuine code failure keeps the fix loop armed.
+      refute Validation.exec_infra_failure?(%{
+               artifacts: %{
+                 "exec_validation" => %{"status" => "fail", "infra_failure" => false}
+               }
+             })
+
+      # A pass or no verdict at all must never suppress fixes.
+      refute Validation.exec_infra_failure?(%{
+               artifacts: %{"exec_validation" => %{"status" => "pass"}}
+             })
+
+      refute Validation.exec_infra_failure?(%{artifacts: %{}})
+      refute Validation.exec_infra_failure?(%{})
+      refute Validation.exec_infra_failure?(nil)
+    end
   end
 end

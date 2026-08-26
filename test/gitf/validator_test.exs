@@ -84,8 +84,30 @@ defmodule GiTF.ValidatorTest do
         status: "active"
       }
 
-      assert {:error, msg} = Validator.run_custom_validation(shell, "false")
+      assert {:error, :failed, msg} = Validator.run_custom_validation(shell, "false")
       assert msg =~ "exit 1"
+    end
+
+    test "classifies exit 127 as :tool_missing — a host problem, not the code's" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "gitf_val_test_#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf(tmp_dir) end)
+
+      shell = %{
+        id: "cel-test",
+        worktree_path: tmp_dir,
+        ghost_id: "ghost-1",
+        sector_id: "sec-1",
+        branch: "test",
+        status: "active"
+      }
+
+      assert {:error, :tool_missing, msg} =
+               Validator.run_custom_validation(shell, "definitely-not-a-real-command-xyz")
+
+      assert msg =~ "TOOL MISSING on host"
     end
   end
 

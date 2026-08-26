@@ -26,7 +26,7 @@ defmodule GiTF.Togusa do
 
   Returns `{:ok, :pass | :fail, result}`.
   """
-  @spec run_quality_gate(String.t()) :: {:ok, :pass | :fail, map()} | {:error, term()}
+  @spec run_quality_gate(String.t()) :: {:ok, :pass | :fail | :infra, map()} | {:error, term()}
   def run_quality_gate(op_id) do
     GiTF.Audit.verify_job(op_id)
   end
@@ -46,6 +46,12 @@ defmodule GiTF.Togusa do
           {:ok, map()} | {:error, term()}
   def request_fix(op_id, shell_id, failures, %FixContext{} = fix_ctx) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
+         # A fix ghost can only fix CODE. Handing one an infrastructure
+         # failure ("TOOL MISSING", exit 126/127) gives it nothing
+         # actionable — run 7's quality fix ghost, prompted with exactly
+         # that, invented an out-of-scope UI control instead and cost the
+         # mission its whole validation budget.
+         :ok <- ensure_code_failure(op_id, failures),
          # Single fix lineage: quality-lane fixes defer to any in-flight fix
          # op (either lane). Run 14's quality lane built a competing
          # marker-laden branch lineage in parallel with the validation
@@ -120,6 +126,26 @@ defmodule GiTF.Togusa do
 
       error ->
         error
+    end
+  end
+
+  defp ensure_code_failure(op_id, failures) do
+    exit_code = failures[:exit_code] || failures["exit_code"]
+
+    output =
+      [failures[:output], failures["output"]]
+      |> Enum.filter(&is_binary/1)
+      |> Enum.join(" ")
+      |> String.downcase()
+
+    if exit_code in [126, 127] or String.contains?(output, "tool missing on host") do
+      Logger.warning(
+        "Togusa: op #{op_id} failure is infrastructure (exit #{inspect(exit_code)}) — refusing to spawn a code-fix ghost"
+      )
+
+      {:error, :infra_failure}
+    else
+      :ok
     end
   end
 

@@ -700,6 +700,10 @@ defmodule GiTF.Major do
             Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
               case GiTF.Audit.verify_job(op_id) do
                 {:ok, :pass, _result} -> {:verification_passed, link_msg.from, op_id}
+                # Infra: the toolchain broke, the code was never judged. The
+                # op is marked inconclusive by Audit; advance rather than
+                # reject — the mission-level validation gate still stands.
+                {:ok, :infra, _result} -> {:verification_passed, link_msg.from, op_id}
                 {:ok, :fail, result} -> {:verification_failed, link_msg.from, op_id, result}
                 {:error, reason} -> {:verification_error, link_msg.from, op_id, reason}
               end

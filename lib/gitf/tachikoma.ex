@@ -319,6 +319,10 @@ defmodule GiTF.Tachikoma do
           {:ok, {:ok, :pass, _result}} ->
             []
 
+          {:ok, {:ok, :infra, _result}} ->
+            # Toolchain broke — inconclusive, not a failure finding.
+            []
+
           {:ok, {:ok, :fail, result}} ->
             [
               %{
@@ -349,6 +353,10 @@ defmodule GiTF.Tachikoma do
       else
         case GiTF.Audit.verify_job(op.id) do
           {:ok, :pass, _result} ->
+            []
+
+          {:ok, :infra, _result} ->
+            # Toolchain broke — inconclusive, not a failure finding.
             []
 
           {:ok, :fail, result} ->
@@ -1264,6 +1272,16 @@ defmodule GiTF.Tachikoma do
             {:merge_ready, op_id, shell_id}
           )
         end
+
+      {:ok, :infra, _result} ->
+        # The gate never judged the code (toolchain/probe broke). Spawning
+        # a fix ghost here is how run 7 (msn-4fda11) got its out-of-scope
+        # flag-btn: a haiku ghost handed "TOOL MISSING — infrastructure
+        # problem" invented feature work instead. No fix, no rejection —
+        # the op stays inconclusive and mission validation remains the gate.
+        Logger.warning(
+          "Tachikoma: op #{op_id} quality gate hit an infrastructure failure — no fix spawned"
+        )
 
       {:ok, :fail, result} ->
         Logger.warning("Tachikoma: op #{op_id} failed quality gate")

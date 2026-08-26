@@ -619,7 +619,7 @@ defmodule GiTF.Git do
     end
   end
 
-# A lockfile changing WITHOUT its manifest is the signature of install
+  # A lockfile changing WITHOUT its manifest is the signature of install
   # residue (npm/mix/cargo rewriting the lockfile as a side effect of a
   # build or test run), not an intentional dependency change. PR #11 on
   # cora shipped +308/−290 of package-lock.json churn this way: a fix

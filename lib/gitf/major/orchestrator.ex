@@ -1155,19 +1155,39 @@ defmodule GiTF.Major.Orchestrator do
          %{worktree_path: _} = shell <- exec_validation_shell(mission, variant_id) do
       Logger.info("Running validation command for #{mission.id}: #{cmd}")
 
-      case GiTF.Validator.run_custom_validation(
-             shell,
-             cmd,
-             GiTF.Validator.validation_timeout_ms(sector)
-           ) do
+      # Sector lock: the op-level audit runs this same command; two npm ci
+      # racing in one tree corrupted node_modules on run 7 (msn-4fda11).
+      result =
+        GiTF.WorktreeLock.with_lock({:sector, mission.sector_id}, fn ->
+          GiTF.Validator.run_custom_validation(
+            shell,
+            cmd,
+            GiTF.Validator.validation_timeout_ms(sector)
+          )
+        end)
+
+      case result do
         :ok ->
           Logger.info("Validation command passed for #{mission.id}")
+          store_exec_verdict(mission, %{"status" => "pass"})
           {:pass, cmd}
 
-        {:error, output} ->
+        {:error, kind, output} ->
           Logger.warning(
-            "Validation command FAILED for #{mission.id}: #{String.slice(to_string(output), 0, 300)}"
+            "Validation command FAILED for #{mission.id} (#{kind}): #{String.slice(to_string(output), 0, 300)}"
           )
+
+          # Record the FACTORY's own classification out-of-band. The fix
+          # loop's infra guard previously depended on the LLM validator
+          # echoing sentinel strings into its artifact — run 7's validator
+          # paraphrased ("host toolchain error") and the guard missed,
+          # spending 4 fix attempts on a corrupted node_modules.
+          store_exec_verdict(mission, %{
+            "status" => "fail",
+            "infra_failure" => kind == :tool_missing,
+            "kind" => to_string(kind),
+            "output" => String.slice(to_string(output), 0, 500)
+          })
 
           {:fail, cmd, to_string(output)}
       end
@@ -1178,6 +1198,17 @@ defmodule GiTF.Major.Orchestrator do
     e ->
       Logger.warning("run_exec_validation crashed for #{mission.id}: #{Exception.message(e)}")
       nil
+  end
+
+  # Overwritten every round so a stale infra flag can never suppress fix
+  # attempts for a later genuine code failure.
+  defp store_exec_verdict(mission, verdict) do
+    GiTF.Missions.store_artifact(mission.id, "exec_validation", verdict)
+  rescue
+    e ->
+      Logger.warning(
+        "Could not store exec_validation verdict for #{mission.id}: #{Exception.message(e)}"
+      )
   end
 
   # The exec command (typecheck + the runtime probe) MUST run in the same
