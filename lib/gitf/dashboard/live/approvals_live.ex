@@ -129,12 +129,55 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     {:noreply, assign(socket, :approvals, load_approvals())}
   end
 
+  defp mission_title(approval) do
+    approval[:mission][:name] ||
+      Map.get(approval, :mission_name, Map.get(approval, :name, "Approval Request"))
+  end
+
+  defp goal_text(approval) do
+    to_string(Map.get(approval, :goal, Map.get(approval, :description, "")))
+  end
+
   defp load_approvals do
-    try do
-      GiTF.Override.pending_approvals()
-    rescue
-      _ -> []
+    GiTF.Override.pending_approvals() |> Enum.map(&enrich/1)
+  rescue
+    _ -> []
+  end
+
+  # The card's job is the DECISION, and the raw request carries only the
+  # goal text — a wall of prose with two buttons. Join what the approver
+  # actually weighs: which gate this is, validation's verdict and coverage,
+  # what it costs, where to look deeper. All best-effort; a missing mission
+  # still renders the bare request.
+  defp enrich(approval) do
+    with mission_id when is_binary(mission_id) <- approval[:mission_id],
+         {:ok, mission} <- GiTF.Missions.get(mission_id) do
+      validation = GiTF.Missions.get_artifact(mission_id, "validation")
+
+      impl_ops =
+        mission
+        |> Map.get(:ops, [])
+        |> Enum.reject(&Map.get(&1, :phase_job, false))
+
+      cost =
+        GiTF.Archive.filter(:costs, &(&1[:mission_id] == mission_id))
+        |> Enum.map(&(&1[:cost_usd] || 0.0))
+        |> Enum.sum()
+
+      approval
+      |> Map.put(:mission, mission)
+      |> Map.put(:validation, validation)
+      |> Map.put(
+        :validation_chips,
+        GiTF.Dashboard.MissionDetailLive.decisions("validation", validation)
+      )
+      |> Map.put(:files_changed, impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum())
+      |> Map.put(:cost_usd, cost)
+    else
+      _ -> approval
     end
+  rescue
+    _ -> approval
   end
 
   @impl true
@@ -153,28 +196,45 @@ defmodule GiTF.Dashboard.ApprovalsLive do
       <% else %>
         <%= for approval <- @approvals do %>
           <div class="panel" style="margin-bottom:1rem">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start">
-              <div>
-                <div style="font-weight:600; color:#f0f6fc; margin-bottom:0.35rem">
-                  {Map.get(approval, :mission_name, Map.get(approval, :name, "Approval Request"))}
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem">
+              <div style="min-width:0; flex:1">
+                <div style="display:flex; align-items:baseline; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.2rem">
+                  <span style="font-weight:600; color:#f0f6fc">
+                    {mission_title(approval)}
+                  </span>
+                  <a
+                    :if={approval[:mission_id]}
+                    href={"/dashboard/missions/#{approval.mission_id}"}
+                    style="font-family:monospace; font-size:0.75rem; color:#58a6ff; text-decoration:none"
+                  >{approval.mission_id}</a>
                 </div>
-                <div style="color:#8b949e; font-size:0.85rem; margin-bottom:0.5rem">
-                  {Map.get(approval, :goal, Map.get(approval, :description, ""))}
-                </div>
-                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
-                  <%= if Map.get(approval, :risk_level) do %>
-                    <span class={"badge #{risk_badge(approval.risk_level)}"}>{approval.risk_level} risk</span>
-                  <% end %>
-                  <%= if Map.get(approval, :op_count) do %>
-                    <span class="badge badge-grey">{approval.op_count} ops</span>
-                  <% end %>
-                  <%= if Map.get(approval, :file_count) do %>
-                    <span class="badge badge-grey">{approval.file_count} files</span>
-                  <% end %>
-                  <span style="font-size:0.8rem; color:#8b949e">
-                    {format_timestamp(Map.get(approval, :requested_at, Map.get(approval, :inserted_at)))}
+                <div style="font-size:0.78rem; color:#8b949e; margin-bottom:0.6rem">
+                  Publish approval — validation finished; approving merges and opens the PR.
+                  <span :if={approval[:requested_at]}>
+                    Requested {format_timestamp(approval[:requested_at])}.
                   </span>
                 </div>
+                <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-bottom:0.6rem">
+                  <span
+                    :for={{label, value, tone} <- Map.get(approval, :validation_chips, [])}
+                    class={"badge badge-#{tone}"}
+                    style="font-size:0.7rem"
+                  >{label}: <b>{value}</b></span>
+                  <span :if={Map.get(approval, :risk_level)} class={"badge #{risk_badge(approval.risk_level)}"}>{approval.risk_level} risk</span>
+                  <span :if={is_number(approval[:files_changed]) and approval.files_changed > 0} class="badge badge-grey">{approval.files_changed} files</span>
+                  <span :if={is_number(approval[:cost_usd]) and approval.cost_usd > 0} class="badge badge-grey">${:erlang.float_to_binary(approval.cost_usd / 1, decimals: 2)}</span>
+                  <a
+                    :if={approval[:mission_id]}
+                    href={"/dashboard/missions/#{approval.mission_id}/plan"}
+                    style="font-size:0.75rem; color:#58a6ff"
+                  >plan</a>
+                </div>
+                <details :if={goal_text(approval) != ""}>
+                  <summary style="cursor:pointer; font-size:0.78rem; color:#8b949e">
+                    {String.slice(goal_text(approval), 0, 140)}…
+                  </summary>
+                  <div style="color:#8b949e; font-size:0.85rem; margin-top:0.5rem; white-space:pre-wrap">{goal_text(approval)}</div>
+                </details>
               </div>
               <div style="display:flex; gap:0.5rem">
                 <%= if @action_id == Map.get(approval, :id) do %>
