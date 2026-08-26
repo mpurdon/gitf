@@ -56,7 +56,23 @@ defmodule GiTF.Sync do
         with {:ok, main_branch} <- detect_main_branch(sector.path),
              {quest_branch, base} = quest_target(mission, main_branch),
              :ok <- create_quest_branch(sector.path, quest_branch, base) do
-          merge_cells_into_quest_branch(sector.path, quest_branch, shells)
+          result = merge_cells_into_quest_branch(sector.path, quest_branch, shells)
+
+          # The consolidation happens ON the quest branch, but the shared
+          # clone must not STAY there: the next mission's triage reads
+          # whatever is checked out as "the codebase". Run 4 of
+          # group-pr-list-by-author completed no_work_needed in 80 seconds
+          # because run 3's publish left this checkout on the mission
+          # branch — triage found the feature already present, with perfect
+          # file:line evidence, in work that was never merged. Pushing and
+          # PR creation address the branch by name, so nothing downstream
+          # needs the working tree to remain on it.
+          GiTF.Git.safe_cmd(["checkout", "-f", main_branch],
+            cd: sector.path,
+            stderr_to_stdout: true
+          )
+
+          result
         end
       end)
     end
