@@ -20,8 +20,9 @@ defmodule GiTF.Phases.AwaitingApproval do
         alert and return `:wait` (never auto-approves critical work)
       * re-validation fresh → `Override.approve/2` with `auto_timeout`
         and return `:pass`
-      * re-validation failed → `Override.reject/3` with reason and
-        return `:terminal_fail`
+      * re-validation failed → record the disagreement on the request,
+        alert the operator once, and return `:wait` (work that passed
+        validation is never auto-rejected on a machine disagreement)
 
   Side effects (auto-approve, reject, alert) happen inside the verdict
   function to match the legacy code's structure. This is consistent with
@@ -116,25 +117,34 @@ defmodule GiTF.Phases.AwaitingApproval do
           :wait
         end
       else
-        if Approval.revalidate(mission) do
-          Logger.info(
-            "Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)"
-          )
+        cond do
+          # A disagreement was already recorded — hold quietly for the
+          # human, don't re-run revalidation every verdict poll.
+          Approval.revalidation_disagreement?(mission.id) ->
+            :wait
 
-          GiTF.Override.approve(mission.id, %{
-            approved_by: "auto_timeout",
-            notes: "Auto-approved after #{timeout_h}h (re-validated)"
-          })
+          Approval.revalidate(mission) ->
+            Logger.info(
+              "Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)"
+            )
 
-          :pass
-        else
-          Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
+            GiTF.Override.approve(mission.id, %{
+              approved_by: "auto_timeout",
+              notes: "Auto-approved after #{timeout_h}h (re-validated)"
+            })
 
-          GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve", %{
-            rejected_by: "auto_timeout"
-          })
+            :pass
 
-          :terminal_fail
+          true ->
+            # The mission already PASSED validation to get here; a
+            # re-validation failure on unchanged code is a signal
+            # disagreement, not new evidence of bad work (msn-aa92dd was
+            # trashed by exactly this — a security-scan flap an hour after
+            # a 10/10 pass). Never destroy validated work on a machine
+            # disagreement: withhold auto-approve, keep the approval
+            # pending, and alert the operator.
+            Approval.note_revalidation_disagreement(mission, timeout_h)
+            :wait
         end
       end
     else

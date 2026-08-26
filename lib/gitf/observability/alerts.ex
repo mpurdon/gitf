@@ -48,6 +48,9 @@ defmodule GiTF.Observability.Alerts do
     quest_failed: :high,
     approval_timed_out: :high,
     approval_timeout_critical: :high,
+    # Validation and re-validation disagreed — auto-approve is withheld and
+    # the mission blocks on a human, so this must reach the operator.
+    approval_revalidation_disagreement: :high,
     budget_blocked: :high,
     budget_warning: :medium,
     clarification_needed: :high,

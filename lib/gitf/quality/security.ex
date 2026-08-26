@@ -283,8 +283,17 @@ defmodule GiTF.Quality.Security do
     ]
   end
 
+# Vendored/generated trees are not the mission's code. Scanning them made the
+  # verdict depend on install state: a worktree audited before `npm ci` passed,
+  # then re-audited after validation installed node_modules the same wildcard's
+  # first 500 files were vendor JS, vuln patterns lit up on minified dependency
+  # code, and the score collapsed to 0 (msn-aa92dd was auto-rejected on exactly
+  # this flap). Scan only the project's own sources.
+  @excluded_dirs ~w(node_modules deps _build target dist build vendor .git)
+
   defp find_in_files(path, patterns, type) do
     Path.wildcard(Path.join(path, "**/*.{ex,exs,js,jsx,ts,tsx,py,rs}"))
+    |> Enum.reject(&excluded_path?(&1, path))
     # Limit files scanned
     |> Enum.take(500)
     |> Enum.flat_map(fn file ->
@@ -311,6 +320,13 @@ defmodule GiTF.Quality.Security do
           []
       end
     end)
+  end
+
+  defp excluded_path?(file, root) do
+    file
+    |> Path.relative_to(root)
+    |> Path.split()
+    |> Enum.any?(&(&1 in @excluded_dirs))
   end
 
   defp calculate_security_score(findings) do

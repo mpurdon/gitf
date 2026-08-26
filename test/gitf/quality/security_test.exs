@@ -35,6 +35,30 @@ defmodule GiTF.Quality.SecurityTest do
       assert length(secret_findings) > 0
     end
 
+    test "ignores vendored directories — the verdict must not depend on install state" do
+      # msn-aa92dd: the same worktree scored pass before `npm ci` and 0 after,
+      # because the scan's first 500 wildcard files became vendor JS.
+      dir = Path.join(System.tmp_dir!(), "gitf_sec_vendor_#{:erlang.unique_integer([:positive])}")
+      vendored = Path.join(dir, "node_modules/some-dep")
+      File.mkdir_p!(vendored)
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      File.write!(Path.join(vendored, "index.js"), """
+      eval("boom");
+      element.innerHTML = userInput;
+      const api_key = "sk_live_TOTALLY_VENDORED_KEY_12345";
+      """)
+
+      File.write!(Path.join(dir, "app.js"), "const ok = 1;\n")
+
+      {:ok, result} = Security.scan(dir, :javascript)
+
+      vendor_findings =
+        Enum.filter(result.findings, &String.starts_with?(&1.file, "node_modules"))
+
+      assert vendor_findings == []
+    end
+
     test "handles missing audit tools gracefully" do
       {:ok, result} = Security.scan("/nonexistent", :elixir)
 

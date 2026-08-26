@@ -123,26 +123,35 @@ defmodule GiTF.Approval do
           {:ok, "awaiting_approval"}
         end
       else
-        if revalidate(mission) do
-          Logger.info(
-            "Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)"
-          )
+        cond do
+          # A disagreement was already recorded — hold quietly for the
+          # human, don't re-run revalidation every advance sweep.
+          revalidation_disagreement?(mission.id) ->
+            {:ok, "awaiting_approval"}
 
-          Override.approve(mission.id, %{
-            approved_by: "auto_timeout",
-            notes: "Auto-approved after #{timeout_h}h (re-validated)"
-          })
+          revalidate(mission) ->
+            Logger.info(
+              "Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)"
+            )
 
-          {:ok, mission} = Missions.get(mission.id)
-          GiTF.Publish.merge(mission)
-        else
-          Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
+            Override.approve(mission.id, %{
+              approved_by: "auto_timeout",
+              notes: "Auto-approved after #{timeout_h}h (re-validated)"
+            })
 
-          Override.reject(mission.id, "Re-validation failed during auto-approve", %{
-            rejected_by: "auto_timeout"
-          })
+            {:ok, mission} = Missions.get(mission.id)
+            GiTF.Publish.merge(mission)
 
-          Missions.fail_quest(mission.id, "Auto-approve failed re-validation")
+          true ->
+            # The mission already PASSED validation to get here; a
+            # re-validation failure on unchanged code is a signal
+            # disagreement, not new evidence of bad work (msn-aa92dd was
+            # trashed by exactly this — a security-scan flap an hour after a
+            # 10/10 pass). Never destroy validated work on a machine
+            # disagreement: withhold auto-approve, keep the approval
+            # pending, and tell the operator about the discrepancy.
+            note_revalidation_disagreement(mission, timeout_h)
+            {:ok, "awaiting_approval"}
         end
       end
     else
@@ -203,6 +212,54 @@ defmodule GiTF.Approval do
         hours_elapsed = GiTF.Clock.awake_elapsed(request.requested_at) / 3600
         hours_elapsed > timeout_hours() and not GiTF.Clock.in_boot_grace?()
     end
+  end
+
+  @doc """
+  Has a revalidation disagreement already been recorded on the pending
+  request? Used to alert and spot-check once, then hold quietly for the
+  human instead of re-running revalidation every advance sweep.
+  """
+  @spec revalidation_disagreement?(String.t()) :: boolean()
+  def revalidation_disagreement?(mission_id) do
+    case Archive.find_one(:approval_requests, fn r ->
+           r.mission_id == mission_id and r.status == "pending"
+         end) do
+      nil -> false
+      request -> request[:revalidation_disagreement] == true
+    end
+  end
+
+  @doc """
+  Records a validation/re-validation disagreement on the pending approval
+  request and alerts the operator — exactly once per request. The mission
+  stays in `awaiting_approval`: work that passed validation is never
+  auto-rejected on a machine disagreement (fail toward the human).
+  """
+  @spec note_revalidation_disagreement(map(), number()) :: :ok
+  def note_revalidation_disagreement(mission, timeout_h) do
+    Logger.warning(
+      "Quest #{mission.id} re-validation disagreed with original validation — withholding auto-approve, keeping for human review"
+    )
+
+    case Archive.find_one(:approval_requests, fn r ->
+           r.mission_id == mission.id and r.status == "pending"
+         end) do
+      nil ->
+        :ok
+
+      request ->
+        Archive.update(:approval_requests, request.id, fn r ->
+          Map.put(r, :revalidation_disagreement, true)
+        end)
+    end
+
+    Observability.Alerts.dispatch_webhook(
+      :approval_revalidation_disagreement,
+      "Quest #{mission.id}: re-validation failed after #{timeout_h}h timeout but original validation passed — auto-approve withheld, human review needed" <>
+        approvals_link()
+    )
+
+    :ok
   end
 
   @doc """
