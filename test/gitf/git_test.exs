@@ -101,6 +101,36 @@ defmodule GiTF.GitTest do
       assert content =~ ">>>>>>>"
     end
 
+    test "conflict commit stages ONLY conflicted files, not worktree residue",
+         %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "residue.txt"), "v1\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "add residue file"])
+
+      run.(["checkout", "-q", "-b", "side"])
+      File.write!(Path.join(repo, "shared.txt"), "line1\nSIDE\nline3\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "side"])
+      run.(["checkout", "-q", "main"])
+      File.write!(Path.join(repo, "shared.txt"), "line1\nMAIN\nline3\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "main"])
+
+      # Install-style residue present at merge time: untracked build output.
+      # (Tracked modifications would make git refuse the merge outright.)
+      File.write!(Path.join(repo, "untracked-residue.log"), "npm noise\n")
+
+      assert {:conflicted, ["shared.txt"]} = Git.merge_union(repo, "side")
+
+      # The merge commit contains the conflicted file, not the residue.
+      {committed, 0} =
+        System.cmd(@git, ["show", "--name-only", "--format=", "HEAD"], cd: repo)
+
+      assert committed =~ "shared.txt"
+      refute committed =~ "untracked-residue.log"
+      assert File.exists?(Path.join(repo, "untracked-residue.log"))
+    end
+
     test "unknown branch aborts and returns error", %{repo: repo} do
       assert {:error, _} = Git.merge_union(repo, "no-such-branch")
       refute File.exists?(Path.join(repo, ".git/MERGE_HEAD"))
@@ -109,6 +139,121 @@ defmodule GiTF.GitTest do
     test "already up to date is :ok", %{repo: repo, run: run} do
       run.(["branch", "twin"])
       assert Git.merge_union(repo, "twin") == :ok
+    end
+  end
+
+  describe "restore_tracked_residue/1" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "gitf_rr_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+
+      run = fn args -> System.cmd(@git, args, cd: tmp, stderr_to_stdout: true) end
+      run.(["init", "-q", "-b", "main"])
+      run.(["config", "user.email", "t@t.dev"])
+      run.(["config", "user.name", "t"])
+      File.write!(Path.join(tmp, "package-lock.json"), "v1\n")
+      File.write!(Path.join(tmp, "src.js"), "code\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "init"])
+
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      %{repo: tmp, run: run}
+    end
+
+    test "reverts tracked modifications, keeps untracked files", %{repo: repo} do
+      # Simulate validation residue: tracked lockfile rewritten, untracked
+      # build output dropped alongside.
+      File.write!(Path.join(repo, "package-lock.json"), "v2-residue\n")
+      File.write!(Path.join(repo, "build.log"), "untracked\n")
+
+      assert Git.restore_tracked_residue(repo) == ["package-lock.json"]
+      assert File.read!(Path.join(repo, "package-lock.json")) == "v1\n"
+      assert File.exists?(Path.join(repo, "build.log"))
+    end
+
+    test "clean tree is a no-op", %{repo: repo} do
+      assert Git.restore_tracked_residue(repo) == []
+    end
+
+    test "also clears staged-but-uncommitted residue", %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "package-lock.json"), "v2-residue\n")
+      run.(["add", "package-lock.json"])
+
+      assert Git.restore_tracked_residue(repo) == ["package-lock.json"]
+      {out, 0} = System.cmd(@git, ["status", "--porcelain"], cd: repo)
+      assert out == ""
+    end
+  end
+
+  describe "unstage_uninstructed_lockfiles/1" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "gitf_lf_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+
+      run = fn args -> System.cmd(@git, args, cd: tmp, stderr_to_stdout: true) end
+      run.(["init", "-q", "-b", "main"])
+      run.(["config", "user.email", "t@t.dev"])
+      run.(["config", "user.name", "t"])
+      File.write!(Path.join(tmp, "package.json"), ~s({"name":"app"}\n))
+      File.write!(Path.join(tmp, "package-lock.json"), ~s({"v":1}\n))
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "init"])
+
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      %{repo: tmp, run: run}
+    end
+
+    defp staged(repo) do
+      {out, 0} = System.cmd(@git, ["diff", "--cached", "--name-only"], cd: repo)
+      String.split(out, "\n", trim: true)
+    end
+
+    test "lockfile staged without its manifest is unstaged (install residue)",
+         %{repo: repo, run: run} do
+      # The cora PR #11 shape: source change + lockfile rewrite, package.json untouched.
+      File.write!(Path.join(repo, "app.js"), "code\n")
+      File.write!(Path.join(repo, "package-lock.json"), ~s({"v":2}\n))
+      run.(["add", "-A"])
+
+      assert Git.unstage_uninstructed_lockfiles(repo) == ["package-lock.json"]
+      assert staged(repo) == ["app.js"]
+      # The working-tree change survives — only the commit is protected.
+      assert File.read!(Path.join(repo, "package-lock.json")) == ~s({"v":2}\n)
+    end
+
+    test "lockfile staged WITH its manifest is kept (intentional dependency change)",
+         %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "package.json"), ~s({"name":"app","dependencies":{}}\n))
+      File.write!(Path.join(repo, "package-lock.json"), ~s({"v":2}\n))
+      run.(["add", "-A"])
+
+      assert Git.unstage_uninstructed_lockfiles(repo) == []
+      assert Enum.sort(staged(repo)) == ["package-lock.json", "package.json"]
+    end
+
+    test "nested lockfiles pair with the manifest in their own directory",
+         %{repo: repo, run: run} do
+      sub = Path.join(repo, "frontend")
+      File.mkdir_p!(sub)
+      File.write!(Path.join(sub, "package.json"), ~s({"name":"fe"}\n))
+      File.write!(Path.join(sub, "yarn.lock"), "v1\n")
+      run.(["add", "-A"])
+      run.(["commit", "-q", "-m", "add frontend"])
+
+      # Residue in the subdir, manifest untouched.
+      File.write!(Path.join(sub, "yarn.lock"), "v2\n")
+      run.(["add", "-A"])
+
+      assert Git.unstage_uninstructed_lockfiles(repo) == ["frontend/yarn.lock"]
+      assert staged(repo) == []
+    end
+
+    test "no staged lockfiles → no-op", %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "app.js"), "code\n")
+      run.(["add", "-A"])
+
+      assert Git.unstage_uninstructed_lockfiles(repo) == []
+      assert staged(repo) == ["app.js"]
     end
   end
 

@@ -1322,6 +1322,21 @@ defmodule GiTF.Major.Orchestrator do
          true <- File.dir?(wt) do
       target_branch = GiTF.Validation.canonical_branch(mission) || "ghost/#{target_ghost}"
 
+      # Validation/quality commands run in this same worktree between
+      # rounds and leave tracked residue (lockfile rewrites, cache
+      # touches). Merging over a dirty tree either sweeps the residue
+      # into a merge commit or aborts with a false "local changes"
+      # conflict — clear it first; all real work is already committed.
+      case GiTF.Git.restore_tracked_residue(wt) do
+        [] ->
+          :ok
+
+        residue ->
+          Logger.info(
+            "Quest #{mission.id}: reverted pre-consolidation residue: #{Enum.join(residue, ", ")}"
+          )
+      end
+
       conflicted =
         done_impl_ops
         |> Enum.map(& &1[:ghost_id])

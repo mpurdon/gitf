@@ -187,6 +187,12 @@ defmodule GiTF.Ghosts do
   def spawn_in_worktree(op_id, shell_id, sector_id, gitf_root) do
     with {:ok, shell} <- GiTF.Shell.get(shell_id),
          :ok <- validate_worktree_exists(shell),
+         # The previous ghost's work is already committed (auto-commit runs
+         # at op completion), so any tracked modification still in the tree
+         # is residue from validation/quality commands run here — npm ci
+         # rewrote package-lock.json this way and the fix ghost committed
+         # it into cora PR #11. Hand the fix ghost a clean tree.
+         :ok <- clean_adopted_worktree(shell),
          {:ok, ghost} <- create_ghost_record(generate_ghost_name(), op_id),
          {:ok, _} <- GiTF.Shell.adopt(shell_id, ghost.id),
          :ok <- assign_job(op_id, ghost.id),
@@ -754,6 +760,20 @@ defmodule GiTF.Ghosts do
 
   defp validate_worktree_exists(%{worktree_path: path}) do
     if File.dir?(path), do: :ok, else: {:error, :worktree_not_found}
+  end
+
+  defp clean_adopted_worktree(%{worktree_path: path}) do
+    case GiTF.Git.restore_tracked_residue(path) do
+      [] ->
+        :ok
+
+      residue ->
+        Logger.info(
+          "Reverted uncommitted residue before worktree adoption: #{Enum.join(residue, ", ")}"
+        )
+
+        :ok
+    end
   end
 
   defp revive_job(%{status: "failed"} = op, new_ghost_id) do

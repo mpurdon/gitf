@@ -305,9 +305,31 @@ defmodule GiTF.Runtime.Loadout do
   defp git_add(args, working_dir) do
     paths = String.split(args["paths"] || args[:paths] || "", " ", trim: true)
 
-    case GiTF.Git.safe_cmd(["add" | paths], cd: working_dir, stderr_to_stdout: true) do
-      {_, 0} -> {:ok, "Files staged: #{Enum.join(paths, ", ")}"}
-      {output, _} -> {:ok, "git add error: #{output}"}
+    # A model emitting "-A", "--all" or "." here bypassed every guard the
+    # auto-commit path has — flags are rejected outright, and the same
+    # exclusions (.claude/, uninstructed lockfiles) apply after staging.
+    case Enum.filter(paths, &String.starts_with?(&1, "-")) do
+      [] ->
+        case GiTF.Git.safe_cmd(["add", "--" | paths], cd: working_dir, stderr_to_stdout: true) do
+          {_, 0} ->
+            GiTF.Git.safe_cmd(["reset", "-q", "HEAD", "--", ".claude/"], cd: working_dir)
+
+            case GiTF.Git.unstage_uninstructed_lockfiles(working_dir) do
+              [] ->
+                {:ok, "Files staged: #{Enum.join(paths, ", ")}"}
+
+              residue ->
+                {:ok,
+                 "Files staged: #{Enum.join(paths, ", ")} (excluded lockfile(s) changed without their manifest — install side effects are not committed: #{Enum.join(residue, ", ")})"}
+            end
+
+          {output, _} ->
+            {:ok, "git add error: #{output}"}
+        end
+
+      flags ->
+        {:ok,
+         "git add error: flags are not accepted (got: #{Enum.join(flags, ", ")}). Pass explicit file paths."}
     end
   rescue
     e -> {:ok, "git add error: #{Exception.message(e)}"}

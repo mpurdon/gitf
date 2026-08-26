@@ -1743,6 +1743,19 @@ defmodule GiTF.Ghost.Worker do
             safe_git_cmd(["add", "-A"], path, 30_000)
             safe_git_cmd(["reset", "HEAD", "--", ".claude/"], path, 30_000)
 
+            # Lockfile rewritten without its manifest = install residue from a
+            # build/test run, not the ghost's work — keep it out of the commit
+            # (cora PR #11 shipped 600 lines of package-lock churn this way).
+            case GiTF.Git.unstage_uninstructed_lockfiles(path) do
+              [] ->
+                :ok
+
+              residue ->
+                Logger.info(
+                  "Ghost #{state.ghost_id}: excluded side-effect lockfile(s) from auto-commit: #{Enum.join(residue, ", ")}"
+                )
+            end
+
             # Only commit if there are staged changes left
             case safe_git_cmd(["diff", "--cached", "--name-only"], path, 30_000) do
               {staged, 0} ->

@@ -523,6 +523,12 @@ defmodule GiTF.Sync.Resolver do
     :ok
   end
 
+  # INVARIANT: no `-a` here, and validation must keep running AFTER the
+  # resolved files are `git add`ed. The scratch worktree is dirty with the
+  # validation command's install residue (npm ci rewrites lockfiles); only
+  # the ordering "stage resolutions → validate → commit the index" keeps
+  # that residue out of the sync commit. Adding `-a`, or staging after
+  # validation, would commit it.
   defp commit_merge(repo, branch, target) do
     GiTF.Git.safe_cmd(["commit", "--no-edit", "-m", "Sync #{branch} into #{target}"],
       cd: repo,

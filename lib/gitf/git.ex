@@ -603,7 +603,11 @@ defmodule GiTF.Git do
                 {:error, to_string(out)}
 
               files ->
-                safe_cmd(["-C", wt, "add", "-A"])
+                # Stage ONLY the conflicted files. `add -A` here swept
+                # whatever else was dirty in the worktree (validation's
+                # install residue) into a commit labelled as a merge —
+                # the least reviewable place for it.
+                safe_cmd(["-C", wt, "add", "--"] ++ files)
                 safe_cmd(["-C", wt, "commit", "--no-edit"])
                 {:conflicted, files}
             end
@@ -612,6 +616,109 @@ defmodule GiTF.Git do
             safe_cmd(["-C", wt, "merge", "--abort"])
             {:error, to_string(out)}
         end
+    end
+  end
+
+# A lockfile changing WITHOUT its manifest is the signature of install
+  # residue (npm/mix/cargo rewriting the lockfile as a side effect of a
+  # build or test run), not an intentional dependency change. PR #11 on
+  # cora shipped +308/−290 of package-lock.json churn this way: a fix
+  # ghost ran `npm install` to reproduce a validation failure and the
+  # auto-commit swept the rewritten lockfile into the mission branch.
+  @lockfile_manifests %{
+    "package-lock.json" => ["package.json"],
+    "npm-shrinkwrap.json" => ["package.json"],
+    "yarn.lock" => ["package.json"],
+    "pnpm-lock.yaml" => ["package.json"],
+    "bun.lockb" => ["package.json"],
+    "mix.lock" => ["mix.exs"],
+    "Cargo.lock" => ["Cargo.toml"],
+    "poetry.lock" => ["pyproject.toml"],
+    "uv.lock" => ["pyproject.toml"],
+    "Pipfile.lock" => ["Pipfile"],
+    "Gemfile.lock" => ["Gemfile"],
+    "composer.lock" => ["composer.json"],
+    "go.sum" => ["go.mod"]
+  }
+
+  @doc """
+  Unstages dependency lockfiles that are staged without their manifest.
+
+  Looks at the staged set in `wt`; any known lockfile (npm, yarn, pnpm,
+  mix, cargo, poetry, uv, pip, bundler, composer, go) whose sibling
+  manifest is not also staged is reset out of the index. The working-tree
+  change is left in place — only the commit is protected.
+
+  Returns the list of unstaged paths (empty when nothing was filtered).
+  """
+  @spec unstage_uninstructed_lockfiles(String.t()) :: [String.t()]
+  def unstage_uninstructed_lockfiles(wt) do
+    case safe_cmd(["-C", wt, "diff", "--cached", "--name-only"]) do
+      {out, 0} ->
+        staged = out |> to_string() |> String.split("\n", trim: true)
+        staged_set = MapSet.new(staged)
+
+        residue =
+          Enum.filter(staged, fn path ->
+            case Map.fetch(@lockfile_manifests, Path.basename(path)) do
+              {:ok, manifests} ->
+                dir = Path.dirname(path)
+
+                not Enum.any?(manifests, fn manifest ->
+                  sibling = if dir == ".", do: manifest, else: Path.join(dir, manifest)
+                  MapSet.member?(staged_set, sibling)
+                end)
+
+              :error ->
+                false
+            end
+          end)
+
+        case residue do
+          [] ->
+            []
+
+          files ->
+            safe_cmd(["-C", wt, "reset", "HEAD", "--"] ++ files)
+            files
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  @doc """
+  Reverts uncommitted changes to TRACKED files in `wt`, returning the list
+  of paths that were restored (empty when the tree was already clean).
+
+  Only call this at a boundary where all legitimate work is already
+  committed — e.g. before a fix ghost adopts an implementation worktree,
+  or before consolidation merges into it. At those points the impl ghost's
+  auto-commit has already run, so any tracked modification left in the
+  tree is residue from validation/quality/verification commands executed
+  there (`npm ci` rewriting the lockfile, analyzers touching caches).
+  Untracked files are left alone.
+  """
+  @spec restore_tracked_residue(String.t()) :: [String.t()]
+  def restore_tracked_residue(wt) do
+    case safe_cmd(["-C", wt, "status", "--porcelain", "--untracked-files=no"]) do
+      {"", 0} ->
+        []
+
+      {out, 0} ->
+        files =
+          out
+          |> to_string()
+          |> String.split("\n", trim: true)
+          |> Enum.map(&String.slice(&1, 3..-1//1))
+
+        safe_cmd(["-C", wt, "reset", "-q", "HEAD", "--", "."])
+        safe_cmd(["-C", wt, "checkout", "--", "."])
+        files
+
+      _ ->
+        []
     end
   end
 
