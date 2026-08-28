@@ -329,4 +329,79 @@ defmodule GiTF.GitTest do
       refute Git.repo?("/nonexistent/path/#{:erlang.unique_integer([:positive])}")
     end
   end
+
+  describe "conflict_marker_files/2" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "gitf_cm_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+
+      run = fn args -> System.cmd(@git, args, cd: tmp, stderr_to_stdout: true) end
+      run.(["init", "-q", "-b", "main"])
+      run.(["config", "user.email", "t@t.dev"])
+      run.(["config", "user.name", "t"])
+      File.write!(Path.join(tmp, "clean.rs"), "fn main() {}\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "init"])
+
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      %{repo: tmp, run: run}
+    end
+
+    test "finds committed markers — the msn-7683ac tree shape", %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "models.rs"), """
+      enum Priority {
+      <<<<<<< HEAD
+          High,
+      =======
+          Critical,
+      >>>>>>> ghost/ghost-503ee3
+      }
+      """)
+
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "union merge with markers"])
+
+      assert Git.conflict_marker_files(repo) == ["models.rs"]
+    end
+
+    test "clean tree yields nothing", %{repo: repo} do
+      assert Git.conflict_marker_files(repo) == []
+    end
+
+    test "scoping to changed files ignores marker-like content elsewhere",
+         %{repo: repo, run: run} do
+      # A committed fixture that legitimately CONTAINS marker syntax…
+      File.write!(Path.join(repo, "fixture.txt"), "<<<<<<< HEAD\n=======\n>>>>>>> x\n")
+      # …and the mission's own file, marker-laden.
+      File.write!(Path.join(repo, "touched.ts"), "a\n=======\nb\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "both"])
+
+      assert Git.conflict_marker_files(repo, ["touched.ts"]) == ["touched.ts"]
+      # Scope entries that no longer exist are dropped, not passed to git.
+      assert Git.conflict_marker_files(repo, ["gone.ts", "touched.ts"]) == ["touched.ts"]
+    end
+
+    test "marker-like but non-marker lines do not trip the scan", %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "notes.md"), """
+      ==== four equals is a heading underline
+      ========== ten equals is a divider
+      <<<<<<<< eight angles is not a marker
+      x <<<<<<< not at line start
+      """)
+
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "lookalikes"])
+
+      assert Git.conflict_marker_files(repo) == []
+    end
+
+    test "diff3-style base markers are caught", %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "d3.txt"), "||||||| merged common ancestors\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "diff3"])
+
+      assert Git.conflict_marker_files(repo) == ["d3.txt"]
+    end
+  end
 end

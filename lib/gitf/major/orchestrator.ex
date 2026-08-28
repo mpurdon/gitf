@@ -1051,21 +1051,30 @@ defmodule GiTF.Major.Orchestrator do
 
       case Map.get(mission, :impl_variants) || [] do
         [] ->
-          {:ok, conflicted} =
-            consolidate_impl_branches(mission, Map.get(ops_by_variant, nil, []))
+          case consolidate_impl_branches(mission, Map.get(ops_by_variant, nil, [])) do
+            {:conflict_pending, branch, files} ->
+              # Do NOT spawn a validation ghost onto a marker-laden tree —
+              # that is how msn-7683ac burned all four fix attempts. A
+              # focused resolution op reconciles this ONE merge, then the
+              # mission re-enters validation and consolidation resumes.
+              start_conflict_resolution(mission, branch, files)
 
-          changed_files = collect_changed_files(ops_by_variant, nil)
+            {:ok, notes} ->
+              changed_files = collect_changed_files(ops_by_variant, nil)
 
-          spawn_validation_for_variant(
-            mission,
-            requirements,
-            planning,
-            ctx,
-            diff_base,
-            nil,
-            changed_files,
-            conflicted
-          )
+              spawn_validation_for_variant(
+                mission,
+                requirements,
+                planning,
+                ctx,
+                diff_base,
+                nil,
+                changed_files,
+                notes
+              )
+
+              {:ok, "validation"}
+          end
 
         variants ->
           # Tournament mode: one validation ghost per variant, each
@@ -1086,9 +1095,9 @@ defmodule GiTF.Major.Orchestrator do
               []
             )
           end)
-      end
 
-      {:ok, "validation"}
+          {:ok, "validation"}
+      end
     end
   end
 
@@ -1355,17 +1364,28 @@ defmodule GiTF.Major.Orchestrator do
   # the feature sat in two branches (msn-807187, finding #17). Idempotent:
   # re-merging an already-merged branch is "Already up to date".
   #
-  # A CONTENT conflict completes the merge with the conflict markers
-  # committed, and the conflicted files are returned so the validation
-  # prompt can direct the fix loop to reconcile them. The previous policy
-  # (abort the branch's merge, let validation "report the gap") silently
-  # dropped entire branches from the union: run 13 (msn-c1c654) lost the
-  # whole frontend to one models.rs conflict, every validation round
-  # reported it missing, and fix ghosts re-implemented it blind —
-  # manufacturing exactly the duplicate definitions that killed the run.
-  # Visible markers are strictly better than invisible absence.
+  # A CONTENT conflict still completes that one merge with the markers
+  # committed (run 13: aborting silently dropped whole branches — visible
+  # markers beat invisible absence), but consolidation now STOPS at the
+  # first conflicted merge. msn-7683ac proved the old merge-everything
+  # policy diverges past two branches: each further union merge conflicts
+  # against already-committed markers, nesting them (61 marker lines
+  # through models.rs, five branches deep) until neither the fix loop nor
+  # a human can reconcile the tree. One conflicted merge at a time is the
+  # invariant; the caller spawns a FOCUSED resolution op for that single
+  # merge and re-enters, and merged?/2 skips the resolved branch on the
+  # next pass so the loop advances.
   #
-  # Returns {:ok, conflicted_files}.
+  # Returns:
+  #   {:ok, notes} — every branch merged AND the tree is marker-free.
+  #     `notes` carries only UNMERGED-BRANCH entries (merge failed without
+  #     content conflicts, run 21) for the validation prompt.
+  #   {:conflict_pending, branch, files} — `branch` was merged with
+  #     committed markers in `files`; no further branches were merged.
+  #   {:conflict_pending, nil, files} — merges clean, but tracked files
+  #     still carry markers (committed by an impl ghost, or missed by a
+  #     prior resolution). Validation must never spend an attempt on
+  #     either pending shape.
   defp consolidate_impl_branches(mission, done_impl_ops) do
     # Target the CANONICAL worktree (chain tip; fix ops excluded from
     # selection — they adopt older shells and drag the target backward,
@@ -1392,7 +1412,7 @@ defmodule GiTF.Major.Orchestrator do
           )
       end
 
-      conflicted =
+      branches =
         done_impl_ops
         |> Enum.map(& &1[:ghost_id])
         |> Enum.filter(&is_binary/1)
@@ -1405,11 +1425,13 @@ defmodule GiTF.Major.Orchestrator do
         # loop had just reconciled — run 32 burned its whole budget
         # resolving Settings.ts, then MainApp.tsx, then Settings.ts again.
         |> Enum.reject(&GiTF.Git.merged?(wt, &1))
-        |> Enum.flat_map(fn branch ->
+
+      result =
+        Enum.reduce_while(branches, {:ok, []}, fn branch, {:ok, notes} ->
           case GiTF.Git.merge_union(wt, branch) do
             :ok ->
               Logger.info("Quest #{mission.id}: consolidated #{branch} into #{target_branch}")
-              []
+              {:cont, {:ok, notes}}
 
             {:conflicted, files} ->
               # Generated files are not worth reconciling: both sides are
@@ -1419,7 +1441,6 @@ defmodule GiTF.Major.Orchestrator do
               # `npm run bindings` rewrites wholesale from the Rust structs.
               {generated, human} = Enum.split_with(files, &generated_file?/1)
               regenerated = if generated == [], do: [], else: regenerate(wt, generated)
-
               unresolved = human ++ (generated -- regenerated)
 
               if regenerated != [] do
@@ -1429,15 +1450,19 @@ defmodule GiTF.Major.Orchestrator do
                 )
               end
 
-              if unresolved != [] do
+              if unresolved == [] do
+                # Every conflict was machine output and the regenerator
+                # already replaced it — nothing left for a resolution ghost.
+                {:cont, {:ok, notes}}
+              else
                 Logger.warning(
-                  "Quest #{mission.id}: consolidation merge of #{branch} conflicted in " <>
-                    "#{Enum.join(unresolved, ", ")} — committed WITH conflict markers so no " <>
-                    "work is dropped; the fix loop must reconcile the marked regions"
+                  "Quest #{mission.id}: merge of #{branch} conflicted in " <>
+                    "#{Enum.join(unresolved, ", ")} — markers committed; consolidation " <>
+                    "HALTED for a focused resolution op (never merge onto markers)"
                 )
-              end
 
-              unresolved
+                {:halt, {:conflict_pending, branch, unresolved}}
+              end
 
             {:error, out} ->
               reason = out |> to_string() |> String.trim() |> String.slice(0, 200)
@@ -1452,15 +1477,33 @@ defmodule GiTF.Major.Orchestrator do
               # and validation judged a tree silently missing that work.
               # This synthetic entry rides the merge_conflicts list into the
               # validation prompt so the fix loop knows work is absent.
-              [
-                "UNMERGED BRANCH #{branch} (merge failed: #{reason}) — its commits are " <>
-                  "missing from this tree; merge it or re-apply its work"
-              ]
+              {:cont,
+               {:ok,
+                notes ++
+                  [
+                    "UNMERGED BRANCH #{branch} (merge failed: #{reason}) — its commits are " <>
+                      "missing from this tree; merge it or re-apply its work"
+                  ]}}
           end
         end)
-        |> Enum.uniq()
 
-      {:ok, conflicted}
+      # The marker GATE: even when every merge came back clean, the tree may
+      # carry markers an impl ghost committed or a prior resolution missed.
+      # Validation must never spend one of its four attempts on a tree that
+      # a text scan already convicts. Scoped to the mission's own changed
+      # files so pre-existing marker-like content (fixtures, docs) can't
+      # convict a tree the mission never touched.
+      with {:ok, notes} <- result do
+        scope =
+          done_impl_ops
+          |> Enum.flat_map(&(&1[:changed_files] || []))
+          |> Enum.uniq()
+
+        case GiTF.Git.conflict_marker_files(wt, scope) do
+          [] -> {:ok, Enum.uniq(notes)}
+          files -> {:conflict_pending, nil, files}
+        end
+      end
     else
       _ -> {:ok, []}
     end
@@ -1471,6 +1514,133 @@ defmodule GiTF.Major.Orchestrator do
       )
 
       {:ok, []}
+  end
+
+  # One focused ghost per conflicted merge, spawned into the canonical
+  # worktree where the marker-laden merge commit sits. Deliberately
+  # DISTINCT from the validation fix loop: resolution has its own small
+  # per-target budget, consumes no validation attempts, and its prompt is
+  # scoped to the marked regions of one merge — not "fix everything".
+  # msn-7683ac's fix ghosts were handed 15 marker-laden files in two
+  # languages plus the real validation gaps, four times, and diverged.
+  @max_resolutions_per_target 2
+
+  defp start_conflict_resolution(mission, branch, files) do
+    target = branch || "worktree"
+
+    prior =
+      Archive.by_index(:ops, :mission_id, mission.id)
+      |> Enum.count(&(&1[:conflict_resolution] == target))
+
+    cond do
+      prior >= @max_resolutions_per_target ->
+        GiTF.Missions.fail_quest(
+          mission.id,
+          "Merge conflict resolution for #{target} did not converge after " <>
+            "#{prior} focused attempts (files: #{Enum.join(Enum.take(files, 8), ", ")})"
+        )
+
+      GiTF.Ops.worktree_writer_in_flight?(mission.id) ->
+        # Same single-lineage rule as the fix loop: one writer per
+        # worktree. The in-flight writer's completion re-enters validation
+        # and consolidation re-derives whatever is still pending.
+        Logger.info(
+          "Quest #{mission.id}: conflict resolution deferred — worktree writer in flight"
+        )
+
+        {:ok, "implementation"}
+
+      true ->
+        create_conflict_resolution_op(mission, branch, files, target, prior)
+    end
+  end
+
+  defp create_conflict_resolution_op(mission, branch, files, target, prior) do
+    case GiTF.Ops.create(%{
+           title: "Resolve merge conflicts: #{target}",
+           description: resolution_description(branch, files),
+           mission_id: mission.id,
+           sector_id: mission.sector_id,
+           phase_job: false,
+           # Mission-level validation gates the final tree; running the full
+           # sector validation per resolution op would double-charge it.
+           skip_verification: true,
+           conflict_resolution: target,
+           target_files: files
+         }) do
+      {:ok, op} ->
+        GiTF.Missions.transition_phase(
+          mission.id,
+          "implementation",
+          "Merge conflict resolution: #{target} (attempt #{prior + 1})"
+        )
+
+        Logger.info(
+          "Quest #{mission.id}: spawned resolution op #{op.id} for #{target} " <>
+            "(#{length(files)} conflicted files)"
+        )
+
+        spawn_resolution_in_worktree(mission, op)
+        {:ok, "implementation"}
+
+      {:error, reason} ->
+        Logger.error(
+          "Quest #{mission.id}: could not create conflict-resolution op: #{inspect(reason)}"
+        )
+
+        GiTF.Missions.fail_quest(mission.id, "Could not create conflict-resolution op")
+    end
+  end
+
+  # The resolution must run where the markers are: the canonical worktree.
+  # Falling back to standard dispatch would hand the op a FRESH worktree
+  # branched before the conflicted merge — resolving nothing.
+  defp spawn_resolution_in_worktree(mission, op) do
+    with %{id: shell_id} <- GiTF.Validation.canonical_impl_shell(mission),
+         {:ok, gitf_root} <- GiTF.gitf_dir(),
+         {:ok, _ghost} <-
+           GiTF.Ghosts.spawn_in_worktree(op.id, shell_id, mission.sector_id, gitf_root) do
+      :ok
+    else
+      other ->
+        Logger.error(
+          "Quest #{mission.id}: could not spawn resolution ghost into the canonical " <>
+            "worktree (#{inspect(other)}) — op #{op.id} stays pending for the recovery sweep"
+        )
+
+        :error
+    end
+  end
+
+  defp resolution_description(branch, files) do
+    source =
+      if branch,
+        do: "a union merge of branch `#{branch}`",
+        else: "earlier commits in this worktree"
+
+    """
+    This worktree contains COMMITTED merge-conflict markers left by #{source}.
+    Your only job is to reconcile those markers. Files with markers:
+
+    #{Enum.map_join(files, "\n", &("- " <> &1))}
+
+    Rules:
+    - Both sides of every conflict carry wanted work. Produce the correct
+      combined code; do not discard either side's functionality.
+    - Remove every `<<<<<<<`, `|||||||`, `=======`, `>>>>>>>` marker line.
+    - Do not add features, do not refactor, do not touch files that have no
+      markers.
+    - If a conflicted file is a GENERATED artifact (e.g. src/bindings/*.ts
+      from ts-rs), reconcile its source instead and regenerate it with the
+      project's generator (e.g. `npm run bindings`) rather than hand-editing
+      machine output.
+    - If a marker-like line is intentional file content (a test fixture or a
+      documentation example), leave it exactly as-is and say so.
+    - After reconciling, the files you touched must be syntactically valid —
+      run the cheapest applicable check (typecheck/build) if the toolchain
+      allows.
+    - Commit the resolution.
+    """
   end
 
   # The branch a mission is amending, when it is amending one. Callers use it

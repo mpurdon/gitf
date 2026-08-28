@@ -619,6 +619,44 @@ defmodule GiTF.Git do
     end
   end
 
+  # <<<<<<<, |||||||, ======= and >>>>>>> at line start. ERE, since git grep
+  # -E is what consumes it. The ={7} alternative is exact-line (a Markdown
+  # setext underline is 3+ equals of arbitrary length, but a 7-equals line
+  # is accepted as a marker — the resolution ghost is told to leave
+  # intentional content alone rather than this scan trying to be clever).
+  @conflict_marker_re "^(<{7}( |$)|\\|{7}( |$)|={7}$|>{7}( |$))"
+
+  @doc """
+  Tracked files whose WORKING-TREE content contains merge-conflict markers.
+
+  This is the gate that keeps a marker-laden tree from ever reaching
+  validation: msn-7683ac committed nested markers from five branches and
+  then spent all four fix attempts failing to hand-reconcile them. `-I`
+  skips binaries; untracked files are irrelevant (they can't be committed
+  by the consolidation path). Returns [] on a clean tree or when git
+  itself fails — callers gate on presence, and a scan error must not
+  invent conflicts.
+
+  `paths` scopes the scan (e.g. to the files a mission actually changed) so
+  pre-existing marker-like content elsewhere — a test fixture, a docs
+  example — can't convict a tree the mission never touched. An empty list
+  scans everything. Paths that don't exist in the worktree are dropped
+  rather than handed to git, whose pathspec errors would read as "clean".
+  """
+  @spec conflict_marker_files(String.t(), [String.t()]) :: [String.t()]
+  def conflict_marker_files(wt, paths \\ []) do
+    pathspec =
+      case Enum.filter(paths, &File.exists?(Path.join(wt, &1))) do
+        [] -> ["."]
+        existing -> existing
+      end
+
+    case safe_cmd(["-C", wt, "grep", "-I", "-l", "-E", @conflict_marker_re, "--"] ++ pathspec) do
+      {out, 0} -> out |> to_string() |> String.split("\n", trim: true)
+      _ -> []
+    end
+  end
+
   # A lockfile changing WITHOUT its manifest is the signature of install
   # residue (npm/mix/cargo rewriting the lockfile as a side effect of a
   # build or test run), not an intentional dependency change. PR #11 on

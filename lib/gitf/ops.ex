@@ -130,6 +130,10 @@ defmodule GiTF.Ops do
         # (finding #14).
         fix_of: attrs[:fix_of],
         fix_context: attrs[:fix_context],
+        # Set on focused merge-resolution ops (the branch being reconciled,
+        # or "worktree" for leftover markers) so consolidation can count
+        # attempts per target instead of guessing from titles.
+        conflict_resolution: attrs[:conflict_resolution],
         # Priority (inherited from mission)
         priority: attrs[:priority] || inherit_mission_priority(attrs[:mission_id])
       }
