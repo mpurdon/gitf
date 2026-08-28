@@ -219,6 +219,28 @@ defmodule GiTF.Outcomes do
     end)
   end
 
+  @doc """
+  Puts a stopped (or slow-polling) outcome back on the tracker's plate.
+
+  Called by `GiTF.Outcomes.EventsPoller` when the repo events feed shows
+  activity on the PR after we last looked at it. `last_activity_at` is
+  bumped so `Analyzer.stale?/2` doesn't immediately re-stop a record that
+  was retired by the 72h window and has now come back to life.
+  """
+  @spec revive(String.t()) :: {:ok, t()} | {:error, term()}
+  def revive(id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    update(id, fn outcome ->
+      Map.merge(outcome, %{
+        tracking_stopped: false,
+        stopped_reason: nil,
+        next_poll_at: now,
+        last_activity_at: now
+      })
+    end)
+  end
+
   @doc "True when the factory is configured to track post-completion outcomes."
   @spec enabled?() :: boolean()
   def enabled?, do: Application.get_env(:gitf, :outcomes_enabled, false) == true

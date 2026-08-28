@@ -184,6 +184,7 @@ defmodule GiTF.Application do
              # it re-acquires its read accessor cleanly.
              {GiTF.Major.Janitor, []},
              {GiTF.Outcomes.Tracker, []},
+             {GiTF.Outcomes.EventsPoller, []},
              {GiTF.LSP.Supervisor, []},
              {GiTF.SectorSupervisor, []},
              {GiTF.Budget.Watchdog, []},

@@ -283,6 +283,53 @@ defmodule GiTF.GitHub do
   defp pr_number(_), do: nil
 
   @doc """
+  Lists recent repository events (`GET /repos/{owner}/{repo}/events`).
+
+  This is the wake catch-up feed: one call per repo covers activity on every
+  PR over a ~30-day window (cap 300 events), which is what survives the box
+  idle-stopping — GitHub never retries a missed webhook delivery, and its
+  webhook delivery log only lasts 3 days.
+
+  Pass the `etag` from a previous call to make an unchanged poll free:
+  a 304 answer costs no rate-limit budget and returns `:not_modified`.
+
+  Returns `{:ok, events, etag}`, `:not_modified`, or
+  `{:error, :transient | :permanent | term()}`.
+  """
+  @spec repo_events(GiTF.Schema.Sector.t(), keyword()) ::
+          {:ok, [map()], String.t() | nil} | :not_modified | {:error, term()}
+  def repo_events(sector, opts \\ []) do
+    with {:ok, client} <- client(sector) do
+      headers =
+        case opts[:etag] do
+          etag when is_binary(etag) and etag != "" -> [{"if-none-match", etag}]
+          _ -> []
+        end
+
+      case Req.get(client,
+             url: "/repos/#{sector.github_owner}/#{sector.github_repo}/events",
+             params: [per_page: 100],
+             headers: headers
+           ) do
+        {:ok, %{status: 200, body: events} = resp} when is_list(events) ->
+          {:ok, events, resp |> Req.Response.get_header("etag") |> List.first()}
+
+        {:ok, %{status: 304}} ->
+          :not_modified
+
+        {:ok, %{status: status}} when status in [401, 403, 404] ->
+          {:error, :permanent}
+
+        {:ok, %{status: _}} ->
+          {:error, :transient}
+
+        {:error, _} ->
+          {:error, :transient}
+      end
+    end
+  end
+
+  @doc """
   Lists inline review comments on a pull request.
 
   These are where a change request usually lives: requesting changes via a
