@@ -263,6 +263,7 @@ defmodule GiTF.Major do
   @impl true
   def handle_continue(:resume_active_quests, state) do
     Task.Supervisor.start_child(GiTF.TaskSupervisor, &GiTF.Sector.backfill_github_config/0)
+    state = reattach_running_ghosts(state)
     resume_active_quests(state)
     GiTF.Readiness.mark_ready()
     {:noreply, state}
@@ -531,7 +532,7 @@ defmodule GiTF.Major do
       {:ok, _pid} ->
         Logger.info("Ghost #{ghost_id} recovered by supervisor, re-monitoring")
         monitor_ghost_worker(ghost_id)
-        {:noreply, state}
+        {:noreply, put_in(state.active_ghosts[ghost_id], %{op_id: op_id, recovered: true})}
 
       :error ->
         case GiTF.Ghosts.get(ghost_id) do
@@ -1378,7 +1379,11 @@ defmodule GiTF.Major do
       {:degraded, Enum.map(failed, &to_string/1)}
     end
   rescue
-    _ -> :ok
+    # Fail CLOSED: a gate that cannot run must refuse spawning, not wave
+    # ghosts into a factory it couldn't inspect.
+    e ->
+      Logger.error("Preflight health check raised: #{Exception.message(e)}")
+      {:degraded, ["preflight_raised"]}
   end
 
   defp check_disk_ok do
@@ -1422,7 +1427,10 @@ defmodule GiTF.Major do
         end
     end
   rescue
-    _ -> true
+    # Fail CLOSED: "the git check itself crashed" is not "git is fine".
+    e ->
+      Logger.error("Preflight git check raised: #{Exception.message(e)}")
+      false
   end
 
   # Refuse to spawn when free disk is below this floor — a new ghost creates a
@@ -1654,7 +1662,7 @@ defmodule GiTF.Major do
           # (supplements the timer-based recover_stuck_jobs)
           monitor_ghost_worker(ghost.id)
 
-          state
+          put_in(state.active_ghosts[ghost.id], %{op_id: op.id, spawned_at: DateTime.utc_now()})
 
         {:error, reason} ->
           {step, raw_reason} =
@@ -1727,6 +1735,28 @@ defmodule GiTF.Major do
     end
   end
 
+  # A restarted Major boots with active_ghosts: %{} and zero monitors while
+  # the real fleet keeps running under SectorSupervisor — which sits ABOVE
+  # Major in Core.Supervisor precisely so it survives a Major crash. Without
+  # reattaching, a surviving ghost's death never reaches handle_ghost_death
+  # (no monitor), and status/active_ghost_count under-report until the
+  # Janitor's stall sweep eventually notices the stranded op.
+  defp reattach_running_ghosts(state) do
+    tracked =
+      GiTF.Registry
+      |> Registry.select([{{{:ghost, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+      |> Map.new(fn {ghost_id, pid} ->
+        Process.monitor(pid)
+        {ghost_id, %{pid: pid, reattached: true}}
+      end)
+
+    if map_size(tracked) > 0 do
+      Logger.info("Major restart: reattached monitors to #{map_size(tracked)} running ghost(s)")
+    end
+
+    %{state | active_ghosts: Map.merge(tracked, state.active_ghosts)}
+  end
+
   # Periodic timers for stall detection, debrief checks, phase advancement,
   # stuck-op recovery, and the idle code-quality sweeper now live in
   # `GiTF.Major.Janitor`. Major keeps only the timers whose work touches
@@ -1771,12 +1801,15 @@ defmodule GiTF.Major do
   end
 
   defp resume_active_quests(_state) do
-    # On startup, find active missions with no running ops or phase ghosts and kick them
+    # On startup, find active missions with no running ops or phase ghosts and
+    # kick them. GiTF.Missions owns the status contract — a hand-rolled list
+    # here once omitted "paused_budget", so every restart resurrected
+    # budget-paused missions and spent straight past their caps.
     active_quests =
       GiTF.Archive.all(:missions)
       |> Enum.filter(fn q ->
-        q[:status] not in [nil, "completed", "failed", "cancelled", "paused"] and
-          q[:current_phase] not in [nil, "completed", "failed", "cancelled"]
+        GiTF.Missions.non_terminal?(q) and
+          q[:current_phase] not in [nil | GiTF.Missions.terminal_phases()]
       end)
 
     Enum.each(active_quests, fn mission ->
@@ -2038,9 +2071,13 @@ defmodule GiTF.Major do
     queen_workspace = queen_workspace_path(state.gitf_root)
     File.mkdir_p!(queen_workspace)
 
-    # In API mode, start an agent loop task with queen tools
+    # In API mode, start an agent loop task with queen tools. async_nolink:
+    # Major does not trap exits, so a linked task raise (provider 5xx, decode
+    # error) would kill Major — and with it, under :rest_for_one, every
+    # sibling below. The {ref, result} and :DOWN clauses above handle both
+    # outcomes; a link handles neither.
     task =
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
         GiTF.Runtime.AgentLoop.run(
           "You are the Major orchestrator for a GiTF of AI coding agents. " <>
             "Monitor active missions, manage ghost workers, and coordinate work.",

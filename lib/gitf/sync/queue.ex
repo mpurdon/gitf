@@ -309,8 +309,13 @@ defmodule GiTF.Sync.Queue do
       [{op_id, shell_id} | rest] ->
         Logger.info("SyncQueue processing op #{op_id}")
 
+        # async_nolink: the queue does not trap exits, so a linked task would
+        # take the whole queue (and its pending backlog) down on a resolver
+        # crash — and the :merge_timeout handler's Process.exit(pid, :kill)
+        # would kill the queue itself. Unlinked, a crash arrives as the :DOWN
+        # message the handler below was written for.
         task =
-          Task.async(fn ->
+          Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
             result = GiTF.Sync.Resolver.resolve(op_id, shell_id)
             {:merge_result, op_id, result}
           end)

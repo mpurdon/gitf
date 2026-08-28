@@ -171,11 +171,19 @@ defmodule GiTF.Application do
         {Supervisor, :start_link,
          [
            [
+             # Order is load-bearing under :rest_for_one: a crash restarts
+             # everything BELOW the crashed child. Ghosts (SectorSupervisor)
+             # do not hold Major's pid — links ride PubSub and are replayed —
+             # so they sit ABOVE Major and survive a Major crash. Before this
+             # ordering, one Major (or RateLimiter) crash tore down every
+             # in-flight ghost, whose terminate marked all their ops failed.
              {GiTF.RateLimiter,
               name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
              {DynamicSupervisor,
               name: GiTF.Runtime.ProviderLimiter.Supervisor, strategy: :one_for_one},
              {DynamicSupervisor, name: GiTF.MissionSupervisor, strategy: :one_for_one},
+             {GiTF.LSP.Supervisor, []},
+             {GiTF.SectorSupervisor, []},
              {GiTF.Major, gitf_root: gitf_root},
              # Periodic recovery/stall/debrief timers — owned by a sibling so
              # Janitor crashes don't disrupt Major's link routing. Positioned
@@ -185,8 +193,6 @@ defmodule GiTF.Application do
              {GiTF.Major.Janitor, []},
              {GiTF.Outcomes.Tracker, []},
              {GiTF.Outcomes.EventsPoller, []},
-             {GiTF.LSP.Supervisor, []},
-             {GiTF.SectorSupervisor, []},
              {GiTF.Budget.Watchdog, []},
              {GiTF.Vault.Writer, []},
              {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}

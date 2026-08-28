@@ -315,7 +315,13 @@ defmodule GiTF.Tachikoma do
             GiTF.Audit.verify_job(op.id)
           end)
 
-        case Task.yield(task, 60_000) || Task.shutdown(task) do
+        # The kill budget must exceed the sector's validation budget.
+        # Task.shutdown kills the task that HOLDS the :global sector lock
+        # (the lock dies with its holder) but cannot kill System.cmd's OS
+        # child — so a 60s kill under a 120s-30min validation run released
+        # the lock while npm ci was still writing, and the next lock holder
+        # started a second install into the same tree (run 7's corruption).
+        case Task.yield(task, verification_kill_budget_ms(op)) || Task.shutdown(task) do
           {:ok, {:ok, :pass, _result}} ->
             []
 
@@ -1236,6 +1242,19 @@ defmodule GiTF.Tachikoma do
       :ok
   end
 
+  # Slack covers quality checks + lock wait on top of the validation command
+  # itself; the fallback matches the default validation budget + slack.
+  defp verification_kill_budget_ms(op) do
+    with sector_id when is_binary(sector_id) <- Map.get(op, :sector_id),
+         {:ok, sector} <- GiTF.Sector.get(sector_id) do
+      GiTF.Validator.validation_timeout_ms(sector) + 120_000
+    else
+      _ -> 240_000
+    end
+  rescue
+    _ -> 240_000
+  end
+
   defp format_audit_result(result) do
     case Map.get(result, :validations) do
       nil ->
@@ -1311,7 +1330,7 @@ defmodule GiTF.Tachikoma do
       Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
   end
 
-# One owner for the "is this delivered via a mission-level PR?" policy;
+  # One owner for the "is this delivered via a mission-level PR?" policy;
   # SyncQueue's recovery sweep applies the same predicate.
   defp mission_uses_pr_branch?(op_id), do: GiTF.Sync.mission_level_pr?(op_id)
 

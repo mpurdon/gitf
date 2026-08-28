@@ -262,22 +262,39 @@ defmodule GiTF.Major.Orchestrator do
           fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
 
         over_budget?(mission) ->
-          {cap, spent} = mission_budget_snapshot(mission)
+          case mission_budget_snapshot(mission) do
+            {:ok, {cap, spent}} ->
+              Logger.warning(
+                "Quest #{mission_id} exceeded budget cap ($#{Float.round(cap, 2)}): spent $#{Float.round(spent, 4)} — failing"
+              )
 
-          Logger.warning(
-            "Quest #{mission_id} exceeded budget cap ($#{Float.round(cap, 2)}): spent $#{Float.round(spent, 4)} — failing"
-          )
+              GiTF.Observability.Alerts.dispatch_webhook(
+                :budget_exceeded,
+                "Quest #{mission_id} spent $#{Float.round(spent, 4)} (cap $#{Float.round(cap, 2)})",
+                dedup_key: "budget_exceeded:#{mission_id}"
+              )
 
-          GiTF.Observability.Alerts.dispatch_webhook(
-            :budget_exceeded,
-            "Quest #{mission_id} spent $#{Float.round(spent, 4)} (cap $#{Float.round(cap, 2)})",
-            dedup_key: "budget_exceeded:#{mission_id}"
-          )
+              fail_quest(
+                mission_id,
+                "Budget exceeded: spent $#{Float.round(spent, 4)} of $#{Float.round(cap, 2)} cap"
+              )
 
-          fail_quest(
-            mission_id,
-            "Budget exceeded: spent $#{Float.round(spent, 4)} of $#{Float.round(cap, 2)} cap"
-          )
+            {:error, reason} ->
+              # The budget could not be COMPUTED. Failing the quest would
+              # destroy work over a bookkeeping glitch; advancing would
+              # spend uncapped. Hold in place and page the operator.
+              Logger.error(
+                "Quest #{mission_id}: budget unverifiable (#{reason}) — holding, not advancing"
+              )
+
+              GiTF.Observability.Alerts.dispatch_webhook(
+                :budget_blocked,
+                "Quest #{mission_id}: budget could not be computed (#{reason}) — mission held",
+                dedup_key: "budget_unverifiable:#{mission_id}"
+              )
+
+              :ok
+          end
 
         true ->
           advance_mission_phase(mission)
@@ -294,8 +311,14 @@ defmodule GiTF.Major.Orchestrator do
     if status == "completed" or phase in ["completed", "awaiting_approval", "pending"] do
       false
     else
-      {cap, spent} = mission_budget_snapshot(mission)
-      spent > cap
+      # Fail CLOSED: an unverifiable budget blocks advancement (the arm
+      # above distinguishes held-vs-exceeded). The old rescue returned
+      # spent=0.0, which meant one malformed cost record permanently
+      # disarmed the cap for every mission.
+      case mission_budget_snapshot(mission) do
+        {:ok, {cap, spent}} -> spent > cap
+        {:error, _reason} -> true
+      end
     end
   end
 
@@ -314,11 +337,12 @@ defmodule GiTF.Major.Orchestrator do
         GiTF.Budget.config_budget()
 
     spent = GiTF.Costs.for_quest(mission.id) |> GiTF.Costs.total()
-    {cap * 1.0, spent}
+    {:ok, {cap * 1.0, spent}}
   rescue
-    # spent=0 means the guard can't fire on a failed lookup; the cap value
-    # is inert here.
-    _ -> {20.0, 0.0}
+    e ->
+      Logger.error("Mission budget snapshot failed for #{mission.id}: #{Exception.message(e)}")
+
+      {:error, Exception.message(e)}
   end
 
   defp quest_timed_out?(mission) do

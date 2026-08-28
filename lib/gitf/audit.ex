@@ -385,6 +385,21 @@ defmodule GiTF.Audit do
 
   defp quality_security(op_id, worktree_path, language) do
     case Quality.analyze_security(op_id, worktree_path, language) do
+      {:ok, %{tool_available: false} = report} ->
+        # The dependency audit never ran (tool missing/crashed/timed out).
+        # A nil score is "not measured" to every consumer; a numeric score
+        # from a scanner that didn't execute would be a fabricated verdict
+        # in either direction.
+        Logger.warning(
+          "Security dependency audit unavailable for op #{op_id} — recording inconclusive"
+        )
+
+        %{
+          security_score: nil,
+          security_findings: length(report.issues),
+          security_inconclusive: true
+        }
+
       {:ok, report} ->
         %{security_score: report.score, security_findings: length(report.issues)}
 

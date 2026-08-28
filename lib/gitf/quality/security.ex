@@ -6,12 +6,24 @@ defmodule GiTF.Quality.Security do
   @doc """
   Run security scans on a shell.
   Returns {:ok, results} with security score and findings.
+
+  `available: false` means the dependency audit could not actually run
+  (tool missing, crashed, or timed out). Empty findings from a scanner that
+  never ran must NOT read as a clean bill: `[]` scores 100, so a missing
+  `npm` used to make every op's security gate green forever. Callers treat
+  unavailable as inconclusive, never as clean.
   """
   def scan(shell_path, language) do
+    {dep_findings, available, unavailable_reason} =
+      case check_dependencies(shell_path, language) do
+        {:unavailable, reason} -> {[], false, reason}
+        findings when is_list(findings) -> {findings, true, nil}
+      end
+
     findings =
       [
         check_secrets(shell_path),
-        check_dependencies(shell_path, language),
+        dep_findings,
         check_vulnerabilities(shell_path, language)
       ]
       |> List.flatten()
@@ -23,7 +35,9 @@ defmodule GiTF.Quality.Security do
      %{
        findings: findings,
        score: score,
-       tool: "section-security"
+       tool: "section-security",
+       available: available,
+       unavailable_reason: unavailable_reason
      }}
   end
 
@@ -87,14 +101,17 @@ defmodule GiTF.Quality.Security do
         end
       end)
 
+    # Missing/crashed/timed-out tool is UNAVAILABLE, not "no findings" —
+    # [] scores 100, and a verdict must never depend on which tools the
+    # host happens to have installed.
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {_output, 0}} -> []
       {:ok, {output, _}} when is_binary(output) -> parse_mix_audit(output)
-      {:ok, _tool_missing_or_error} -> []
-      nil -> []
+      {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
+      nil -> {:unavailable, :timeout}
     end
   rescue
-    _ -> []
+    _ -> {:unavailable, :scanner_crashed}
   end
 
   defp check_npm_audit(path) do
@@ -117,11 +134,11 @@ defmodule GiTF.Quality.Security do
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} when is_binary(output) -> parse_npm_audit(output)
-      {:ok, _tool_missing_or_error} -> []
-      nil -> []
+      {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
+      nil -> {:unavailable, :timeout}
     end
   rescue
-    _ -> []
+    _ -> {:unavailable, :scanner_crashed}
   end
 
   defp check_cargo_audit(path) do
@@ -144,11 +161,11 @@ defmodule GiTF.Quality.Security do
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} when is_binary(output) -> parse_cargo_audit(output)
-      {:ok, _tool_missing_or_error} -> []
-      nil -> []
+      {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
+      nil -> {:unavailable, :timeout}
     end
   rescue
-    _ -> []
+    _ -> {:unavailable, :scanner_crashed}
   end
 
   defp check_pip_audit(path) do
@@ -171,11 +188,11 @@ defmodule GiTF.Quality.Security do
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, _}} when is_binary(output) -> parse_pip_audit(output)
-      {:ok, _tool_missing_or_error} -> []
-      nil -> []
+      {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
+      nil -> {:unavailable, :timeout}
     end
   rescue
-    _ -> []
+    _ -> {:unavailable, :scanner_crashed}
   end
 
   defp parse_mix_audit(output) do

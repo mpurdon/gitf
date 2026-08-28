@@ -41,7 +41,7 @@ defmodule GiTF.Quality do
   Returns {:ok, report} with security score and findings.
   """
   def analyze_security(op_id, shell_path, language) do
-    {:ok, %{findings: findings, score: score, tool: tool}} =
+    {:ok, %{findings: findings, score: score, tool: tool} = result} =
       Security.scan(shell_path, language)
 
     report = %{
@@ -51,7 +51,9 @@ defmodule GiTF.Quality do
       score: score,
       issues: findings,
       tool: tool,
-      tool_available: true,
+      # False when the dependency audit could not run — a verdict from a
+      # scanner that never executed must not read as a clean 100.
+      tool_available: Map.get(result, :available, true),
       recommendations: generate_security_recommendations(findings),
       inserted_at: DateTime.utc_now(),
       updated_at: DateTime.utc_now()

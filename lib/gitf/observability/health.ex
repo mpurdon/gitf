@@ -79,7 +79,12 @@ defmodule GiTF.Observability.Health do
       end
     end
   rescue
-    _ -> true
+    # Fail CLOSED: "the liveness probe crashed" must not read as "alive" —
+    # that permanently blinds the zombie detector. Worst case here is a
+    # spurious zombie alert, which is the survivable direction.
+    e ->
+      Logger.error("Liveness probe raised: #{Exception.message(e)}")
+      false
   end
 
   defp check_store do
@@ -137,7 +142,10 @@ defmodule GiTF.Observability.Health do
         :ok
     end
   rescue
-    _ -> :ok
+    # Fail CLOSED: a disk check that crashed has not verified the disk.
+    e ->
+      Logger.warning("Disk health check raised: #{Exception.message(e)}")
+      :error
   end
 
   defp check_memory do
