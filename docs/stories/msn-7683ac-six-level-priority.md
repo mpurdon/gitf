@@ -179,3 +179,33 @@ parallel workstreams cleanly, and then drowned in its own merge — because
 the one piece of machinery that was never built for n>2 was the piece
 that turns parallel work back into one tree. Every safety net around the
 failure held. The factory now knows exactly what to build next.
+
+## Interlude: building the consolidation engine (2026-08-28, same day)
+
+Shipped as **v0.65.214** (commit 4f9221e), ~4 hours after the failure:
+
+- **Incremental merge-and-resolve.** `consolidate_impl_branches` now stops
+  at the FIRST conflicted merge. The markers for that one merge are still
+  committed (run 13's visible-beats-absent lesson survives), but instead
+  of merging four more branches on top, the factory spawns a **focused
+  resolution op** — a ghost whose entire job is reconciling that single
+  merge's marked files, running in the canonical worktree where the merge
+  commit sits. When it finishes, the mission re-enters validation,
+  `merged?` skips the resolved branch, and the next branch merges. One
+  conflicted merge at a time, forever bounded: two attempts per target,
+  then the mission fails with a named reason.
+- **The marker gate.** `Git.conflict_marker_files/2` — a `git grep` for
+  `<<<<<<<`/`|||||||`/`=======`/`>>>>>>>` at line start, scoped to the
+  mission's changed files — runs after every consolidation pass. A
+  marker-laden tree can no longer reach a validation ghost, so validation
+  attempts are never again spent on what a text scan already convicts.
+- Resolution ops consume **no validation attempts** (msn-7683ac spent all
+  four on marker cleanup) and carry explicit instructions: both sides are
+  wanted work; generated files get their *source* resolved and are
+  regenerated, never hand-merged; intentional marker-like content is left
+  alone.
+- Preserved: generated-file regeneration on conflict (run 32),
+  unmerged-branch visibility notes (run 21), residue restore, merged?-skip.
+
+2,230 tests green. The rematch: the SAME mission goal, unchanged, on the
+new engine.
