@@ -666,6 +666,24 @@ defmodule GiTF.Ops do
   end
 
   @doc """
+  The `\"done\"` op that resolves `op_id`'s retry chain, or nil.
+
+  Used wherever a consumer needs the RESOLVING op itself rather than a
+  boolean — e.g. worktree chain-inheritance, where a dependent op must
+  continue in the worktree of whichever descendant actually finished.
+  """
+  @spec done_retry_descendant(String.t(), non_neg_integer()) :: map() | nil
+  def done_retry_descendant(op_id, depth \\ 0)
+  def done_retry_descendant(_op_id, depth) when depth >= @max_retry_chain_depth, do: nil
+
+  def done_retry_descendant(op_id, depth) do
+    children = Archive.filter(:ops, fn j -> Map.get(j, :retry_of) == op_id end)
+
+    Enum.find(children, &(&1.status == "done")) ||
+      Enum.find_value(children, &done_retry_descendant(&1.id, depth + 1))
+  end
+
+  @doc """
   In-memory variant of `retry_completed?/1` — accepts any enumerable of
   ops (list or `{id, op}` map entries). Use when checking many ops in a
   single pass to avoid N Archive scans. Traverses the whole retry chain,

@@ -1606,8 +1606,24 @@ defmodule GiTF.Major do
         GiTF.Ghosts.spawn_in_worktree(op.id, shell_id, op.sector_id, gitf_root)
 
       :none ->
-        GiTF.Ghosts.spawn_detached(op.id, op.sector_id, gitf_root)
+        # No inheritable worktree — but if the mission already has a
+        # consolidated lineage, branch from ITS tip instead of origin/main.
+        # Sequential ops then produce cumulative branches and fast-forward
+        # consolidation, not sibling conflicts (execution-efficiency A1).
+        GiTF.Ghosts.spawn_detached(op.id, op.sector_id, gitf_root, canonical_base_opts(op))
     end
+  end
+
+  defp canonical_base_opts(op) do
+    with mission_id when is_binary(mission_id) <- op[:mission_id],
+         {:ok, mission} <- GiTF.Missions.get(mission_id),
+         branch when is_binary(branch) <- GiTF.Validation.canonical_branch(mission) do
+      [base_branch: branch]
+    else
+      _ -> []
+    end
+  rescue
+    _ -> []
   end
 
   # Public for test assertion only — the chain-inheritance contract this
@@ -1625,6 +1641,19 @@ defmodule GiTF.Major do
     with false <- op[:phase_job] == true,
          deps when deps != [] <- GiTF.Ops.dependencies(op.id) do
       deps
+      # A dependency rescued by a retry chain must chain the WORKTREE too:
+      # the original op reads "failed", but its done retry descendant holds
+      # the lineage. Without this hop, every op downstream of a retried
+      # failure provisioned a fresh sibling worktree from origin/main —
+      # which is where all three six-level-priority runs manufactured
+      # their merge conflicts.
+      |> Enum.map(fn
+        %{status: s, id: id} = dep when s in ["failed", "rejected"] ->
+          GiTF.Ops.done_retry_descendant(id) || dep
+
+        dep ->
+          dep
+      end)
       |> Enum.filter(&(is_map(&1) and &1[:status] == "done" and is_binary(&1[:ghost_id])))
       |> Enum.sort_by(& &1[:updated_at], :desc)
       |> Enum.find_value(:none, fn dep_op ->

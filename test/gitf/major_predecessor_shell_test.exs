@@ -61,4 +61,56 @@ defmodule GiTF.MajorPredecessorShellTest do
   test "ops without dependencies get no predecessor shell", %{dep_op: dep_op} do
     assert GiTF.Major.predecessor_shell(dep_op) == :none
   end
+
+  test "a FAILED dependency resolved by a retry chain still chains the worktree", %{
+    op: op,
+    dep_op: dep_op,
+    shell: shell
+  } do
+    # Rewind: the dependency failed; its retry ALSO failed; the
+    # retry-of-the-retry succeeded in a live worktree. Runs 1-3 of
+    # six-level-priority forked sibling branches off origin/main here,
+    # manufacturing every consolidation conflict they later drowned in.
+    {:ok, _} = Archive.update(:ops, dep_op.id, &Map.put(&1, :status, "failed"))
+
+    {:ok, retry1} =
+      Ops.create(%{title: "op A retry", mission_id: dep_op.mission_id, sector_id: dep_op.sector_id})
+
+    {:ok, _} =
+      Archive.update(:ops, retry1.id, &Map.merge(&1, %{status: "failed", retry_of: dep_op.id}))
+
+    {:ok, ghost2} = Archive.insert(:ghosts, %{name: "g2", status: "stopped"})
+
+    worktree2 = Path.join(Path.dirname(shell.worktree_path), "wt2")
+    File.mkdir_p!(worktree2)
+
+    {:ok, shell2} =
+      Archive.insert(:shells, %{
+        sector_id: dep_op.sector_id,
+        ghost_id: ghost2.id,
+        path: "/tmp/s",
+        worktree_path: worktree2,
+        status: "active"
+      })
+
+    {:ok, _} = Archive.update(:ghosts, ghost2.id, &Map.put(&1, :shell_id, shell2.id))
+
+    {:ok, retry2} =
+      Ops.create(%{
+        title: "op A retry 2",
+        mission_id: dep_op.mission_id,
+        sector_id: dep_op.sector_id
+      })
+
+    {:ok, _} =
+      Archive.update(
+        :ops,
+        retry2.id,
+        &Map.merge(&1, %{status: "done", retry_of: retry1.id, ghost_id: ghost2.id})
+      )
+
+    {:ok, op} = Ops.get(op.id)
+    assert {:ok, shell_id} = GiTF.Major.predecessor_shell(op)
+    assert shell_id == shell2.id
+  end
 end

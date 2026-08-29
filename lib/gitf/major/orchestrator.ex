@@ -1211,44 +1211,69 @@ defmodule GiTF.Major.Orchestrator do
   defp run_exec_validation(mission, variant_id) do
     with %{validation_command: cmd} = sector when is_binary(cmd) and cmd != "" <-
            Archive.get(:sectors, mission.sector_id),
-         %{worktree_path: _} = shell <- exec_validation_shell(mission, variant_id) do
-      Logger.info("Running validation command for #{mission.id}: #{cmd}")
+         %{worktree_path: wt} = shell <- exec_validation_shell(mission, variant_id) do
+      # Verdict cache (execution-efficiency B4): a fix loop re-enters
+      # validation several times per mission; when the TREE hasn't moved
+      # since the last run, re-paying npm ci + build (minutes of
+      # sector-lock time) buys nothing. Reuse only on an exact
+      # fingerprint match; a nil fingerprint never caches.
+      fingerprint = tree_fingerprint(wt)
+      cached = GiTF.Missions.get_artifact(mission.id, "exec_validation")
 
-      # Sector lock: the op-level audit runs this same command; two npm ci
-      # racing in one tree corrupted node_modules on run 7 (msn-4fda11).
-      result =
-        GiTF.WorktreeLock.with_lock({:sector, mission.sector_id}, fn ->
-          GiTF.Validator.run_custom_validation(
-            shell,
-            cmd,
-            GiTF.Validator.validation_timeout_ms(sector)
-          )
-        end)
+      if is_binary(fingerprint) and is_map(cached) and cached["tree"] == fingerprint do
+        Logger.info(
+          "Quest #{mission.id}: exec-validation tree unchanged — reusing #{cached["status"]} verdict"
+        )
 
-      case result do
-        :ok ->
-          Logger.info("Validation command passed for #{mission.id}")
-          store_exec_verdict(mission, %{"status" => "pass"})
-          {:pass, cmd}
+        case cached["status"] do
+          "pass" -> {:pass, cmd}
+          _ -> {:fail, cmd, to_string(cached["output"] || "")}
+        end
+      else
+        Logger.info("Running validation command for #{mission.id}: #{cmd}")
 
-        {:error, kind, output} ->
-          Logger.warning(
-            "Validation command FAILED for #{mission.id} (#{kind}): #{String.slice(to_string(output), 0, 300)}"
-          )
+        # Sector lock: the op-level audit runs this same command; two npm ci
+        # racing in one tree corrupted node_modules on run 7 (msn-4fda11).
+        result =
+          GiTF.WorktreeLock.with_lock({:sector, mission.sector_id}, fn ->
+            GiTF.Validator.run_custom_validation(
+              shell,
+              cmd,
+              GiTF.Validator.validation_timeout_ms(sector)
+            )
+          end)
 
-          # Record the FACTORY's own classification out-of-band. The fix
-          # loop's infra guard previously depended on the LLM validator
-          # echoing sentinel strings into its artifact — run 7's validator
-          # paraphrased ("host toolchain error") and the guard missed,
-          # spending 4 fix attempts on a corrupted node_modules.
-          store_exec_verdict(mission, %{
-            "status" => "fail",
-            "infra_failure" => kind == :tool_missing,
-            "kind" => to_string(kind),
-            "output" => String.slice(to_string(output), 0, 500)
-          })
+        # Fingerprint AFTER the run — the command itself mutates the tree
+        # (installs rewrite lockfiles), and the verdict describes the tree
+        # it LEFT behind, which is what the next round will see.
+        post_fingerprint = tree_fingerprint(wt)
 
-          {:fail, cmd, to_string(output)}
+        case result do
+          :ok ->
+            Logger.info("Validation command passed for #{mission.id}")
+            store_exec_verdict(mission, %{"status" => "pass", "tree" => post_fingerprint})
+            {:pass, cmd}
+
+          {:error, kind, output} ->
+            Logger.warning(
+              "Validation command FAILED for #{mission.id} (#{kind}): #{String.slice(to_string(output), 0, 300)}"
+            )
+
+            # Record the FACTORY's own classification out-of-band. The fix
+            # loop's infra guard previously depended on the LLM validator
+            # echoing sentinel strings into its artifact — run 7's validator
+            # paraphrased ("host toolchain error") and the guard missed,
+            # spending 4 fix attempts on a corrupted node_modules.
+            store_exec_verdict(mission, %{
+              "status" => "fail",
+              "infra_failure" => kind == :tool_missing,
+              "kind" => to_string(kind),
+              "output" => String.slice(to_string(output), 0, 500),
+              "tree" => post_fingerprint
+            })
+
+            {:fail, cmd, to_string(output)}
+        end
       end
     else
       _ -> nil
@@ -1257,6 +1282,21 @@ defmodule GiTF.Major.Orchestrator do
     e ->
       Logger.warning("run_exec_validation crashed for #{mission.id}: #{Exception.message(e)}")
       nil
+  end
+
+  # HEAD sha + working-tree status digest. Anything that changes either —
+  # a commit, a resolution, install residue — changes the fingerprint, so
+  # the verdict cache can only ever reuse a verdict for a byte-identical
+  # tree. nil on any git failure (never cache blind).
+  defp tree_fingerprint(wt) do
+    with {head, 0} <- GiTF.Git.safe_cmd(["-C", wt, "rev-parse", "HEAD"]),
+         {status, 0} <- GiTF.Git.safe_cmd(["-C", wt, "status", "--porcelain"]) do
+      :md5 |> :crypto.hash([to_string(head), to_string(status)]) |> Base.encode16()
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   # Overwritten every round so a stale infra flag can never suppress fix
@@ -1440,92 +1480,50 @@ defmodule GiTF.Major.Orchestrator do
 
       branches =
         done_impl_ops
-        |> Enum.map(& &1[:ghost_id])
-        |> Enum.filter(&is_binary/1)
-        |> Enum.map(&("ghost/" <> &1))
-        |> Enum.uniq()
-        |> Enum.reject(&(&1 == target_branch))
+        # Resolution ops work IN the canonical worktree — they have no
+        # sibling branch worth merging, and a stale ghost/<id> ref for one
+        # would only add UNMERGED-BRANCH noise.
+        |> Enum.reject(&(&1[:conflict_resolution] != nil))
+        |> Enum.map(&{&1.id, &1[:ghost_id]})
+        |> Enum.filter(fn {_id, g} -> is_binary(g) end)
+        |> Enum.map(fn {id, g} -> {id, "ghost/" <> g} end)
+        |> Enum.uniq_by(&elem(&1, 1))
+        |> Enum.reject(fn {_id, b} -> b == target_branch end)
         # Skip branches already contained in this tree. Consolidation runs
         # on EVERY validation round, and re-merging a branch whose commits
         # are already present re-injected the same conflict markers the fix
         # loop had just reconciled — run 32 burned its whole budget
         # resolving Settings.ts, then MainApp.tsx, then Settings.ts again.
-        |> Enum.reject(&GiTF.Git.merged?(wt, &1))
+        |> Enum.reject(fn {_id, b} -> GiTF.Git.merged?(wt, b) end)
 
       result =
-        Enum.reduce_while(branches, {:ok, []}, fn branch, {:ok, notes} ->
-          case GiTF.Git.merge_union(wt, branch) do
-            :ok ->
-              Logger.info("Quest #{mission.id}: consolidated #{branch} into #{target_branch}")
-              {:cont, {:ok, notes}}
+        Enum.reduce_while(branches, {:ok, []}, fn {op_id, branch}, {:ok, notes} ->
+          # Op state can change between the phase snapshot and this merge.
+          # Run 3's tree was poisoned by a quality-fix branch merged in the
+          # window around its audit rejection — a rejected or failed
+          # lineage must never enter the tree, so re-read at the moment of
+          # merge, from the authoritative record.
+          if not fresh_mergeable?(op_id) do
+            Logger.info(
+              "Quest #{mission.id}: skipping #{branch} — op #{op_id} is no longer " <>
+                "done/verified at merge time"
+            )
 
-            {:conflicted, files} ->
-              # Generated files are not worth reconciling: both sides are
-              # machine output from the same source of truth, so the merge
-              # is meaningless and the regenerator is authoritative. Run 32
-              # burned rounds hand-merging src/bindings/Settings.ts, which
-              # `npm run bindings` rewrites wholesale from the Rust structs.
-              {generated, human} = Enum.split_with(files, &generated_file?/1)
-              regenerated = if generated == [], do: [], else: regenerate(wt, generated)
-              unresolved = human ++ (generated -- regenerated)
-
-              if regenerated != [] do
-                Logger.info(
-                  "Quest #{mission.id}: regenerated #{Enum.join(regenerated, ", ")} " <>
-                    "instead of merging machine output"
-                )
-              end
-
-              if unresolved == [] do
-                # Every conflict was machine output and the regenerator
-                # already replaced it — nothing left for a resolution ghost.
-                {:cont, {:ok, notes}}
-              else
-                Logger.warning(
-                  "Quest #{mission.id}: merge of #{branch} conflicted in " <>
-                    "#{Enum.join(unresolved, ", ")} — markers committed; consolidation " <>
-                    "HALTED for a focused resolution op (never merge onto markers)"
-                )
-
-                {:halt, {:conflict_pending, branch, unresolved}}
-              end
-
-            {:error, out} ->
-              reason = out |> to_string() |> String.trim() |> String.slice(0, 200)
-
-              Logger.warning(
-                "Quest #{mission.id}: consolidation merge of #{branch} failed without " <>
-                  "content conflicts (#{reason}) — branch NOT merged; surfacing to validation"
-              )
-
-              # A dropped branch must be as visible as a conflicted file:
-              # run 21's final fix branch aborted here with an empty reason
-              # and validation judged a tree silently missing that work.
-              # This synthetic entry rides the merge_conflicts list into the
-              # validation prompt so the fix loop knows work is absent.
-              {:cont,
-               {:ok,
-                notes ++
-                  [
-                    "UNMERGED BRANCH #{branch} (merge failed: #{reason}) — its commits are " <>
-                      "missing from this tree; merge it or re-apply its work"
-                  ]}}
+            {:cont, {:ok, notes}}
+          else
+            consolidate_one_branch(mission, wt, target_branch, branch, notes)
           end
         end)
 
       # The marker GATE: even when every merge came back clean, the tree may
       # carry markers an impl ghost committed or a prior resolution missed.
       # Validation must never spend one of its four attempts on a tree that
-      # a text scan already convicts. Scoped to the mission's own changed
-      # files so pre-existing marker-like content (fixtures, docs) can't
-      # convict a tree the mission never touched.
+      # a text scan already convicts. FULL-tree scan: run 3's leftover
+      # markers hid in a rejected op's files, which a changed-files scope
+      # excluded — and false positives are survivable now that cap
+      # exhaustion defers to ground-truth validation instead of failing.
       with {:ok, notes} <- result do
-        scope =
-          done_impl_ops
-          |> Enum.flat_map(&(&1[:changed_files] || []))
-          |> Enum.uniq()
-
-        case GiTF.Git.conflict_marker_files(wt, scope) do
+        case GiTF.Git.conflict_marker_files(wt) do
           [] -> {:ok, Enum.uniq(notes)}
           files -> {:conflict_pending, nil, files}
         end
@@ -1540,6 +1538,75 @@ defmodule GiTF.Major.Orchestrator do
       )
 
       {:ok, []}
+  end
+
+  # Op status re-read at the moment of merge — the phase snapshot can be
+  # minutes old, and a lineage rejected in between must stay out.
+  defp fresh_mergeable?(op_id) do
+    case Archive.get(:ops, op_id) do
+      %{status: "done"} = op -> op[:verification_status] not in ["failed", "rejected"]
+      _ -> false
+    end
+  end
+
+  defp consolidate_one_branch(mission, wt, target_branch, branch, notes) do
+    case GiTF.Git.merge_union(wt, branch) do
+      :ok ->
+        Logger.info("Quest #{mission.id}: consolidated #{branch} into #{target_branch}")
+        {:cont, {:ok, notes}}
+
+      {:conflicted, files} ->
+        # Generated files are not worth reconciling: both sides are
+        # machine output from the same source of truth, so the merge
+        # is meaningless and the regenerator is authoritative. Run 32
+        # burned rounds hand-merging src/bindings/Settings.ts, which
+        # `npm run bindings` rewrites wholesale from the Rust structs.
+        {generated, human} = Enum.split_with(files, &generated_file?/1)
+        regenerated = if generated == [], do: [], else: regenerate(wt, generated)
+        unresolved = human ++ (generated -- regenerated)
+
+        if regenerated != [] do
+          Logger.info(
+            "Quest #{mission.id}: regenerated #{Enum.join(regenerated, ", ")} " <>
+              "instead of merging machine output"
+          )
+        end
+
+        if unresolved == [] do
+          # Every conflict was machine output and the regenerator
+          # already replaced it — nothing left for a resolution ghost.
+          {:cont, {:ok, notes}}
+        else
+          Logger.warning(
+            "Quest #{mission.id}: merge of #{branch} conflicted in " <>
+              "#{Enum.join(unresolved, ", ")} — markers committed; consolidation " <>
+              "HALTED for a focused resolution op (never merge onto markers)"
+          )
+
+          {:halt, {:conflict_pending, branch, unresolved}}
+        end
+
+      {:error, out} ->
+        reason = out |> to_string() |> String.trim() |> String.slice(0, 200)
+
+        Logger.warning(
+          "Quest #{mission.id}: consolidation merge of #{branch} failed without " <>
+            "content conflicts (#{reason}) — branch NOT merged; surfacing to validation"
+        )
+
+        # A dropped branch must be as visible as a conflicted file:
+        # run 21's final fix branch aborted here with an empty reason
+        # and validation judged a tree silently missing that work.
+        # This synthetic entry rides the merge_conflicts list into the
+        # validation prompt so the fix loop knows work is absent.
+        {:cont,
+         {:ok,
+          notes ++
+            [
+              "UNMERGED BRANCH #{branch} (merge failed: #{reason}) — its commits are " <>
+                "missing from this tree; merge it or re-apply its work"
+            ]}}
+    end
   end
 
   # One focused ghost per conflicted merge, spawned into the canonical
@@ -1624,9 +1691,26 @@ defmodule GiTF.Major.Orchestrator do
         _ -> []
       end
 
+    # Run 3: resolution ops completed "done" having changed NOTHING while
+    # the markers stayed put. If that happened here, say so — the next
+    # ghost must not repeat the same shallow look and conclude clean.
+    futile_note =
+      if Enum.any?(
+           Archive.by_index(:ops, :mission_id, mission.id),
+           &(&1[:conflict_resolution] == target and &1.status == "done" and
+               (&1[:files_changed] || 0) == 0)
+         ) do
+        "\nWARNING: a previous resolution op for this target completed WITHOUT " <>
+          "changing any files, yet the markers above are still present at the " <>
+          "exact lines listed. They are REAL. Open each location and reconcile it; " <>
+          "do not conclude the tree is clean without editing.\n"
+      else
+        ""
+      end
+
     case GiTF.Ops.create(%{
            title: "Resolve merge conflicts: #{target}",
-           description: resolution_description(branch, files, excerpt),
+           description: resolution_description(branch, files, excerpt) <> futile_note,
            mission_id: mission.id,
            sector_id: mission.sector_id,
            phase_job: false,
