@@ -1557,6 +1557,10 @@ defmodule GiTF.MCPServer.Handlers do
       # `source: None`, hiding the very thing that explains why it exists.
       source: m[:source],
       source_issue: m[:source_issue],
+      # A failed mission without its reason forced operators onto
+      # gitf-console over SSM — the post-mortem's first question must be
+      # answerable from the MCP (runs 3 and 4 both required box probes).
+      failure_reason: m[:failure_reason],
       target_branch: m[:target_branch],
       cost_cap_usd: m[:cost_cap_usd],
       inserted_at: to_string(m[:inserted_at]),

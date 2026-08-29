@@ -651,6 +651,41 @@ defmodule GiTF.Ops do
   @max_retry_chain_depth 10
 
   @doc """
+  The proof obligation an op's completion must satisfy — declared HERE,
+  beside where each op kind is minted, and evaluated by `Ghost.Worker`
+  (the only process holding the worktree). The worker previously inferred
+  these semantics from four accreted booleans (`phase_job`,
+  `skip_verification`, `fix_of`, `conflict_resolution`), each carrying its
+  own incident scar and a paragraph about how it interacts with the
+  others; the matrix was O(kinds²) in explanation and invisible to the
+  planner that mints the kinds.
+
+    * `{:absence_of_markers, files}` — merge-resolution ops: done means
+      the named files carry no conflict markers (run 4: one completed
+      "done" with markers intact while the endgame had no budget left).
+    * `:output_only` — phase ops and skip_verification recon ops: the
+      deliverable is the OUTPUT, not a diff (msn-e631cb: a recon ghost
+      was failed for correctly changing nothing).
+    * `:diff_optional` — fix ops: an empty diff is an honest "nothing to
+      fix" (runs 27-29: failing these looped missions to their ceiling).
+    * `:diff_required` — everything else: zero changed files means the
+      work did not happen, whatever the model claimed.
+  """
+  @spec completion_proof(map()) ::
+          :diff_required | :diff_optional | :output_only | {:absence_of_markers, [String.t()]}
+  def completion_proof(op) do
+    cond do
+      # Before skip_verification: resolution ops carry that flag too, but
+      # their proof is stronger, not weaker.
+      is_binary(op[:conflict_resolution]) -> {:absence_of_markers, op[:target_files] || []}
+      op[:phase_job] == true -> :output_only
+      op[:skip_verification] == true -> :output_only
+      is_binary(op[:fix_of]) -> :diff_optional
+      true -> :diff_required
+    end
+  end
+
+  @doc """
   Returns true if any DESCENDANT in `op_id`'s retry chain (retry, retry of
   retry, …) reached `\"done\"`.
   Touches Archive — use `retry_completed_in?/2` when iterating in a loop.

@@ -1523,63 +1523,47 @@ defmodule GiTF.Ghost.Worker do
     # (recon/read-only) — their deliverable is the output, not a diff. The
     # honesty bar applied blindly executed a Recon ghost for correctly
     # changing nothing (msn-e631cb), deterministically failing its DAG.
-    read_only_op? = (op && Map.get(op, :skip_verification, false)) == true
+    # What "done" MEANS for this op kind is declared beside op minting
+    # (Ops.completion_proof/1 — each variant carries its incident scar
+    # there). This site only evaluates the declared proof against the
+    # worktree it holds.
+    changed = Map.get(metadata, :files_changed, 0)
 
-    # A FIX op with nothing to fix is an honest outcome, not a failure. The
-    # complaint that spawned it was often environmental (a corrupt npm
-    # cache, a killed probe) or already resolved by a sibling fix — the
-    # ghost inspects the tree, finds the code correct, and changes nothing.
-    # Failing it here was the campaign's terminal loop: no completed fix op
-    # meant validation never re-ran, so the mission ground to its ceiling
-    # while the tree was fine (runs 27, 28, 29). Complete it instead: the
-    # orchestrator re-validates, and if the complaint was real, validation
-    # says so again with its own budget intact.
-    fix_op? = op && is_binary(Map.get(op, :fix_of))
+    case (op && GiTF.Ops.completion_proof(op)) || :diff_required do
+      {:absence_of_markers, files} ->
+        case resolution_marker_check(state, files) do
+          [] ->
+            do_complete_success(state, op, is_phase_job)
 
-    empty_completion? =
-      not is_phase_job and not read_only_op? and not fix_op? and
-        Map.get(metadata, :files_changed, 0) == 0
+          marked ->
+            Logger.warning(
+              "Op #{state.op_id}: resolution ghost #{state.ghost_id} reported success " <>
+                "but markers remain in #{Enum.join(marked, ", ")} — marking failed"
+            )
 
-    # A RESOLUTION op's deliverable is the ABSENCE of markers in its target
-    # files. Run 4 died because one went "done" with markers remaining and
-    # the endgame's resolution budget was already spent — proof over claim.
-    # (These ops carry skip_verification, so the diff-honesty gate above
-    # never sees them; this is their only completion check.)
-    unproven_markers =
-      if op && is_binary(Map.get(op, :conflict_resolution)) do
-        resolution_marker_check(state, op)
-      else
-        []
-      end
+            mark_failed(
+              state,
+              "Resolution reported success but conflict markers remain in: " <>
+                Enum.join(marked, ", ")
+            )
+        end
 
-    if fix_op? and Map.get(metadata, :files_changed, 0) == 0 do
-      Logger.info(
-        "Op #{state.op_id}: fix ghost #{state.ghost_id} found nothing to change — " <>
-          "completing so validation re-runs against the current tree"
-      )
-    end
-
-    cond do
-      unproven_markers != [] ->
-        Logger.warning(
-          "Op #{state.op_id}: resolution ghost #{state.ghost_id} reported success but " <>
-            "markers remain in #{Enum.join(unproven_markers, ", ")} — marking failed"
-        )
-
-        mark_failed(
-          state,
-          "Resolution reported success but conflict markers remain in: " <>
-            Enum.join(unproven_markers, ", ")
-        )
-
-      empty_completion? ->
+      :diff_required when changed == 0 ->
         Logger.warning(
           "Op #{state.op_id}: ghost #{state.ghost_id} reported success with 0 file changes — marking failed"
         )
 
         mark_failed(state, "Ghost reported success but produced 0 file changes")
 
-      true ->
+      :diff_optional when changed == 0 ->
+        Logger.info(
+          "Op #{state.op_id}: fix ghost #{state.ghost_id} found nothing to change — " <>
+            "completing so validation re-runs against the current tree"
+        )
+
+        do_complete_success(state, op, is_phase_job)
+
+      _ ->
         do_complete_success(state, op, is_phase_job)
     end
   end
@@ -1588,9 +1572,9 @@ defmodule GiTF.Ghost.Worker do
   # elsewhere is validation's problem (adjudication), not this ghost's.
   # -l mode returns filenames uncapped — an excerpt's line limit could
   # hide a second marker-laden file behind a chatty first one.
-  defp resolution_marker_check(state, op) do
+  defp resolution_marker_check(state, files) do
     with %{worktree_path: wt} when is_binary(wt) <- Archive.get(:shells, state.shell_id),
-         files when files != [] <- Map.get(op, :target_files) || [] do
+         [_ | _] <- files do
       GiTF.Git.conflict_marker_files(wt, files)
     else
       _ -> []
