@@ -1586,13 +1586,12 @@ defmodule GiTF.Ghost.Worker do
 
   # Scoped to the op's own target files: pre-existing marker-like content
   # elsewhere is validation's problem (adjudication), not this ghost's.
+  # -l mode returns filenames uncapped — an excerpt's line limit could
+  # hide a second marker-laden file behind a chatty first one.
   defp resolution_marker_check(state, op) do
     with %{worktree_path: wt} when is_binary(wt) <- Archive.get(:shells, state.shell_id),
          files when files != [] <- Map.get(op, :target_files) || [] do
-      wt
-      |> GiTF.Git.conflict_marker_excerpt(files, 5)
-      |> Enum.map(&(&1 |> String.split(":", parts: 2) |> hd()))
-      |> Enum.uniq()
+      GiTF.Git.conflict_marker_files(wt, files)
     else
       _ -> []
     end

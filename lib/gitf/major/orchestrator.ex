@@ -1625,20 +1625,37 @@ defmodule GiTF.Major.Orchestrator do
     # spent the per-mission worktree budget on two early productive
     # episodes and had nothing left for the endgame. An absolute ceiling
     # stays as the unattended-operation backstop.
-    futile =
-      Enum.count(
-        resolution_ops,
-        &(&1.status in ["failed", "rejected"] or
-            (&1.status == "done" and (&1[:files_changed] || 0) == 0))
-      )
-
-    prior =
-      if length(resolution_ops) >= @max_total_resolutions_per_target,
-        do: max(futile, @max_resolutions_per_target),
-        else: futile
+    futile = Enum.count(resolution_ops, &futile_resolution?/1)
+    total = length(resolution_ops)
 
     cond do
-      prior >= @max_resolutions_per_target and is_nil(branch) ->
+      # Two DISTINCT policies, each with an honest record: futility (the
+      # attempts change nothing) and the absolute ceiling (converging but
+      # unbounded — the unattended-operation backstop). The first version
+      # forged the futility counter to trip the cap, so a ceiling'd
+      # mission's failure reason claimed "2 focused attempts" after 5
+      # productive ones — a falsified post-mortem record.
+      total >= @max_total_resolutions_per_target and is_nil(branch) ->
+        Logger.warning(
+          "Quest #{mission.id}: worktree resolution ceiling (#{total} attempts, " <>
+            "#{futile} futile) — deferring to ground-truth validation"
+        )
+
+        {:cap_exhausted, files}
+
+      total >= @max_total_resolutions_per_target ->
+        snapshot_marker_artifact(mission, files)
+
+        GiTF.Missions.fail_quest(
+          mission.id,
+          "Merge conflict resolution for #{target} hit the absolute ceiling: " <>
+            "#{total} attempts (#{futile} futile) without a clean tree " <>
+            "(files: #{Enum.join(Enum.take(files, 8), ", ")})"
+        )
+
+        {:error, :conflict_resolution_exhausted}
+
+      futile >= @max_resolutions_per_target and is_nil(branch) ->
         # The scan and the resolution ghosts DISAGREE twice over: the regex
         # says markers, ghosts sent with exact line excerpts say clean and
         # change nothing. Run 2 died here — failing a multi-hour mission on
@@ -1647,13 +1664,13 @@ defmodule GiTF.Major.Orchestrator do
         # markers are real, typecheck/build names them and the fix loop has
         # them; if not, the mission lives.
         Logger.warning(
-          "Quest #{mission.id}: worktree marker scan and #{prior} resolution ghosts " <>
+          "Quest #{mission.id}: worktree marker scan and #{futile} futile resolution ghosts " <>
             "disagree (#{Enum.join(files, ", ")}) — deferring to ground-truth validation"
         )
 
         {:cap_exhausted, files}
 
-      prior >= @max_resolutions_per_target ->
+      futile >= @max_resolutions_per_target ->
         # A conflicted BRANCH merge is not ambiguous — those markers were
         # just committed by the merge itself. Two failed focused attempts
         # is genuine non-convergence. Snapshot the evidence first: the
@@ -1663,7 +1680,7 @@ defmodule GiTF.Major.Orchestrator do
         GiTF.Missions.fail_quest(
           mission.id,
           "Merge conflict resolution for #{target} did not converge after " <>
-            "#{prior} focused attempts (files: #{Enum.join(Enum.take(files, 8), ", ")})"
+            "#{futile} futile attempts (#{total} total) (files: #{Enum.join(Enum.take(files, 8), ", ")})"
         )
 
         # fail_quest returns {:ok, mission_map} — which the phase-advance
@@ -1702,8 +1719,13 @@ defmodule GiTF.Major.Orchestrator do
     e -> Logger.warning("Quest #{mission.id}: marker snapshot failed: #{Exception.message(e)}")
   end
 
+  defp futile_resolution?(op) do
+    op.status in ["failed", "rejected"] or
+      (op.status == "done" and (op[:files_changed] || 0) == 0)
+  end
+
   defp create_conflict_resolution_op(mission, branch, files, target, resolution_ops) do
-    prior = length(resolution_ops)
+    total = length(resolution_ops)
     excerpt = marker_excerpt(mission, files)
 
     # Run 3: resolution ops completed "done" having changed NOTHING while
@@ -1712,7 +1734,7 @@ defmodule GiTF.Major.Orchestrator do
     futile_note =
       if Enum.any?(
            resolution_ops,
-           &(&1.status == "done" and (&1[:files_changed] || 0) == 0)
+           &futile_resolution?/1
          ) do
         "\nWARNING: a previous resolution op for this target completed WITHOUT " <>
           "changing any files, yet the markers above are still present at the " <>
@@ -1738,7 +1760,7 @@ defmodule GiTF.Major.Orchestrator do
         GiTF.Missions.transition_phase(
           mission.id,
           "implementation",
-          "Merge conflict resolution: #{target} (attempt #{prior + 1})"
+          "Merge conflict resolution: #{target} (attempt #{total + 1})"
         )
 
         Logger.info(

@@ -641,8 +641,8 @@ defmodule GiTF.Git do
   files a changed-files scope excluded, and false positives are handled
   downstream (cap exhaustion defers to ground-truth validation).
   """
-  @spec conflict_marker_files(String.t()) :: [String.t()]
-  def conflict_marker_files(wt), do: marker_grep(wt, ["-l"])
+  @spec conflict_marker_files(String.t(), [String.t()]) :: [String.t()]
+  def conflict_marker_files(wt, paths \\ ["."]), do: marker_grep(wt, ["-l"], paths)
 
   @doc """
   `file:line:content` excerpt of every marker hit, capped at `limit` lines.
@@ -659,7 +659,7 @@ defmodule GiTF.Git do
     wt |> marker_grep(["-n"], pathspec) |> Enum.take(limit)
   end
 
-  defp marker_grep(wt, mode_flags, pathspec \\ ["."]) do
+  defp marker_grep(wt, mode_flags, pathspec) do
     args = ["-C", wt, "grep", "-I", "-E"] ++ mode_flags ++ [@conflict_marker_re, "--"] ++ pathspec
 
     case safe_cmd(args) do

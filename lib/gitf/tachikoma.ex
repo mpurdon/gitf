@@ -135,6 +135,9 @@ defmodule GiTF.Tachikoma do
     if rem(count, 5) == 0 do
       check_zombie_missions()
       check_stalled_missions()
+      # Alert-only tripwire beside its remediation siblings: a 10-minute
+      # threshold needs ~2.5-min sampling, not every-30s sweeps.
+      check_mission_stalls()
     end
 
     # Prune stale worktree metadata every 10 patrols (~5 min)
@@ -205,7 +208,6 @@ defmodule GiTF.Tachikoma do
   defp run_patrol(state) do
     results = GiTF.Medic.run_all(fix: state.auto_fix)
     budget_results = check_budgets()
-    stall_results = check_mission_stalls()
     conflict_results = check_merge_conflicts()
     audit_results = check_verifications()
     circuit_results = probe_provider_circuits()
@@ -218,8 +220,7 @@ defmodule GiTF.Tachikoma do
 
     all_results =
       results ++
-        budget_results ++
-        stall_results ++ conflict_results ++ audit_results ++ circuit_results ++ major_results
+        budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ major_results
 
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
@@ -241,22 +242,27 @@ defmodule GiTF.Tachikoma do
       {state.last_results, state.stuck_misses}
   end
 
-  # The run-2 lesson: an ACTIVE mission with nothing running is a stall no
-  # matter what the schedulers believe — the operator's dumb external
-  # watcher caught one 72 minutes before any factory mechanism did.
-  # Deliberately dumb: shares NO logic with ready?/spawn (a logic bug there
-  # must not blind this too). Just "is anything running; has anything moved".
+  # The run-2 lesson: an in-flight mission with nothing alive is a stall no
+  # matter what the records say — the operator's dumb external watcher
+  # caught one 72 minutes before any factory mechanism did. Liveness is
+  # PROCESS truth (mission_has_live_ghost?: Registry + Process.alive?),
+  # not op-status records, which are maintained by exactly the machinery
+  # whose failure this exists to catch. awaiting_approval is excluded:
+  # quietly waiting on a human is the intended behaviour there.
   @mission_stall_threshold_ms 10 * 60 * 1000
 
   defp check_mission_stalls do
     now = DateTime.utc_now()
 
-    GiTF.Missions.list()
-    |> Enum.filter(&(&1[:status] == "active"))
-    |> Enum.flat_map(fn m ->
-      ops = GiTF.Archive.by_index(:ops, :mission_id, m.id)
-      running = Enum.count(ops, &(&1.status in ["running", "assigned"]))
+    GiTF.Archive.filter(:missions, &(&1[:status] in GiTF.Missions.active_statuses()))
+    |> Enum.reject(&(&1[:current_phase] == "awaiting_approval"))
+    |> Enum.each(&check_one_mission_stall(&1, now))
+  end
 
+  defp check_one_mission_stall(m, now) do
+    ops = GiTF.Archive.by_index(:ops, :mission_id, m.id)
+
+    if ops != [] and not mission_has_live_ghost?(m) do
       last_touch =
         ops
         |> Enum.map(&(&1[:updated_at] || &1[:inserted_at]))
@@ -265,33 +271,22 @@ defmodule GiTF.Tachikoma do
 
       quiet_ms = DateTime.diff(now, last_touch, :millisecond)
 
-      if running == 0 and ops != [] and quiet_ms > @mission_stall_threshold_ms do
+      if quiet_ms > @mission_stall_threshold_ms do
         message =
-          "Mission #{m.id} (#{m[:name]}) is ACTIVE with 0 running ops and no op " <>
-            "activity for #{div(quiet_ms, 60_000)}m"
+          "Mission #{m.id} (#{m[:name]}) is in flight with NO live ghost process " <>
+            "and no op activity for #{div(quiet_ms, 60_000)}m"
 
         GiTF.Observability.Alerts.dispatch_webhook(
           :mission_stalled,
           message,
           dedup_key: "mission_stalled:#{m.id}"
         )
-
-        [%{name: "mission_stalled", status: :error, message: message}]
-      else
-        []
       end
-    end)
+    end
   rescue
-    # The watchdog must not silently report "no stalls" when its OWN logic
-    # throws (same contract as check_major_heartbeat).
+    # One malformed mission must cost one mission's verdict, not the sweep.
     e ->
-      [
-        %{
-          name: "mission_stall_check",
-          status: :warn,
-          message: "stall check itself crashed: #{Exception.message(e)}"
-        }
-      ]
+      Logger.warning("mission stall check failed for #{m[:id]}: #{Exception.message(e)}")
   end
 
   defp check_budgets do
