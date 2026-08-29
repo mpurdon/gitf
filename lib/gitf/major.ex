@@ -1631,7 +1631,7 @@ defmodule GiTF.Major do
              ) do
       # One owner for the fork-point policy (canonical tip → latest impl
       # op's branch → amend-mission target branch, the run-17 contract).
-      GiTF.Major.Orchestrator.impl_base_branch_opts(mission)
+      GiTF.Major.Topology.impl_base_branch_opts(mission)
     else
       _ -> []
     end

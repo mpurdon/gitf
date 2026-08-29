@@ -41,7 +41,7 @@ defmodule GiTF.Phases.Review do
   @impl true
   def before_advance(mission, verdict, artifact)
       when verdict in [:pass, :advance] and is_map(artifact) do
-    GiTF.Major.Orchestrator.promote_selected_design(mission.id, artifact)
+    GiTF.Major.DesignBoard.promote_selected_design(mission.id, artifact)
 
     # An OVERRULED review (advance-on-exhaustion) is an unresolved
     # objection, not a settled one. Record it so validation and the PR can
@@ -168,7 +168,7 @@ defmodule GiTF.Phases.Review do
       # design rather than paying for another identical debate.
       0
     else
-      GiTF.Major.Orchestrator.max_redesign_for(Map.get(mission, :sector_id))
+      GiTF.Major.DesignBoard.max_redesign_for(Map.get(mission, :sector_id))
     end
   end
 end

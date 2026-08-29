@@ -76,5 +76,5 @@ defmodule GiTF.Phases.Simplify do
   # Delegate to the orchestrator's canonical implementation so legacy
   # simplify ops (no `:strategy` field, name encoded as `[strategy]` in
   # the title) still classify correctly.
-  defp op_strategy(op), do: GiTF.Major.Orchestrator.op_strategy(op)
+  defp op_strategy(op), do: GiTF.Major.ModelPolicy.op_strategy(op)
 end

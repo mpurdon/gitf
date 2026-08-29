@@ -95,7 +95,7 @@ defmodule GiTF.Dashboard.DesignLive do
   def handle_event("reject_design", _params, socket) do
     mission = socket.assigns.mission
 
-    case GiTF.Major.Orchestrator.reject_design(mission.id, "Human rejected via dashboard") do
+    case GiTF.Major.DesignBoard.reject_design(mission.id, "Human rejected via dashboard") do
       {:ok, _} ->
         {:ok, mission} = GiTF.Missions.get(mission.id)
 

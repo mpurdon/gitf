@@ -15,7 +15,7 @@ defmodule GiTF.Workflow.Verdict do
   | `:fail`     | Verdict-driven phase failed; follow `on_fail:` (subject to `max_retries`) |
   Phase-specific helpers live as private functions so adding a new phase
   type is a one-place change. The artifact-failed convention
-  (`artifact["status"] == "failed"`) matches `Orchestrator.artifact_failed?`.
+  (`artifact["status"] == "failed"`) matches `Lifecycle.artifact_failed?`.
 
   Workflow termination (the `:end` sentinel in `next:`) is signalled by
   the Advancer when it walks `Workflow.next_phase/3`, not by Verdict —

@@ -12,20 +12,25 @@ defmodule GiTF.Major.ReviewBaseBranchTest do
   """
   use ExUnit.Case, async: true
 
-  @source File.read!("lib/gitf/major/orchestrator.ex")
+  # The spawn path lives with the persona that puts ghosts in the field;
+  # the base-branch resolution itself lives with the branch terrain.
+  @launcher File.read!("lib/gitf/major/phase_launcher.ex")
+  @topology File.read!("lib/gitf/major/topology.ex")
 
   test "phase ghosts inherit the branch being amended" do
     # Every phase — triage, design, validation — spawns through here, so one
     # default covers them all rather than each caller remembering.
-    assert @source =~
-             ~r/spawn_opts =\s*\n\s*\[prompt: prompt\]\s*\n\s*\|> Keyword\.merge\(mission_base_branch_opts\(mission\)\)/
+    assert @launcher =~
+             ~r/spawn_opts =\s*\n\s*\[prompt: prompt\]\s*\n\s*\|> Keyword\.merge\(Topology\.mission_base_branch_opts\(mission\)\)/
   end
 
   test "an explicit base_branch from the caller still wins" do
     # Chained impl ops and tournament variants pass a specific base; the
     # mission default must not override it.
-    idx_default = :binary.match(@source, "Keyword.merge(mission_base_branch_opts(mission))")
-    idx_explicit = :binary.match(@source, "Keyword.merge(Keyword.take(opts, [:base_branch]))")
+    idx_default =
+      :binary.match(@launcher, "Keyword.merge(Topology.mission_base_branch_opts(mission))")
+
+    idx_explicit = :binary.match(@launcher, "Keyword.merge(Keyword.take(opts, [:base_branch]))")
 
     assert idx_default != :nomatch and idx_explicit != :nomatch
     {default_at, _} = idx_default
@@ -34,11 +39,11 @@ defmodule GiTF.Major.ReviewBaseBranchTest do
   end
 
   test "implementation falls back to the amended branch, not sector HEAD" do
-    assert @source =~ ~r/_ ->\s*\n\s*mission_base_branch_opts\(mission\)/
+    assert @topology =~ ~r/_ ->\s*\n\s*mission_base_branch_opts\(mission\)/
   end
 
   test "the helper only applies when a branch is actually set" do
-    assert @source =~
+    assert @topology =~
              ~r/branch when is_binary\(branch\) and branch != "" -> \[base_branch: branch\]/
   end
 end

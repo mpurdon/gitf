@@ -225,4 +225,21 @@ defmodule GiTF.Triage do
   rescue
     _ -> complexity
   end
+
+  @doc """
+  The canonical atom form of a mission's triaged complexity, read from the
+  triage artifact, or nil when absent/unrecognized. Lives here because this
+  module owns both the artifact and the string↔atom mapping — its previous
+  home in DesignBoard created a DesignBoard↔ModelPolicy reference cycle.
+  """
+  @spec mission_complexity(map()) :: atom() | nil
+  def mission_complexity(mission) do
+    case GiTF.Missions.get_artifact(mission.id, "triage") do
+      %{} = triage ->
+        triage |> Map.get("complexity") |> GiTF.Triage.complexity_from_string()
+
+      _ ->
+        nil
+    end
+  end
 end

@@ -7,7 +7,7 @@ defmodule GiTF.Phases.Design do
   `minimal`/`normal`/`complex`, gated by triage complexity and `FastPath`)
   and records `mission.design_strategy_count`.
 
-  `verdict/2` mirrors `Orchestrator.check_design_complete/1` against
+  `verdict/2` mirrors `DesignBoard.check_design_complete/1` against
   `mission.ops`:
 
     * No design ops yet → `:wait`
@@ -22,7 +22,7 @@ defmodule GiTF.Phases.Design do
   the legacy "review exists to cross-validate multiple proposals; a
   single-variant design has nothing to pick among" rule), the chosen
   `selected_design`, and the list of done variants. When `single_variant`,
-  it also calls `Orchestrator.promote_selected_design/2` so the planning
+  it also calls `DesignBoard.promote_selected_design/2` so the planning
   phase sees the chosen variant on the canonical `"design"` artifact key.
 
   Pair with a workflow phase config like:
@@ -94,7 +94,7 @@ defmodule GiTF.Phases.Design do
     GiTF.Missions.store_artifact(mission.id, "design", artifact)
 
     if single_variant? do
-      Orchestrator.promote_selected_design(mission.id, %{"selected_design" => selected})
+      GiTF.Major.DesignBoard.promote_selected_design(mission.id, %{"selected_design" => selected})
     end
 
     :ok
@@ -158,5 +158,5 @@ defmodule GiTF.Phases.Design do
   # back to the legacy `[strategy]` title regex for pre-migration ops —
   # without that fallback, those ops yield `nil` strategy and get filtered
   # out, falsely marking the design as single-variant.
-  defp op_strategy(op), do: Orchestrator.op_strategy(op)
+  defp op_strategy(op), do: GiTF.Major.ModelPolicy.op_strategy(op)
 end
