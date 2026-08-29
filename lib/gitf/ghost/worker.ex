@@ -1540,6 +1540,18 @@ defmodule GiTF.Ghost.Worker do
       not is_phase_job and not read_only_op? and not fix_op? and
         Map.get(metadata, :files_changed, 0) == 0
 
+    # A RESOLUTION op's deliverable is the ABSENCE of markers in its target
+    # files. Run 4 died because one went "done" with markers remaining and
+    # the endgame's resolution budget was already spent — proof over claim.
+    # (These ops carry skip_verification, so the diff-honesty gate above
+    # never sees them; this is their only completion check.)
+    unproven_markers =
+      if op && is_binary(Map.get(op, :conflict_resolution)) do
+        resolution_marker_check(state, op)
+      else
+        []
+      end
+
     if fix_op? and Map.get(metadata, :files_changed, 0) == 0 do
       Logger.info(
         "Op #{state.op_id}: fix ghost #{state.ghost_id} found nothing to change — " <>
@@ -1547,24 +1559,58 @@ defmodule GiTF.Ghost.Worker do
       )
     end
 
-    if empty_completion? do
-      Logger.warning(
-        "Op #{state.op_id}: ghost #{state.ghost_id} reported success with 0 file changes — marking failed"
-      )
+    cond do
+      unproven_markers != [] ->
+        Logger.warning(
+          "Op #{state.op_id}: resolution ghost #{state.ghost_id} reported success but " <>
+            "markers remain in #{Enum.join(unproven_markers, ", ")} — marking failed"
+        )
 
-      mark_failed(state, "Ghost reported success but produced 0 file changes")
-    else
-      case GiTF.Ops.get(state.op_id) do
-        {:ok, %{status: "done"}} ->
-          :ok
+        mark_failed(
+          state,
+          "Resolution reported success but conflict markers remain in: " <>
+            Enum.join(unproven_markers, ", ")
+        )
 
-        _ ->
-          GiTF.Ops.complete(state.op_id)
-          GiTF.Ops.unblock_dependents(state.op_id)
-      end
+      empty_completion? ->
+        Logger.warning(
+          "Op #{state.op_id}: ghost #{state.ghost_id} reported success with 0 file changes — marking failed"
+        )
 
-      finish_mark_success(state, op, is_phase_job)
+        mark_failed(state, "Ghost reported success but produced 0 file changes")
+
+      true ->
+        do_complete_success(state, op, is_phase_job)
     end
+  end
+
+  # Scoped to the op's own target files: pre-existing marker-like content
+  # elsewhere is validation's problem (adjudication), not this ghost's.
+  defp resolution_marker_check(state, op) do
+    with %{worktree_path: wt} when is_binary(wt) <- Archive.get(:shells, state.shell_id),
+         files when files != [] <- Map.get(op, :target_files) || [] do
+      wt
+      |> GiTF.Git.conflict_marker_excerpt(files, 5)
+      |> Enum.map(&(&1 |> String.split(":", parts: 2) |> hd()))
+      |> Enum.uniq()
+    else
+      _ -> []
+    end
+  rescue
+    _ -> []
+  end
+
+  defp do_complete_success(state, op, is_phase_job) do
+    case GiTF.Ops.get(state.op_id) do
+      {:ok, %{status: "done"}} ->
+        :ok
+
+      _ ->
+        GiTF.Ops.complete(state.op_id)
+        GiTF.Ops.unblock_dependents(state.op_id)
+    end
+
+    finish_mark_success(state, op, is_phase_job)
   end
 
   defp finish_mark_success(state, op, is_phase_job) do

@@ -113,3 +113,13 @@ after each phase — wall-clock and conflict-count are the metrics.
 Baselines: run 1 = 2h48m/failed (marker divergence); run 2 = TBD
 (first engine test, sequential); phase-1 target < 90 min; phase-2
 target < 60 min.
+
+## Naming: "the endgame" (operator-adopted 2026-08-29)
+
+The post-consolidation convergence stage — everything between "all impl
+branches merged" and "validation's verdict accepted": the full-tree marker
+scan, worktree-target resolutions, and scan-vs-ghost adjudication. It has
+killed more runs than any named phase yet has no name in the code.
+Roadmap: introduce `endgame` as the official term (log prefixes, the
+extracted module when the resolution engine leaves the orchestrator, the
+dashboard's phase strip between implementation and validation).

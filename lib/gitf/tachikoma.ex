@@ -205,6 +205,7 @@ defmodule GiTF.Tachikoma do
   defp run_patrol(state) do
     results = GiTF.Medic.run_all(fix: state.auto_fix)
     budget_results = check_budgets()
+    stall_results = check_mission_stalls()
     conflict_results = check_merge_conflicts()
     audit_results = check_verifications()
     circuit_results = probe_provider_circuits()
@@ -217,7 +218,8 @@ defmodule GiTF.Tachikoma do
 
     all_results =
       results ++
-        budget_results ++ conflict_results ++ audit_results ++ circuit_results ++ major_results
+        budget_results ++
+        stall_results ++ conflict_results ++ audit_results ++ circuit_results ++ major_results
 
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
@@ -237,6 +239,59 @@ defmodule GiTF.Tachikoma do
       })
 
       {state.last_results, state.stuck_misses}
+  end
+
+  # The run-2 lesson: an ACTIVE mission with nothing running is a stall no
+  # matter what the schedulers believe — the operator's dumb external
+  # watcher caught one 72 minutes before any factory mechanism did.
+  # Deliberately dumb: shares NO logic with ready?/spawn (a logic bug there
+  # must not blind this too). Just "is anything running; has anything moved".
+  @mission_stall_threshold_ms 10 * 60 * 1000
+
+  defp check_mission_stalls do
+    now = DateTime.utc_now()
+
+    GiTF.Missions.list()
+    |> Enum.filter(&(&1[:status] == "active"))
+    |> Enum.flat_map(fn m ->
+      ops = GiTF.Archive.by_index(:ops, :mission_id, m.id)
+      running = Enum.count(ops, &(&1.status in ["running", "assigned"]))
+
+      last_touch =
+        ops
+        |> Enum.map(&(&1[:updated_at] || &1[:inserted_at]))
+        |> Enum.filter(&match?(%DateTime{}, &1))
+        |> Enum.max(DateTime, fn -> m[:inserted_at] || now end)
+
+      quiet_ms = DateTime.diff(now, last_touch, :millisecond)
+
+      if running == 0 and ops != [] and quiet_ms > @mission_stall_threshold_ms do
+        message =
+          "Mission #{m.id} (#{m[:name]}) is ACTIVE with 0 running ops and no op " <>
+            "activity for #{div(quiet_ms, 60_000)}m"
+
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :mission_stalled,
+          message,
+          dedup_key: "mission_stalled:#{m.id}"
+        )
+
+        [%{name: "mission_stalled", status: :error, message: message}]
+      else
+        []
+      end
+    end)
+  rescue
+    # The watchdog must not silently report "no stalls" when its OWN logic
+    # throws (same contract as check_major_heartbeat).
+    e ->
+      [
+        %{
+          name: "mission_stall_check",
+          status: :warn,
+          message: "stall check itself crashed: #{Exception.message(e)}"
+        }
+      ]
   end
 
   defp check_budgets do

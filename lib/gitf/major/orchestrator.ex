@@ -1607,6 +1607,9 @@ defmodule GiTF.Major.Orchestrator do
   # msn-7683ac's fix ghosts were handed 15 marker-laden files in two
   # languages plus the real validation gaps, four times, and diverged.
   @max_resolutions_per_target 2
+  # Absolute per-target ceiling regardless of productivity — the
+  # unattended-operation backstop against a converging-but-endless series.
+  @max_total_resolutions_per_target 5
 
   defp start_conflict_resolution(mission, branch, files) do
     target = branch || "worktree"
@@ -1617,7 +1620,22 @@ defmodule GiTF.Major.Orchestrator do
       Archive.by_index(:ops, :mission_id, mission.id)
       |> Enum.filter(&(&1[:conflict_resolution] == target))
 
-    prior = length(resolution_ops)
+    # The cap counts FUTILE attempts only (failed/rejected, or done with
+    # zero changes — which the completion gate now fails anyway). Run 4
+    # spent the per-mission worktree budget on two early productive
+    # episodes and had nothing left for the endgame. An absolute ceiling
+    # stays as the unattended-operation backstop.
+    futile =
+      Enum.count(
+        resolution_ops,
+        &(&1.status in ["failed", "rejected"] or
+            (&1.status == "done" and (&1[:files_changed] || 0) == 0))
+      )
+
+    prior =
+      if length(resolution_ops) >= @max_total_resolutions_per_target,
+        do: max(futile, @max_resolutions_per_target),
+        else: futile
 
     cond do
       prior >= @max_resolutions_per_target and is_nil(branch) ->

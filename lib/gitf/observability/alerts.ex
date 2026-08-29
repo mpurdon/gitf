@@ -54,6 +54,7 @@ defmodule GiTF.Observability.Alerts do
     # Toolchain/probe broke under validation — code was never judged; fix
     # attempts are held but rounds burn tokens until it clears.
     validation_infra_failure: :high,
+    mission_stalled: :critical,
     budget_blocked: :high,
     budget_warning: :medium,
     clarification_needed: :high,
