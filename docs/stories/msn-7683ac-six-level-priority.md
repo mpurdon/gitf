@@ -257,3 +257,75 @@ empty; "Active" conflates blocked/pending with running; the phase strip
 shows no x/y op progress; and there is no stalled-mission alarm (zero
 running ops + active mission + N minutes should page). The operator
 should never out-monitor the factory with eyeballs.
+
+## Act two, scene two: run 2's endgame — the referee blows the call
+
+After the un-stall, run 2's consolidation was the engine's first trial
+and it PASSED where it mattered: seven conflicted branch merges, seven
+focused resolution ops, each converging, no marker stacking. Then the
+endgame: the final worktree scan kept convicting five files while two
+resolution ghosts sent to fix them reported clean and changed ZERO
+files. At the 2-attempt cap the engine failed the whole mission over a
+lexical disagreement — and worktree cleanup destroyed the evidence
+minutes later. **Engine v2 (v0.65.219):** scan-vs-ghost disputes go to
+ground-truth validation for adjudication instead of dying at the cap;
+resolution ghosts get `git grep -n` file:line:content excerpts; genuine
+non-convergence snapshots its marker evidence into a mission artifact
+before the pruner arrives.
+
+## Act three: run 3 — died at the finish line, with fingerprints
+
+**msn-4f4d2a** (six-level-priority-3, v0.65.219, started 01:45Z, failed
+04:24Z — 2h39m). The deepest run of the three by far:
+
+- Front half: pristine, third time running (12 min).
+- Implementation: 13-op DAG drained with one failure, recovered
+  first-retry (the transitive-chain fix never even needed).
+- **Consolidation: SURVIVED — a first.** Branch conflicts resolved one
+  at a time; when the scan-vs-ghost dispute recurred (it did, two
+  worktree passes at 03:39–03:41), the v2 adjudication path fired and
+  handed the tree to validation instead of dying.
+- **Validation validated real code** — cross-op incoherence about the
+  renamed "normal" level, exactly what 13 sequential ops branched from a
+  common base produce — and the fix loop ground through attempts 1–4
+  with the resolution engine interleaved, catching fix-branch conflicts
+  as they happened.
+- Then the cap: final validation found REAL markers ("verified real, not
+  a false positive") across 6+ files, and the mission sealed at
+  "validation failed after 4 attempts."
+
+**The fingerprint: `ghost/ghost-d72859` — the REJECTED quality-fix
+ghost — appears in almost every remaining conflict block.** Three
+precise engine-edge defects fall out:
+
+1. **Rejected work reached the tree.** An op can be transiently "done"
+   (then rejected by audit); if consolidation runs in that window, its
+   branch merges — and when the op is later rejected, nothing un-merges
+   the poison. Consolidation must re-check op status at merge time and
+   exclude rejected/failed lineages; rejected-after-merge needs a revert
+   or a loud artifact.
+2. **Resolution ops complete without proof.** Several branch resolutions
+   went "done" while their own target files still carried markers. A
+   resolution op's completion must be GATED on a re-scan of its target
+   files — markers still present ⇒ the op FAILED, and the retry
+   machinery (now transitive) gives it another shot with excerpts.
+3. **The marker-gate scope has a hole.** The scan is scoped to
+   changed_files of DONE impl ops — a rejected op's merged branch is
+   invisible to it. When any resolution op exists, scan the full tree
+   (or add resolution target_files to scope).
+
+## Where the war stands after three runs
+
+Every run killed at least one deep factory defect, and each died later
+than the last: run 1 in consolidation (marker stacking), run 2 in the
+endgame (retry chains + scan disagreement), run 3 in validation's final
+round (rejected-lineage poisoning + unverified resolutions). The
+pipeline in FRONT of consolidation has now been flawless three times;
+the engine's core loop is proven; what remains is its edges — and the
+deeper economic truth from `docs/plans/execution-efficiency.md`: 13
+sequential ops branched from a common base manufacture both the
+conflicts and the cross-op incoherence that validation then has to
+chase. Merge-as-you-go + chained worktrees don't just speed the factory
+up — they shrink the entire class of failure that killed all three runs.
+
+Engine v3 (the three fixes above) + efficiency Phase 1, then run 4.
