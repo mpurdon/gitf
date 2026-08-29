@@ -643,27 +643,51 @@ defmodule GiTF.Ops do
   @spec max_retries() :: pos_integer()
   def max_retries, do: @max_retries
 
+  # Retry chains can be MORE than one generation: original → retry →
+  # retry-of-retry. Checking only direct children stalled msn-6be1ba for
+  # 72 minutes — the bindings op failed, its retry failed, the third
+  # sibling succeeded, and seven dependents stayed blocked because their
+  # edges point at the ORIGINAL id and nothing walked the chain.
+  @max_retry_chain_depth 10
+
   @doc """
-  Returns true if any sibling op has `retry_of: op_id` AND `status: \"done\"`.
+  Returns true if any DESCENDANT in `op_id`'s retry chain (retry, retry of
+  retry, …) reached `\"done\"`.
   Touches Archive — use `retry_completed_in?/2` when iterating in a loop.
   """
   @spec retry_completed?(String.t()) :: boolean()
-  def retry_completed?(op_id) do
-    Archive.find_one(:ops, fn j ->
-      Map.get(j, :retry_of) == op_id && j.status == "done"
-    end) != nil
+  def retry_completed?(op_id), do: descendant_done?(op_id, 0)
+
+  defp descendant_done?(_op_id, depth) when depth >= @max_retry_chain_depth, do: false
+
+  defp descendant_done?(op_id, depth) do
+    Archive.filter(:ops, fn j -> Map.get(j, :retry_of) == op_id end)
+    |> Enum.any?(fn j -> j.status == "done" or descendant_done?(j.id, depth + 1) end)
   end
 
   @doc """
   In-memory variant of `retry_completed?/1` — accepts any enumerable of
   ops (list or `{id, op}` map entries). Use when checking many ops in a
-  single pass to avoid N Archive scans.
+  single pass to avoid N Archive scans. Traverses the whole retry chain,
+  like `retry_completed?/1`.
   """
   @spec retry_completed_in?(String.t(), Enumerable.t()) :: boolean()
   def retry_completed_in?(op_id, ops) do
-    Enum.any?(ops, fn
-      {_id, op} -> Map.get(op, :retry_of) == op_id and op.status == "done"
-      op when is_map(op) -> Map.get(op, :retry_of) == op_id and op.status == "done"
+    ops
+    |> Enum.map(fn
+      {_id, op} -> op
+      op when is_map(op) -> op
+    end)
+    |> descendant_done_in?(op_id, 0)
+  end
+
+  defp descendant_done_in?(_ops, _op_id, depth) when depth >= @max_retry_chain_depth, do: false
+
+  defp descendant_done_in?(ops, op_id, depth) do
+    ops
+    |> Enum.filter(&(Map.get(&1, :retry_of) == op_id))
+    |> Enum.any?(fn op ->
+      op.status == "done" or descendant_done_in?(ops, op.id, depth + 1)
     end)
   end
 
@@ -701,17 +725,38 @@ defmodule GiTF.Ops do
   def resolved?(_op, _retried_ok), do: false
 
   @doc """
-  Builds a MapSet of op IDs whose retry sibling has reached `\"done\"`.
+  Builds a MapSet of op IDs resolved by a `\"done\"` op somewhere in their
+  retry DESCENDANT chain. A completed retry-of-a-retry resolves its whole
+  ancestor line, since dependency edges point at the original op's id.
   Pass to `resolved?/2` to avoid O(n²) sibling scans in loops.
   """
   @spec retried_ok_set(Enumerable.t()) :: MapSet.t()
   def retried_ok_set(ops) do
+    by_id = Map.new(ops, &{&1.id, &1})
+
     for o <- ops,
         o.status == "done",
         id = Map.get(o, :retry_of),
         not is_nil(id),
-        do: id,
-        into: MapSet.new()
+        reduce: MapSet.new() do
+      acc -> put_retry_ancestors(id, by_id, acc, 0)
+    end
+  end
+
+  defp put_retry_ancestors(nil, _by_id, acc, _depth), do: acc
+  defp put_retry_ancestors(_id, _by_id, acc, depth) when depth >= @max_retry_chain_depth, do: acc
+
+  defp put_retry_ancestors(id, by_id, acc, depth) do
+    if MapSet.member?(acc, id) do
+      acc
+    else
+      acc = MapSet.put(acc, id)
+
+      case Map.get(by_id, id) do
+        %{} = op -> put_retry_ancestors(Map.get(op, :retry_of), by_id, acc, depth + 1)
+        _ -> acc
+      end
+    end
   end
 
   @doc """
@@ -731,6 +776,38 @@ defmodule GiTF.Ops do
 
   @spec unblock_dependents(String.t(), non_neg_integer()) :: :ok
   def unblock_dependents(op_id, attempt) do
+    # A completing RETRY satisfies its whole ancestor chain's dependents:
+    # dependency edges point at the planner's ORIGINAL op id, while the op
+    # that finally succeeds may be a retry-of-a-retry. Without walking up,
+    # those dependents wait for the Tachikoma patrol at best — msn-6be1ba
+    # sat blocked for 72 minutes at worst.
+    op_id
+    |> retry_ancestor_ids()
+    |> Enum.each(&unblock_dependents_of(&1, attempt))
+  end
+
+  defp retry_ancestor_ids(op_id), do: collect_retry_ancestors(op_id, [], 0)
+
+  defp collect_retry_ancestors(nil, acc, _depth), do: Enum.reverse(acc)
+
+  defp collect_retry_ancestors(op_id, acc, depth) when depth >= @max_retry_chain_depth,
+    do: Enum.reverse([op_id | acc])
+
+  defp collect_retry_ancestors(op_id, acc, depth) do
+    if op_id in acc do
+      Enum.reverse(acc)
+    else
+      parent =
+        case Archive.get(:ops, op_id) do
+          %{} = op -> Map.get(op, :retry_of)
+          _ -> nil
+        end
+
+      collect_retry_ancestors(parent, [op_id | acc], depth + 1)
+    end
+  end
+
+  defp unblock_dependents_of(op_id, attempt) do
     # Serialize concurrent calls for the same op so multiple code paths
     # (link_received handler, retry, phase advance) don't duplicate work.
     # If another caller holds the lock but then crashes before finishing,
@@ -747,7 +824,10 @@ defmodule GiTF.Ops do
       {:error, :locked} when attempt < @max_unblock_retries ->
         Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
           Process.sleep(@unblock_retry_delay_ms)
-          unblock_dependents(op_id, attempt + 1)
+          # Retry only THIS id — the sibling ancestors already ran (or are
+          # running their own retries); re-expanding the chain here would
+          # multiply lock attempts.
+          unblock_dependents_of(op_id, attempt + 1)
         end)
 
         :ok

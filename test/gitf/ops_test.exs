@@ -268,4 +268,78 @@ defmodule GiTF.OpsTest do
       assert {:ok, %{status: "pending", ghost_id: nil}} = Ops.reset(op.id)
     end
   end
+
+  describe "transitive retry chains (the msn-6be1ba stall)" do
+    # original → retry (failed) → retry-of-retry (done). Dependency edges
+    # point at the ORIGINAL; a single-generation check stalled 7 dependents
+    # for 72 minutes.
+    defp chain_fixture(mission, sector) do
+      {:ok, original} = create_job(mission, sector, %{title: "bindings"})
+      {:ok, original} = Archive.update(:ops, original.id, &Map.put(&1, :status, "failed"))
+
+      {:ok, retry1} = create_job(mission, sector, %{title: "bindings retry 1"})
+
+      {:ok, retry1} =
+        Archive.update(:ops, retry1.id, &Map.merge(&1, %{status: "failed", retry_of: original.id}))
+
+      {:ok, retry2} = create_job(mission, sector, %{title: "bindings retry 2"})
+
+      {:ok, retry2} =
+        Archive.update(:ops, retry2.id, &Map.merge(&1, %{status: "done", retry_of: retry1.id}))
+
+      {original, retry1, retry2}
+    end
+
+    test "retry_completed? traverses the whole chain", %{mission: mission, sector: sector} do
+      {original, retry1, _retry2} = chain_fixture(mission, sector)
+
+      assert Ops.retry_completed?(original.id)
+      assert Ops.retry_completed?(retry1.id)
+    end
+
+    test "retry_completed? is false when the whole chain failed",
+         %{mission: mission, sector: sector} do
+      {original, _r1, retry2} = chain_fixture(mission, sector)
+      {:ok, _} = Archive.update(:ops, retry2.id, &Map.put(&1, :status, "failed"))
+
+      refute Ops.retry_completed?(original.id)
+    end
+
+    test "retry_completed_in? matches the Archive-backed variant",
+         %{mission: mission, sector: sector} do
+      {original, retry1, retry2} = chain_fixture(mission, sector)
+      ops = [original, retry1, retry2] |> Enum.map(&Archive.get(:ops, &1.id))
+
+      assert Ops.retry_completed_in?(original.id, ops)
+      refute Ops.retry_completed_in?(retry2.id, ops)
+    end
+
+    test "retried_ok_set resolves every ancestor of a done retry",
+         %{mission: mission, sector: sector} do
+      {original, retry1, retry2} = chain_fixture(mission, sector)
+      ops = [original, retry1, retry2] |> Enum.map(&Archive.get(:ops, &1.id))
+
+      set = Ops.retried_ok_set(ops)
+      assert MapSet.member?(set, original.id)
+      assert MapSet.member?(set, retry1.id)
+    end
+
+    test "ready? passes and unblock_dependents fires through the chain",
+         %{mission: mission, sector: sector} do
+      {original, _retry1, retry2} = chain_fixture(mission, sector)
+
+      {:ok, dependent} = create_job(mission, sector, %{title: "MainApp rail"})
+      {:ok, _} = Archive.update(:ops, dependent.id, &Map.put(&1, :status, "blocked"))
+
+      {:ok, _} =
+        Archive.insert(:op_dependencies, %{op_id: dependent.id, depends_on_id: original.id})
+
+      assert Ops.ready?(dependent.id)
+
+      # The event-driven path: the op that COMPLETED is the grandchild, but
+      # the dependency edge points at the original. Unblocking must walk up.
+      :ok = Ops.unblock_dependents(retry2.id)
+      assert %{status: "pending"} = Archive.get(:ops, dependent.id)
+    end
+  end
 end
