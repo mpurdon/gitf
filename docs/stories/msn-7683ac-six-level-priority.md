@@ -329,3 +329,30 @@ chase. Merge-as-you-go + chained worktrees don't just speed the factory
 up — they shrink the entire class of failure that killed all three runs.
 
 Engine v3 (the three fixes above) + efficiency Phase 1, then run 4.
+
+## Epilogue: the overnight rebuild (v0.65.221, deployed 2026-08-29)
+
+All of run 3's harvest shipped the same night, plus the deeper cut:
+
+- **Engine v3 complete**: merge-time status re-reads (rejected lineages
+  stay out), resolution branches excluded from the merge set, full-tree
+  marker gate (safe under adjudication), futile-resolution warnings.
+- **The conflict SOURCE fixed**: `predecessor_shell` — the
+  chain-inheritance mechanism built after runs 13–16 — turned out to have
+  the same single-generation retry blindness as `ready?`. A failed
+  dependency rescued by a retry-of-a-retry forked every downstream op
+  onto a sibling branch from origin/main. One defect, THREE expressions
+  (readiness, unblocking, worktree topology), now all fixed; plus
+  canonical-tip branching for chain roots. Sequential execution now
+  yields cumulative branches and fast-forward consolidation — the engine
+  built to fight conflicts should rarely meet one.
+- **Verdict cache**: fix-loop rounds on byte-identical trees reuse the
+  exec-validation verdict instead of re-paying npm ci under the lock.
+- Cleanup: cora's remote was already clean (no branch ever escaped the
+  box — every run failed before publish); the box's sector clone dropped
+  10 dead ghost/mission branches.
+
+2,237 tests green. Run 4 awaits the operator's go — with the conflict
+factory dismantled, the interesting question is what the FOURTH failure
+mode will be. That's the dark-factory loop working: every crash pays for
+a wall the next mission can't hit.
