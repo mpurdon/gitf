@@ -209,3 +209,51 @@ Shipped as **v0.65.214** (commit 4f9221e), ~4 hours after the failure:
 
 2,230 tests green. The rematch: the SAME mission goal, unchanged, on the
 new engine.
+
+## Act two: the rematch stalls before the engine even gets its trial
+
+**msn-6be1ba** (six-level-priority-2, v0.65.214, full forced, started
+21:29Z). Front half: pristine again (12 minutes). The planner produced an
+almost identical 13-op DAG — same decomposition instincts, plus new
+"[Recon]" scouting ops. Implementation ground forward, `running=1` as
+always… and then, at 22:48Z, the timeline went silent.
+
+**The operator caught it before the factory did.** Looking at the
+Catwalk mission page: "a lot of blocked pendings." The page itself was
+part of the problem — the op-summary panel rendered no counts at all,
+the "Active 7" tab showed seven ops that were all blocked (nothing was
+*running*), and no alarm exists for "active mission, zero running ops,
+72 minutes." The dashboard displayed a stall as a calm work-in-progress.
+
+**Root cause, confirmed live on the box** (`gitf-console` probe):
+
+    op-a2ab10  "Regenerate ts-rs bindings"  failed   retry_of: nil
+    op-223307  retry of a2ab10              failed
+    op-194f47  retry of 223307              DONE ✅
+    Ops.ready?("op-0f9504")                 false
+
+The bindings op failed **twice**; the retry-of-the-retry succeeded — and
+satisfied nobody. Dependency edges point at the planner's ORIGINAL op id,
+and every resolution check (`retry_completed?`, `retried_ok_set`, the
+batch scheduler variant) looked exactly ONE generation down the retry
+chain. Run 1 never hit this because each of its failures recovered on
+the first retry. Run 2 needed two, and seven frontend ops sat blocked
+behind a dependency that had, in fact, been satisfied for over an hour.
+Even the Tachikoma patrol's blocked-op sweep agreed with the wrong
+answer, because it asks the same `ready?`.
+
+**The fix (v0.65.217, commit 8f4ec96, ~40 min after diagnosis):** retry
+chains resolve transitively — `ready?` walks the whole descendant chain,
+`retried_ok_set` resolves every ancestor of a done retry, and a
+completing retry fires `unblock_dependents` for its entire ancestor
+line. Five new tests encode the exact three-op chain from the live
+mission. And the remediation is doctrine-pure: deploying the fix IS the
+rescue — Tachikoma's 30-second patrol re-evaluates the blocked ops with
+the fixed `ready?` and the mission resumes exactly where it froze, no
+hand-editing.
+
+**Dashboard debt surfaced for the backlog:** op-summary counts render
+empty; "Active" conflates blocked/pending with running; the phase strip
+shows no x/y op progress; and there is no stalled-mission alarm (zero
+running ops + active mission + N minutes should page). The operator
+should never out-monitor the factory with eyeballs.
