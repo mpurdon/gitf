@@ -1530,22 +1530,26 @@ defmodule GiTF.Ghost.Worker do
     changed = Map.get(metadata, :files_changed, 0)
 
     case (op && GiTF.Ops.completion_proof(op)) || :diff_required do
+      # ORDERING CONTRACT: `auto_commit_worktree/1` ran above, in the
+      # `is_phase_job` branch — resolution ops are always `phase_job: false`,
+      # so their edits are COMMITTED before this gate reads the tree. The
+      # gate must see the committed tree, not the ghost's uncommitted
+      # working copy: what consolidation merges next is HEAD. Do not move
+      # this case above the auto-commit.
       {:absence_of_markers, files} ->
         case resolution_marker_check(state, files) do
-          [] ->
+          :ok ->
             do_complete_success(state, op, is_phase_job)
 
-          marked ->
+          verdict ->
+            reason = GiTF.Ghost.ResolutionProof.failure_reason(verdict)
+
             Logger.warning(
-              "Op #{state.op_id}: resolution ghost #{state.ghost_id} reported success " <>
-                "but markers remain in #{Enum.join(marked, ", ")} — marking failed"
+              "Op #{state.op_id}: resolution ghost #{state.ghost_id} did not clear the " <>
+                "proof gate — #{reason}"
             )
 
-            mark_failed(
-              state,
-              "Resolution reported success but conflict markers remain in: " <>
-                Enum.join(marked, ", ")
-            )
+            mark_failed(state, reason)
         end
 
       :diff_required when changed == 0 ->
@@ -1568,19 +1572,17 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  # Scoped to the op's own target files: pre-existing marker-like content
-  # elsewhere is validation's problem (adjudication), not this ghost's.
-  # -l mode returns filenames uncapped — an excerpt's line limit could
-  # hide a second marker-laden file behind a chatty first one.
+  # The proof gate itself lives in `GiTF.Ghost.ResolutionProof` — it is a
+  # decision about a worktree, not about this GenServer, and a gate that
+  # can only be exercised by standing up a live ghost is a gate nobody
+  # tests (which is how run 5's version shipped rescuing to "passed").
   defp resolution_marker_check(state, files) do
-    with %{worktree_path: wt} when is_binary(wt) <- Archive.get(:shells, state.shell_id),
-         [_ | _] <- files do
-      GiTF.Git.conflict_marker_files(wt, files)
-    else
-      _ -> []
-    end
-  rescue
-    _ -> []
+    GiTF.Ghost.ResolutionProof.verify(%{
+      op_id: state.op_id,
+      ghost_id: state.ghost_id,
+      shell_id: state.shell_id,
+      files: files
+    })
   end
 
   defp do_complete_success(state, op, is_phase_job) do

@@ -175,6 +175,15 @@ defmodule GiTF.Major.Endgame do
            target_files: files
          }) do
       {:ok, op} ->
+        # The markers this op exists to reconcile live in the canonical
+        # worktree, so the op must DEPEND on the canonical worktree's op.
+        # Without the edge `GiTF.Major.predecessor_shell/1` answers :none
+        # and the recovery sweep (the path that runs when the direct spawn
+        # below fails) hands the resolution ghost a fresh worktree cut from
+        # the sector base — a sibling branch whose merge-back manufactures
+        # exactly the conflicts it was spawned to resolve.
+        GiTF.Validation.anchor_to_canonical_worktree(mission, op)
+
         GiTF.Missions.transition_phase(
           mission.id,
           "implementation",

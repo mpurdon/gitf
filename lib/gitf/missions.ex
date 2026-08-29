@@ -8,9 +8,30 @@ defmodule GiTF.Missions do
 
   This is a pure context module: no process state, just data transformations
   against the store.
+
+  ## Resume provenance
+
+  `resume/2` starts a new mission on a failed one's tree, replaying the
+  phases before the resume point from the parent's artifacts instead of
+  re-running them. That saves hours, and it costs certainty.
+
+  **Inherited state is a suspect in every failure of a resumed run.** The
+  design the parent produced, the plan cut from it, and the tree left in
+  `archive/<parent_id>` were all authored by a run that DID NOT SUCCEED.
+  Any of them can be the reason the child fails too, and nothing downstream
+  can tell an inherited defect from a fresh one — the child's own ghosts
+  never saw the requirements that produced the code they are judged on.
+
+  So: if a resumed run fails in a way that might implicate inherited state
+  — a design gap, a plan that never covered the requirement, a tree with
+  work missing — the answer is a fresh full run, not another resume. Resume
+  is for re-entering a loop that was working (validation ↔ fix) when the
+  factory, not the work, gave out. Stacking resumes on resumes compounds
+  provenance until no post-mortem can say where the defect entered.
   """
 
   require Logger
+  require GiTF.Ghost.Status, as: GhostStatus
 
   alias GiTF.Archive
 
@@ -184,6 +205,308 @@ defmodule GiTF.Missions do
           error
       end
     end
+  end
+
+  # -- Resume ------------------------------------------------------------------
+
+  # v1 scope. `"validation"` is the endgame-iteration loop: everything before
+  # implementation is inherited, the parent's final tree is checked out, and
+  # the mission re-enters at consolidation → validation → fix. Earlier resume
+  # points would have to re-derive a tree from artifacts, which is a different
+  # (and much less certain) operation.
+  @resumable_phases ["validation"]
+
+  # Phases whose artifacts are inherited when resuming AT the key. Ordered:
+  # the replayed transitions are written in this order so the timeline reads
+  # as the journey it stands in for.
+  @inherited_phases %{
+    "validation" => ~w(triage research requirements design review planning)
+  }
+
+  @doc "Phases `resume/2` can restart a mission at."
+  @spec resumable_phases() :: [String.t()]
+  def resumable_phases, do: @resumable_phases
+
+  @doc """
+  Starts a NEW mission on a failed mission's preserved tree, re-entering
+  the pipeline at `from_phase` instead of running it from the top.
+
+  Only `"validation"` is supported (the endgame-iteration loop). The
+  parent's canonical branch must already be archived as
+  `archive/<parent_id>` — `fail_quest/2` and `kill/1` do that automatically
+  since the branch-preservation change; missions that failed before it have
+  nothing to resume from.
+
+  What the child inherits:
+
+    * the parent's goal, sector and `pipeline_mode` (including the forced
+      flag — an operator's choice of mode outlives the run that carried it),
+    * the phase artifacts for every phase before `from_phase`, each stamped
+      `"inherited_from" => parent_id` inside the artifact map,
+    * a replayed phase transition per inherited phase, reasoned
+      `"inherited from <parent_id>"` so the timeline distinguishes a
+      replayed leg from a real one,
+    * one synthetic `"done"` implementation op holding a worktree cut from
+      `archive/<parent_id>` — which is what makes
+      `GiTF.Validation.canonical_impl_shell/1` resolve to the parent's final
+      tree, and what lets the journey advance into validation on its own.
+
+  Resume implies start: the mission is left `status: "active"`,
+  `current_phase: "implementation"`, and handed to
+  `GiTF.Major.Orchestrator.advance_quest/1`. There is no separate
+  `start_mission` step.
+
+  Read the module doc's provenance rule before acting on a resumed run's
+  failure.
+
+  ## Options
+
+    * `:advance` (default `true`) — hand the finished mission to the
+      orchestrator. The only reason to pass `false` is to build the child
+      and inspect it without spawning a validation ghost; production always
+      advances, because a resumed mission nobody advances is a checked-out
+      worktree holding the parent's only tree and doing nothing.
+
+  Returns `{:ok, mission}` or one of `{:error, :parent_not_found |
+  :parent_not_failed | :unsupported_from_phase | :sector_unavailable |
+  :archive_branch_missing | term()}`.
+  """
+  @spec resume(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def resume(parent_id, from_phase \\ "validation", opts \\ [])
+
+  def resume(parent_id, from_phase, opts) when is_binary(parent_id) and is_binary(from_phase) do
+    with :ok <- validate_from_phase(from_phase),
+         {:ok, parent} <- fetch_resumable_parent(parent_id),
+         {:ok, archive_branch} <- fetch_archive_branch(parent) do
+      build_resumed_mission(parent, from_phase, archive_branch, opts)
+    end
+  end
+
+  def resume(_parent_id, _from_phase, _opts), do: {:error, :parent_not_found}
+
+  defp validate_from_phase(phase) do
+    if phase in @resumable_phases, do: :ok, else: {:error, :unsupported_from_phase}
+  end
+
+  defp fetch_resumable_parent(parent_id) do
+    case Archive.get(:missions, parent_id) do
+      nil ->
+        {:error, :parent_not_found}
+
+      # `kill/1` deletes the record, so "killed" is only reachable for
+      # missions some other path marked killed without deleting. Accepted
+      # anyway: the check is about "nobody is still working on this", and a
+      # live mission must never have its tree resumed underneath it.
+      %{status: status} = parent when status in ["failed", "killed"] ->
+        {:ok, Map.put(parent, :ops, GiTF.Ops.list(mission_id: parent_id))}
+
+      _ ->
+        {:error, :parent_not_failed}
+    end
+  end
+
+  defp fetch_archive_branch(parent) do
+    branch = GiTF.Major.Topology.archive_branch(parent.id)
+
+    with sector_id when is_binary(sector_id) <- Map.get(parent, :sector_id),
+         %{path: path} when is_binary(path) <- Archive.get(:sectors, sector_id),
+         true <- File.dir?(path) do
+      if GiTF.Git.branch_exists?(path, branch) do
+        {:ok, branch}
+      else
+        {:error, :archive_branch_missing}
+      end
+    else
+      _ -> {:error, :sector_unavailable}
+    end
+  end
+
+  defp build_resumed_mission(parent, from_phase, archive_branch, opts) do
+    with {:ok, child} <- create_resumed_record(parent, from_phase),
+         :ok <- inherit_artifacts(child, parent, from_phase),
+         :ok <- replay_transitions(child, parent, from_phase),
+         {:ok, _op} <- seed_inherited_tree(child, parent, archive_branch) do
+      # The synthetic op is already "done", so the journey's implementation
+      # leg is complete the moment it starts: `check_implementation_complete`
+      # sees every impl op done and walks straight into start_validation.
+      # Nothing here has to know that — it just has to put the mission at
+      # the right phase and let the orchestrator read it.
+      transition_phase(child.id, "implementation", "resumed from #{parent.id} at #{from_phase}")
+
+      if Keyword.get(opts, :advance, true) do
+        GiTF.Major.Orchestrator.advance_quest(child.id)
+      end
+
+      get(child.id)
+    end
+  end
+
+  defp create_resumed_record(parent, from_phase) do
+    with {:ok, child} <-
+           create(%{
+             goal: parent.goal,
+             sector_id: parent[:sector_id],
+             name: "#{parent[:name] || parent.id}-resume",
+             status: "active"
+           }) do
+      update(child.id, %{
+        resumed_from: parent.id,
+        resumed_at_phase: from_phase,
+        # An operator's forced pipeline mode is a decision about the WORK,
+        # not about the run that carried it — it survives the resume.
+        pipeline_mode: parent[:pipeline_mode],
+        pipeline_mode_forced: parent[:pipeline_mode_forced] || false,
+        target_branch: parent[:target_branch],
+        cost_cap_usd: parent[:cost_cap_usd]
+      })
+    end
+  end
+
+  # Every artifact is stamped INSIDE the map rather than tracked in a
+  # sidecar: a phase artifact travels alone into prompts, diagnosis output
+  # and the dashboard, and an unstamped copy is indistinguishable from work
+  # this run actually did.
+  defp inherit_artifacts(child, parent, from_phase) do
+    phases = Map.get(@inherited_phases, from_phase, [])
+    parent_artifacts = Map.get(parent, :artifacts, %{}) || %{}
+
+    inherited =
+      parent_artifacts
+      |> Enum.filter(fn {key, value} -> inheritable?(key, phases) and is_map(value) end)
+      |> Map.new(fn {key, value} -> {key, Map.put(value, "inherited_from", parent.id)} end)
+
+    Archive.update(:missions, child.id, fn m ->
+      Map.put(m, :artifacts, Map.merge(Map.get(m, :artifacts, %{}) || %{}, inherited))
+    end)
+
+    :ok
+  end
+
+  # Parallel phases write suffixed keys ("design_minimal", "planning_thorough",
+  # "validation_v2"). Prefix-matching carries the whole family, so a resumed
+  # design tournament arrives with its full field rather than one variant.
+  defp inheritable?(key, phases) when is_binary(key) do
+    Enum.any?(phases, fn phase -> key == phase or String.starts_with?(key, phase <> "_") end)
+  end
+
+  defp inheritable?(_key, _phases), do: false
+
+  defp replay_transitions(child, parent, from_phase) do
+    inherited_artifacts = Map.get(parent, :artifacts, %{}) || %{}
+
+    Map.get(@inherited_phases, from_phase, [])
+    |> Enum.filter(fn phase ->
+      Enum.any?(Map.keys(inherited_artifacts), &inheritable?(&1, [phase]))
+    end)
+    |> Enum.each(fn phase ->
+      transition_phase(child.id, phase, "inherited from #{parent.id}")
+    end)
+
+    :ok
+  end
+
+  # THE SEED. `canonical_impl_shell/1` resolves op → ghost → shell →
+  # worktree; a resumed mission has no real ghost that ever ran, so all
+  # three records are minted by hand around a worktree cut from the archive
+  # branch. Get any link wrong and consolidation, validation, the fix loop
+  # and publish all silently target the sector base instead of the
+  # inherited tree.
+  defp seed_inherited_tree(child, parent, archive_branch) do
+    with {:ok, op} <- create_inherited_op(child, parent),
+         {:ok, ghost} <- Archive.insert(:ghosts, inherited_ghost_record(op.id)),
+         {:ok, shell} <- create_inherited_shell(child, ghost, archive_branch) do
+      Archive.update(:ghosts, ghost.id, fn g ->
+        Map.merge(g, %{shell_id: shell.id, shell_path: shell.worktree_path})
+      end)
+
+      Archive.update(:ops, op.id, fn o ->
+        Map.merge(o, %{ghost_id: ghost.id, shell_id: shell.id, branch: shell.branch})
+      end)
+
+      Logger.info(
+        "Quest #{child.id}: seeded inherited tree from #{archive_branch} " <>
+          "(op #{op.id}, ghost #{ghost.id}, worktree #{shell.worktree_path})"
+      )
+
+      {:ok, op}
+    else
+      {:error, reason} ->
+        # A resumed mission whose tree could not be provisioned would run
+        # validation against the sector base and report the inherited work
+        # missing. Fail loudly at creation instead.
+        Logger.error("Quest #{child.id}: could not seed inherited tree: #{inspect(reason)}")
+        fail_quest(child.id, "Resume could not provision the inherited worktree")
+        {:error, {:seed_failed, reason}}
+    end
+  end
+
+  defp create_inherited_op(child, parent) do
+    # The parent's changed files ride along: `validate_pass_against_diff/1`
+    # overrides a "pass" verdict when no completed impl op reports a
+    # meaningful file, and the synthetic op is the ONLY impl op a resumed
+    # mission has. Leaving this empty makes the resumed run unpassable.
+    changed = parent_changed_files(parent)
+
+    with {:ok, op} <-
+           GiTF.Ops.create(%{
+             title: "Inherited implementation from #{parent.id}",
+             description:
+               "Placeholder for the implementation work inherited from mission #{parent.id}. " <>
+                 "No ghost ran for this op; its worktree is checked out at that mission's " <>
+                 "final tree (#{GiTF.Major.Topology.archive_branch(parent.id)}).",
+             mission_id: child.id,
+             sector_id: child[:sector_id],
+             status: "done",
+             phase_job: false,
+             skip_verification: true
+           }) do
+      # `Ops.create/1` builds a fixed record and drops unknown keys, so the
+      # resume-specific fields are merged after the insert rather than
+      # passed in (silently losing `inherited` would make the synthetic op
+      # indistinguishable from real work in every post-mortem).
+      Archive.update(:ops, op.id, fn o ->
+        Map.merge(o, %{
+          inherited: true,
+          changed_files: changed,
+          files_changed: length(changed)
+        })
+      end)
+    end
+  end
+
+  defp parent_changed_files(parent) do
+    (parent[:ops] || [])
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.flat_map(fn op -> op[:changed_files] || [] end)
+    |> Enum.uniq()
+  end
+
+  defp inherited_ghost_record(op_id) do
+    %{
+      name: "inherited",
+      status: GhostStatus.stopped(),
+      op_id: op_id,
+      shell_path: nil,
+      shell_id: nil,
+      pid: nil,
+      assigned_model: nil,
+      context_tokens_used: 0,
+      context_tokens_limit: nil,
+      context_percentage: 0.0,
+      inherited: true
+    }
+  end
+
+  defp create_inherited_shell(child, ghost, archive_branch) do
+    opts = [base_branch: archive_branch]
+
+    opts =
+      case GiTF.gitf_dir() do
+        {:ok, root} -> Keyword.put(opts, :gitf_root, root)
+        _ -> opts
+      end
+
+    GiTF.Shell.create(child[:sector_id], ghost.id, opts)
   end
 
   @doc """
@@ -675,6 +998,12 @@ defmodule GiTF.Missions do
         {:error, :not_found}
 
       mission ->
+        # FIRST, before the status write: once this mission reads "failed",
+        # the orphan sweep and the shell reaper are free to remove its
+        # worktrees and delete its ghost branches. Preserve the tree while
+        # it still exists — this is the only input `resume/2` has.
+        preserve_canonical_branch(mission_id)
+
         from_phase = Map.get(mission, :current_phase, "pending")
 
         if !recent_duplicate_transition?(mission_id, from_phase, "completed") do
@@ -768,6 +1097,11 @@ defmodule GiTF.Missions do
         {:error, :not_found}
 
       quest ->
+        # Before the ops (and with them the shells and worktrees) go away.
+        # A killed mission's work is as resumable as a failed one's, and
+        # `kill` is the more destructive of the two — it deletes the record.
+        preserve_canonical_branch(mission_id)
+
         # Rollback sector if applicable
         rollback_sector(quest)
 
@@ -785,6 +1119,27 @@ defmodule GiTF.Missions do
         Archive.delete(:missions, mission_id)
         :ok
     end
+  end
+
+  # Never let branch archival break a failure path: a mission that failed
+  # must be recorded as failed even when its sector clone is missing, its
+  # worktrees are already gone, or git is unhappy. Topology already logs
+  # each error; this swallows whatever is left.
+  defp preserve_canonical_branch(mission_id) do
+    GiTF.Major.Topology.archive_canonical_branch(mission_id)
+    :ok
+  rescue
+    e ->
+      Logger.warning("Quest #{mission_id}: canonical branch preservation failed: #{inspect(e)}")
+
+      :ok
+  catch
+    kind, reason ->
+      Logger.warning(
+        "Quest #{mission_id}: canonical branch preservation #{kind}: #{inspect(reason)}"
+      )
+
+      :ok
   end
 
   defp rollback_sector(%{sector_id: sid}) when is_binary(sid) do

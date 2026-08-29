@@ -223,19 +223,74 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  The branch namespace holding a failed mission's final tree. Never
+  deleted by any prune path — see `branch_delete/2`.
+  """
+  @spec archive_branch_prefix() :: String.t()
+  def archive_branch_prefix, do: "archive/"
+
+  @doc """
+  True when `branch` is a failure archive ref (`archive/<mission_id>`).
+  """
+  @spec archive_branch?(term()) :: boolean()
+  def archive_branch?(branch) when is_binary(branch),
+    do: String.starts_with?(branch, archive_branch_prefix())
+
+  def archive_branch?(_), do: false
+
+  @doc """
   Deletes a local git branch.
 
   Runs `git branch -D <branch_name>` from `repo_path`.
   Returns `:ok` on success.
+
+  `archive/*` branches are REFUSED here rather than at each caller. They
+  are the only record of a failed mission's tree once its worktrees are
+  pruned, and four independent prune paths (shell removal, the orphan
+  sweep, mission-branch cleanup, worktree reaping) each delete branches
+  from a different derivation of "this mission is over". A per-caller
+  guard is one refactor away from being forgotten; the chokepoint is not.
   """
   @spec branch_delete(String.t(), String.t()) :: :ok | {:error, String.t()}
-  def branch_delete(repo_path, branch_name) do
+  def branch_delete(repo_path, branch_name) when is_binary(branch_name) do
+    if archive_branch?(branch_name) do
+      require Logger
+
+      Logger.info("Refusing to delete archive branch #{branch_name} — resume depends on it")
+      {:error, :archive_branch_protected}
+    else
+      do_branch_delete(repo_path, branch_name)
+    end
+  end
+
+  defp do_branch_delete(repo_path, branch_name) do
     case safe_cmd(["branch", "-D", branch_name],
            cd: repo_path,
            stderr_to_stdout: true
          ) do
       {_output, 0} -> :ok
       {output, _code} -> {:error, String.trim(output)}
+    end
+  end
+
+  @doc """
+  Points `branch` at the commit `start_point` names, creating or moving it.
+
+  `git branch -f` rather than `-b`/plain: the operation must be idempotent
+  because the failure path that calls it can run more than once for the
+  same mission, and a second archive attempt must not error out on
+  "branch already exists".
+
+  Returns `:ok` or `{:error, output}`.
+  """
+  @spec branch_at(String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
+  def branch_at(repo_path, branch, start_point) do
+    case safe_cmd(["branch", "-f", branch, start_point],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> :ok
+      {output, _code} -> {:error, String.trim(to_string(output))}
     end
   end
 
@@ -643,6 +698,37 @@ defmodule GiTF.Git do
   """
   @spec conflict_marker_files(String.t(), [String.t()]) :: [String.t()]
   def conflict_marker_files(wt, paths \\ ["."]), do: marker_grep(wt, ["-l"], paths)
+
+  @doc """
+  `conflict_marker_files/2` for callers that must not confuse "the scan
+  found nothing" with "the scan did not run".
+
+  `conflict_marker_files/2` collapses both onto `[]`, which is correct for
+  the full-tree consolidation gate (a scan error must not invent conflicts,
+  and downstream adjudication catches real ones). It is exactly wrong for
+  `GiTF.Ghost.ResolutionProof`, where `[]` IS the proof: a git that cannot
+  run certifies every resolution it is asked about.
+
+  `git grep` exit 1 means "no matches" — including for a pathspec matching
+  nothing, so a resolution that legitimately deleted a conflicted file
+  still reads clean. Anything above 1 is a real failure.
+
+  Returns `{:ok, files}` or `{:error, reason}`.
+  """
+  @spec conflict_marker_files_checked(String.t(), [String.t()]) ::
+          {:ok, [String.t()]} | {:error, String.t()}
+  def conflict_marker_files_checked(wt, paths) do
+    args =
+      ["-C", wt, "grep", "-I", "-E", "-l", @conflict_marker_re, "--"] ++ paths
+
+    case safe_cmd(args) do
+      {out, 0} -> {:ok, out |> to_string() |> String.split("\n", trim: true)}
+      {_out, 1} -> {:ok, []}
+      {out, code} -> {:error, "git grep exited #{code}: #{String.slice(to_string(out), 0, 200)}"}
+    end
+  rescue
+    e -> {:error, "git grep raised: #{Exception.message(e)}"}
+  end
 
   @doc """
   `file:line:content` excerpt of every marker hit, capped at `limit` lines.

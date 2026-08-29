@@ -458,6 +458,32 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("create_mission", _), do: {:error, "Missing required parameter: goal"}
 
+  # Resume IS a start — there is no second call. The two-step
+  # create_mission/start_mission shape exists so an operator can inspect a
+  # plan before spending on it; a resume has nothing new to inspect, and a
+  # mission left un-started here would sit on a checked-out worktree
+  # holding the only copy of the parent's tree.
+  def call("resume_mission", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      from_phase = args["from_phase"] || "validation"
+
+      case GiTF.Missions.resume(id, from_phase) do
+        {:ok, mission} ->
+          audit_write("mission.resume", mission.id, %{
+            parent_id: id,
+            from_phase: from_phase
+          })
+
+          {:ok, json_text(serialize_mission(mission))}
+
+        {:error, reason} ->
+          {:error, resume_error_message(reason, id, from_phase)}
+      end
+    end
+  end
+
+  def call("resume_mission", _), do: {:error, "Missing required parameter: id"}
+
   # -- Projects ----------------------------------------------------------------
 
   def call("create_project", %{"name" => _, "roadmap" => _} = args) do
@@ -1415,6 +1441,38 @@ defmodule GiTF.MCPServer.Handlers do
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}
 
+  # Person-level identity is resolved at the HTTP edge (GiTF.Tailnet) and is
+  # not plumbed down to tool handlers yet, so the actor recorded here is the
+  # SURFACE, not the human. Recording "mcp" honestly beats trusting an
+  # actor name the caller could supply.
+  defp audit_write(action, subject, details) do
+    GiTF.AuditLog.record("mcp", action, subject, details)
+  end
+
+  # Each resume failure names the thing to do next: these are the questions
+  # an operator asks in the same breath as "why not?".
+  defp resume_error_message(:parent_not_found, id, _phase), do: "Mission not found: #{id}"
+
+  defp resume_error_message(:parent_not_failed, id, _phase),
+    do: "Mission #{id} is not failed or killed — only a finished-badly mission can be resumed"
+
+  defp resume_error_message(:unsupported_from_phase, _id, phase),
+    do:
+      "Unsupported from_phase #{inspect(phase)} — supported: " <>
+        Enum.join(GiTF.Missions.resumable_phases(), ", ")
+
+  defp resume_error_message(:archive_branch_missing, id, _phase),
+    do:
+      "No archive/#{id} branch in the sector clone — that mission's tree was not preserved " <>
+        "(it failed before branch archival shipped, or its sector clone is gone). " <>
+        "Run the mission fresh instead."
+
+  defp resume_error_message(:sector_unavailable, id, _phase),
+    do: "Mission #{id}'s sector clone is missing or has no path on disk"
+
+  defp resume_error_message(reason, _id, _phase),
+    do: log_and_sanitize("resume_mission", reason)
+
   defp resolve_project_sector(id, %{"create_sector" => name}) when is_binary(name) do
     with {:ok, sector} <- GiTF.Sector.create_new(name) do
       GiTF.Project.assign_sector(id, sector.id)
@@ -1561,6 +1619,12 @@ defmodule GiTF.MCPServer.Handlers do
       # gitf-console over SSM — the post-mortem's first question must be
       # answerable from the MCP (runs 3 and 4 both required box probes).
       failure_reason: m[:failure_reason],
+      # Resume provenance. A resumed mission's design, plan and TREE were
+      # authored by a run that failed — a post-mortem that cannot see that
+      # will blame the wrong phase. `resumed_at_phase` says how much of the
+      # pipeline this run actually executed.
+      resumed_from: m[:resumed_from],
+      resumed_at_phase: m[:resumed_at_phase],
       target_branch: m[:target_branch],
       cost_cap_usd: m[:cost_cap_usd],
       inserted_at: to_string(m[:inserted_at]),

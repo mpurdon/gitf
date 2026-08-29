@@ -17,6 +17,7 @@ this document rather than normalizing an SSM workaround.
 | Watch a mission | `show_mission`, `mission_timeline`, `list_ops` | `show_mission` includes ops, pipeline mode, provenance, and (since 0.65.226) `failure_reason` |
 | Post-mortem a failure | `mission_diagnosis`, `show_artifact`, `show_op`, `ghost_output` | Diagnosis bundles artifacts + transitions; `show_artifact` reads a single phase artifact (incl. `exec_validation`, `conflict_markers`) |
 | Kill / close / delete | `kill_mission`, `close_mission`, `delete_mission` | All `confirm: true`; killed missions notify the requester before deletion |
+| Re-run a failure without re-running the pipeline | `resume_mission` | **`confirm: true`, and resume IMPLIES start — no `start_mission` after.** Needs `archive/<parent_id>` in the sector clone (`fail_quest`/`kill` create it). v1 only re-enters at `from_phase: "validation"` |
 | Op surgery | `show_op`, `reset_op`, `kill_op` | `show_op` carries `depends_on`, retry fields, audit_result, changed_files |
 | Ghost inspection | `list_ghosts`, `ghost_output`, `stop_ghost` | `ghost_output` requires `op_id` |
 | Money | `costs_summary`, `ledger_stats` | **Known gap:** per-mission cost attribution does not survive the 168h cost-record pruning (efficiency plan B5) |
@@ -58,6 +59,15 @@ only legitimate SSM/SSH uses:
 - **Read cadence**: reads are cheap (ETS-backed, no LLM); polling every
   60–120s is fine. `list_missions` defaults to active-only; pass
   `all: true` deliberately.
+- **Resume is not a retry, and it is not free of the parent**:
+  `resume_mission` inherits the failed run's artifacts and its *tree*, so
+  everything before `from_phase` was authored by a run that did not
+  succeed. Read `resumed_from` / `resumed_at_phase` on any mission before
+  post-morteming it — a resumed run's design and plan are a suspect in its
+  failure, and `mission_timeline` marks the replayed legs
+  `inherited from <parent_id>` to keep them apart from real ones. If a
+  resumed run fails in a way that could implicate inherited state, the
+  answer is a fresh full run, not a second resume.
 
 ## Implementation
 

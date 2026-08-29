@@ -309,6 +309,41 @@ defmodule GiTF.Validation do
   """
   @spec canonical_impl_shell(map()) :: map() | nil
   def canonical_impl_shell(mission) do
+    case canonical_impl_pair(mission) do
+      {_op, shell} -> shell
+      nil -> nil
+    end
+  end
+
+  @doc """
+  The op that OWNS the canonical worktree — the other half of
+  `canonical_impl_shell/1`, selected by the same walk so the two can never
+  disagree.
+
+  Fix and resolution ops need this as a dependency anchor: an op with no
+  dependency edges makes `GiTF.Major.predecessor_shell/1` answer `:none`,
+  and every fallback spawn path then provisions a FRESH worktree cut from
+  the sector base. Runs 4 and 5 both died on the merge-back of such a
+  sibling — a fix ghost's three-way markers against the very tree it was
+  supposed to be repairing. Depending on the canonical op makes "continue
+  in that worktree" a property of the DAG rather than of whichever spawn
+  path happened to run.
+
+  Reading the op off `shell.ghost_id` would NOT do: `GiTF.Shell.adopt/2`
+  repoints that field at each adopting ghost, so after one fix the shell
+  names the fix's ghost, not the chain op's.
+
+  Returns the op record or nil.
+  """
+  @spec canonical_impl_op(map()) :: map() | nil
+  def canonical_impl_op(mission) do
+    case canonical_impl_pair(mission) do
+      {op, _shell} -> op
+      nil -> nil
+    end
+  end
+
+  defp canonical_impl_pair(mission) do
     mission.ops
     |> Enum.reject(& &1[:phase_job])
     |> Enum.reject(&is_binary(&1[:fix_of]))
@@ -327,7 +362,7 @@ defmodule GiTF.Validation do
              Archive.get(:ghosts, op.ghost_id),
            %{worktree_path: wt} = shell <- Archive.get(:shells, shell_id),
            true <- is_binary(wt) and File.dir?(wt) do
-        shell
+        {op, shell}
       else
         _ -> nil
       end
@@ -483,6 +518,8 @@ defmodule GiTF.Validation do
            target_files: impl_files
          }) do
       {:ok, fix_op} ->
+        anchor_fix_op(mission, fix_op, fix_ctx)
+
         Missions.transition_phase(
           mission.id,
           "implementation",
@@ -516,6 +553,83 @@ defmodule GiTF.Validation do
   end
 
   # -- Internals --------------------------------------------------------------
+
+  @doc """
+  Records the dependency edge that pins `op` to the worktree it must
+  continue: the canonical impl op.
+
+  The edge is the ROOT fix for the sibling-branch class of failure. A fix
+  or resolution op created with no dependencies makes
+  `GiTF.Major.predecessor_shell/1` return `:none`, so the three spawn
+  paths that can reach such an op — the direct worktree spawn, its
+  `spawn_implementation_jobs` fallback, and the recovery sweep — each cut a
+  fresh worktree from the sector base instead. Runs 4 and 5 both ended on
+  the merge-back of one of those siblings (ghost-70bcc6, ghost-20bca7),
+  three-way markers against the tree the ghost was repairing. Patching one
+  spawn path leaves the other two; the edge fixes all three at once.
+
+  Depending on a DONE op does not block: `Ops.add_dependency/2` only blocks
+  when the dependency is unresolved, and `Ops.ready?/1` treats "done" as
+  satisfied — so the new op is immediately schedulable.
+
+  Best-effort by design: a missing anchor leaves today's behaviour intact
+  rather than failing op creation.
+  """
+  @spec anchor_to_canonical_worktree(map(), map(), String.t() | nil) :: :ok
+  def anchor_to_canonical_worktree(mission, op, fallback_op_id \\ nil) do
+    case anchor_op_id(mission, fallback_op_id) do
+      nil ->
+        Logger.info(
+          "Quest #{mission.id}: op #{op.id} has no canonical anchor op — " <>
+            "it will provision a fresh worktree"
+        )
+
+        :ok
+
+      anchor_id when anchor_id == op.id ->
+        :ok
+
+      anchor_id ->
+        case GiTF.Ops.add_dependency(op.id, anchor_id) do
+          {:ok, _} ->
+            Logger.info("Quest #{mission.id}: anchored op #{op.id} to worktree op #{anchor_id}")
+
+          {:error, reason} ->
+            Logger.warning(
+              "Quest #{mission.id}: could not anchor op #{op.id} to #{anchor_id}: #{inspect(reason)}"
+            )
+        end
+
+        :ok
+    end
+  rescue
+    e ->
+      Logger.warning("Quest #{mission.id}: anchoring op crashed: #{Exception.message(e)}")
+
+      :ok
+  end
+
+  # The canonical op first (it owns the worktree every fallback path should
+  # land in). The fix's own originating op is the second choice, and only
+  # when it is done — a running or failed anchor would BLOCK the new op.
+  defp anchor_op_id(mission, fallback_op_id) do
+    cond do
+      op = canonical_impl_op(mission) -> op.id
+      done_op?(fallback_op_id) -> fallback_op_id
+      op = latest_completed_impl_op(mission) -> op.id
+      true -> nil
+    end
+  end
+
+  defp done_op?(op_id) when is_binary(op_id) do
+    match?(%{status: "done"}, Archive.get(:ops, op_id))
+  end
+
+  defp done_op?(_), do: false
+
+  defp anchor_fix_op(mission, fix_op, %FixContext{} = fix_ctx) do
+    anchor_to_canonical_worktree(mission, fix_op, fix_ctx.original_op_id)
+  end
 
   # Build a comprehensive fix description from validation findings.
   defp build_fix_description(_mission, validation, impl_files) do

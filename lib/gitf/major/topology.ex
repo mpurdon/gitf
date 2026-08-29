@@ -32,6 +32,10 @@ defmodule GiTF.Major.Topology do
       fixes lived further down the line.
     * msn-dd29a1: a mission amending an open PR was cut from main, so the
       file under review did not exist in any ghost's worktree.
+    * Runs 4-6: a failed mission's tree was pruned with the mission — hours
+      of merged, type-checked work destroyed by the cleanup that follows
+      `fail_quest`, leaving nothing to resume from. Failure now archives the
+      canonical branch first (`archive_canonical_branch/1`).
   """
 
   require Logger
@@ -397,6 +401,93 @@ defmodule GiTF.Major.Topology do
     end
   rescue
     _ -> []
+  end
+
+  # -- Archival ----------------------------------------------------------------
+
+  @doc """
+  The branch a failed mission's final tree is preserved under.
+  """
+  @spec archive_branch(String.t()) :: String.t()
+  def archive_branch(mission_id), do: GiTF.Git.archive_branch_prefix() <> mission_id
+
+  @doc """
+  Preserves the mission's canonical tree as `archive/<mission_id>` in the
+  SECTOR CLONE, before anything prunes the worktrees it lives in.
+
+  Worktrees share the repository's ref store, so a ghost branch created
+  inside `sector/ghosts/<ghost_id>` is already visible to `git branch` run
+  in `sector.path` — the archive ref needs no worktree of its own and
+  survives the worktree's removal.
+
+  Called from the failure paths (`Missions.fail_quest/2`, `Missions.kill/1`)
+  and never allowed to break them: every error is logged and swallowed. A
+  mission that failed must still be recorded as failed even if its repo is
+  gone.
+
+  Returns `{:ok, branch}`, or `{:error, reason}` for callers that care
+  (`GiTF.Missions.resume/2` reads the branch back, so its absence is a real
+  error THERE — just not here).
+  """
+  @spec archive_canonical_branch(String.t() | map()) :: {:ok, String.t()} | {:error, term()}
+  def archive_canonical_branch(mission_id) when is_binary(mission_id) do
+    case GiTF.Missions.get(mission_id) do
+      {:ok, mission} -> archive_canonical_branch(mission)
+      _ -> {:error, :mission_not_found}
+    end
+  end
+
+  def archive_canonical_branch(%{id: mission_id} = mission) do
+    with {:ok, path} <- sector_path(mission),
+         {:ok, tip} <- canonical_tip_branch(mission) do
+      archive = archive_branch(mission_id)
+
+      case GiTF.Git.branch_at(path, archive, tip) do
+        :ok ->
+          Logger.info("Quest #{mission_id}: preserved #{tip} as #{archive} in #{path}")
+          {:ok, archive}
+
+        {:error, out} ->
+          Logger.warning("Quest #{mission_id}: could not archive #{tip} as #{archive}: #{out}")
+          {:error, out}
+      end
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Quest #{Map.get(mission, :id)}: branch archival crashed: #{Exception.message(e)}"
+      )
+
+      {:error, :archive_crashed}
+  end
+
+  def archive_canonical_branch(_), do: {:error, :mission_not_found}
+
+  defp sector_path(mission) do
+    with sector_id when is_binary(sector_id) <- Map.get(mission, :sector_id),
+         %{path: path} when is_binary(path) <- Archive.get(:sectors, sector_id),
+         true <- File.dir?(path) do
+      {:ok, path}
+    else
+      _ -> {:error, :sector_unavailable}
+    end
+  end
+
+  # The deepest point of the mission's lineage. Deliberately NOT
+  # `impl_base_branch_opts/1`: its last fallback is the amend-mission's
+  # target_branch (the PR head), and archiving THAT would file somebody
+  # else's branch under this mission's failure.
+  defp canonical_tip_branch(mission) do
+    case GiTF.Validation.canonical_branch(mission) do
+      branch when is_binary(branch) ->
+        {:ok, branch}
+
+      _ ->
+        case GiTF.Validation.latest_completed_impl_op(mission) do
+          %{ghost_id: ghost_id} when is_binary(ghost_id) -> {:ok, "ghost/#{ghost_id}"}
+          _ -> {:error, :no_canonical_branch}
+        end
+    end
   end
 
   # -- Teardown ----------------------------------------------------------------

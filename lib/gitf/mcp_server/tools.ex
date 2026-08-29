@@ -239,6 +239,33 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "resume_mission",
+        description:
+          "[WRITE] Start a NEW mission on a failed mission's preserved tree, re-entering at " <>
+            "from_phase instead of running the pipeline from the top. Phases before from_phase " <>
+            "are inherited from the parent (artifacts stamped inherited_from) and their " <>
+            "transitions are replayed in the timeline. Requires an archive/<parent_id> branch " <>
+            "in the sector clone. Resume IMPLIES start — do not call start_mission after. " <>
+            "Inherited state is a suspect in every failure of a resumed run: if the resumed run " <>
+            "fails in a way that could implicate the inherited design, plan or tree, run the " <>
+            "mission fresh instead of resuming again. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "The FAILED or killed parent mission's ID"},
+            from_phase: %{
+              type: "string",
+              description:
+                "Phase to re-enter at. Only \"validation\" (the endgame-iteration loop) " <>
+                  "is supported today.",
+              default: "validation"
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
         name: "create_project",
         description:
           "[WRITE] Create a draft project: a multi-mission initiative with a brief and a dependency-DAG roadmap. " <>
