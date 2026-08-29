@@ -2,7 +2,7 @@ defmodule GiTF.Archive.Indexes do
   @moduledoc "Secondary index maintenance for Archive collections."
 
   @specs %{
-    ops: [:status, :mission_id],
+    ops: [:status, :mission_id, :retry_of],
     op_dependencies: [:op_id, :depends_on_id],
     failure_analyses: [:sector_id, :failure_type, :model],
     skills: [:scope, :sector_id, :status],

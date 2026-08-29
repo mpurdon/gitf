@@ -835,28 +835,37 @@ defmodule GiTF.Major.PhasePrompts do
         [] ->
           ""
 
-        files ->
+        notes ->
+          # Since incremental merge-and-resolve landed, this channel no
+          # longer carries raw marker-file paths (consolidation halts and
+          # resolves those before validation ever spawns). What arrives is
+          # prose: `UNMERGED BRANCH …` sentences and/or a `POSSIBLE
+          # unresolved conflict markers …` adjudication note. Render them
+          # as notes to be read literally — the old "these files will not
+          # compile" framing contradicted the adjudication note outright.
           """
 
-          ## UNRESOLVED MERGE CONFLICTS (committed with markers)
+          ## CONSOLIDATION NOTES
 
-          Consolidating the implementation branches produced content conflicts.
-          The merge was completed WITH conflict markers (`<<<<<<<`/`=======`/
-          `>>>>>>>`) committed, so both sides of the work are present in:
+          Consolidating the implementation branches left the following
+          conditions. Read each entry LITERALLY and verify it against the
+          tree — do not assume more or less than it states:
 
           ```
-          #{Enum.join(files, "\n")}
+          #{Enum.join(notes, "\n")}
           ```
 
-          These files will not compile until reconciled. Report each as a gap
-          of the form "reconcile merge conflict markers in <file>" — the fix
-          ghost must MERGE the two sides (both are wanted work from parallel
-          ops), never delete one side wholesale.
+          Entries marked `UNMERGED BRANCH` mean that branch's commits are
+          entirely ABSENT from this tree (the merge itself failed) — report
+          the missing work as a gap so the fix ghost merges the branch or
+          re-applies its changes.
 
-          Entries marked `UNMERGED BRANCH` are worse: that branch's commits
-          are entirely ABSENT from this tree (the merge itself failed).
-          Report the missing work as a gap so the fix ghost merges the
-          branch or re-applies its changes.
+          Entries marked `POSSIBLE unresolved conflict markers` mean the
+          marker scan and focused resolution ghosts disagreed — check the
+          named files; if real markers exist, report each as a gap of the
+          form "reconcile merge conflict markers in <file>" (both sides are
+          wanted work — merge them, never delete one side wholesale); if
+          the content is intentional, say so and move on.
           """
       end
 

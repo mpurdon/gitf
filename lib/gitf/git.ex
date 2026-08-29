@@ -637,25 +637,12 @@ defmodule GiTF.Git do
   itself fails — callers gate on presence, and a scan error must not
   invent conflicts.
 
-  `paths` scopes the scan (e.g. to the files a mission actually changed) so
-  pre-existing marker-like content elsewhere — a test fixture, a docs
-  example — can't convict a tree the mission never touched. An empty list
-  scans everything. Paths that don't exist in the worktree are dropped
-  rather than handed to git, whose pathspec errors would read as "clean".
+  The scan is deliberately full-tree: run 3's leftover markers hid in
+  files a changed-files scope excluded, and false positives are handled
+  downstream (cap exhaustion defers to ground-truth validation).
   """
-  @spec conflict_marker_files(String.t(), [String.t()]) :: [String.t()]
-  def conflict_marker_files(wt, paths \\ []) do
-    pathspec =
-      case Enum.filter(paths, &File.exists?(Path.join(wt, &1))) do
-        [] -> ["."]
-        existing -> existing
-      end
-
-    case safe_cmd(["-C", wt, "grep", "-I", "-l", "-E", @conflict_marker_re, "--"] ++ pathspec) do
-      {out, 0} -> out |> to_string() |> String.split("\n", trim: true)
-      _ -> []
-    end
-  end
+  @spec conflict_marker_files(String.t()) :: [String.t()]
+  def conflict_marker_files(wt), do: marker_grep(wt, ["-l"])
 
   @doc """
   `file:line:content` excerpt of every marker hit, capped at `limit` lines.
@@ -669,11 +656,34 @@ defmodule GiTF.Git do
   @spec conflict_marker_excerpt(String.t(), [String.t()], pos_integer()) :: [String.t()]
   def conflict_marker_excerpt(wt, paths, limit \\ 40) do
     pathspec = if paths == [], do: ["."], else: paths
+    wt |> marker_grep(["-n"], pathspec) |> Enum.take(limit)
+  end
 
-    case safe_cmd(["-C", wt, "grep", "-n", "-I", "-E", @conflict_marker_re, "--"] ++ pathspec) do
-      {out, 0} -> out |> to_string() |> String.split("\n", trim: true) |> Enum.take(limit)
+  defp marker_grep(wt, mode_flags, pathspec \\ ["."]) do
+    args = ["-C", wt, "grep", "-I", "-E"] ++ mode_flags ++ [@conflict_marker_re, "--"] ++ pathspec
+
+    case safe_cmd(args) do
+      {out, 0} -> out |> to_string() |> String.split("\n", trim: true)
       _ -> []
     end
+  end
+
+  @doc """
+  Identity of the worktree's exact content: HEAD sha + a digest of
+  `status --porcelain`. Any commit, resolution, or install residue changes
+  it, so a cached verdict keyed on this can only ever be reused for a
+  byte-identical tree. nil on any git failure — never fingerprint blind.
+  """
+  @spec tree_fingerprint(String.t()) :: String.t() | nil
+  def tree_fingerprint(wt) do
+    with {head, 0} <- safe_cmd(["-C", wt, "rev-parse", "HEAD"]),
+         {status, 0} <- safe_cmd(["-C", wt, "status", "--porcelain"]) do
+      :md5 |> :crypto.hash([to_string(head), to_string(status)]) |> Base.encode16()
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   # A lockfile changing WITHOUT its manifest is the signature of install

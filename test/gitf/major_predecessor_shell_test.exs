@@ -74,7 +74,11 @@ defmodule GiTF.MajorPredecessorShellTest do
     {:ok, _} = Archive.update(:ops, dep_op.id, &Map.put(&1, :status, "failed"))
 
     {:ok, retry1} =
-      Ops.create(%{title: "op A retry", mission_id: dep_op.mission_id, sector_id: dep_op.sector_id})
+      Ops.create(%{
+        title: "op A retry",
+        mission_id: dep_op.mission_id,
+        sector_id: dep_op.sector_id
+      })
 
     {:ok, _} =
       Archive.update(:ops, retry1.id, &Map.merge(&1, %{status: "failed", retry_of: dep_op.id}))

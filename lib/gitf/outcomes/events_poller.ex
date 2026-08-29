@@ -95,15 +95,19 @@ defmodule GiTF.Outcomes.EventsPoller do
   # history — an event on a merged PR is not ours to act on — and a repo
   # with nothing revivable gets no API call at all.
   defp revivable_by_sector do
-    Outcomes.all()
-    |> Enum.filter(&revivable?/1)
+    # Fold, never materialize: Archive.all + filter on a growing
+    # collection is the documented 1.3GB anti-pattern (archive.ex).
+    :mission_outcomes
+    |> GiTF.Archive.filter(&revivable?/1)
     |> Enum.group_by(& &1.sector_id)
     |> Enum.reject(fn {sector_id, _} -> is_nil(sector_id) end)
   end
 
   defp poll_sector(sector_id, outcomes, state) do
-    with {:ok, sector} <- GiTF.Sector.get(sector_id),
-         true <- github_configured?(sector) do
+    # No separate config guard: repo_events/2 goes through GitHub.client/1,
+    # which already returns {:error, :no_github_config} for unconfigured
+    # sectors — the error arm below absorbs it.
+    with {:ok, sector} <- GiTF.Sector.get(sector_id) do
       case GiTF.GitHub.repo_events(sector, etag: state.etags[sector_id]) do
         {:ok, events, etag} ->
           revived = process_events(events, outcomes)
@@ -123,10 +127,6 @@ defmodule GiTF.Outcomes.EventsPoller do
     else
       _ -> state
     end
-  end
-
-  defp github_configured?(sector) do
-    is_binary(Map.get(sector, :github_owner)) and is_binary(Map.get(sector, :github_repo))
   end
 
   # Returns the number of records revived.

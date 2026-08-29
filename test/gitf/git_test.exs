@@ -368,20 +368,6 @@ defmodule GiTF.GitTest do
       assert Git.conflict_marker_files(repo) == []
     end
 
-    test "scoping to changed files ignores marker-like content elsewhere",
-         %{repo: repo, run: run} do
-      # A committed fixture that legitimately CONTAINS marker syntax…
-      File.write!(Path.join(repo, "fixture.txt"), "<<<<<<< HEAD\n=======\n>>>>>>> x\n")
-      # …and the mission's own file, marker-laden.
-      File.write!(Path.join(repo, "touched.ts"), "a\n=======\nb\n")
-      run.(["add", "."])
-      run.(["commit", "-q", "-m", "both"])
-
-      assert Git.conflict_marker_files(repo, ["touched.ts"]) == ["touched.ts"]
-      # Scope entries that no longer exist are dropped, not passed to git.
-      assert Git.conflict_marker_files(repo, ["gone.ts", "touched.ts"]) == ["touched.ts"]
-    end
-
     test "marker-like but non-marker lines do not trip the scan", %{repo: repo, run: run} do
       File.write!(Path.join(repo, "notes.md"), """
       ==== four equals is a heading underline

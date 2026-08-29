@@ -532,7 +532,7 @@ defmodule GiTF.Major do
       {:ok, _pid} ->
         Logger.info("Ghost #{ghost_id} recovered by supervisor, re-monitoring")
         monitor_ghost_worker(ghost_id)
-        {:noreply, put_in(state.active_ghosts[ghost_id], %{op_id: op_id, recovered: true})}
+        {:noreply, put_in(state.active_ghosts[ghost_id], ghost_info(op_id, :recovered))}
 
       :error ->
         case GiTF.Ghosts.get(ghost_id) do
@@ -1617,13 +1617,31 @@ defmodule GiTF.Major do
   defp canonical_base_opts(op) do
     with mission_id when is_binary(mission_id) <- op[:mission_id],
          {:ok, mission} <- GiTF.Missions.get(mission_id),
-         branch when is_binary(branch) <- GiTF.Validation.canonical_branch(mission) do
-      [base_branch: branch]
+         # Cheap gate first: the canonical-shell resolution walks the DAG
+         # and forks a git subprocess — pointless for the first op of a
+         # fresh mission, which is exactly when this path fires most.
+         # Amend missions (target_branch set) pass regardless: their fork
+         # point is the PR head even before any impl op completes.
+         true <-
+           is_binary(mission[:target_branch]) or
+             Enum.any?(
+               mission.ops || [],
+               &(&1[:phase_job] in [nil, false] and &1.status == "done" and
+                   is_binary(&1[:ghost_id]))
+             ) do
+      # One owner for the fork-point policy (canonical tip → latest impl
+      # op's branch → amend-mission target branch, the run-17 contract).
+      GiTF.Major.Orchestrator.impl_base_branch_opts(mission)
     else
       _ -> []
     end
   rescue
-    _ -> []
+    # Fail open by necessity (a spawn must not die over base selection),
+    # but never silently: origin/main branching is exactly the sibling
+    # divergence this function exists to prevent.
+    e ->
+      Logger.warning("canonical_base_opts failed for op #{op[:id]}: #{Exception.message(e)}")
+      []
   end
 
   # Public for test assertion only — the chain-inheritance contract this
@@ -1691,7 +1709,10 @@ defmodule GiTF.Major do
           # (supplements the timer-based recover_stuck_jobs)
           monitor_ghost_worker(ghost.id)
 
-          put_in(state.active_ghosts[ghost.id], %{op_id: op.id, spawned_at: DateTime.utc_now()})
+          put_in(
+            state.active_ghosts[ghost.id],
+            ghost_info(op.id, :spawned)
+          )
 
         {:error, reason} ->
           {step, raw_reason} =
@@ -1757,6 +1778,12 @@ defmodule GiTF.Major do
     end
   end
 
+  # One shape for every active_ghosts entry — three ad-hoc maps grew here
+  # in a day and nothing could safely read a field from any of them.
+  defp ghost_info(op_id, origin) when origin in [:spawned, :recovered, :reattached] do
+    %{op_id: op_id, origin: origin, since: DateTime.utc_now()}
+  end
+
   defp monitor_ghost_worker(ghost_id) do
     case GiTF.Ghost.Worker.lookup(ghost_id) do
       {:ok, pid} -> Process.monitor(pid)
@@ -1776,7 +1803,7 @@ defmodule GiTF.Major do
       |> Registry.select([{{{:ghost, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
       |> Map.new(fn {ghost_id, pid} ->
         Process.monitor(pid)
-        {ghost_id, %{pid: pid, reattached: true}}
+        {ghost_id, ghost_info(nil, :reattached)}
       end)
 
     if map_size(tracked) > 0 do

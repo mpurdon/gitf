@@ -1252,7 +1252,11 @@ defmodule GiTF.Tachikoma do
       _ -> 240_000
     end
   rescue
-    _ -> 240_000
+    # Fallback must not be silent: a too-short kill budget under a long
+    # sector validation is the run-7 corruption shape.
+    e ->
+      Logger.warning("verification_kill_budget_ms fell back to default: #{Exception.message(e)}")
+      240_000
   end
 
   defp format_audit_result(result) do

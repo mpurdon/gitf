@@ -1225,10 +1225,7 @@ defmodule GiTF.Major.Orchestrator do
           "Quest #{mission.id}: exec-validation tree unchanged — reusing #{cached["status"]} verdict"
         )
 
-        case cached["status"] do
-          "pass" -> {:pass, cmd}
-          _ -> {:fail, cmd, to_string(cached["output"] || "")}
-        end
+        verdict_result(cached, cmd)
       else
         Logger.info("Running validation command for #{mission.id}: #{cmd}")
 
@@ -1284,20 +1281,13 @@ defmodule GiTF.Major.Orchestrator do
       nil
   end
 
-  # HEAD sha + working-tree status digest. Anything that changes either —
-  # a commit, a resolution, install residue — changes the fingerprint, so
-  # the verdict cache can only ever reuse a verdict for a byte-identical
-  # tree. nil on any git failure (never cache blind).
-  defp tree_fingerprint(wt) do
-    with {head, 0} <- GiTF.Git.safe_cmd(["-C", wt, "rev-parse", "HEAD"]),
-         {status, 0} <- GiTF.Git.safe_cmd(["-C", wt, "status", "--porcelain"]) do
-      :md5 |> :crypto.hash([to_string(head), to_string(status)]) |> Base.encode16()
-    else
-      _ -> nil
-    end
-  rescue
-    _ -> nil
-  end
+  # Tree identity lives beside the other git primitives.
+  defp tree_fingerprint(wt), do: GiTF.Git.tree_fingerprint(wt)
+
+  # One owner for the verdict-map ↔ return-tuple mapping, used by both the
+  # cache-hit arm and the fresh-run arms.
+  defp verdict_result(%{"status" => "pass"}, cmd), do: {:pass, cmd}
+  defp verdict_result(verdict, cmd), do: {:fail, cmd, to_string(verdict["output"] || "")}
 
   # Overwritten every round so a stale infra flag can never suppress fix
   # attempts for a later genuine code failure.
@@ -1621,9 +1611,13 @@ defmodule GiTF.Major.Orchestrator do
   defp start_conflict_resolution(mission, branch, files) do
     target = branch || "worktree"
 
-    prior =
+    # Fetched ONCE; the attempt count and the futile-prior check downstream
+    # both derive from this list.
+    resolution_ops =
       Archive.by_index(:ops, :mission_id, mission.id)
-      |> Enum.count(&(&1[:conflict_resolution] == target))
+      |> Enum.filter(&(&1[:conflict_resolution] == target))
+
+    prior = length(resolution_ops)
 
     cond do
       prior >= @max_resolutions_per_target and is_nil(branch) ->
@@ -1654,6 +1648,11 @@ defmodule GiTF.Major.Orchestrator do
             "#{prior} focused attempts (files: #{Enum.join(Enum.take(files, 8), ", ")})"
         )
 
+        # fail_quest returns {:ok, mission_map} — which the phase-advance
+        # caller pattern-matches as a successful advance and keeps spawning
+        # on a dead mission. Normalize the failure explicitly.
+        {:error, :conflict_resolution_exhausted}
+
       GiTF.Ops.worktree_writer_in_flight?(mission.id) ->
         # Same single-lineage rule as the fix loop: one writer per
         # worktree. The in-flight writer's completion re-enters validation
@@ -1665,40 +1664,37 @@ defmodule GiTF.Major.Orchestrator do
         {:ok, "implementation"}
 
       true ->
-        create_conflict_resolution_op(mission, branch, files, target, prior)
+        create_conflict_resolution_op(mission, branch, files, target, resolution_ops)
+    end
+  end
+
+  defp marker_excerpt(mission, files) do
+    case GiTF.Validation.canonical_impl_shell(mission) do
+      %{worktree_path: wt} -> GiTF.Git.conflict_marker_excerpt(wt, files)
+      _ -> []
     end
   end
 
   defp snapshot_marker_artifact(mission, files) do
-    excerpt =
-      case GiTF.Validation.canonical_impl_shell(mission) do
-        %{worktree_path: wt} -> GiTF.Git.conflict_marker_excerpt(wt, files)
-        _ -> []
-      end
-
     GiTF.Missions.store_artifact(mission.id, "conflict_markers", %{
       "files" => files,
-      "excerpt" => excerpt
+      "excerpt" => marker_excerpt(mission, files)
     })
   rescue
     e -> Logger.warning("Quest #{mission.id}: marker snapshot failed: #{Exception.message(e)}")
   end
 
-  defp create_conflict_resolution_op(mission, branch, files, target, prior) do
-    excerpt =
-      case GiTF.Validation.canonical_impl_shell(mission) do
-        %{worktree_path: wt} -> GiTF.Git.conflict_marker_excerpt(wt, files)
-        _ -> []
-      end
+  defp create_conflict_resolution_op(mission, branch, files, target, resolution_ops) do
+    prior = length(resolution_ops)
+    excerpt = marker_excerpt(mission, files)
 
     # Run 3: resolution ops completed "done" having changed NOTHING while
     # the markers stayed put. If that happened here, say so — the next
     # ghost must not repeat the same shallow look and conclude clean.
     futile_note =
       if Enum.any?(
-           Archive.by_index(:ops, :mission_id, mission.id),
-           &(&1[:conflict_resolution] == target and &1.status == "done" and
-               (&1[:files_changed] || 0) == 0)
+           resolution_ops,
+           &(&1.status == "done" and (&1[:files_changed] || 0) == 0)
          ) do
         "\nWARNING: a previous resolution op for this target completed WITHOUT " <>
           "changing any files, yet the markers above are still present at the " <>
@@ -1820,7 +1816,11 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp impl_base_branch_opts(mission) do
+  # Public (undocumented) because it is THE owner of "which branch does a
+  # new worktree fork from" — Major's spawn path calls it too. A second
+  # hand-rolled copy there dropped the run-17 fallbacks within a day.
+  @doc false
+  def impl_base_branch_opts(mission) do
     # Base validation on the canonical worktree's CURRENT branch — the
     # deepest lineage point, including post-chain fix commits. An
     # op-derived branch name can lag (run 17: validation based on chain

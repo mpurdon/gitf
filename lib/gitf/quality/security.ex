@@ -3,6 +3,8 @@ defmodule GiTF.Quality.Security do
   Security scanning for ghost worktrees.
   """
 
+  require Logger
+
   @doc """
   Run security scans on a shell.
   Returns {:ok, results} with security score and findings.
@@ -14,10 +16,14 @@ defmodule GiTF.Quality.Security do
   unavailable as inconclusive, never as clean.
   """
   def scan(shell_path, language) do
-    {dep_findings, available, unavailable_reason} =
+    {dep_findings, available} =
       case check_dependencies(shell_path, language) do
-        {:unavailable, reason} -> {[], false, reason}
-        findings when is_list(findings) -> {findings, true, nil}
+        {:unavailable, reason} ->
+          Logger.warning("Dependency audit unavailable (#{reason}) in #{shell_path}")
+          {[], false}
+
+        findings when is_list(findings) ->
+          {findings, true}
       end
 
     findings =
@@ -36,8 +42,7 @@ defmodule GiTF.Quality.Security do
        findings: findings,
        score: score,
        tool: "section-security",
-       available: available,
-       unavailable_reason: unavailable_reason
+       available: available
      }}
   end
 
@@ -55,18 +60,6 @@ defmodule GiTF.Quality.Security do
     find_in_files(path, patterns, "secret")
   end
 
-  # Dependency vulnerability scanning
-  defp check_dependencies(path, language) do
-    case language do
-      :elixir -> check_mix_audit(path)
-      :javascript -> check_npm_audit(path)
-      :typescript -> check_npm_audit(path)
-      :rust -> check_cargo_audit(path)
-      :python -> check_pip_audit(path)
-      _ -> []
-    end
-  end
-
   # Common vulnerability patterns
   defp check_vulnerabilities(path, language) do
     patterns =
@@ -81,49 +74,48 @@ defmodule GiTF.Quality.Security do
     find_in_files(path, patterns, "vulnerability")
   end
 
+  # Dependency vulnerability scanning
+  defp check_dependencies(path, language) do
+    case language do
+      # mix deps.audit exits 0 on a clean tree with prose that the line
+      # parser must not see — short-circuit exit 0 to no-findings.
+      :elixir ->
+        run_audit(path, "mix", ["deps.audit"], fn
+          {_out, 0} -> []
+          {out, _} -> parse_mix_audit(out)
+        end)
+
+      :javascript ->
+        run_audit(path, "npm", ["audit", "--json"], fn {out, _} -> parse_npm_audit(out) end)
+
+      :typescript ->
+        run_audit(path, "npm", ["audit", "--json"], fn {out, _} -> parse_npm_audit(out) end)
+
+      :rust ->
+        run_audit(path, "cargo", ["audit", "--json"], fn {out, _} -> parse_cargo_audit(out) end)
+
+      :python ->
+        run_audit(path, "pip-audit", ["--format", "json"], fn {out, _} -> parse_pip_audit(out) end)
+
+      _ ->
+        []
+    end
+  end
+
   @audit_timeout_ms 60_000
 
-  defp check_mix_audit(path) do
+  # One skeleton for every dependency auditor. The tool runs inside a
+  # Task because System.cmd raises :enoent INSIDE the task and a
+  # caller-side rescue cannot catch a linked task's exit — it crashed the
+  # whole quality pass, misattributed to gitf. Missing/crashed/timed-out
+  # tools are UNAVAILABLE, never "no findings": [] scores 100, and a
+  # verdict must not depend on which tools the host happens to have.
+  defp run_audit(path, exe, args, result_fn) do
     task =
       Task.async(fn ->
-        # Tool may be absent on this host (the box has no mix toolchain);
-        # System.cmd raises :enoent INSIDE the task, and a rescue in the
-        # caller cannot catch a linked task's exit — it crashed the whole
-        # quality pass, misattributed to gitf.
-        if System.find_executable("mix") do
+        if System.find_executable(exe) do
           try do
-            System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true)
-          rescue
-            _ -> :tool_error
-          end
-        else
-          :tool_missing
-        end
-      end)
-
-    # Missing/crashed/timed-out tool is UNAVAILABLE, not "no findings" —
-    # [] scores 100, and a verdict must never depend on which tools the
-    # host happens to have installed.
-    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {_output, 0}} -> []
-      {:ok, {output, _}} when is_binary(output) -> parse_mix_audit(output)
-      {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
-      nil -> {:unavailable, :timeout}
-    end
-  rescue
-    _ -> {:unavailable, :scanner_crashed}
-  end
-
-  defp check_npm_audit(path) do
-    task =
-      Task.async(fn ->
-        # Tool may be absent on this host (the box has no npm toolchain);
-        # System.cmd raises :enoent INSIDE the task, and a rescue in the
-        # caller cannot catch a linked task's exit — it crashed the whole
-        # quality pass, misattributed to gitf.
-        if System.find_executable("npm") do
-          try do
-            System.cmd("npm", ["audit", "--json"], cd: path, stderr_to_stdout: true)
+            System.cmd(exe, args, cd: path, stderr_to_stdout: true)
           rescue
             _ -> :tool_error
           end
@@ -133,61 +125,7 @@ defmodule GiTF.Quality.Security do
       end)
 
     case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, _}} when is_binary(output) -> parse_npm_audit(output)
-      {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
-      nil -> {:unavailable, :timeout}
-    end
-  rescue
-    _ -> {:unavailable, :scanner_crashed}
-  end
-
-  defp check_cargo_audit(path) do
-    task =
-      Task.async(fn ->
-        # Tool may be absent on this host (the box has no cargo toolchain);
-        # System.cmd raises :enoent INSIDE the task, and a rescue in the
-        # caller cannot catch a linked task's exit — it crashed the whole
-        # quality pass, misattributed to gitf.
-        if System.find_executable("cargo") do
-          try do
-            System.cmd("cargo", ["audit", "--json"], cd: path, stderr_to_stdout: true)
-          rescue
-            _ -> :tool_error
-          end
-        else
-          :tool_missing
-        end
-      end)
-
-    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, _}} when is_binary(output) -> parse_cargo_audit(output)
-      {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
-      nil -> {:unavailable, :timeout}
-    end
-  rescue
-    _ -> {:unavailable, :scanner_crashed}
-  end
-
-  defp check_pip_audit(path) do
-    task =
-      Task.async(fn ->
-        # Tool may be absent on this host (the box has no pip-audit toolchain);
-        # System.cmd raises :enoent INSIDE the task, and a rescue in the
-        # caller cannot catch a linked task's exit — it crashed the whole
-        # quality pass, misattributed to gitf.
-        if System.find_executable("pip-audit") do
-          try do
-            System.cmd("pip-audit", ["--format", "json"], cd: path, stderr_to_stdout: true)
-          rescue
-            _ -> :tool_error
-          end
-        else
-          :tool_missing
-        end
-      end)
-
-    case Task.yield(task, @audit_timeout_ms) || Task.shutdown(task, 5_000) do
-      {:ok, {output, _}} when is_binary(output) -> parse_pip_audit(output)
+      {:ok, {output, code}} when is_binary(output) -> result_fn.({output, code})
       {:ok, reason} when is_atom(reason) -> {:unavailable, reason}
       nil -> {:unavailable, :timeout}
     end

@@ -41,13 +41,20 @@ defmodule GiTF.Observability.Health do
   @spec active_missions() :: [map()]
   def active_missions do
     Archive.filter(:missions, &GiTF.Missions.non_terminal?/1)
-  rescue
-    _ -> []
   end
 
   @doc "Get liveness status — detects zombie state (alive but unproductive)"
   @spec alive?() :: boolean()
-  def alive?, do: alive?(active_missions())
+  def alive? do
+    alive?(active_missions())
+  rescue
+    # Fail CLOSED at the gate, covering the input scan too: a raise in
+    # active_missions used to collapse to [] and alive?([]) == true —
+    # the hardened probe fed by an unguarded input.
+    e ->
+      Logger.error("Liveness input scan raised: #{Exception.message(e)}")
+      false
+  end
 
   @doc """
   Liveness with a precomputed non-terminal mission list, so callers that

@@ -656,14 +656,7 @@ defmodule GiTF.Ops do
   Touches Archive — use `retry_completed_in?/2` when iterating in a loop.
   """
   @spec retry_completed?(String.t()) :: boolean()
-  def retry_completed?(op_id), do: descendant_done?(op_id, 0)
-
-  defp descendant_done?(_op_id, depth) when depth >= @max_retry_chain_depth, do: false
-
-  defp descendant_done?(op_id, depth) do
-    Archive.filter(:ops, fn j -> Map.get(j, :retry_of) == op_id end)
-    |> Enum.any?(fn j -> j.status == "done" or descendant_done?(j.id, depth + 1) end)
-  end
+  def retry_completed?(op_id), do: done_retry_descendant(op_id) != nil
 
   @doc """
   The `\"done\"` op that resolves `op_id`'s retry chain, or nil.
@@ -677,7 +670,7 @@ defmodule GiTF.Ops do
   def done_retry_descendant(_op_id, depth) when depth >= @max_retry_chain_depth, do: nil
 
   def done_retry_descendant(op_id, depth) do
-    children = Archive.filter(:ops, fn j -> Map.get(j, :retry_of) == op_id end)
+    children = Archive.by_index(:ops, :retry_of, op_id)
 
     Enum.find(children, &(&1.status == "done")) ||
       Enum.find_value(children, &done_retry_descendant(&1.id, depth + 1))
@@ -696,17 +689,8 @@ defmodule GiTF.Ops do
       {_id, op} -> op
       op when is_map(op) -> op
     end)
-    |> descendant_done_in?(op_id, 0)
-  end
-
-  defp descendant_done_in?(_ops, _op_id, depth) when depth >= @max_retry_chain_depth, do: false
-
-  defp descendant_done_in?(ops, op_id, depth) do
-    ops
-    |> Enum.filter(&(Map.get(&1, :retry_of) == op_id))
-    |> Enum.any?(fn op ->
-      op.status == "done" or descendant_done_in?(ops, op.id, depth + 1)
-    end)
+    |> retried_ok_set()
+    |> MapSet.member?(op_id)
   end
 
   @doc """
@@ -757,23 +741,27 @@ defmodule GiTF.Ops do
         id = Map.get(o, :retry_of),
         not is_nil(id),
         reduce: MapSet.new() do
-      acc -> put_retry_ancestors(id, by_id, acc, 0)
+      acc -> up_chain(id, &Map.get(by_id, &1), acc, 0)
     end
   end
 
-  defp put_retry_ancestors(nil, _by_id, acc, _depth), do: acc
-  defp put_retry_ancestors(_id, _by_id, acc, depth) when depth >= @max_retry_chain_depth, do: acc
+  # THE upward retry_of walk — every consumer shares this one, so the
+  # cycle guard and depth cap can't drift between copies. `lookup` is a
+  # by_id map for batch callers and Archive.get for event-driven ones.
+  defp up_chain(nil, _lookup, acc, _depth), do: acc
+  defp up_chain(_id, _lookup, acc, depth) when depth >= @max_retry_chain_depth, do: acc
 
-  defp put_retry_ancestors(id, by_id, acc, depth) do
+  defp up_chain(id, lookup, acc, depth) do
     if MapSet.member?(acc, id) do
       acc
     else
-      acc = MapSet.put(acc, id)
+      parent =
+        case lookup.(id) do
+          %{} = op -> Map.get(op, :retry_of)
+          _ -> nil
+        end
 
-      case Map.get(by_id, id) do
-        %{} = op -> put_retry_ancestors(Map.get(op, :retry_of), by_id, acc, depth + 1)
-        _ -> acc
-      end
+      up_chain(parent, lookup, MapSet.put(acc, id), depth + 1)
     end
   end
 
@@ -804,25 +792,10 @@ defmodule GiTF.Ops do
     |> Enum.each(&unblock_dependents_of(&1, attempt))
   end
 
-  defp retry_ancestor_ids(op_id), do: collect_retry_ancestors(op_id, [], 0)
-
-  defp collect_retry_ancestors(nil, acc, _depth), do: Enum.reverse(acc)
-
-  defp collect_retry_ancestors(op_id, acc, depth) when depth >= @max_retry_chain_depth,
-    do: Enum.reverse([op_id | acc])
-
-  defp collect_retry_ancestors(op_id, acc, depth) do
-    if op_id in acc do
-      Enum.reverse(acc)
-    else
-      parent =
-        case Archive.get(:ops, op_id) do
-          %{} = op -> Map.get(op, :retry_of)
-          _ -> nil
-        end
-
-      collect_retry_ancestors(parent, [op_id | acc], depth + 1)
-    end
+  defp retry_ancestor_ids(op_id) do
+    op_id
+    |> up_chain(&Archive.get(:ops, &1), MapSet.new(), 0)
+    |> MapSet.to_list()
   end
 
   defp unblock_dependents_of(op_id, attempt) do
