@@ -1686,7 +1686,12 @@ defmodule GiTF.MCPServer.Handlers do
         changed_files: j[:changed_files],
         acceptance_criteria: j[:acceptance_criteria],
         skip_verification: j[:skip_verification] || false,
-        depends_on: j[:depends_on] || []
+        # The DAG lives in the :op_dependencies COLLECTION, never on the op
+        # record — `j[:depends_on]` is a field that does not exist, so
+        # `show_op` reported EVERY op as dependency-free. That reads as
+        # "the anchor edge was never written" and sent the msn-b47135
+        # postmortem chasing the wrong link for an hour.
+        depends_on: GiTF.Ops.dependencies(j.id) |> Enum.map(& &1.id)
       })
 
     # Include ghost status if assigned

@@ -831,9 +831,6 @@ defmodule GiTF.Ghost.Worker do
 
   defp provision(state) do
     cond do
-      Keyword.get(state.opts, :revive, false) ->
-        provision_revive(state)
-
       ghost_restarting?(state.ghost_id) ->
         Logger.info("Ghost #{state.ghost_id} auto-resuming after crash recovery")
         provision_auto_resume(state)
@@ -858,7 +855,13 @@ defmodule GiTF.Ghost.Worker do
     GiTF.Telemetry.start_ghost_span(state.ghost_id, state.op_id, mission_id)
     provision_start_ms = System.monotonic_time(:millisecond)
 
-    with {:shell, {:ok, shell}} <- {:shell, create_shell(state)},
+    # A shell already assigned to this ghost was ADOPTED — the spawner
+    # (`Ghosts.spawn_in_worktree/4`, `Ghosts.revive/3`) handed this ghost an
+    # existing worktree and expects it to continue on that branch. Cutting a
+    # fresh one instead is the sibling-branch defect; see `acquire_shell/2`.
+    adopted = adopted_shell(state)
+
+    with {:shell, {:ok, shell}} <- {:shell, acquire_shell(state, adopted)},
          {:update, :ok} <- {:update, update_ghost_working(state, shell)},
          {:transition, :ok} <- {:transition, maybe_transition_job(state)},
          {:agent, :ok} <- {:agent, maybe_ensure_agent(state, shell)} do
@@ -910,7 +913,7 @@ defmodule GiTF.Ghost.Worker do
             "Spawn failed for ghost #{state.ghost_id}, rolling back shell #{shell.id}"
           )
 
-          rollback_shell(shell.id)
+          rollback_created_shell(shell.id, adopted)
           {:error, reason}
       end
     else
@@ -919,10 +922,62 @@ defmodule GiTF.Ghost.Worker do
         # We check whether shell_id is set by looking at state -- if create_shell
         # succeeded but a subsequent step failed, the shell variable is not in scope
         # here, so we look it up by ghost_id.
-        rollback_shell_for_ghost(state.ghost_id)
+        rollback_created_shell_for_ghost(state.ghost_id, adopted)
         {:error, {step, reason}}
     end
   end
+
+  # Continue in the adopted worktree when there is one, otherwise cut a fresh
+  # shell. Only the settings file is regenerated: it is ghost-scoped, and the
+  # adopted tree still carries its previous occupant's.
+  defp acquire_shell(state, %{worktree_path: path} = adopted) do
+    Logger.info(
+      "Ghost #{state.ghost_id}: continuing in adopted worktree #{path} " <>
+        "(shell #{adopted.id}, branch #{inspect(adopted[:branch])})"
+    )
+
+    GiTF.Runtime.Settings.generate(state.ghost_id, state.gitf_root, path)
+    {:ok, adopted}
+  end
+
+  defp acquire_shell(state, nil), do: create_shell(state)
+
+  # The shell handed over by the spawner, or — when that hand-off was lost —
+  # whatever active shell already names this ghost, which is what
+  # `GiTF.Shell.adopt/2` writes. Reading the RECORD rather than trusting an
+  # option keyword is deliberate: the option was silently dropped in transit
+  # once already (see `GiTF.Ghosts.start_worker/5`).
+  defp adopted_shell(state) do
+    shell =
+      case Keyword.get(state.opts, :shell_id) do
+        id when is_binary(id) ->
+          Archive.get(:shells, id)
+
+        _ ->
+          Archive.find_one(:shells, fn c ->
+            c.ghost_id == state.ghost_id and c[:status] == "active"
+          end)
+      end
+
+    case shell do
+      %{worktree_path: path} = shell when is_binary(path) ->
+        if File.dir?(path), do: shell, else: nil
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  # Never destroy a worktree this ghost did not create. Rolling back an
+  # adopted shell would delete the canonical tree AND its branch — the whole
+  # mission's work — over one failed spawn.
+  defp rollback_created_shell(_shell_id, %{}), do: :ok
+  defp rollback_created_shell(shell_id, nil), do: rollback_shell(shell_id)
+
+  defp rollback_created_shell_for_ghost(_ghost_id, %{}), do: :ok
+  defp rollback_created_shell_for_ghost(ghost_id, nil), do: rollback_shell_for_ghost(ghost_id)
 
   defp ghost_restarting?(ghost_id) do
     case Archive.get(:ghosts, ghost_id) do
@@ -1088,23 +1143,12 @@ defmodule GiTF.Ghost.Worker do
     _ -> :ok
   end
 
-  defp provision_revive(state) do
-    # Enrich logging metadata with mission_id so revived-ghost logs carry
-    # the same structured context as fresh provisioning.
-    case GiTF.Ops.get(state.op_id) do
-      {:ok, op} -> GiTF.Logger.set_ghost_context(state.ghost_id, state.op_id, op.mission_id)
-      _ -> :ok
-    end
-
-    shell_id = Keyword.fetch!(state.opts, :shell_id)
-
-    with {:ok, shell} <- GiTF.Shell.get(shell_id),
-         :ok <- update_ghost_working(state, shell),
-         {:ok, handle} <- spawn_api_or_cli(state, shell) do
-      {:ok, attach_handle(state, shell, handle)}
-    end
-  end
-
+  # NOTE: a `provision_revive/1` arm was deleted here (2026-08-29). It was
+  # selected by an `opts[:revive]` flag that `GiTF.Ghosts.start_worker/5`
+  # never forwarded, so it had run only in tests — and it skipped the span,
+  # the op transition, role settings, pre-dispatch, the task skill and the
+  # beacon timer. Adoption is now a property of the shell record and every
+  # ghost provisions through the one full path.
   defp create_shell(state) do
     shell_opts = [gitf_root: state.gitf_root]
 

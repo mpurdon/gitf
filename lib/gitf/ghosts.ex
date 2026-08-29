@@ -197,10 +197,7 @@ defmodule GiTF.Ghosts do
          {:ok, _} <- GiTF.Shell.adopt(shell_id, ghost.id),
          :ok <- assign_job(op_id, ghost.id),
          {:ok, _pid} <-
-           start_worker(ghost.id, op_id, sector_id, gitf_root,
-             revive: true,
-             shell_id: shell_id
-           ) do
+           start_worker(ghost.id, op_id, sector_id, gitf_root, shell_id: shell_id) do
       Logger.info("Ghost #{ghost.id} spawned in existing worktree for fix op #{op_id}")
       {:ok, ghost}
     end
@@ -233,7 +230,7 @@ defmodule GiTF.Ghosts do
              op.id,
              shell.sector_id,
              gitf_root,
-             Keyword.merge(opts, revive: true, shell_id: shell.id, prompt: prompt)
+             Keyword.merge(opts, shell_id: shell.id, prompt: prompt)
            ) do
       {:ok, new_ghost}
     end
@@ -447,6 +444,15 @@ defmodule GiTF.Ghosts do
     end
   end
 
+  # This allowlist SILENTLY DROPS anything not named here, and `:shell_id`
+  # was not named: `spawn_in_worktree/4` and `revive/3` both logged "spawned
+  # in existing worktree" while the Worker, never told which worktree,
+  # provisioned a fresh one from origin/main. Every validation-fix and
+  # conflict-resolution ghost of msn-b47135 got its own `ghost/<id>` sibling
+  # branch that way, and consolidation then manufactured the exact merge
+  # conflicts those ghosts had been spawned to resolve.
+  @forwarded_worker_opts [:prompt, :claude_executable, :base_branch, :shell_id]
+
   defp start_worker(ghost_id, op_id, sector_id, gitf_root, opts) do
     child_opts =
       [
@@ -454,7 +460,7 @@ defmodule GiTF.Ghosts do
         op_id: op_id,
         sector_id: sector_id,
         gitf_root: gitf_root
-      ] ++ Keyword.take(opts, [:prompt, :claude_executable, :base_branch])
+      ] ++ Keyword.take(opts, @forwarded_worker_opts)
 
     GiTF.SectorSupervisor.start_child({GiTF.Ghost.Worker, child_opts})
   end
