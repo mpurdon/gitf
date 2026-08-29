@@ -280,7 +280,11 @@ defmodule GiTF.OpsTest do
       {:ok, retry1} = create_job(mission, sector, %{title: "bindings retry 1"})
 
       {:ok, retry1} =
-        Archive.update(:ops, retry1.id, &Map.merge(&1, %{status: "failed", retry_of: original.id}))
+        Archive.update(
+          :ops,
+          retry1.id,
+          &Map.merge(&1, %{status: "failed", retry_of: original.id})
+        )
 
       {:ok, retry2} = create_job(mission, sector, %{title: "bindings retry 2"})
 

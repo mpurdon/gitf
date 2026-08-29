@@ -1057,7 +1057,33 @@ defmodule GiTF.Major.Orchestrator do
               # that is how msn-7683ac burned all four fix attempts. A
               # focused resolution op reconciles this ONE merge, then the
               # mission re-enters validation and consolidation resumes.
-              start_conflict_resolution(mission, branch, files)
+              case start_conflict_resolution(mission, branch, files) do
+                {:cap_exhausted, marked} ->
+                  changed_files = collect_changed_files(ops_by_variant, nil)
+
+                  notes = [
+                    "POSSIBLE unresolved conflict markers in: #{Enum.join(marked, ", ")} — " <>
+                      "the marker scan flags these but two focused resolution ghosts " <>
+                      "reported them clean. Verify against the actual file content; " <>
+                      "reconcile only if real."
+                  ]
+
+                  spawn_validation_for_variant(
+                    mission,
+                    requirements,
+                    planning,
+                    ctx,
+                    diff_base,
+                    nil,
+                    changed_files,
+                    notes
+                  )
+
+                  {:ok, "validation"}
+
+                other ->
+                  other
+              end
 
             {:ok, notes} ->
               changed_files = collect_changed_files(ops_by_variant, nil)
@@ -1533,7 +1559,28 @@ defmodule GiTF.Major.Orchestrator do
       |> Enum.count(&(&1[:conflict_resolution] == target))
 
     cond do
+      prior >= @max_resolutions_per_target and is_nil(branch) ->
+        # The scan and the resolution ghosts DISAGREE twice over: the regex
+        # says markers, ghosts sent with exact line excerpts say clean and
+        # change nothing. Run 2 died here — failing a multi-hour mission on
+        # a lexical disagreement is the wrong direction. Ground truth
+        # adjudicates: proceed to validation carrying the file list; if the
+        # markers are real, typecheck/build names them and the fix loop has
+        # them; if not, the mission lives.
+        Logger.warning(
+          "Quest #{mission.id}: worktree marker scan and #{prior} resolution ghosts " <>
+            "disagree (#{Enum.join(files, ", ")}) — deferring to ground-truth validation"
+        )
+
+        {:cap_exhausted, files}
+
       prior >= @max_resolutions_per_target ->
+        # A conflicted BRANCH merge is not ambiguous — those markers were
+        # just committed by the merge itself. Two failed focused attempts
+        # is genuine non-convergence. Snapshot the evidence first: the
+        # worktrees (and their markers) are pruned when the mission seals.
+        snapshot_marker_artifact(mission, files)
+
         GiTF.Missions.fail_quest(
           mission.id,
           "Merge conflict resolution for #{target} did not converge after " <>
@@ -1555,10 +1602,31 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  defp snapshot_marker_artifact(mission, files) do
+    excerpt =
+      case GiTF.Validation.canonical_impl_shell(mission) do
+        %{worktree_path: wt} -> GiTF.Git.conflict_marker_excerpt(wt, files)
+        _ -> []
+      end
+
+    GiTF.Missions.store_artifact(mission.id, "conflict_markers", %{
+      "files" => files,
+      "excerpt" => excerpt
+    })
+  rescue
+    e -> Logger.warning("Quest #{mission.id}: marker snapshot failed: #{Exception.message(e)}")
+  end
+
   defp create_conflict_resolution_op(mission, branch, files, target, prior) do
+    excerpt =
+      case GiTF.Validation.canonical_impl_shell(mission) do
+        %{worktree_path: wt} -> GiTF.Git.conflict_marker_excerpt(wt, files)
+        _ -> []
+      end
+
     case GiTF.Ops.create(%{
            title: "Resolve merge conflicts: #{target}",
-           description: resolution_description(branch, files),
+           description: resolution_description(branch, files, excerpt),
            mission_id: mission.id,
            sector_id: mission.sector_id,
            phase_job: false,
@@ -1612,17 +1680,33 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp resolution_description(branch, files) do
+  defp resolution_description(branch, files, excerpt) do
     source =
       if branch,
         do: "a union merge of branch `#{branch}`",
         else: "earlier commits in this worktree"
+
+    excerpt_section =
+      case excerpt do
+        [] ->
+          ""
+
+        lines ->
+          """
+
+          Exact marker locations at the time this op was created
+          (`file:line:content`):
+
+          #{Enum.map_join(lines, "\n", &("    " <> &1))}
+          """
+      end
 
     """
     This worktree contains COMMITTED merge-conflict markers left by #{source}.
     Your only job is to reconcile those markers. Files with markers:
 
     #{Enum.map_join(files, "\n", &("- " <> &1))}
+    #{excerpt_section}
 
     Rules:
     - Both sides of every conflict carry wanted work. Produce the correct

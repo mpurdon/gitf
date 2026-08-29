@@ -657,6 +657,25 @@ defmodule GiTF.Git do
     end
   end
 
+  @doc """
+  `file:line:content` excerpt of every marker hit, capped at `limit` lines.
+
+  Fed to resolution ghosts so they receive exact locations rather than bare
+  filenames — run 2's endgame had ghosts reporting files clean while the
+  scan kept convicting them, and nobody could see which lines disagreed.
+  Also snapshotted into the mission record on non-convergence, because the
+  worktrees (the evidence) are pruned when a mission seals.
+  """
+  @spec conflict_marker_excerpt(String.t(), [String.t()], pos_integer()) :: [String.t()]
+  def conflict_marker_excerpt(wt, paths, limit \\ 40) do
+    pathspec = if paths == [], do: ["."], else: paths
+
+    case safe_cmd(["-C", wt, "grep", "-n", "-I", "-E", @conflict_marker_re, "--"] ++ pathspec) do
+      {out, 0} -> out |> to_string() |> String.split("\n", trim: true) |> Enum.take(limit)
+      _ -> []
+    end
+  end
+
   # A lockfile changing WITHOUT its manifest is the signature of install
   # residue (npm/mix/cargo rewriting the lockfile as a side effect of a
   # build or test run), not an intentional dependency change. PR #11 on

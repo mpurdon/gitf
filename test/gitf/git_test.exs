@@ -396,6 +396,17 @@ defmodule GiTF.GitTest do
       assert Git.conflict_marker_files(repo) == []
     end
 
+    test "conflict_marker_excerpt gives file:line:content hits", %{repo: repo, run: run} do
+      File.write!(Path.join(repo, "x.rs"), "a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> ghost/g\n")
+      run.(["add", "."])
+      run.(["commit", "-q", "-m", "markers"])
+
+      excerpt = Git.conflict_marker_excerpt(repo, ["x.rs"])
+      assert Enum.any?(excerpt, &String.starts_with?(&1, "x.rs:2:<<<<<<<"))
+      assert Enum.any?(excerpt, &(&1 == "x.rs:4:======="))
+      assert length(excerpt) == 3
+    end
+
     test "diff3-style base markers are caught", %{repo: repo, run: run} do
       File.write!(Path.join(repo, "d3.txt"), "||||||| merged common ancestors\n")
       run.(["add", "."])
