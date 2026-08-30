@@ -4,11 +4,25 @@ defmodule GiTF.Runtime.CallMetrics do
   needs and the factory never kept: how long each call took, at what
   throughput, and whether it hit a cold provider.
 
-  One `:llm_calls` record per completion, keyed by the provider and the
+  One `:llm_calls` record per completion, keyed by the provider, the
   *routed* model (the one that actually served the request — the circuit
-  can reroute away from the requested spec). Cost and token totals already
-  live in `:costs`, but an N-iteration agent run books ONE cost record for
-  N HTTP calls, so latency cannot ride that collection; it gets its own.
+  can reroute away from the requested spec) and the `unit` measured. Cost
+  and token totals already live in `:costs`, but an N-iteration agent run
+  books ONE cost record for N HTTP calls, so latency cannot ride that
+  collection; it gets its own.
+
+  `unit` is load-bearing, not decoration. Three things get measured here
+  and they differ by two orders of magnitude:
+
+    * `:call` — one model call (every API completion, and every turn of a
+      CLI ghost's agent loop, recovered by `GiTF.Runtime.CLICallTracker`)
+    * `:run` — a whole CLI agent run whose transcript could not be
+      decomposed into calls
+    * `:session` — an in-process `CLIClient` invocation, which is an
+      entire agentic session behind one function call
+
+  `stats/1` groups on it so a six-minute run can never be averaged into
+  the p50 of four-second calls.
 
   TTFT is stored honestly: nothing in the factory streams today (the agent
   loop uses non-streaming generate_text, Bedrock uses non-streaming
@@ -48,6 +62,7 @@ defmodule GiTF.Runtime.CallMetrics do
           :model,
           :mode,
           :kind,
+          :unit,
           :duration_ms,
           :ttft_ms,
           :streaming,
@@ -119,8 +134,8 @@ defmodule GiTF.Runtime.CallMetrics do
     cost_rows = cost_index(cutoff)
 
     calls
-    |> Enum.group_by(fn c -> {c[:provider], c[:model]} end)
-    |> Enum.map(fn {{provider, model}, rows} ->
+    |> Enum.group_by(fn c -> {c[:provider], c[:model], unit_of(c)} end)
+    |> Enum.map(fn {{provider, model, unit}, rows} ->
       durations = rows |> Enum.map(& &1[:duration_ms]) |> Enum.filter(&is_number/1) |> Enum.sort()
       p50 = percentile(durations, 0.5)
 
@@ -158,6 +173,7 @@ defmodule GiTF.Runtime.CallMetrics do
       %{
         provider: provider,
         model: model,
+        unit: unit,
         calls: length(rows),
         p50_duration_ms: p50,
         p95_duration_ms: percentile(durations, 0.95),
@@ -172,6 +188,15 @@ defmodule GiTF.Runtime.CallMetrics do
       }
     end)
     |> Enum.sort_by(& &1.calls, :desc)
+  end
+
+  # Records written before `unit` existed carry only `kind`; derive from it
+  # rather than labelling a whole CLI session as one call.
+  defp unit_of(row) do
+    case row[:unit] do
+      nil -> if row[:kind] == :cli_session, do: :session, else: :call
+      unit -> unit
+    end
   end
 
   # $/1M effective tokens per normalized model, from the :costs collection —

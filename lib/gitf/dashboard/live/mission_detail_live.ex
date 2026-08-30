@@ -8,11 +8,22 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   @heartbeat_interval :timer.seconds(15)
 
-  # Derive display phases from the orchestrator's canonical list,
-  # adding "pending" and "completed" bookends, removing "awaiting_approval" (shown as sync)
-  @phases ["pending"] ++
-            (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++
-            ["completed"]
+  # Derive display phases from the orchestrator's canonical list, adding
+  # "pending" and "completed" bookends. EVERY orchestrator phase appears —
+  # this list used to subtract "awaiting_approval" and alias it to "sync",
+  # so a mission blocked on a human for twelve hours rendered as "sync,
+  # actively merging". The one phase meaning "the factory has stopped"
+  # was displayed as the factory working.
+  @phases ["pending"] ++ GiTF.Major.Orchestrator.phases() ++ ["completed"]
+
+  # A display list that can silently drop a phase is exactly how that
+  # happened. Fail the BUILD instead of the operator's judgement.
+  @orphan_phases GiTF.Major.Orchestrator.phases() -- @phases
+  if @orphan_phases != [] do
+    raise "Phase Pipeline is missing orchestrator phases: #{inspect(@orphan_phases)}. " <>
+            "Every phase must be displayable — hide it in the RENDER if it should not " <>
+            "be shown, never by dropping it from the list."
+  end
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -253,7 +264,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         {:noreply, assign(socket, selected_phase: phase, artifact: artifact)}
 
       _ ->
-        artifact = GiTF.Missions.get_artifact(mission.id, phase)
+        artifact = GiTF.Missions.get_artifact(mission.id, artifact_key(phase))
         {:noreply, assign(socket, selected_phase: phase, artifact: artifact)}
     end
   end
@@ -281,7 +292,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   def handle_event("retry_all_failed", _params, socket) do
-    failed_ops = Enum.filter(socket.assigns.ops, &(&1.status == "failed" && !&1[:phase_job]))
+    # Same predicate as the Failed chip, so "Retry All Failed" acts on
+    # exactly the ops that chip counts — this used to be a third spelling
+    # of the phase_job test (`&1.status` would also raise on a statusless op).
+    failed_ops = op_view(socket.assigns.ops || [], "failed").visible
 
     retried =
       Enum.count(failed_ops, fn op ->
@@ -419,58 +433,86 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   defp compute_op_stats(socket) do
-    all_ops = socket.assigns.ops || []
-    op_filter = socket.assigns[:op_filter] || "active"
-
-    impl_ops = Enum.reject(all_ops, & &1[:phase_job])
-    phase_ops = Enum.filter(all_ops, & &1[:phase_job])
-
-    counts = %{
-      done: Enum.count(impl_ops, &(Map.get(&1, :status) == "done")),
-      running: Enum.count(impl_ops, &(Map.get(&1, :status) in ["running", "assigned"])),
-      blocked: Enum.count(impl_ops, &(Map.get(&1, :status) == "blocked")),
-      failed: Enum.count(impl_ops, &(Map.get(&1, :status) == "failed")),
-      pending: Enum.count(impl_ops, &(Map.get(&1, :status) == "pending"))
-    }
-
-    visible_ops =
-      case op_filter do
-        "all" ->
-          all_ops
-
-        "active" ->
-          Enum.reject(all_ops, &(Map.get(&1, :status) in ["done", "failed"] or &1[:phase_job]))
-
-        "done" ->
-          Enum.filter(all_ops, &(Map.get(&1, :status) == "done"))
-
-        "failed" ->
-          Enum.filter(all_ops, &(Map.get(&1, :status) == "failed"))
-
-        "running" ->
-          Enum.filter(all_ops, &(Map.get(&1, :status) in ["running", "assigned"]))
-
-        "blocked" ->
-          Enum.filter(all_ops, &(Map.get(&1, :status) == "blocked"))
-
-        "pending" ->
-          Enum.filter(all_ops, &(Map.get(&1, :status) == "pending"))
-
-        "phase" ->
-          phase_ops
-
-        _ ->
-          all_ops
-      end
+    view = op_view(socket.assigns.ops || [], socket.assigns[:op_filter] || "active")
 
     assign(socket,
-      visible_ops: visible_ops,
-      counts: counts,
-      total_ops: length(all_ops),
-      impl_count: length(impl_ops),
-      phase_op_count: length(phase_ops)
+      visible_ops: view.visible,
+      counts: view.counts,
+      total_ops: view.total,
+      impl_count: view.impl_count,
+      phase_op_count: view.phase_count
     )
   end
+
+  @doc """
+  The Ops card's filter chips and the list they filter, derived together.
+
+  Every count is the LENGTH OF THE LIST ITS CHIP SELECTS — not a parallel
+  tally. They used to be two different definitions of "op": the chips
+  counted implementation ops while the list filtered ALL ops, so
+  `Done 4` rendered ten rows (four impl ops plus four validation and
+  three simplify phase jobs). Only `active` excluded phase jobs, and only
+  because it happened to be written that way.
+
+  The chips partition: implementation ops by status, `Phase` for the
+  phase jobs, `All` for everything (7 + 4 = 11). Counting phase ops in
+  the status chips instead would make `Phase` and `All` double-count, and
+  `Done` would equal `All` on a finished mission — which tells an
+  operator nothing.
+  """
+  @spec op_view([map()], String.t()) :: %{
+          visible: [map()],
+          counts: map(),
+          total: non_neg_integer(),
+          impl_count: non_neg_integer(),
+          phase_count: non_neg_integer()
+        }
+  def op_view(all_ops, op_filter) do
+    impl_ops = Enum.filter(all_ops, &impl_op?/1)
+    phase_ops = Enum.filter(all_ops, &phase_op?/1)
+
+    select = &select_ops(&1, all_ops, impl_ops, phase_ops)
+
+    %{
+      visible: select.(op_filter),
+      counts:
+        Map.new(~w(active done running blocked failed pending), fn status ->
+          {String.to_atom(status), length(select.(status))}
+        end),
+      total: length(all_ops),
+      impl_count: length(impl_ops),
+      phase_count: length(phase_ops)
+    }
+  end
+
+  defp select_ops("all", all_ops, _impl, _phase), do: all_ops
+  defp select_ops("phase", _all, _impl, phase_ops), do: phase_ops
+
+  # Anything not finished. Deliberately the complement of done/failed
+  # rather than the union of running/blocked/pending, so an op with a
+  # status this page has never heard of is still visible somewhere.
+  defp select_ops("active", _all, impl_ops, _phase),
+    do: Enum.reject(impl_ops, &(op_status(&1) in ["done", "failed"]))
+
+  defp select_ops("running", _all, impl_ops, _phase),
+    do: with_status(impl_ops, ["running", "assigned"])
+
+  defp select_ops(status, _all, impl_ops, _phase)
+       when status in ["done", "failed", "blocked", "pending"],
+       do: with_status(impl_ops, [status])
+
+  defp select_ops(_unknown, all_ops, _impl, _phase), do: all_ops
+
+  defp with_status(ops, statuses), do: Enum.filter(ops, &(op_status(&1) in statuses))
+
+  defp op_status(op), do: Map.get(op, :status)
+
+  # One predicate, one place. The same phase_job test was spelled three
+  # ways across this page (`& &1[:phase_job]`, `or &1[:phase_job]`,
+  # `!&1[:phase_job]`), and that drift IS the bug — a seventh filter would
+  # have drifted again. Truthiness, matching what the old call sites did.
+  defp phase_op?(op), do: Map.get(op, :phase_job) not in [nil, false]
+  defp impl_op?(op), do: not phase_op?(op)
 
   defp cleanup_mission_artifacts(mission_id) do
     # Clean up links referencing this mission's ghosts/ops
@@ -580,13 +622,21 @@ defmodule GiTF.Dashboard.MissionDetailLive do
              phase_done?(mission, phase),
            do: :page
 
-      phase == "completed" or Map.has_key?(artifacts, phase) ->
+      phase == "completed" or Map.has_key?(artifacts, artifact_key(phase)) ->
         :decisions
 
       true ->
         nil
     end
   end
+
+  # The approval decision is stored under "approval", not under the phase
+  # id — so the gate looked click-less on a page whose header promises
+  # "click a marked phase for its decisions", on the most decision-laden
+  # phase in the run.
+  @doc false
+  def artifact_key("awaiting_approval"), do: "approval"
+  def artifact_key(phase), do: phase
 
   # The headline judgments a phase made, as {label, value, badge-tone}.
   # These are the answers to "what was decided here?" — the verdicts, picks
@@ -625,6 +675,27 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           if(total > 0, do: [{"requirements", "#{met}/#{total} met", "grey"}], else: []) ++
           if(gaps > 0, do: [{"gaps", to_string(gaps), "yellow"}], else: [])
 
+      "awaiting_approval" ->
+        # Who decided, and whether a human actually did. An auto-timeout
+        # approval IS a decision and renders done — but the operator must
+        # be able to see that nobody read it.
+        decided_by = artifact["approved_by"] || artifact["rejected_by"]
+
+        maybe(
+          artifact["approved"],
+          &{"decision", if(&1, do: "approved", else: "rejected"),
+           if(&1, do: "green", else: "red")}
+        ) ++
+          maybe(decided_by, &{"by", &1, if(auto_decision?(&1), do: "yellow", else: "grey")}) ++
+          if(auto_decision?(decided_by),
+            do: [{"human review", "none — auto-decided on timeout", "yellow"}],
+            else: []
+          ) ++
+          maybe(
+            artifact["approved_at"] || artifact["rejected_at"],
+            &{"at", String.slice(to_string(&1), 0, 16), "grey"}
+          )
+
       "sync" ->
         maybe(artifact["status"], &{"outcome", &1, "purple"}) ++
           maybe(artifact["pr_url"], fn _ -> {"pr", "opened", "green"} end)
@@ -655,6 +726,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp maybe(nil, _fun), do: []
   defp maybe([], _fun), do: []
   defp maybe(value, fun), do: [fun.(value)]
+
+  # GiTF.Override.approve/2 uses the same "auto" prefix to decide whether
+  # an approval is a human decision (and may clear the phase gate).
+  defp auto_decision?(by) when is_binary(by), do: String.starts_with?(by, "auto")
+  defp auto_decision?(_), do: false
 
   defp tone_for_complexity(c) when c in ["trivial", "simple"], do: "green"
   defp tone_for_complexity("moderate"), do: "yellow"
@@ -861,7 +937,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 class="step-label"
                 style={"white-space:nowrap; #{if @selected_phase == phase, do: "font-weight:700"}"}
               >
-                {phase}<span :if={detail} style="font-size:1.05rem; line-height:0; vertical-align:-0.12em; opacity:0.7; margin-left:0.22rem">{if detail == :page, do: "↗", else: "≡"}</span>
+                {phase_label(phase)}<span :if={detail} style="font-size:1.05rem; line-height:0; vertical-align:-0.12em; opacity:0.7; margin-left:0.22rem">{if detail == :page, do: "↗", else: "≡"}</span>
               </div>
               <%= if @phase_durations[phase] do %>
                 <div style="font-size:0.6rem; color:#6b7280; margin-top:0.1rem">{@phase_durations[phase]}</div>
@@ -1015,7 +1091,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <div class="panel-title" style="margin-bottom:0.5rem">Ops</div>
           <div class="op-filters">
             <button phx-click="filter_ops" phx-value-filter="active" class={"op-filter-chip #{if @op_filter == "active", do: "op-filter-active"}"}>
-              Active <span class="op-filter-count">{@counts.running + @counts.blocked + @counts.pending}</span>
+              Active <span class="op-filter-count">{@counts.active}</span>
             </button>
             <button :if={@counts.done > 0} phx-click="filter_ops" phx-value-filter="done" class={"op-filter-chip op-filter-green #{if @op_filter == "done", do: "op-filter-active"}"}>
               Done <span class="op-filter-count">{@counts.done}</span>
@@ -1386,6 +1462,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp phase_icon(%{phase: "validation"} = assigns),
     do: ~H"<Heroicons.shield_check mini class='w-4 h-4' />"
 
+  # A raised hand, not a checkmark-in-waiting: this step means the factory
+  # has stopped and a person is the blocker.
+  defp phase_icon(%{phase: "awaiting_approval"} = assigns),
+    do: ~H"<Heroicons.hand_raised mini class='w-4 h-4' />"
+
   defp phase_icon(%{phase: "sync"} = assigns),
     do: ~H"<Heroicons.arrow_path_rounded_square mini class='w-4 h-4' />"
 
@@ -1400,18 +1481,39 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   defp phase_icon(assigns), do: ~H"<span>{@phase |> String.first() |> String.upcase()}</span>"
 
-  defp normalise_phase("awaiting_approval"), do: "sync"
-  defp normalise_phase(phase), do: phase
+  # "awaiting_approval" crowds the strip next to "implementation"; the
+  # phase id stays canonical everywhere else.
+  defp phase_label("awaiting_approval"), do: "approval"
+  defp phase_label(phase), do: phase
+
+  defp current_phase(mission), do: Map.get(mission, :current_phase) || "pending"
+
+  defp phase_index(phase), do: Enum.find_index(@phases, &(&1 == phase))
 
   # Fast mode skips only the review phase (single design, no comparison needed)
   @fast_skipped_phases ~w(review)
 
+  # No `|| 0` sentinel. That fallback collapsed an unknown phase to index
+  # 0 — "pending" — so an id this list had never heard of silently claimed
+  # a position in the pipeline instead of admitting ignorance. Now an
+  # unrecognised phase on EITHER side means "cannot say it is done", which
+  # is the only honest answer and the fail-closed one: a widget may
+  # under-report progress, never invent it.
   defp phase_done?(mission, phase) do
-    current = normalise_phase(Map.get(mission, :current_phase, "pending"))
-    current_idx = Enum.find_index(@phases, &(&1 == current)) || 0
-    phase_idx = Enum.find_index(@phases, &(&1 == phase)) || 0
-    phase_idx < current_idx
+    case {phase_index(current_phase(mission)), phase_index(phase)} do
+      {current_idx, phase_idx} when is_integer(current_idx) and is_integer(phase_idx) ->
+        phase_idx < current_idx
+
+      _ ->
+        false
+    end
   end
+
+  # The gate is skipped when the mission passed it without a human ever
+  # being asked. Derived by GiTF.Approval so the overview's mini-pipeline
+  # cannot disagree with this one.
+  defp phase_skipped?(mission, "awaiting_approval"),
+    do: GiTF.Approval.gate_state(mission) == :skipped
 
   defp phase_skipped?(mission, phase) do
     Map.get(mission, :pipeline_mode) == "fast" and phase in @fast_skipped_phases
@@ -1419,7 +1521,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   defp phase_failed?(mission, phase) do
     status = Map.get(mission, :status)
-    current = normalise_phase(Map.get(mission, :current_phase, "pending"))
+    current = current_phase(mission)
 
     cond do
       # Mission failed on this phase
@@ -1437,7 +1539,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   defp phase_step_class(mission, phase) do
-    current = normalise_phase(Map.get(mission, :current_phase, "pending"))
+    current = current_phase(mission)
 
     cond do
       phase_failed?(mission, phase) -> "step-failed"

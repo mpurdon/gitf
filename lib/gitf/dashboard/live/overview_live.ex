@@ -366,16 +366,35 @@ defmodule GiTF.Dashboard.OverviewLive do
     _ -> []
   end
 
-  @mini_phases (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++ ["completed"]
+  # Every orchestrator phase, in its real order. This list used to subtract
+  # "awaiting_approval" and alias it to "sync", so a mission blocked on a
+  # human rendered as the factory merging. See GiTF.Approval.gate_state/1.
+  @mini_phases GiTF.Major.Orchestrator.phases() ++ ["completed"]
+
+  # Same build-time guard as the mission-detail stepper: a display list
+  # that can silently drop a phase is how the lie got in.
+  @orphan_mini_phases GiTF.Major.Orchestrator.phases() -- @mini_phases
+  if @orphan_mini_phases != [] do
+    raise "Overview mini-pipeline is missing orchestrator phases: " <>
+            "#{inspect(@orphan_mini_phases)}. Hide a phase in the RENDER, never by " <>
+            "dropping it from the list."
+  end
+
+  attr(:phase, :string, required: true)
+  attr(:mission, :map, default: %{})
 
   defp mini_phase_pipeline(assigns) do
     current = assigns.phase || "pending"
     phases = @mini_phases
 
-    current_idx = Enum.find_index(phases, &(&1 == normalise_overview_phase(current))) || -1
+    current_idx = Enum.find_index(phases, &(&1 == current)) || -1
 
-    assigns = assign(assigns, :phases, phases)
-    assigns = assign(assigns, :current_idx, current_idx)
+    assigns =
+      assigns
+      |> assign(:phases, phases)
+      |> assign(:current_idx, current_idx)
+      # One derivation per mission row, not one per dot.
+      |> assign(:gate_state, GiTF.Approval.gate_state(assigns.mission))
 
     ~H"""
     <div style="display:flex; align-items:center; gap:0px">
@@ -384,8 +403,9 @@ defmodule GiTF.Dashboard.OverviewLive do
           <div style={"width:6px; height:1px; background:#{if idx <= @current_idx, do: "#22c55e", else: "#30363d"}"}></div>
         <% end %>
         <div
-          title={phase}
+          title={mini_phase_title(phase, @gate_state)}
           style={"width:6px; height:6px; border-radius:50%; background:#{cond do
+            phase == "awaiting_approval" and @gate_state == :skipped -> "#4b5563"
             idx < @current_idx -> "#22c55e"
             idx == @current_idx -> "#3b82f6"
             true -> "#30363d"
@@ -396,9 +416,14 @@ defmodule GiTF.Dashboard.OverviewLive do
     """
   end
 
-  defp normalise_overview_phase("awaiting_approval"), do: "sync"
-  defp normalise_overview_phase("pending"), do: "pending"
-  defp normalise_overview_phase(phase), do: phase
+  defp mini_phase_title("awaiting_approval", :held),
+    do: "approval — HELD, waiting on a human"
+
+  defp mini_phase_title("awaiting_approval", :skipped),
+    do: "approval — skipped, nothing needed approving"
+
+  defp mini_phase_title("awaiting_approval", _), do: "approval"
+  defp mini_phase_title(phase, _), do: phase
 
   defp mission_status_badge("active"), do: "badge-blue"
   defp mission_status_badge("completed"), do: "badge-green"
@@ -568,7 +593,7 @@ defmodule GiTF.Dashboard.OverviewLive do
                     </div>
                   </div>
                   <div style="display:flex; align-items:center; gap:6px">
-                    <.mini_phase_pipeline phase={Map.get(mission, :current_phase, "pending")} />
+                    <.mini_phase_pipeline phase={Map.get(mission, :current_phase, "pending")} mission={mission} />
                     <%!-- Budget micro-bar --%>
                     <div style="flex:1; height:3px; background:#21262d; border-radius:2px; overflow:hidden; min-width:30px" title={"Budget: #{mission.budget_pct}%"}>
                       <div style={"height:100%; border-radius:2px; background:#{cond do

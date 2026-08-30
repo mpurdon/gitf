@@ -19,6 +19,8 @@ defmodule GiTF.Runtime.LLMClient do
   # GiTF.Runtime.CallMetrics (Default per HTTP attempt against the routed
   # model, CLIClient per session) — a new impl that skips this produces no
   # latency data and no one will notice until the provider_perf table lies.
+  # This covers in-process consumers only; ghost subprocesses never come
+  # through here and are instrumented at GiTF.Runtime.CLICallTracker.
   @callback generate_text(model(), messages(), opts()) ::
               {:ok, struct()} | {:error, term()}
   @callback stream_text(model(), messages(), opts()) ::
@@ -111,6 +113,7 @@ defmodule GiTF.Runtime.LLMClient.Default do
       model: to_string(routed_model),
       mode: GiTF.Runtime.ModelResolver.execution_mode(),
       kind: :api_call,
+      unit: :call,
       duration_ms: System.monotonic_time(:millisecond) - started,
       ttft_ms: nil,
       streaming: false,

@@ -30,6 +30,81 @@ defmodule GiTF.Approval do
   alias GiTF.{Archive, Audit, Missions, Observability, Override}
   alias GiTF.Config.Provider, as: ConfigProvider
 
+  # The one phase whose meaning is "the factory has stopped and a human is
+  # the blocker".
+  @gate_phase "awaiting_approval"
+
+  @doc """
+  Where a mission stands relative to the human-approval gate, for the
+  pipeline widgets:
+
+    * `:held` — sitting on the gate right now. A human is the blocker.
+    * `:decided` — a human (or the auto-timeout) answered. Read the
+      `approval` artifact for who and when.
+    * `:skipped` — the mission passed the gate point without anything ever
+      being asked of a human. Nothing to approve, so nothing happened.
+    * `:future` — the gate has not been reached. It may still fire.
+
+  Both the mission-detail stepper and the overview mini-pipeline call
+  this, so they cannot render the same mission differently — the previous
+  arrangement had each aliasing `awaiting_approval` to `sync`
+  independently, and msn-ac0539 spent twelve hours blocked on a human
+  while both widgets showed "sync — actively merging".
+
+  `:skipped` is only ever claimed once the mission is past the gate point
+  (at `sync` or later) or terminal. A gate that may still fire renders
+  `:future`, never dimmed. A mission that died before ever reaching the
+  gate is `:skipped` rather than `:future`: it is not waiting for
+  anything, and a pending-looking step on a dead mission is the same lie
+  in a different colour.
+
+  Truthfulness comes from `GiTF.Override.approval_status/1` — `:not_required`
+  means no request record AND no approval artifact, i.e. nothing was ever
+  asked of a human. It is consulted only once the cheap phase-position
+  checks have already decided the gate is behind us.
+  """
+  @spec gate_state(map()) :: :future | :held | :decided | :skipped
+  def gate_state(mission) when is_map(mission) do
+    cond do
+      current_phase(mission) == @gate_phase -> :held
+      not past_gate?(mission) -> :future
+      not is_binary(Map.get(mission, :id)) -> :future
+      true -> from_status(Override.approval_status(mission.id))
+    end
+  rescue
+    # A widget must not take the page down because the store hiccuped.
+    # `:future` claims nothing about what a human did.
+    _ -> :future
+  end
+
+  def gate_state(_), do: :future
+
+  defp from_status(:not_required), do: :skipped
+  # A request still open past the gate point is an anomaly, not a skip —
+  # say a human is the blocker rather than dimming the step.
+  defp from_status(:pending), do: :held
+  defp from_status(_), do: :decided
+
+  defp current_phase(mission), do: Map.get(mission, :current_phase) || "pending"
+
+  @terminal_statuses ~w(completed closed killed failed)
+
+  defp past_gate?(mission) do
+    Map.get(mission, :status) in @terminal_statuses or advanced_past_gate?(mission)
+  end
+
+  # Runtime lookup, not a module attribute: a compile-time call into
+  # `Orchestrator` from here would build a dependency cycle.
+  defp advanced_past_gate?(mission) do
+    phases = GiTF.Major.Orchestrator.phases()
+
+    case {Enum.find_index(phases, &(&1 == @gate_phase)),
+          Enum.find_index(phases, &(&1 == current_phase(mission)))} do
+      {gate, current} when is_integer(gate) and is_integer(current) -> current > gate
+      _ -> false
+    end
+  end
+
   @doc """
   Transitions the mission into the `awaiting_approval` phase, raises
   the approval request, and notifies operators via the

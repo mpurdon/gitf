@@ -49,13 +49,16 @@ defmodule GiTF.Runtime.CLIClient do
       end
 
     # A CLI invocation is a whole agentic session, not one completion —
-    # recorded as kind: :cli_session so stats never average it against
-    # single HTTP calls. Per-turn latency is invisible from out here.
+    # recorded as unit: :session so stats never average it against single
+    # calls. Per-turn latency is invisible from out here; the ghost path
+    # sees the same CLI's stream and books unit: :call from it, which is
+    # why the provider names the concrete CLI rather than a bare "cli".
     GiTF.Runtime.CallMetrics.record(%{
-      provider: "cli",
+      provider: "cli:claude",
       model: to_string(cli_model || model),
       mode: :cli,
       kind: :cli_session,
+      unit: :session,
       duration_ms: System.monotonic_time(:millisecond) - started,
       ttft_ms: nil,
       streaming: false,

@@ -63,7 +63,8 @@ defmodule GiTF.Ghost.Worker do
           gitf_root: String.t(),
           output: iodata(),
           output_bytes: non_neg_integer(),
-          parsed_events: [map()]
+          parsed_events: [map()],
+          call_tracker: GiTF.Runtime.CLICallTracker.t() | nil
         }
 
   # Cap on retained ghost output. A runaway ghost can emit unbounded text;
@@ -195,7 +196,8 @@ defmodule GiTF.Ghost.Worker do
       fallback_attempted: false,
       first_error: nil,
       same_model_retries: 0,
-      last_activity_at: System.monotonic_time(:second)
+      last_activity_at: System.monotonic_time(:second),
+      call_tracker: nil
     }
 
     {:ok, state, {:continue, :provision}}
@@ -284,12 +286,15 @@ defmodule GiTF.Ghost.Worker do
        | output: output,
          output_bytes: output_bytes,
          parsed_events: cap_events(events, state.parsed_events),
+         call_tracker: track_call_latency(state.call_tracker, data),
          last_activity_at: System.monotonic_time(:second)
      }}
   end
 
   def handle_info({port, {:exit_status, 0}}, %{handle: {:port, port}} = state) do
     Logger.info("Ghost #{state.ghost_id} completed successfully")
+
+    state = flush_call_latency(state, :ok)
 
     try do
       mark_success(state)
@@ -304,6 +309,7 @@ defmodule GiTF.Ghost.Worker do
 
   def handle_info({port, {:exit_status, exit_code}}, %{handle: {:port, port}} = state) do
     Logger.warning("Ghost #{state.ghost_id} exited with status #{exit_code}")
+    state = flush_call_latency(state, :exit_error)
     output = IO.iodata_to_binary(state.output)
 
     mark_failed(
@@ -520,6 +526,7 @@ defmodule GiTF.Ghost.Worker do
     cond do
       not alive? ->
         Logger.warning("Ghost #{state.ghost_id}: process is dead")
+        state = flush_call_latency(state, :process_died)
         mark_failed(state, "Underlying process died")
         {:stop, :normal, %{state | status: :failed}}
 
@@ -529,6 +536,7 @@ defmodule GiTF.Ghost.Worker do
         )
 
         kill_handle(state)
+        state = flush_call_latency(state, :timeout)
         mark_failed(state, "Exceeded wall-clock cap of #{max_wallclock} seconds")
         {:stop, :normal, %{state | status: :failed}}
 
@@ -538,6 +546,7 @@ defmodule GiTF.Ghost.Worker do
         )
 
         kill_handle(state)
+        state = flush_call_latency(state, :stalled)
         mark_failed(state, "No activity for #{idle_seconds} seconds")
         {:stop, :normal, %{state | status: :failed}}
 
@@ -593,6 +602,12 @@ defmodule GiTF.Ghost.Worker do
   @impl true
   def terminate(reason, state) do
     shutdown_handle(state, 2_000)
+
+    # Backstop for every death path the explicit flushes don't name —
+    # supervisor shutdown, a linked crash, an operator stop. A no-op once
+    # a named flush has already run.
+    state = flush_call_latency(state, :interrupted)
+
     GiTF.Progress.clear(state.ghost_id)
 
     case classify_exit(reason) do
@@ -1130,8 +1145,98 @@ defmodule GiTF.Ghost.Worker do
         status: :running,
         handle: handle,
         os_pid: os_pid,
+        call_tracker: build_call_tracker(state, handle),
         started_at: System.monotonic_time(:second)
     }
+  end
+
+  # -- Private: per-call LLM latency (CLI subprocess path) ----------------------
+  #
+  # API-mode ghosts run the agent loop in-process and are already measured
+  # at GiTF.Runtime.LLMClient.Default. CLI-mode ghosts are subprocesses on
+  # the far side of a port, so their calls are recovered from the
+  # stream-json transcript instead. Only the port path gets a tracker.
+
+  defp build_call_tracker(state, {:port, _port}) do
+    GiTF.Runtime.CLICallTracker.new(
+      provider: cli_provider(state),
+      model: assigned_model(state.ghost_id),
+      mode: state.execution_mode,
+      mission_id: mission_id_for_op(state.op_id)
+    )
+  rescue
+    e ->
+      Logger.debug("Call tracker init failed for ghost #{state.ghost_id}: #{inspect(e)}")
+      nil
+  end
+
+  defp build_call_tracker(_state, _handle), do: nil
+
+  # Names the concrete CLI so claude and copilot rows can never merge into
+  # one percentile. Outside CLI mode the configured model plugin is an API
+  # provider — a port is only reachable there via the test executable
+  # override, and stamping an API provider's name on a subprocess record
+  # would be a lie — so the label stays generic.
+  defp cli_provider(%{execution_mode: :cli}), do: "cli:" <> GiTF.Runtime.Models.default_name()
+  defp cli_provider(_state), do: "cli"
+
+  defp assigned_model(ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
+      %{assigned_model: model} when is_binary(model) and model != "" -> model
+      _ -> nil
+    end
+  end
+
+  defp mission_id_for_op(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} -> Map.get(op, :mission_id)
+      _ -> nil
+    end
+  end
+
+  @doc false
+  # Public for tests: that a metrics failure cannot fail the ghost is the
+  # property, and it is only observable at these two seams.
+  def track_call_latency_for_test(tracker, data), do: track_call_latency(tracker, data)
+
+  @doc false
+  def flush_call_latency_for_test(state, outcome), do: flush_call_latency(state, outcome)
+
+  # Metrics must never cost a ghost its run: on any failure the tracker is
+  # returned unadvanced and the chunk goes unmeasured.
+  defp track_call_latency(nil, _data), do: nil
+
+  defp track_call_latency(tracker, data) do
+    {advanced, records} =
+      GiTF.Runtime.CLICallTracker.consume(tracker, data, System.monotonic_time(:millisecond))
+
+    Enum.each(records, &GiTF.Runtime.CallMetrics.record/1)
+    advanced
+  rescue
+    e ->
+      Logger.debug("Call latency tracking failed: #{inspect(e)}")
+      tracker
+  end
+
+  # Idempotent: the tracker is cleared as it is flushed, so the terminate/2
+  # backstop is a no-op once a named path has already spoken.
+  defp flush_call_latency(state, outcome) do
+    case Map.get(state, :call_tracker) do
+      nil -> state
+      tracker -> do_flush_call_latency(state, tracker, outcome)
+    end
+  end
+
+  defp do_flush_call_latency(state, tracker, outcome) do
+    {_tracker, records} =
+      GiTF.Runtime.CLICallTracker.finish(tracker, outcome, System.monotonic_time(:millisecond))
+
+    Enum.each(records, &GiTF.Runtime.CallMetrics.record/1)
+    Map.put(state, :call_tracker, nil)
+  rescue
+    e ->
+      Logger.debug("Call latency flush failed: #{inspect(e)}")
+      Map.put(state, :call_tracker, nil)
   end
 
   defp persist_os_pid(_ghost_id, nil), do: :ok
@@ -1244,11 +1349,7 @@ defmodule GiTF.Ghost.Worker do
     executable = Keyword.get(state.opts, :claude_executable)
 
     # Get the assigned model from the ghost record
-    model =
-      case Archive.get(:ghosts, state.ghost_id) do
-        %{assigned_model: model} when is_binary(model) -> model
-        _ -> nil
-      end
+    model = assigned_model(state.ghost_id)
 
     # Build spawn options with model
     spawn_opts =
@@ -2272,12 +2373,7 @@ defmodule GiTF.Ghost.Worker do
     if Map.get(state, :fallback_attempted) do
       :no_fallback
     else
-      current_model =
-        case Archive.get(:ghosts, state.ghost_id) do
-          %{assigned_model: m} when is_binary(m) -> m
-          _ -> nil
-        end
-
+      current_model = assigned_model(state.ghost_id)
       fallback = if current_model, do: GiTF.Runtime.ModelResolver.fallback(current_model)
 
       if is_binary(fallback) and fallback != "" do
