@@ -25,6 +25,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
      |> assign(:current_path, "/approvals")
      |> assign(:approvals, approvals)
      |> assign(:action_id, nil)
+     |> assign(:action_mission_id, nil)
      |> assign(:action_type, nil)
      |> assign(:notes, "")
      |> assign(:refresh_scheduled, false)
@@ -57,17 +58,29 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     assign(socket, :refresh_scheduled, true)
   end
 
+  # TWO ids, deliberately. `action_id` is the :approval_requests record id
+  # (`apr-…`) and exists only to decide WHICH card expands its modal.
+  # `action_mission_id` is what `GiTF.Override` actually operates on.
+  #
+  # They were one assign until 2026-08-30, and it was the request id — so
+  # `Override.approve/2` was handed `apr-034baf` where it wanted `msn-…`,
+  # `Missions.store_artifact/3` answered `{:error, :not_found}`, and the
+  # operator got a flash they could miss. The Catwalk's approve and reject
+  # buttons had therefore NEVER worked, on either path, for as long as this
+  # page has existed. Keep the two apart: collapsing them back would fix
+  # the write and silently break modal targeting the moment two requests
+  # are pending at once.
   @impl true
-  def handle_event("show_approve", %{"id" => id}, socket) do
-    {:noreply, assign(socket, action_id: id, action_type: :approve, notes: "")}
+  def handle_event("show_approve", %{"id" => id} = params, socket) do
+    {:noreply, start_action(socket, id, params["mission"], :approve)}
   end
 
-  def handle_event("show_reject", %{"id" => id}, socket) do
-    {:noreply, assign(socket, action_id: id, action_type: :reject, notes: "")}
+  def handle_event("show_reject", %{"id" => id} = params, socket) do
+    {:noreply, start_action(socket, id, params["mission"], :reject)}
   end
 
   def handle_event("cancel_action", _params, socket) do
-    {:noreply, assign(socket, action_id: nil, action_type: nil, notes: "")}
+    {:noreply, clear_action(socket)}
   end
 
   def handle_event("update_notes", %{"notes" => text}, socket) do
@@ -75,26 +88,30 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   end
 
   def handle_event("confirm_approve", _params, socket) do
-    actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
+    with_mission(socket, fn mission_id ->
+      actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
 
-    case GiTF.Override.approve(socket.assigns.action_id, %{
-           approved_by: actor,
-           notes: socket.assigns.notes
-         }) do
-      {:ok, _} ->
-        GiTF.AuditLog.record(actor, "approval.approve", socket.assigns.action_id, %{
-          notes: socket.assigns.notes
-        })
+      case GiTF.Override.approve(mission_id, %{
+             approved_by: actor,
+             notes: socket.assigns.notes
+           }) do
+        {:ok, _} ->
+          GiTF.AuditLog.record(actor, "approval.approve", mission_id, %{
+            notes: socket.assigns.notes
+          })
 
-        {:noreply,
-         socket
-         |> assign(action_id: nil, action_type: nil, notes: "")
-         |> assign(:approvals, load_approvals())
-         |> put_flash(:info, "Approved.")}
+          {:noreply,
+           socket
+           |> clear_action()
+           |> assign(:approvals, load_approvals())
+           |> put_flash(:info, "Approved.")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Approve failed: #{inspect(reason)}")}
-    end
+        {:error, reason} ->
+          # Leave the modal OPEN: the message has to land next to the
+          # button they pressed, not above a card they have scrolled past.
+          {:noreply, put_flash(socket, :error, action_error("Approve", mission_id, reason))}
+      end
+    end)
   end
 
   def handle_event("confirm_reject", _params, socket) do
@@ -103,30 +120,66 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     if reason == "" do
       {:noreply, put_flash(socket, :error, "Rejection reason is required.")}
     else
-      actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
+      with_mission(socket, fn mission_id ->
+        actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
 
-      case GiTF.Override.reject(socket.assigns.action_id, reason, %{
-             rejected_by: actor
-           }) do
-        {:ok, _} ->
-          GiTF.AuditLog.record(actor, "approval.reject", socket.assigns.action_id, %{
-            reason: reason
-          })
+        case GiTF.Override.reject(mission_id, reason, %{rejected_by: actor}) do
+          {:ok, _} ->
+            GiTF.AuditLog.record(actor, "approval.reject", mission_id, %{reason: reason})
 
-          {:noreply,
-           socket
-           |> assign(action_id: nil, action_type: nil, notes: "")
-           |> assign(:approvals, load_approvals())
-           |> put_flash(:info, "Rejected.")}
+            {:noreply,
+             socket
+             |> clear_action()
+             |> assign(:approvals, load_approvals())
+             |> put_flash(:info, "Rejected.")}
 
-        {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Reject failed: #{inspect(reason)}")}
-      end
+          {:error, err} ->
+            {:noreply, put_flash(socket, :error, action_error("Reject", mission_id, err))}
+        end
+      end)
     end
   end
 
   def handle_event("refresh", _params, socket) do
     {:noreply, assign(socket, :approvals, load_approvals())}
+  end
+
+  defp start_action(socket, request_id, mission_id, type) do
+    assign(socket,
+      action_id: request_id,
+      action_mission_id: mission_id,
+      action_type: type,
+      notes: ""
+    )
+  end
+
+  defp clear_action(socket) do
+    assign(socket, action_id: nil, action_mission_id: nil, action_type: nil, notes: "")
+  end
+
+  # A request whose mission is gone must not silently no-op — that is the
+  # whole failure mode this page just had.
+  defp with_mission(socket, fun) do
+    case socket.assigns.action_mission_id do
+      mission_id when is_binary(mission_id) and mission_id != "" ->
+        fun.(mission_id)
+
+      _ ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Approval request #{socket.assigns.action_id || "(unknown)"} carries no mission id, " <>
+             "so there is nothing to decide. The request is stale — delete it, or find the " <>
+             "mission and act on it there."
+         )}
+    end
+  end
+
+  defp action_error(verb, mission_id, reason) do
+    "#{verb} failed for mission #{mission_id}: #{inspect(reason)}. " <>
+      "The approval request may be stale (its mission deleted or already decided) — " <>
+      "check the mission before retrying."
   end
 
   defp mission_title(approval) do
@@ -261,12 +314,30 @@ defmodule GiTF.Dashboard.ApprovalsLive do
                   <%= if @action_id == Map.get(approval, :id) do %>
                     <%!-- action form shown inline --%>
                   <% else %>
-                    <button phx-click="show_approve" phx-value-id={approval.id} class="btn btn-green">Approve</button>
-                    <button phx-click="show_reject" phx-value-id={approval.id} class="btn btn-red">Reject</button>
+                    <%!-- id targets the modal, mission is what gets decided.
+                          They are different records; conflating them is the
+                          bug that made these buttons do nothing. --%>
+                    <button
+                      phx-click="show_approve"
+                      phx-value-id={approval.id}
+                      phx-value-mission={approval[:mission_id]}
+                      class="btn btn-green"
+                    >Approve</button>
+                    <button
+                      phx-click="show_reject"
+                      phx-value-id={approval.id}
+                      phx-value-mission={approval[:mission_id]}
+                      class="btn btn-red"
+                    >Reject</button>
                   <% end %>
                 </div>
                 <div :if={triage = Map.get(approval, :triage)} class="triage-tally">
                   {GiTF.Approval.Triage.tally(triage)}
+                </div>
+                <%!-- An omission is a fail, but it should be visible before
+                      the operator reads a single item. --%>
+                <div :if={triage = Map.get(approval, :triage)} class="triage-coverage">
+                  {GiTF.Approval.Triage.coverage_line(triage)}
                 </div>
               </div>
             </div>
@@ -365,12 +436,26 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     <div class="triage-item">
       <span class={"badge #{status_chip(@item.status)}"}>{@item.status}</span>
       <div class="triage-item-body">
-        <div class="triage-item-title">
-          {@item.title}<span class="triage-item-kind">{@item.kind}</span>
+        <%!-- The id and its verdict are the label; the requirement is the
+              line you actually read. "FR-1 met" is a citation, not
+              information. --%>
+        <div class="triage-item-label">
+          {@item.title}
+          <span :if={@item.priority} class="badge badge-grey triage-priority">{@item.priority}</span>
+          <span class="triage-item-kind">{@item.kind}</span>
         </div>
+        <div :if={@item.requirement} class="triage-requirement">{@item.requirement}</div>
         <details :if={expandable?(@item)}>
           <summary style="cursor:pointer; font-size:0.75rem; color:#8b949e">detail</summary>
           <div class="triage-detail">{@item.detail}</div>
+        </details>
+        <details :if={@item.acceptance_criteria != []}>
+          <summary style="cursor:pointer; font-size:0.75rem; color:#8b949e">
+            {length(@item.acceptance_criteria)} acceptance criteria
+          </summary>
+          <ul class="triage-criteria">
+            <li :for={criterion <- @item.acceptance_criteria}>{criterion}</li>
+          </ul>
         </details>
         <details :if={@item.rebuttal}>
           <summary style="cursor:pointer; font-size:0.75rem; color:#3fb950">rebuttal</summary>

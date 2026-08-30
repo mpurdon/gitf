@@ -58,10 +58,36 @@ defmodule GiTF.MCPServer.ApprovalToolsTest do
     r
   end
 
+  # A bare id is a citation, not information — the operator's words. The
+  # requirements artifact is what turns "FR-1 met" into a sentence.
+  defp requirements_artifact do
+    %{
+      "functional_requirements" => [
+        %{
+          "id" => "FR-1",
+          "description" => "The system SHALL retry 5xx responses three times",
+          "priority" => "must-have",
+          "acceptance_criteria" => ["client.ex retries on 502/503/504", "backoff is exponential"]
+        },
+        %{
+          "id" => "FR-2",
+          "description" => "The system SHALL log every retry attempt",
+          "priority" => "should-have",
+          "acceptance_criteria" => ["one log line per attempt"]
+        }
+      ],
+      # Non-functional entries routinely omit priority.
+      "non_functional" => [
+        %{"id" => "NFR-1", "description" => "The system SHALL answer within 200ms"}
+      ]
+    }
+  end
+
   # A clean pass with one advisory gap — the msn-ac0539 shape.
   defp passing_mission do
     m =
       mission!(%{
+        "requirements" => requirements_artifact() |> Map.delete("non_functional"),
         "validation" => %{
           "overall_verdict" => "pass",
           "requires_approval" => true,
@@ -163,6 +189,69 @@ defmodule GiTF.MCPServer.ApprovalToolsTest do
       assert body["counts"]["fails"] == length(triage.fails)
       assert body["counts"]["concerns"] == length(triage.concerns)
       assert body["counts"]["oks"] == length(triage.oks)
+    end
+
+    test "items carry the requirement text, not just the id" do
+      m = passing_mission()
+
+      {:ok, text} = Handlers.call("show_approval", %{"id" => m.id})
+      ok = Enum.find(decode(text)["oks"], &(&1["req_id"] == "FR-1"))
+
+      # "FR-1 met" told the operator nothing about what FR-1 asked for.
+      assert ok["title"] == "FR-1 met"
+      assert ok["requirement"] == "The system SHALL retry 5xx responses three times"
+      assert ok["priority"] == "must-have"
+
+      assert ok["acceptance_criteria"] == [
+               "client.ex retries on 502/503/504",
+               "backoff is exponential"
+             ]
+    end
+
+    test "reports requirement coverage alongside the tally" do
+      m = passing_mission()
+
+      {:ok, text} = Handlers.call("show_approval", %{"id" => m.id})
+      coverage = decode(text)["coverage"]
+
+      assert coverage["known"] == true
+      assert coverage["reported"] == 2
+      assert coverage["total"] == 2
+      assert coverage["line"] == "2 of 2 requirements reported this round"
+    end
+
+    test "a requirement the validator never mentioned is a fail, and coverage says so" do
+      m =
+        mission!(%{
+          "requirements" => requirements_artifact(),
+          "validation" => %{
+            "overall_verdict" => "pass",
+            "requirements_met" => [%{"req_id" => "FR-1", "met" => true}]
+          }
+        })
+
+      request!(m.id)
+
+      {:ok, text} = Handlers.call("show_approval", %{"id" => m.id})
+      body = decode(text)
+
+      # Silence is not a pass.
+      unreported = Enum.filter(body["fails"], &(&1["kind"] == "unreported"))
+      assert Enum.map(unreported, & &1["req_id"]) == ["FR-2", "NFR-1"]
+      assert Enum.find(unreported, &(&1["req_id"] == "NFR-1"))["priority"] == nil
+
+      assert body["coverage"]["line"] == "1 of 3 requirements reported this round"
+    end
+
+    test "a mission with no requirements artifact says coverage is unknown" do
+      m = mission!(%{"validation" => %{"overall_verdict" => "pass", "requirements_met" => []}})
+      request!(m.id)
+
+      {:ok, text} = Handlers.call("show_approval", %{"id" => m.id})
+      coverage = decode(text)["coverage"]
+
+      assert coverage["known"] == false
+      assert coverage["line"] =~ "coverage unknown"
     end
 
     test "carries the request and the timeout state" do

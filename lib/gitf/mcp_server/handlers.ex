@@ -1740,6 +1740,11 @@ defmodule GiTF.MCPServer.Handlers do
       request: serialize_approval_request(request),
       timeout: serialize_approval_timeout(mission.id, request),
       tally: GiTF.Approval.Triage.tally(triage),
+      # How much of the requirements artifact this round reported on at
+      # all. A validator that silently omits a requirement produces a
+      # clean tally, so the omission gets its own line — and its own
+      # :unreported fails.
+      coverage: Map.put(triage.coverage, :line, GiTF.Approval.Triage.coverage_line(triage)),
       counts: %{
         fails: length(triage.fails),
         concerns: length(triage.concerns),
@@ -1810,11 +1815,18 @@ defmodule GiTF.MCPServer.Handlers do
 
   defp awake_hours_since(_), do: nil
 
+  # Whitelisted on purpose — but the whitelist is why a bare "FR-1 met"
+  # reached the operator with no idea what FR-1 asked for. The requirement
+  # context is joined from the mission's requirements artifact.
   defp serialize_triage_item(item) do
     %{
       status: to_string(item.status),
       kind: to_string(item.kind),
       title: item.title,
+      req_id: item.req_id,
+      requirement: item.requirement,
+      priority: item.priority,
+      acceptance_criteria: item.acceptance_criteria,
       detail: item.detail,
       rebuttal: item.rebuttal
     }

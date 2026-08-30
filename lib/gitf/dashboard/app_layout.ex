@@ -24,8 +24,17 @@ defmodule GiTF.Dashboard.AppLayout do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "section:alerts")
     end
 
-    # Drop :flash before assigning — it's reserved by LiveView in components
-    safe_assigns = Map.drop(assigns, [:flash])
+    # `:flash` is reserved by LiveView inside components, so it cannot be
+    # assigned under that name — but dropping it while `render/1` still
+    # read `@flash` meant the component resolved its OWN empty flash and
+    # every dashboard flash rendered as nothing. put_flash/3 across the
+    # whole Catwalk was write-only: the approvals page reported a failed
+    # approve into a void. Carry the parent's flash under a name of our
+    # own and render THAT.
+    safe_assigns =
+      assigns
+      |> Map.drop([:flash])
+      |> Map.put(:parent_flash, Map.get(assigns, :flash) || %{})
 
     {:ok,
      socket
@@ -155,12 +164,12 @@ defmodule GiTF.Dashboard.AppLayout do
         </div>
       </nav>
       <main class="main">
-        <div :if={Phoenix.Flash.get(@flash, :info)} class="flash-info" style="display:flex; justify-content:space-between; align-items:center">
-          <span>{Phoenix.Flash.get(@flash, :info)}</span>
+        <div :if={Phoenix.Flash.get(@parent_flash, :info)} class="flash-info" style="display:flex; justify-content:space-between; align-items:center">
+          <span>{Phoenix.Flash.get(@parent_flash, :info)}</span>
           <button phx-click="lv:clear-flash" phx-value-key="info" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
         </div>
-        <div :if={Phoenix.Flash.get(@flash, :error)} class="flash-error" style="display:flex; justify-content:space-between; align-items:center">
-          <span>{Phoenix.Flash.get(@flash, :error)}</span>
+        <div :if={Phoenix.Flash.get(@parent_flash, :error)} class="flash-error" style="display:flex; justify-content:space-between; align-items:center">
+          <span>{Phoenix.Flash.get(@parent_flash, :error)}</span>
           <button phx-click="lv:clear-flash" phx-value-key="error" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
         </div>
         {render_slot(@inner_block)}

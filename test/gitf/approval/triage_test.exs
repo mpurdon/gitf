@@ -22,19 +22,47 @@ defmodule GiTF.Approval.TriageTest do
 
   defp kinds(items), do: Enum.map(items, & &1.kind)
 
-  # msn-ac0539: sixteen requirements, all met, five of them flipping a
-  # verdict an earlier round had rejected and each carrying its argument.
-  # One gap survived onto the pass verdict — the setting works but is not
-  # surfaced in the UI.
-  defp ac0539 do
-    rebutted = ["FR-3", "FR-7", "FR-9", "FR-12", "FR-15"]
+  # The live msn-ac0539 shape: thirteen functional requirements plus three
+  # non-functional ones (which carry no `priority`), all sixteen reported
+  # met, five of them flipping a verdict an earlier round had rejected and
+  # each carrying its argument. One gap survived onto the pass verdict —
+  # the setting works but is not surfaced in the UI.
+  @ac0539_ids Enum.map(1..13, &"FR-#{&1}") ++ Enum.map(1..3, &"NFR-#{&1}")
+  @ac0539_rebutted ["FR-3", "FR-7", "FR-9", "FR-12", "NFR-2"]
 
+  defp ac0539_requirements do
+    %{
+      "title" => "six-level priority",
+      "functional_requirements" =>
+        for n <- 1..13 do
+          %{
+            "id" => "FR-#{n}",
+            "description" => "The system SHALL support behaviour number #{n}",
+            "priority" => "must-have",
+            "acceptance_criteria" => ["criterion A for FR-#{n}", "criterion B for FR-#{n}"],
+            "ears_pattern" => "ubiquitous"
+          }
+        end,
+      # Non-functional entries routinely omit priority.
+      "non_functional" =>
+        for n <- 1..3 do
+          %{
+            "id" => "NFR-#{n}",
+            "description" => "The system SHALL stay within quality bar #{n}",
+            "acceptance_criteria" => ["criterion for NFR-#{n}"]
+          }
+        end,
+      "constraints" => [],
+      "out_of_scope" => []
+    }
+  end
+
+  defp ac0539 do
     entries =
-      for n <- 1..16 do
-        id = "FR-#{n}"
+      for id <- @ac0539_ids do
         entry = %{"req_id" => id, "met" => true, "evidence" => "covered by #{id} test"}
 
-        if id in rebutted,
+        if id in @ac0539_rebutted,
           do:
             Map.put(
               entry,
@@ -46,6 +74,7 @@ defmodule GiTF.Approval.TriageTest do
       end
 
     mission(%{
+      "requirements" => ac0539_requirements(),
       "validation" => %{
         "overall_verdict" => "pass",
         "requires_approval" => true,
@@ -343,7 +372,12 @@ defmodule GiTF.Approval.TriageTest do
     end
 
     test "a non-map mission triages to nothing rather than crashing" do
-      assert Triage.build(nil) == %{fails: [], concerns: [], oks: []}
+      assert Triage.build(nil) == %{
+               fails: [],
+               concerns: [],
+               oks: [],
+               coverage: %{known: false, reported: 0, total: 0}
+             }
     end
   end
 
@@ -359,6 +393,267 @@ defmodule GiTF.Approval.TriageTest do
     end
   end
 
+  describe "requirement context" do
+    # "FR-1 met" is a citation, not information. The description, its
+    # priority and its acceptance criteria come from the mission's
+    # requirements artifact and ride along on every item bearing an id.
+    test "an item carries the requirement text, priority and criteria" do
+      ok = Triage.build(ac0539()).oks |> Enum.find(&(&1.req_id == "FR-4"))
+
+      assert ok.title == "FR-4 met"
+      assert ok.requirement == "The system SHALL support behaviour number 4"
+      assert ok.priority == "must-have"
+      assert ok.acceptance_criteria == ["criterion A for FR-4", "criterion B for FR-4"]
+    end
+
+    test "a non-functional requirement without a priority does not crash" do
+      nfr = Triage.build(ac0539()).oks |> Enum.find(&(&1.req_id == "NFR-1"))
+
+      assert nfr.requirement == "The system SHALL stay within quality bar 1"
+      assert nfr.priority == nil
+      assert nfr.acceptance_criteria == ["criterion for NFR-1"]
+    end
+
+    test "an id the artifact does not know keeps its verdict and nils the rest" do
+      triage =
+        Triage.build(
+          mission(%{
+            "requirements" => %{
+              "functional_requirements" => [%{"id" => "FR-1", "description" => "known one"}]
+            },
+            "validation" => %{
+              "requirements_met" => [
+                %{"req_id" => "FR-1", "met" => true},
+                %{"req_id" => "FR-99", "met" => true}
+              ]
+            }
+          })
+        )
+
+      # The verdict matters more than the prose — never drop the item.
+      stranger = Enum.find(triage.oks, &(&1.req_id == "FR-99"))
+      assert stranger.title == "FR-99 met"
+      assert stranger.requirement == nil
+      assert stranger.priority == nil
+      assert stranger.acceptance_criteria == []
+    end
+
+    test "a fail carries its requirement too" do
+      triage =
+        Triage.build(
+          mission(%{
+            "requirements" => %{
+              "functional_requirements" => [
+                %{
+                  "id" => "FR-5",
+                  "description" => "The system SHALL retry 5xx responses",
+                  "priority" => "must-have"
+                }
+              ]
+            },
+            "validation" => %{
+              "requirements_met" => [%{"req_id" => "FR-5", "met" => false}]
+            }
+          })
+        )
+
+      assert [fail] = triage.fails
+      assert fail.requirement == "The system SHALL retry 5xx responses"
+      assert fail.priority == "must-have"
+    end
+
+    test "a contested-open item is enriched from the artifact as well" do
+      triage =
+        Triage.build(
+          mission(
+            %{
+              "requirements" => %{
+                "functional_requirements" => [
+                  %{"id" => "FR-9", "description" => "The system SHALL page on error"}
+                ]
+              },
+              "validation" => %{"requirements_met" => []}
+            },
+            %{contested_requirements: [%{"req_id" => "FR-9", "reason" => "never wired up"}]}
+          )
+        )
+
+      contested = Enum.find(triage.fails, &(&1.kind == :contested_open))
+      assert contested.requirement == "The system SHALL page on error"
+    end
+
+    test "items with no requirement id still have the keys, emptied" do
+      triage = Triage.build(validation(%{"gaps" => ["a gap"]}))
+
+      assert [gap] = triage.concerns
+      assert gap.req_id == nil
+      assert gap.requirement == nil
+      assert gap.priority == nil
+      assert gap.acceptance_criteria == []
+    end
+
+    test "a malformed requirements artifact enriches nothing and raises nothing" do
+      for broken <- ["not a map", %{"functional_requirements" => "nope"}, %{}, nil] do
+        triage =
+          Triage.build(
+            mission(%{
+              "requirements" => broken,
+              "validation" => %{"requirements_met" => [%{"req_id" => "FR-1", "met" => true}]}
+            })
+          )
+
+        assert [ok] = triage.oks
+        assert ok.requirement == nil
+        assert triage.fails == []
+        assert triage.coverage.known == false
+      end
+    end
+  end
+
+  describe "unreported requirements" do
+    # A validator that simply never mentions a requirement used to produce
+    # a spotless panel. "I did not look" and "it is fine" must not render
+    # the same.
+    test "a requirement with no verdict this round fails" do
+      triage =
+        Triage.build(
+          mission(%{
+            "requirements" => %{
+              "functional_requirements" => [
+                %{"id" => "FR-1", "description" => "one"},
+                %{"id" => "FR-2", "description" => "the forgotten one"}
+              ]
+            },
+            "validation" => %{
+              "overall_verdict" => "pass",
+              "requirements_met" => [%{"req_id" => "FR-1", "met" => true}]
+            }
+          })
+        )
+
+      assert [fail] = triage.fails
+      assert fail.kind == :unreported
+      assert fail.status == :fail
+      assert fail.title == "FR-2 — never reported on this round"
+      assert fail.detail =~ "no verdict for this requirement"
+      assert fail.requirement == "the forgotten one"
+    end
+
+    test "uncovered_requirements ids fold in, deduped against the derived set" do
+      triage =
+        Triage.build(
+          mission(%{
+            "requirements" => %{
+              "functional_requirements" => [
+                %{"id" => "FR-1", "description" => "one"},
+                %{"id" => "FR-2", "description" => "two"}
+              ]
+            },
+            "validation" => %{
+              "requirements_met" => [%{"req_id" => "FR-1", "met" => true}],
+              # FR-2 is already derived as unreported; FR-7 is only here.
+              "uncovered_requirements" => ["FR-2", "FR-7"]
+            }
+          })
+        )
+
+      unreported = Enum.filter(triage.fails, &(&1.kind == :unreported))
+
+      assert Enum.map(unreported, & &1.req_id) == ["FR-2", "FR-7"]
+
+      # The one the validator also flagged says so; the derived-only one
+      # does not claim something the artifact never said.
+      derived = Enum.find(unreported, &(&1.req_id == "FR-2"))
+      assert derived.detail =~ "uncovered_requirements"
+
+      stranger = Enum.find(unreported, &(&1.req_id == "FR-7"))
+      assert stranger.detail =~ "uncovered_requirements"
+      assert stranger.requirement == nil
+    end
+
+    test "uncovered_requirements works with no requirements artifact at all" do
+      triage =
+        Triage.build(
+          validation(%{
+            "requirements_met" => [],
+            "uncovered_requirements" => ["FR-3"]
+          })
+        )
+
+      assert [%{kind: :unreported, req_id: "FR-3"}] = triage.fails
+    end
+
+    test "no requirements artifact means no unreported fails — we cannot know" do
+      triage =
+        Triage.build(validation(%{"requirements_met" => [%{"req_id" => "FR-1", "met" => true}]}))
+
+      assert triage.fails == []
+    end
+
+    test "malformed uncovered_requirements entries are ignored" do
+      triage =
+        Triage.build(
+          validation(%{
+            "requirements_met" => [],
+            "uncovered_requirements" => [nil, 7, "", %{"no" => "id"}, %{"req_id" => "FR-4"}]
+          })
+        )
+
+      assert [%{req_id: "FR-4"}] = triage.fails
+    end
+  end
+
+  describe "coverage" do
+    test "the msn-ac0539 shape reports every requirement" do
+      triage = Triage.build(ac0539())
+
+      assert triage.coverage == %{known: true, reported: 16, total: 16}
+      assert Triage.coverage_line(triage) == "16 of 16 requirements reported this round"
+      assert triage.fails == []
+    end
+
+    test "an omission is visible in the line before you read a single item" do
+      triage =
+        Triage.build(
+          mission(%{
+            "requirements" => %{
+              "functional_requirements" => Enum.map(1..4, &%{"id" => "FR-#{&1}"})
+            },
+            "validation" => %{
+              "requirements_met" => [
+                %{"req_id" => "FR-1", "met" => true},
+                %{"req_id" => "FR-2", "met" => true}
+              ]
+            }
+          })
+        )
+
+      assert triage.coverage == %{known: true, reported: 2, total: 4}
+      assert Triage.coverage_line(triage) == "2 of 4 requirements reported this round"
+    end
+
+    test "no requirements artifact says so rather than printing 0 of 0" do
+      triage = Triage.build(validation(%{"requirements_met" => []}))
+
+      assert triage.coverage.known == false
+
+      assert Triage.coverage_line(triage) ==
+               "requirement coverage unknown — no requirements artifact on this mission"
+    end
+
+    test "a present but empty requirements artifact is also unknown" do
+      triage =
+        Triage.build(
+          mission(%{
+            "requirements" => %{"functional_requirements" => [], "non_functional" => []},
+            "validation" => %{"requirements_met" => []}
+          })
+        )
+
+      assert triage.coverage.known == false
+    end
+  end
+
   describe "grouping" do
     test "every item carries the full shape the panel renders" do
       triage = Triage.build(ac0539())
@@ -369,6 +664,10 @@ defmodule GiTF.Approval.TriageTest do
         assert is_binary(item.title)
         assert is_nil(item.detail) or is_binary(item.detail)
         assert is_nil(item.rebuttal) or is_binary(item.rebuttal)
+        assert is_nil(item.req_id) or is_binary(item.req_id)
+        assert is_nil(item.requirement) or is_binary(item.requirement)
+        assert is_nil(item.priority) or is_binary(item.priority)
+        assert is_list(item.acceptance_criteria)
       end
     end
 
@@ -377,6 +676,10 @@ defmodule GiTF.Approval.TriageTest do
         Triage.build(
           mission(
             %{
+              "requirements" => %{
+                "functional_requirements" =>
+                  Enum.map(1..4, &%{"id" => "FR-#{&1}", "description" => "req #{&1}"})
+              },
               "validation" => %{
                 "requirements_met" => [
                   %{"req_id" => "FR-1", "met" => true},
@@ -392,9 +695,18 @@ defmodule GiTF.Approval.TriageTest do
           )
         )
 
-      assert kinds(triage.fails) == [:requirement, :contested_flip, :cross_check, :contested_open]
+      # FR-4 exists in the requirements artifact and no verdict mentions it.
+      assert kinds(triage.fails) == [
+               :requirement,
+               :contested_flip,
+               :unreported,
+               :cross_check,
+               :contested_open
+             ]
+
       assert kinds(triage.concerns) == [:gap, :ground_truth]
       assert kinds(triage.oks) == [:requirement]
+      assert triage.coverage == %{known: true, reported: 3, total: 4}
     end
   end
 end

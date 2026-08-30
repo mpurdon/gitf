@@ -633,8 +633,15 @@ defmodule GiTF.Dashboard.Layouts do
           .triage-item { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.4rem 0; border-top: 1px solid #ffffff0f; }
           .triage-item:first-child { border-top: none; padding-top: 0; }
           .triage-item-body { min-width: 0; flex: 1; }
-          .triage-item-title { font-size: 0.85rem; color: #f0f6fc; }
-          .triage-item-kind { font-size: 0.7rem; color: #8b949e; font-family: monospace; margin-left: 0.35rem; }
+          /* The id + verdict is a label; the requirement text is the line
+             an operator actually reads. "FR-1 met" is a citation. */
+          .triage-item-label { font-size: 0.75rem; font-family: monospace; color: #8b949e; }
+          .triage-requirement { font-size: 0.85rem; color: #f0f6fc; margin-top: 0.15rem; }
+          .triage-priority { font-size: 0.62rem; margin-left: 0.35rem; vertical-align: middle; }
+          .triage-item-kind { font-size: 0.7rem; color: #484f58; font-family: monospace; margin-left: 0.35rem; }
+          .triage-criteria { margin: 0.35rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; color: #8b949e; }
+          .triage-criteria li { margin-bottom: 0.2rem; }
+          .triage-coverage { font-size: 0.72rem; color: #8b949e; font-family: monospace; white-space: nowrap; }
           .triage-detail { font-size: 0.8rem; color: #8b949e; margin-top: 0.35rem; white-space: pre-wrap; }
           .triage-rebuttal { font-size: 0.8rem; color: #8b949e; margin-top: 0.35rem; padding-left: 0.6rem; border-left: 2px solid #3fb950; white-space: pre-wrap; }
           .triage-tally { font-size: 0.78rem; color: #8b949e; font-family: monospace; white-space: nowrap; }
