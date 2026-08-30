@@ -124,6 +124,68 @@ defmodule GiTF.Config do
   end
 
   @doc """
+  Merges `values` into one section of the config file the running factory
+  actually reads, then reloads so the change takes effect without a
+  restart.
+
+  Two things separate this from `update_major_config/1`:
+
+    * **It writes the winning layer, or nothing.** Load order is defaults
+      → global → project → env, so a project `.gitf/config.toml` shadows
+      the global file. Writing global while a project section exists
+      would persist a value that never takes effect. This targets the
+      resolved gitf root's config — the same file the dashboard's
+      Settings page edits, so the two surfaces cannot disagree — and
+      REFUSES when no root resolves. There is no global fallback on
+      purpose: quietly rewriting `~/.config/gitf/config.toml` because a
+      workspace could not be found is the kind of surprise a write tool
+      must not have.
+    * **It refuses to write over a config it could not parse.**
+      `write_config/2` serialises the WHOLE map, so treating an
+      unreadable file as `%{}` would replace an operator's entire config
+      with the one section being set. A missing file is `%{}`; a corrupt
+      one is an error.
+
+  Callers should re-read the value through `GiTF.Config.Provider` rather
+  than echoing what they wrote — an env var (`HIVE_*`) still outranks the
+  file, and the effective value is the only honest receipt.
+  """
+  @spec update_config_section(String.t(), map()) :: :ok | {:error, term()}
+  def update_config_section(section, values) when is_binary(section) and is_map(values) do
+    with {:ok, path} <- writable_config_path(),
+         {:ok, existing} <- read_existing_config(path) do
+      merged = Map.merge(Map.get(existing, section, %{}), values)
+
+      case write_config(path, Map.put(existing, section, merged)) do
+        :ok ->
+          GiTF.Config.Provider.reload()
+          :ok
+
+        error ->
+          error
+      end
+    end
+  end
+
+  defp writable_config_path do
+    case GiTF.gitf_dir() do
+      {:ok, root} -> {:ok, Path.join([root, ".gitf", "config.toml"])}
+      _ -> {:error, :no_gitf_root}
+    end
+  end
+
+  defp read_existing_config(path) do
+    if File.exists?(path) do
+      case read_config(path) do
+        {:ok, cfg} -> {:ok, cfg}
+        {:error, reason} -> {:error, {:unreadable_config, path, reason}}
+      end
+    else
+      {:ok, %{}}
+    end
+  end
+
+  @doc """
   Returns true if the system is in dark factory mode (autonomous approval).
   """
   @spec dark_factory?() :: boolean()

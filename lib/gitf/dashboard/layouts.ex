@@ -616,6 +616,30 @@ defmodule GiTF.Dashboard.Layouts do
           .op-filter-purple.op-filter-active { background: #8b5cf622; border-color: #8b5cf655; color: #a78bfa; }
           .op-filter-count { font-family: monospace; font-size: 0.7rem; font-weight: 700; }
 
+          /* -- Approval triage ------------------------------------------------ */
+          /* Three blocks, read top down: what failed, what should worry you,
+             what is fine. The concerns block is deliberately the same amber
+             as .btn-orange — an advisory gap is the thing most likely to be
+             the real defect, so it gets action-button weight. */
+          .triage-group { border-radius: 6px; padding: 0.7rem 0.85rem; margin-bottom: 0.6rem; }
+          .triage-fail { background: #f8514915; border: 1px solid #f8514955; border-left: 3px solid #f85149; }
+          .triage-concerns { background: #d2992215; border: 1px solid #d2992255; border-left: 3px solid #d29922; }
+          .triage-ok { background: #0d1117; border: 1px solid #30363d; }
+          .triage-group-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+          .triage-fail .triage-group-title { color: #f85149; }
+          .triage-concerns .triage-group-title { color: #d29922; }
+          .triage-ok .triage-group-title { color: #3fb950; }
+          .triage-items { margin-top: 0.5rem; }
+          .triage-item { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.4rem 0; border-top: 1px solid #ffffff0f; }
+          .triage-item:first-child { border-top: none; padding-top: 0; }
+          .triage-item-body { min-width: 0; flex: 1; }
+          .triage-item-title { font-size: 0.85rem; color: #f0f6fc; }
+          .triage-item-kind { font-size: 0.7rem; color: #8b949e; font-family: monospace; margin-left: 0.35rem; }
+          .triage-detail { font-size: 0.8rem; color: #8b949e; margin-top: 0.35rem; white-space: pre-wrap; }
+          .triage-rebuttal { font-size: 0.8rem; color: #8b949e; margin-top: 0.35rem; padding-left: 0.6rem; border-left: 2px solid #3fb950; white-space: pre-wrap; }
+          .triage-tally { font-size: 0.78rem; color: #8b949e; font-family: monospace; white-space: nowrap; }
+          .triage-warn { background: #f8514915; border: 1px solid #f8514955; border-radius: 6px; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; font-size: 0.82rem; color: #f85149; }
+
           /* -- Responsive ---------------------------------------------------- */
           @media (max-width: 1024px) { .design-layout { grid-template-columns: 1fr; } .review-split { grid-template-columns: 1fr; } .mission-detail-layout { grid-template-columns: 1fr; } .mission-sidebar { position: static; } }
 

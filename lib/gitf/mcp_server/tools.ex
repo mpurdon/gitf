@@ -467,6 +467,95 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "show_approval",
+        description:
+          "The approval decision for a mission, triaged. Returns the pending approval " <>
+            "request (requested_at, risk level), the timeout state (hours configured, " <>
+            "awake hours elapsed, whether auto-approve is even possible at this risk " <>
+            "level), and the full triage from GiTF.Approval.Triage — fails / concerns / " <>
+            "oks, each item carrying status, kind, title, detail and any rebuttal. The " <>
+            "Catwalk's approval panel derives from the same module, so the two surfaces " <>
+            "cannot disagree. Answers for approved and rejected missions too (see " <>
+            "approval_status). Read this BEFORE approve_mission: a pass verdict with " <>
+            "concerns is exactly where a false pass hides.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Mission ID"}
+          },
+          required: ["id"]
+        }
+      },
+      %{
+        name: "approve_mission",
+        description:
+          "[WRITE] Approve a mission waiting at awaiting_approval, clearing the gate so " <>
+            "the merge/PR proceeds. Only acts on a PENDING approval — an already-decided " <>
+            "mission comes back with approved: false and its current approval_status " <>
+            "rather than an error. If the triage reports any FAILING checks the approval " <>
+            "still goes through (the operator outranks the machine) but the response " <>
+            "leads with a warning naming them. Recorded as approved_by \"mcp_operator\" — " <>
+            "the MCP has no person-level identity, and unlike an auto_* approval this " <>
+            "counts as a human decision and clears the phase gate. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Mission ID"},
+            notes: %{
+              type: "string",
+              description: "Optional note recorded on the approval artifact and audit log"
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
+        name: "reject_mission",
+        description:
+          "[WRITE] Reject a mission waiting at awaiting_approval. The rejection is " <>
+            "recorded immediately; the mission terminal-fails on the next advance sweep, " <>
+            "and its tree survives as the archive/<id> branch so resume_mission can still " <>
+            "reach it. The reason is stored on the approval artifact and the audit log " <>
+            "but NO ghost consumes it today — rejecting does not schedule a fix, so say " <>
+            "what is wrong for the human who reads it next. Only acts on a PENDING " <>
+            "approval. Recorded as rejected_by \"mcp_operator\". Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Mission ID"},
+            reason: %{
+              type: "string",
+              description: "Why it is rejected (required, non-empty) — recorded, not acted on"
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "reason", "confirm"]
+        }
+      },
+      %{
+        name: "set_approval_timeout",
+        description:
+          "[WRITE] Set the auto-approve timeout (hours) for pending approvals — config " <>
+            "path [approvals] timeout_hours, factory-wide, not per sector. Elapsed time " <>
+            "is AWAKE time, so an idle-stopped box does not burn the window. Critical-risk " <>
+            "missions never auto-approve regardless. Persisted to the config file the " <>
+            "factory reads and reloaded in place — no restart, survives one. The response " <>
+            "echoes the EFFECTIVE value re-read after the reload, which can differ from " <>
+            "what you asked for if a HIVE_* env var outranks the file. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            hours: %{
+              type: "number",
+              description: "Timeout in hours (greater than 0, up to 720)"
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["hours", "confirm"]
+        }
+      },
+      %{
         name: "reset_op",
         description:
           "[WRITE] Reset a failed or stuck op so it can be retried. Stops its ghost and cleans up its shell. Requires confirm: true.",

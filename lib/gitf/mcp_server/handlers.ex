@@ -11,6 +11,19 @@ defmodule GiTF.MCPServer.Handlers do
   # suggests orchestration or ghost-pool issues.
   @terminal_phases ~w(completed closed killed)
 
+  # Who an approve/reject over the MCP is attributed to. Person-level
+  # identity is resolved at the HTTP edge (GiTF.Tailnet) and is NOT plumbed
+  # down to tool handlers — the local socket listener has no peer identity
+  # at all — so naming the surface honestly beats inventing a human. It
+  # deliberately does not start with "auto": GiTF.Override.approve/2 treats
+  # an "auto*" approver as a machine timeout and refuses to clear the phase
+  # gate, and this IS an operator decision.
+  @mcp_actor "mcp_operator"
+
+  # A fat-fingered 10000 would park every approval indefinitely; 0 or a
+  # negative would auto-approve everything the instant it was requested.
+  @max_approval_timeout_hours 720
+
   def call("factory_status", _args) do
     missions = GiTF.Missions.list()
     # Everything an operator might still act on — paused missions included,
@@ -637,6 +650,109 @@ defmodule GiTF.MCPServer.Handlers do
   end
 
   def call("delete_mission", _), do: {:error, "Missing required parameter: id"}
+
+  # -- Approvals -------------------------------------------------------------
+
+  # A mission held at awaiting_approval was answerable only by reading the
+  # raw validation artifact off the box: the operator hit this live and
+  # fell back to SSM console probes, which docs/MCP.md calls a coverage
+  # bug. The triage comes from GiTF.Approval.Triage — the same module the
+  # Catwalk's panel renders — so the MCP and the dashboard can never
+  # disagree about what failed.
+  def call("show_approval", %{"id" => id} = args) do
+    safe_handler("show_approval", args, fn ->
+      case GiTF.Missions.get(id) do
+        {:ok, mission} -> {:ok, json_text(serialize_approval(mission))}
+        {:error, _} -> {:error, "Mission not found: #{id}"}
+      end
+    end)
+  end
+
+  def call("show_approval", _), do: {:error, "Missing required parameter: id"}
+
+  def call("approve_mission", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      with_pending_approval("approve_mission", id, fn mission ->
+        notes = args["notes"]
+        triage = GiTF.Approval.Triage.build(mission)
+
+        case GiTF.Override.approve(mission.id, %{approved_by: @mcp_actor, notes: notes}) do
+          {:ok, _} ->
+            audit_write("approval.approve", mission.id, %{
+              notes: notes,
+              fails: length(triage.fails)
+            })
+
+            {:ok, json_text(approve_receipt(mission, triage, notes))}
+
+          {:error, reason} ->
+            {:error, log_and_sanitize("approve_mission", reason)}
+        end
+      end)
+    end
+  end
+
+  def call("approve_mission", _), do: {:error, "Missing required parameter: id"}
+
+  def call("reject_mission", %{"id" => id, "reason" => reason} = args) do
+    with :ok <- require_confirm(args),
+         {:ok, reason} <- require_reason(reason) do
+      with_pending_approval("reject_mission", id, fn mission ->
+        case GiTF.Override.reject(mission.id, reason, %{rejected_by: @mcp_actor}) do
+          {:ok, _} ->
+            audit_write("approval.reject", mission.id, %{reason: reason})
+            {:ok, json_text(reject_receipt(mission, reason))}
+
+          {:error, err} ->
+            {:error, log_and_sanitize("reject_mission", err)}
+        end
+      end)
+    end
+  end
+
+  def call("reject_mission", %{"id" => _} = args) when not is_map_key(args, "reason"),
+    do: {:error, "Missing required parameter: reason"}
+
+  def call("reject_mission", _), do: {:error, "Missing required parameters: id, reason, confirm"}
+
+  # The approval timeout is a factory-wide CONFIG value
+  # (`[:approvals, :timeout_hours]`), not a per-sector record like
+  # set_validation_timeout — so it persists through the config file plus a
+  # Provider.reload(), the same path the dashboard's Settings page uses.
+  # `Provider.put/2` alone would look identical and be silently reverted by
+  # the next reload.
+  def call("set_approval_timeout", %{"hours" => hours} = args) do
+    with :ok <- require_confirm(args),
+         :ok <- validate_approval_hours(hours) do
+      previous = GiTF.Approval.timeout_hours()
+
+      case GiTF.Config.update_config_section("approvals", %{"timeout_hours" => hours}) do
+        :ok ->
+          # Re-read rather than echo: an env var outranks the file, and the
+          # effective value is the only honest receipt.
+          effective = GiTF.Approval.timeout_hours()
+          audit_write("approvals.set_timeout", "config", %{from: previous, to: effective})
+
+          {:ok, json_text(timeout_receipt(previous, hours, effective))}
+
+        {:error, {:unreadable_config, path, _reason}} ->
+          {:error,
+           "Config file #{path} exists but does not parse — refusing to overwrite it. " <>
+             "Fix the TOML by hand first."}
+
+        {:error, :no_gitf_root} ->
+          {:error,
+           "No gitf root resolved, so there is no factory config to update. " <>
+             "Refusing rather than guessing at a file you did not name."}
+
+        {:error, reason} ->
+          {:error, "Failed to persist approval timeout: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("set_approval_timeout", _),
+    do: {:error, "Missing required parameters: hours, confirm"}
 
   def call("reset_op", %{"id" => id} = args) do
     with :ok <- require_confirm(args) do
@@ -1469,6 +1585,241 @@ defmodule GiTF.MCPServer.Handlers do
   defp require_confirm(%{"confirm" => true}), do: :ok
   defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}
 
+  # -- Approval helpers ------------------------------------------------------
+
+  # Both write tools act only on a PENDING approval, and a
+  # already-decided mission is not an error condition — it is an answer.
+  # Returning the current status beats "invalid state transition", which
+  # tells the operator nothing about what to do next.
+  defp with_pending_approval(tool, id, fun) do
+    safe_handler(tool, %{"id" => id}, fn ->
+      case GiTF.Missions.get(id) do
+        {:ok, mission} ->
+          case GiTF.Override.approval_status(mission.id) do
+            :pending ->
+              fun.(mission)
+
+            status ->
+              {:ok, json_text(already_decided(mission, status))}
+          end
+
+        {:error, _} ->
+          {:error, "Mission not found: #{id}"}
+      end
+    end)
+  end
+
+  defp already_decided(mission, status) do
+    %{
+      mission_id: mission.id,
+      decided: false,
+      approval_status: to_string(status),
+      current_phase: mission[:current_phase],
+      note: already_decided_note(status)
+    }
+  end
+
+  defp already_decided_note(:approved),
+    do: "Already approved — nothing to do. show_approval carries who decided it and when."
+
+  defp already_decided_note(:rejected),
+    do:
+      "Already rejected. The mission fails on the next advance sweep; its tree survives " <>
+        "as archive/<id>, so resume_mission is the way back in."
+
+  defp already_decided_note(:not_required),
+    do:
+      "No approval is pending for this mission — it never gated, or the request was " <>
+        "already cleared. Check current_phase before assuming it is waiting on you."
+
+  defp require_reason(reason) when is_binary(reason) do
+    case String.trim(reason) do
+      "" -> {:error, "Rejection reason is required and cannot be blank"}
+      trimmed -> {:ok, trimmed}
+    end
+  end
+
+  defp require_reason(_), do: {:error, "Rejection reason is required and must be a string"}
+
+  defp validate_approval_hours(hours) when is_number(hours) do
+    cond do
+      hours <= 0 ->
+        {:error, "hours must be greater than 0 (a 0h timeout auto-approves on request)"}
+
+      hours > @max_approval_timeout_hours ->
+        {:error, "hours must be at most #{@max_approval_timeout_hours} (30 days)"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_approval_hours(_), do: {:error, "hours must be a number"}
+
+  defp approve_receipt(mission, triage, notes) do
+    base = %{
+      mission_id: mission.id,
+      decided: true,
+      approval_status: "approved",
+      approved_by: @mcp_actor,
+      notes: notes,
+      tally: GiTF.Approval.Triage.tally(triage),
+      note:
+        "Approval recorded and the phase gate cleared. The merge/PR proceeds on the next " <>
+          "advance sweep — poll show_mission."
+    }
+
+    # The operator outranks the machine, but they do not get to not-see it.
+    case triage.fails do
+      [] ->
+        base
+
+      fails ->
+        titles = Enum.map(fails, & &1.title)
+
+        Map.merge(base, %{
+          warning:
+            "APPROVED OVER #{length(fails)} FAILING #{failing_word(fails)}: " <>
+              Enum.join(titles, "; "),
+          approved_over_fails: titles
+        })
+    end
+  end
+
+  defp failing_word([_]), do: "CHECK"
+  defp failing_word(_), do: "CHECKS"
+
+  defp reject_receipt(mission, reason) do
+    %{
+      mission_id: mission.id,
+      decided: true,
+      approval_status: "rejected",
+      rejected_by: @mcp_actor,
+      reason: reason,
+      note:
+        "Rejection recorded. The mission terminal-fails on the next advance sweep, and its " <>
+          "tree survives as archive/#{mission.id} so resume_mission can re-enter it. The " <>
+          "reason is stored on the approval artifact and the audit log, but NO ghost " <>
+          "consumes it today — nothing is scheduled to act on it."
+    }
+  end
+
+  defp timeout_receipt(previous, requested, effective) do
+    base = %{
+      setting: "approvals.timeout_hours",
+      previous_hours: previous,
+      timeout_hours: effective,
+      note:
+        "Persisted to the config file and reloaded in place — no restart needed, and it " <>
+          "survives one. Elapsed time is AWAKE time, so an idle-stopped box does not burn " <>
+          "the window; critical-risk missions never auto-approve regardless."
+    }
+
+    if effective == requested do
+      base
+    else
+      Map.put(
+        base,
+        :warning,
+        "Requested #{requested}h but the effective value is #{effective}h — something " <>
+          "outranks the config file (a HIVE_APPROVALS_* env var is the usual cause)."
+      )
+    end
+  end
+
+  defp serialize_approval(mission) do
+    triage = GiTF.Approval.Triage.build(mission)
+    request = approval_request(mission.id)
+
+    %{
+      mission_id: mission.id,
+      name: mission[:name],
+      status: mission[:status],
+      current_phase: mission[:current_phase],
+      approval_status: to_string(GiTF.Override.approval_status(mission.id)),
+      request: serialize_approval_request(request),
+      timeout: serialize_approval_timeout(mission.id, request),
+      tally: GiTF.Approval.Triage.tally(triage),
+      counts: %{
+        fails: length(triage.fails),
+        concerns: length(triage.concerns),
+        oks: length(triage.oks)
+      },
+      fails: Enum.map(triage.fails, &serialize_triage_item/1),
+      concerns: Enum.map(triage.concerns, &serialize_triage_item/1),
+      oks: Enum.map(triage.oks, &serialize_triage_item/1)
+    }
+  end
+
+  defp approval_request(mission_id) do
+    GiTF.Archive.find_one(:approval_requests, fn r -> r[:mission_id] == mission_id end)
+  rescue
+    _ -> nil
+  end
+
+  defp serialize_approval_request(nil), do: nil
+
+  defp serialize_approval_request(request) do
+    %{
+      id: request[:id],
+      status: request[:status],
+      requested_at: to_string(request[:requested_at]),
+      decided_by: request[:decided_by],
+      decided_at: request[:decided_at] && to_string(request[:decided_at]),
+      risk_levels: Enum.map(request[:risk_levels] || [], &to_string/1),
+      job_count: request[:job_count],
+      files_touched: request[:files_touched] || [],
+      # Set when a re-validation disagreed with the original pass; the
+      # approval is deliberately held for a human instead of auto-decided.
+      revalidation_disagreement: request[:revalidation_disagreement] == true
+    }
+  end
+
+  defp serialize_approval_timeout(mission_id, request) do
+    max_risk = GiTF.Approval.mission_max_risk(mission_id)
+
+    %{
+      hours_configured: GiTF.Approval.timeout_hours(),
+      hours_elapsed: awake_hours_since(request && request[:requested_at]),
+      timed_out: GiTF.Approval.timed_out?(mission_id),
+      in_boot_grace: GiTF.Clock.in_boot_grace?(),
+      max_risk: to_string(max_risk),
+      # Critical-risk work never auto-approves; it auto-FAILS at the far
+      # end of the escalation window rather than merging unreviewed.
+      auto_approve_possible: max_risk != :critical,
+      critical_escalation_hours: GiTF.Approval.critical_escalation_hours(),
+      note: approval_timeout_note(max_risk)
+    }
+  end
+
+  defp approval_timeout_note(:critical),
+    do:
+      "Critical risk: this never auto-approves. If nobody decides within " <>
+        "critical_escalation_hours it auto-REJECTS — not merging unreviewed critical work " <>
+        "is the fail-safe outcome."
+
+  defp approval_timeout_note(_),
+    do:
+      "Elapsed is AWAKE hours, not wall clock — an idle-stopped box does not burn the " <>
+        "window. Auto-approve also re-validates first, and a disagreement holds for a human."
+
+  defp awake_hours_since(nil), do: nil
+
+  defp awake_hours_since(%DateTime{} = at),
+    do: Float.round(GiTF.Clock.awake_elapsed(at) / 3600, 2)
+
+  defp awake_hours_since(_), do: nil
+
+  defp serialize_triage_item(item) do
+    %{
+      status: to_string(item.status),
+      kind: to_string(item.kind),
+      title: item.title,
+      detail: item.detail,
+      rebuttal: item.rebuttal
+    }
+  end
+
   # Person-level identity is resolved at the HTTP edge (GiTF.Tailnet) and is
   # not plumbed down to tool handlers yet, so the actor recorded here is the
   # SURFACE, not the human. Recording "mcp" honestly beats trusting an
@@ -1658,6 +2009,13 @@ defmodule GiTF.MCPServer.Handlers do
       resume_seeding: m[:resume_seeding] == true,
       target_branch: m[:target_branch],
       cost_cap_usd: m[:cost_cap_usd],
+      # The two opposed requirement registers. `contested_requirements` is
+      # fail-closed and sticky: an id sits here until someone ARGUES it out,
+      # and it is what the next round's validator is made to answer. Reading
+      # them needed a gitf-console probe over SSM as recently as yesterday,
+      # which is exactly the coverage bug docs/MCP.md says to fix here.
+      contested_requirements: m[:contested_requirements] || [],
+      accepted_requirements: m[:accepted_requirements] || [],
       inserted_at: to_string(m[:inserted_at]),
       ops: Enum.map(ops, &serialize_op/1)
     }

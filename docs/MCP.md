@@ -18,6 +18,10 @@ this document rather than normalizing an SSM workaround.
 | Post-mortem a failure | `mission_diagnosis`, `show_artifact`, `show_op`, `ghost_output` | Diagnosis bundles artifacts + transitions; `show_artifact` reads a single phase artifact (incl. `exec_validation`, `conflict_markers`) |
 | Kill / close / delete | `kill_mission`, `close_mission`, `delete_mission` | All `confirm: true`; killed missions notify the requester before deletion |
 | Re-run a failure without re-running the pipeline | `resume_mission` | Param is **`id`** (the failed parent — same name as `show_mission`), not `mission_id`. **`confirm: true`, and resume IMPLIES start — no `start_mission` after.** Needs `archive/<parent_id>` in the sector clone (`fail_quest`/`kill` create it). v1 only re-enters at `from_phase: "validation"`. **Returns immediately**: the worktree is cut from the archive branch in the background, so the child comes back `status: "pending"` with `resume_seeding: true` — poll `show_mission` until it goes `active`. One live resume per parent: a repeat call returns the existing child with `already_resumed: true` and creates nothing |
+| Decide a held approval | `show_approval`, `approve_mission`, `reject_mission` | Param is **`id`** (the mission). `show_approval` is read-only and answers for pending/approved/rejected alike; the writes are `confirm: true` and act only on a **pending** approval — an already-decided one comes back `decided: false` with its `approval_status`, not an error. `reject_mission` also requires a non-empty **`reason`**. Both attribute to **`approved_by`/`rejected_by: "mcp_operator"`** — the MCP has no person-level identity (see Auth below), and the name deliberately avoids the `auto*` prefix so `Override.approve/2` treats it as a human decision and clears the phase gate. **Rejection is not a feedback loop:** it records the reason and terminal-fails the mission on the next advance sweep (tree survives as `archive/<id>`), but no ghost consumes the reason today |
+| Know whether to approve | `show_approval` | Returns the same `GiTF.Approval.Triage` output the Catwalk's approval panel renders — `fails` / `concerns` / `oks`, each item with `status`, `kind`, `title`, `detail`, `rebuttal` — plus a `tally` and the timeout state (`hours_configured`, awake `hours_elapsed`, `auto_approve_possible`). One module, two surfaces, so they cannot disagree. `approve_mission` over any `fails` still succeeds but the receipt carries `warning` + `approved_over_fails` naming them |
+| Approval timeout | `set_approval_timeout` | **`hours`** (>0, ≤720) + `confirm: true`. Factory-wide config (`[approvals] timeout_hours`), **not** per-sector like `set_validation_timeout` — persisted to the gitf root's `.gitf/config.toml` and `Provider.reload()`ed, so no restart and it survives one. Refuses when no gitf root resolves or the config file does not parse, rather than writing a file you did not name. The receipt's `timeout_hours` is **re-read after the reload**, not echoed, and carries a `warning` if a `HIVE_*` env var outranks the file |
+| Read the requirement registers | `show_mission` | `contested_requirements` (fail-closed, sticky — what the next validator must argue against) and `accepted_requirements` (the monotonic ratchet). Added after a console probe over SSM was needed to read them |
 | Op surgery | `show_op`, `reset_op`, `kill_op` | `show_op` carries `depends_on`, retry fields, audit_result, changed_files |
 | Ghost inspection | `list_ghosts`, `ghost_output`, `stop_ghost` | `ghost_output` requires `op_id` |
 | Money | `costs_summary`, `ledger_stats` | **Known gap:** per-mission cost attribution does not survive the 168h cost-record pruning (efficiency plan B5) |
@@ -51,7 +55,13 @@ only legitimate SSM/SSH uses:
   Connection timed out` means idle-stop fired. `gitf wake` (~60s), retry.
   Long-running watchers must treat timeouts as transient.
 - **Writes are gated**: every mutating tool requires `confirm: true` and
-  is audit-logged (`:audit_log`) with the real tailnet actor.
+  is audit-logged (`:audit_log`). The actor recorded is the **surface**,
+  not the human: tailnet identity is resolved at the HTTP edge and is not
+  plumbed down to tool handlers (the local socket listener has no peer
+  identity at all), so handler writes log `"mcp"` and approve/reject
+  attribute to `"mcp_operator"`. Person-level attribution over MCP is an
+  open gap — the dashboard, which does resolve it, is the surface to use
+  when who-decided matters.
 - **Oversized results**: `mission_diagnosis` and unfiltered `list_*`
   calls can exceed client token limits; clients should save-to-file and
   query structurally. Prefer the narrow tool (`show_artifact`,
