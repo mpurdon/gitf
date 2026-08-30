@@ -389,6 +389,89 @@ defmodule GiTF.MissionResumeTest do
     end
   end
 
+  # msn-978954: the parent judged FR-5 unmet, the resumed child's
+  # validator judged the identical code met — because the child's record
+  # started with both requirement registers empty and had no way to know
+  # the argument had already been had.
+  describe "resume/3 — the requirement registers cross the boundary" do
+    setup %{repo: repo, sector: sector, git: git} do
+      artifacts = %{
+        "requirements" => %{"reqs" => ["FR-1", "FR-5"]},
+        "validation" => %{
+          "overall_verdict" => "fail",
+          "requirements_met" => [
+            %{"req_id" => "FR-1", "met" => true},
+            %{"req_id" => "FR-5", "met" => false, "evidence" => "no retry on 5xx responses"}
+          ]
+        }
+      }
+
+      parent = mission_with_work(sector, repo, git, artifacts: artifacts)
+
+      # The ratchet had banked BOTH — including the one the same round
+      # rejected, which is the state a mid-flight fix round leaves behind.
+      Missions.update(parent.mission_id, %{accepted_requirements: ["FR-1", "FR-5"]})
+      {:ok, _} = Missions.fail_quest(parent.mission_id, "validation never converged")
+
+      {:ok, child} = Missions.resume(parent.mission_id, "validation", advance: false)
+
+      %{parent: parent, child: child}
+    end
+
+    test "the parent's UNMET verdict arrives contested, with its reason", %{child: child} do
+      assert child[:contested_requirements] == [
+               %{"req_id" => "FR-5", "reason" => "no retry on 5xx responses"}
+             ]
+    end
+
+    test "the accepted set loses whatever is still contested", %{child: child} do
+      # An id on both registers is a contradiction, and only the
+      # fail-closed reading is safe: inheriting FR-5 as accepted would
+      # pin it in the child's prompt as SETTLED — the ratchet doing the
+      # false pass' work for it.
+      assert child[:accepted_requirements] == ["FR-1"]
+    end
+
+    test "the parent's registers are not disturbed", %{parent: parent} do
+      {:ok, reloaded} = Missions.get(parent.mission_id)
+      assert reloaded[:accepted_requirements] == ["FR-1", "FR-5"]
+    end
+  end
+
+  describe "resume/3 — probe residue committed by an earlier run" do
+    test "a tree seeded with committed probe screenshots arrives without them", %{
+      repo: repo,
+      sector: sector,
+      git: git
+    } do
+      parent = mission_with_work(sector, repo, git)
+
+      # The state every pre-guard run left behind: the probe's PNGs are
+      # in HEAD. Nothing downstream removes tracked files, so without the
+      # seed-time scrub they ride into the resumed run's every diff and
+      # out through its PR.
+      File.mkdir_p!(Path.join(parent.worktree, ".gitf-probe"))
+      File.write!(Path.join([parent.worktree, ".gitf-probe", "boot.png"]), "PNG")
+      git.(["add", "-Af"], parent.worktree)
+      git.(["commit", "-qm", "probe residue"], parent.worktree)
+
+      {:ok, _} = Missions.fail_quest(parent.mission_id, "died")
+      {:ok, child} = Missions.resume(parent.mission_id, "validation", advance: false)
+
+      [op] = Ops.list(mission_id: child.id)
+      ghost = Archive.get(:ghosts, op.ghost_id)
+      shell = Archive.get(:shells, ghost.shell_id)
+
+      {tracked, 0} = System.cmd(@git, ["ls-files"], cd: shell.worktree_path)
+      refute tracked =~ ".gitf-probe"
+      refute File.exists?(Path.join([shell.worktree_path, ".gitf-probe", "boot.png"]))
+
+      # The inherited WORK is still there — the scrub removes residue, not
+      # the tree it is sitting in.
+      assert File.exists?(Path.join(shell.worktree_path, "feature.ex"))
+    end
+  end
+
   # A parent has exactly ONE resumable tree, so it may have at most one
   # live child. Two MCP calls that timed out client-side (while succeeding
   # server-side) produced FOUR missions racing for the same archive branch.

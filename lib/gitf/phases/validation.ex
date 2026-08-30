@@ -56,6 +56,26 @@ defmodule GiTF.Phases.Validation do
         ghost), then `:wait`. The next poll cycle sees the validation
         artifact go stale, re-spawns validation, and the loop continues.
 
+  ## The two requirement registers
+
+  `verdict/2` maintains a pair of opposed registers on the mission before
+  it judges anything:
+
+    * `accepted_requirements` — the ratchet. Monotonic, fail-open:
+      whatever a validator accepted stays accepted, and the next round's
+      prompt pins it as SETTLED so the fix budget goes to the open set.
+    * `contested_requirements` — the counter-ratchet. Fail-CLOSED:
+      whatever a validator rejected stays rejected until someone argues
+      it out of that state. `enforce_contested_rebuttals/1` mechanically
+      downgrades a `met: true` on a contested id that carries no
+      rebuttal, so the flip that shipped msn-978954's FR-5 gap — same
+      code, opposite verdict, the concern quietly re-filed as "minor" —
+      costs a round instead of nothing.
+
+  Contestation crosses the resume boundary: `GiTF.Missions` seeds a
+  resumed child from its whole lineage, so a child cannot un-know what
+  its parent found.
+
   ## Workflow YAML
 
       - id: validation
@@ -107,9 +127,17 @@ defmodule GiTF.Phases.Validation do
   # `GiTF.Tournament` instead of a single `validation` key.
   @impl true
   def verdict(mission, _artifact) when is_map(mission) do
+    # Order is load-bearing. The rebuttal gate runs FIRST because the
+    # ratchet is monotonic: once it banks a `met: true`, no later pass can
+    # take it back, so an unrebutted flip that reaches the ratchet is
+    # settled forever. Contested recording runs after the ratchet so an
+    # id the ratchet just accepted drops out of the contested set in the
+    # same pass rather than being quoted at the next round as still open.
     mission =
       mission
+      |> enforce_contested_rebuttals()
       |> record_accepted_requirements()
+      |> record_contested_requirements()
       |> clear_respawns_if_validated()
 
     cond do
@@ -338,11 +366,19 @@ defmodule GiTF.Phases.Validation do
   end
 
   defp validation_artifacts(mission) do
+    mission |> validation_artifact_pairs() |> Enum.map(fn {_key, artifact} -> artifact end)
+  end
+
+  # The same set with the storage key attached, for the callers that must
+  # write an artifact back rather than only read it. Sorted so a
+  # tournament's variants are visited in a stable order — the contested
+  # merge is last-writer-wins, and "last" must not depend on map layout.
+  defp validation_artifact_pairs(mission) do
     (Map.get(mission, :artifacts) || %{})
     |> Enum.filter(fn {key, value} ->
       is_binary(key) and String.starts_with?(key, "validation") and is_map(value)
     end)
-    |> Enum.map(fn {_key, artifact} -> artifact end)
+    |> Enum.sort_by(fn {key, _artifact} -> key end)
   end
 
   # A validator DID report on this mission, so the "nobody is coming"
@@ -364,6 +400,277 @@ defmodule GiTF.Phases.Validation do
   end
 
   defp met_requirement_ids(_), do: []
+
+  # -- The counter-ratchet: requirements a validator already REJECTED ---------
+
+  # Below this, a "rebuttal" is not an argument. The floor is crude on
+  # purpose — it cannot judge whether the reasoning is sound, only that
+  # reasoning was offered. "fixed", "now works", "see the diff" are
+  # precisely what an amnesiac flip looks like, and all three fit in a
+  # dozen characters.
+  @rebuttal_min_chars 40
+
+  @doc false
+  @spec rebuttal_min_chars() :: pos_integer()
+  def rebuttal_min_chars, do: @rebuttal_min_chars
+
+  # What a contested entry says when no validator ever articulated why.
+  @default_contested_reason "previously judged unmet"
+
+  @doc """
+  Downgrades every `met: true` verdict on an OPEN contested requirement
+  that arrives without a rebuttal, rewriting the offending artifact in
+  place and failing its round.
+
+  msn-978954 is the whole argument. Its parent (msn-398fa4) judged FR-5
+  unmet with a specific reason; the resumed child's validator looked at
+  byte-identical code and called it met — while filing the very same
+  concern in `gaps` as "minor, non-blocking". Nothing in the pipeline
+  ever made it confront the earlier verdict, so the flip cost nothing
+  and the mission shipped the gap. A verdict that can move without the
+  code moving is not a verdict.
+
+  This is the fail-closed twin of `record_accepted_requirements/1`. The
+  ratchet banks agreement; this gate prices disagreement. Flipping a
+  contested requirement is still permitted — it must merely be argued:
+  a `rebuttal` of at least `#{@rebuttal_min_chars}` characters naming
+  what in the current tree answers the quoted reason, or why the prior
+  verdict was wrong. Anything less is rewritten to `met: false` and the
+  artifact's verdict to `fail`, which routes the round back into the fix
+  loop instead of into approval.
+
+  Two artifacts are left alone:
+
+    * one already carrying `requires_approval` — `validate_pass/2` has
+      run, the mission has moved, and rewriting a verdict that has
+      already been acted on would only desynchronise the record from
+      what happened;
+    * one with nothing to downgrade, which is also what makes this
+      idempotent: the rewrite itself clears the condition it matches on,
+      so the next poll finds no violation.
+
+  The mission comes back with the rewritten artifacts patched into its
+  in-memory `:artifacts` as well as stored. That is not cosmetic —
+  `record_accepted_requirements/1` reads the in-memory map, and a stale
+  copy would let it bank the very flip this gate just rejected.
+  """
+  @spec enforce_contested_rebuttals(map()) :: map()
+  def enforce_contested_rebuttals(mission) do
+    open = open_contested(mission)
+
+    if open == %{} do
+      mission
+    else
+      mission
+      |> validation_artifact_pairs()
+      |> Enum.reduce(mission, fn {key, artifact}, acc ->
+        enforce_in_artifact(acc, key, artifact, open)
+      end)
+    end
+  end
+
+  # Contested minus accepted. Enforcement is the only door through which
+  # a contested id reaches `accepted_requirements`, so an id on both
+  # lists was rebutted at some point and is settled.
+  defp open_contested(mission) do
+    accepted = MapSet.new(Map.get(mission, :accepted_requirements) || [])
+
+    for entry <- Map.get(mission, :contested_requirements) || [],
+        is_map(entry),
+        id = entry["req_id"],
+        is_binary(id) and id != "",
+        not MapSet.member?(accepted, id),
+        into: %{},
+        do: {id, contested_reason(entry)}
+  end
+
+  defp enforce_in_artifact(mission, key, artifact, open) do
+    if Map.has_key?(artifact, "requires_approval") do
+      mission
+    else
+      case unrebutted_ids(artifact, open) do
+        [] -> mission
+        ids -> downgrade_unrebutted(mission, key, artifact, ids, open)
+      end
+    end
+  end
+
+  defp unrebutted_ids(%{"requirements_met" => entries}, open) when is_list(entries) do
+    for entry <- entries,
+        is_map(entry),
+        entry["met"] == true,
+        id = entry["req_id"] || entry["id"],
+        is_binary(id),
+        Map.has_key?(open, id),
+        not rebutted?(entry),
+        do: id
+  end
+
+  defp unrebutted_ids(_artifact, _open), do: []
+
+  defp rebutted?(entry) do
+    case entry["rebuttal"] do
+      text when is_binary(text) -> String.length(String.trim(text)) >= @rebuttal_min_chars
+      _ -> false
+    end
+  end
+
+  defp downgrade_unrebutted(mission, key, artifact, ids, open) do
+    flagged = MapSet.new(ids)
+
+    entries =
+      Enum.map(artifact["requirements_met"], fn entry ->
+        if is_map(entry) and MapSet.member?(flagged, entry["req_id"] || entry["id"]) do
+          # The original evidence stays: it is the case the validator
+          # made, and a post-mortem needs to read it next to the verdict
+          # that rejected it.
+          entry |> Map.put("met", false) |> Map.put("rebuttal_missing", true)
+        else
+          entry
+        end
+      end)
+
+    rewritten =
+      artifact
+      |> Map.put("requirements_met", entries)
+      |> Map.put("gaps", existing_gaps(artifact) ++ Enum.map(ids, &downgrade_gap(&1, open[&1])))
+      |> Map.put("overall_verdict", "fail")
+
+    Missions.store_artifact(mission.id, key, rewritten)
+
+    Logger.warning(
+      "Quest #{mission.id}: contested-rebuttal gate downgraded #{Enum.join(ids, ", ")} " <>
+        "in artifact #{key} — marked met over a standing UNMET verdict with no rebuttal"
+    )
+
+    GiTF.Telemetry.emit([:gitf, :validation, :contested_downgraded], %{count: length(ids)}, %{
+      mission_id: mission.id,
+      req_ids: ids
+    })
+
+    Map.put(mission, :artifacts, Map.put(Map.get(mission, :artifacts) || %{}, key, rewritten))
+  end
+
+  defp existing_gaps(artifact) do
+    case artifact["gaps"] do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp downgrade_gap(id, reason) do
+    "#{id} was previously judged UNMET (#{reason || @default_contested_reason}). " <>
+      "This round marked it met without a rebuttal addressing that verdict — " <>
+      "downgraded to unmet. Fix the code, or flip it with an explicit rebuttal " <>
+      "citing what in the current tree answers the quoted reason."
+  end
+
+  @doc """
+  Merges every `met: false` requirement id from the mission's validation
+  artifacts into `mission.contested_requirements`, as
+  `%{"req_id" => id, "reason" => text}`.
+
+  The mirror of the ratchet, and deliberately NOT monotonic in the same
+  direction: an id leaves the contested set the moment it lands in
+  `accepted_requirements`, because `enforce_contested_rebuttals/1` is the
+  only path by which it can get there. The reason is last-writer-wins —
+  the freshest articulation of what is wrong is the one worth quoting at
+  the next round.
+
+  A downgraded entry (`rebuttal_missing`) contributes its id but no
+  reason. Its evidence argues that the requirement was met; it is the
+  text the gate has just rejected, and letting it become the contested
+  reason would replace the standing verdict with the flip's own case for
+  itself.
+  """
+  @spec record_contested_requirements(map()) :: map()
+  def record_contested_requirements(mission) do
+    previous = Map.get(mission, :contested_requirements) || []
+    accepted = MapSet.new(Map.get(mission, :accepted_requirements) || [])
+
+    merged =
+      previous
+      |> normalize_contested()
+      |> merge_contested(unmet_in_artifacts(mission))
+      |> Enum.reject(fn %{"req_id" => id} -> MapSet.member?(accepted, id) end)
+
+    if merged == previous do
+      mission
+    else
+      GiTF.Archive.update(:missions, mission.id, &Map.put(&1, :contested_requirements, merged))
+      Map.put(mission, :contested_requirements, merged)
+    end
+  end
+
+  # Existing order is preserved and new ids append, so the merge converges
+  # to a fixed point after one write instead of churning the record on
+  # every poll.
+  defp merge_contested(previous, fresh) do
+    reasons =
+      Enum.reduce(fresh, Map.new(previous, &{&1["req_id"], &1["reason"]}), fn
+        {id, nil}, acc -> Map.put_new(acc, id, @default_contested_reason)
+        {id, reason}, acc -> Map.put(acc, id, reason)
+      end)
+
+    (Enum.map(previous, & &1["req_id"]) ++ Enum.map(fresh, &elem(&1, 0)))
+    |> Enum.uniq()
+    |> Enum.map(&%{"req_id" => &1, "reason" => Map.fetch!(reasons, &1)})
+  end
+
+  defp normalize_contested(entries) when is_list(entries) do
+    for entry <- entries,
+        is_map(entry),
+        id = entry["req_id"],
+        is_binary(id) and id != "",
+        do: %{"req_id" => id, "reason" => contested_reason(entry)}
+  end
+
+  defp normalize_contested(_), do: []
+
+  defp contested_reason(entry) do
+    case entry["reason"] do
+      text when is_binary(text) ->
+        case String.trim(text) do
+          "" -> @default_contested_reason
+          trimmed -> trimmed
+        end
+
+      _ ->
+        @default_contested_reason
+    end
+  end
+
+  defp unmet_in_artifacts(mission) do
+    mission
+    |> validation_artifacts()
+    |> Enum.flat_map(&unmet_requirements/1)
+  end
+
+  defp unmet_requirements(%{"requirements_met" => entries}) when is_list(entries) do
+    for entry <- entries,
+        is_map(entry),
+        entry["met"] == false,
+        id = entry["req_id"] || entry["id"],
+        is_binary(id) and id != "",
+        do: {id, unmet_reason(entry)}
+  end
+
+  defp unmet_requirements(_), do: []
+
+  defp unmet_reason(%{"rebuttal_missing" => true}), do: nil
+
+  defp unmet_reason(entry) do
+    case entry["evidence"] do
+      text when is_binary(text) ->
+        case String.trim(text) do
+          "" -> nil
+          trimmed -> trimmed
+        end
+
+      _ ->
+        nil
+    end
+  end
 
   defp validate_pass(mission, artifact) do
     Validation.emit_confidence(mission)

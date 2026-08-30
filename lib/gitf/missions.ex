@@ -28,6 +28,13 @@ defmodule GiTF.Missions do
   is for re-entering a loop that was working (validation ↔ fix) when the
   factory, not the work, gave out. Stacking resumes on resumes compounds
   provenance until no post-mortem can say where the defect entered.
+
+  One thing a resumed run may NOT inherit is a clean slate on the
+  verdicts that killed its parent. `inherited_contested/1` carries every
+  requirement the lineage judged unmet into the child's
+  `contested_requirements`, and the accepted set is reduced by it — msn-978954
+  passed a requirement its parent had rejected, on identical code, because
+  the child's validator was never told the argument had already been had.
   """
 
   require Logger
@@ -457,6 +464,9 @@ defmodule GiTF.Missions do
   end
 
   defp create_resumed_record(parent, from_phase, async?) do
+    contested = inherited_contested(parent)
+    contested_ids = Enum.map(contested, & &1["req_id"])
+
     with {:ok, child} <-
            create(%{
              goal: parent.goal,
@@ -478,8 +488,160 @@ defmodule GiTF.Missions do
         pipeline_mode: parent[:pipeline_mode],
         pipeline_mode_forced: parent[:pipeline_mode_forced] || false,
         target_branch: parent[:target_branch],
-        cost_cap_usd: parent[:cost_cap_usd]
+        cost_cap_usd: parent[:cost_cap_usd],
+        # The two requirement registers cross the resume boundary
+        # together, or the child's validator gets to un-know what its
+        # parent found. Accepted loses anything still contested: an id on
+        # both lists is a contradiction, and the fail-closed reading is
+        # the only safe one.
+        contested_requirements: contested,
+        accepted_requirements: inherited_accepted(parent, contested_ids)
       })
+    end
+  end
+
+  # Ten is a bound, not a belief: `resume/3` already refuses to stack a
+  # resume on a live one, and the module doc argues against stacking them
+  # at all. The cap exists so a cycle written by hand into the records
+  # cannot walk forever.
+  @resume_lineage_hops 10
+
+  @doc """
+  The requirements some validator in `parent`'s resume lineage judged
+  UNMET and nobody has since argued out of that state, as
+  `%{"req_id" => id, "reason" => text}`.
+
+  A `met: true` ANYWHERE in the history does not clear contestation — a
+  bare flip is exactly the false pass this contract closes (msn-978954:
+  the child's validator re-judged its parent's rejected FR-5 as met, on
+  identical code, while re-filing the same concern as "minor"). Only a
+  flip carrying a real rebuttal clears it, and that rule holds across the
+  lineage as well as within a run.
+
+  The cost of that strictness is deliberate and small: a requirement an
+  ancestor genuinely fixed arrives contested in the child, and the
+  child's validator spends one honest sentence citing the fix. The cost
+  of the alternative is a shipped gap nobody can see in the artifact.
+  """
+  @spec inherited_contested(map()) :: [map()]
+  def inherited_contested(parent) do
+    from_artifacts =
+      parent |> resume_lineage() |> Enum.flat_map(&lineage_requirement_entries/1)
+
+    entries = from_artifacts ++ contested_field_entries(parent)
+
+    rebutted =
+      for {:rebutted, id} <- entries, into: MapSet.new(), do: id
+
+    unmet =
+      for {:unmet, id, reason} <- entries,
+          not MapSet.member?(rebutted, id),
+          do: {id, reason}
+
+    # Map.new keeps the LAST value for a duplicate key, and the lineage is
+    # ordered oldest-first, so the freshest articulation of what is wrong
+    # is the one the next round gets quoted.
+    reasons = Map.new(unmet)
+
+    unmet
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.uniq()
+    |> Enum.map(&%{"req_id" => &1, "reason" => reasons[&1]})
+  end
+
+  defp inherited_accepted(parent, contested_ids) do
+    (parent[:accepted_requirements] || []) -- contested_ids
+  end
+
+  # Oldest ancestor first, `parent` last. A missing ancestor record (the
+  # mission was killed and reaped) truncates the walk rather than failing
+  # it — a partial lineage still contests more than no lineage.
+  defp resume_lineage(parent), do: walk_resume_lineage(parent, @resume_lineage_hops, [])
+
+  defp walk_resume_lineage(nil, _hops, acc), do: acc
+  defp walk_resume_lineage(record, 0, acc), do: [record | acc]
+
+  defp walk_resume_lineage(record, hops, acc) do
+    case record[:resumed_from] do
+      id when is_binary(id) ->
+        walk_resume_lineage(Archive.get(:missions, id), hops - 1, [record | acc])
+
+      _ ->
+        [record | acc]
+    end
+  end
+
+  # Same key rule as `Phases.Validation.validation_artifacts/1`, restated
+  # against a raw Archive record (that one reads a loaded mission map).
+  # Sorted so a tournament's variants contribute in a stable order.
+  defp lineage_requirement_entries(record) do
+    mission_id = record[:id]
+
+    (Map.get(record, :artifacts) || %{})
+    |> Enum.filter(fn {key, value} ->
+      is_binary(key) and String.starts_with?(key, "validation") and is_map(value)
+    end)
+    |> Enum.sort_by(fn {key, _artifact} -> key end)
+    |> Enum.flat_map(fn {_key, artifact} -> requirement_entries(artifact, mission_id) end)
+  end
+
+  defp requirement_entries(%{"requirements_met" => entries}, mission_id) when is_list(entries) do
+    for entry <- entries,
+        is_map(entry),
+        id = entry["req_id"] || entry["id"],
+        is_binary(id) and id != "",
+        classified = classify_requirement_entry(entry, id, mission_id),
+        classified != nil,
+        do: classified
+  end
+
+  defp requirement_entries(_artifact, _mission_id), do: []
+
+  defp classify_requirement_entry(entry, id, mission_id) do
+    cond do
+      entry["met"] == false -> {:unmet, id, lineage_unmet_reason(entry, mission_id)}
+      entry["met"] == true and lineage_rebutted?(entry) -> {:rebutted, id}
+      true -> nil
+    end
+  end
+
+  defp lineage_rebutted?(entry) do
+    case entry["rebuttal"] do
+      text when is_binary(text) ->
+        String.length(String.trim(text)) >= GiTF.Phases.Validation.rebuttal_min_chars()
+
+      _ ->
+        false
+    end
+  end
+
+  defp lineage_unmet_reason(entry, mission_id) do
+    case entry["evidence"] do
+      text when is_binary(text) ->
+        case String.trim(text) do
+          "" -> "previously judged unmet in #{mission_id}"
+          trimmed -> trimmed
+        end
+
+      _ ->
+        "previously judged unmet in #{mission_id}"
+    end
+  end
+
+  # The parent's own register, applied last so a standing verdict the
+  # parent recorded outranks the artifact it was derived from.
+  defp contested_field_entries(parent) do
+    for entry <- parent[:contested_requirements] || [],
+        is_map(entry),
+        id = entry["req_id"],
+        is_binary(id) and id != "",
+        do: {:unmet, id, contested_field_reason(entry)}
+  end
+
+  defp contested_field_reason(entry) do
+    case entry["reason"] do
+      text when is_binary(text) and text != "" -> text
+      _ -> "previously judged unmet"
     end
   end
 
@@ -549,6 +711,8 @@ defmodule GiTF.Missions do
           "(op #{op.id}, ghost #{ghost.id}, worktree #{shell.worktree_path})"
       )
 
+      scrub_seeded_residue(child, shell.worktree_path)
+
       {:ok, op}
     else
       {:error, reason} ->
@@ -558,6 +722,32 @@ defmodule GiTF.Missions do
         Logger.error("Quest #{child.id}: could not seed inherited tree: #{inspect(reason)}")
         fail_quest(child.id, "Resume could not provision the inherited worktree")
         {:error, {:seed_failed, reason}}
+    end
+  end
+
+  # The seeded tree is the ONLY moment the factory can undo a commit an
+  # earlier run made before the residue guards existed: from here on
+  # every sink protects the index but nothing removes what is already
+  # tracked, so the inherited `.gitf-probe/*.png` would ride out through
+  # the resumed run's PR. Strictly best-effort — a scrub that fails
+  # leaves the run cosmetically dirty, and failing the seed over it would
+  # trade a cosmetic defect for a dead mission.
+  defp scrub_seeded_residue(child, worktree_path) do
+    case GiTF.Git.scrub_committed_residue(worktree_path) do
+      {:ok, paths} ->
+        Logger.info(
+          "Quest #{child.id}: scrubbed committed probe residue from the inherited tree " <>
+            "(#{Enum.join(paths, ", ")})"
+        )
+
+      {:error, reason} ->
+        Logger.warning(
+          "Quest #{child.id}: could not scrub committed probe residue " <>
+            "(#{inspect(reason)}) — continuing; the residue rides along"
+        )
+
+      :noop ->
+        :ok
     end
   end
 

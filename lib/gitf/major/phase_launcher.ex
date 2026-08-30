@@ -625,6 +625,7 @@ defmodule GiTF.Major.PhaseLauncher do
         exec_validation: exec_validation,
         infra_notes: infra_notes,
         accepted_requirements: Map.get(mission, :accepted_requirements) || [],
+        contested_requirements: open_contested_requirements(mission),
         merge_conflicts: merge_conflicts,
         base_moved: base_moved,
         unresolved_review: GiTF.Phases.Review.unresolved_objection(mission)
@@ -640,6 +641,23 @@ defmodule GiTF.Major.PhaseLauncher do
 
     opts = [model: "general"] ++ base_opts ++ if variant_id, do: [variant: variant_id], else: []
     spawn_phase_ghost(mission, "validation", prompt, opts)
+  end
+
+  # The contested set minus whatever has since been accepted. The two
+  # registers are opposed, and an id on both was rebutted at some point —
+  # `Phases.Validation.enforce_contested_rebuttals/1` is the only door
+  # through which a contested id reaches `accepted_requirements`. Quoting
+  # a settled verdict back at the validator would re-open work the
+  # factory has already banked, which is exactly what the ratchet exists
+  # to prevent.
+  defp open_contested_requirements(mission) do
+    accepted = MapSet.new(Map.get(mission, :accepted_requirements) || [])
+
+    (Map.get(mission, :contested_requirements) || [])
+    |> Enum.filter(fn entry ->
+      is_map(entry) and is_binary(entry["req_id"]) and
+        not MapSet.member?(accepted, entry["req_id"])
+    end)
   end
 
   # -- Nothing gathered for the prompt may abort the spawn ---------------------

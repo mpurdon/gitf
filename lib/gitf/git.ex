@@ -887,6 +887,67 @@ defmodule GiTF.Git do
     end
   end
 
+  # The subset of `@residue_paths` a scrub is allowed to DELETE. `.claude/`
+  # is deliberately absent: a sector repo may legitimately track it (this
+  # one commits `.claude/commands/*.md`), and nothing in a worktree
+  # distinguishes an operator's committed agent config from a ghost's
+  # generated settings. Deleting the former would be a far worse defect
+  # than leaving the latter. The probe directories carry no such
+  # ambiguity — only the factory's own runtime probe ever writes them.
+  @scrubbable_residue_paths [".gitf-probe/", ".gitf-probe-home/"]
+
+  @residue_scrub_message "chore(factory): scrub probe residue inherited from an earlier run"
+
+  @doc """
+  Deletes probe residue that an EARLIER run committed to `wt`'s branch,
+  as one commit.
+
+  Every guard the factory has is a guard against residue being committed
+  from now on: `unstage_residue/1` cleans the index at each commit sink,
+  and `tree_fingerprint/1` no longer sees the probe directory at all.
+  None of them touch what is ALREADY tracked. A tree seeded from a
+  mission that ran before those guards existed carries `.gitf-probe/*.png`
+  in HEAD, and no other code path will ever remove it — the screenshots
+  ride into every diff the resumed run produces and out through its PR.
+
+  Only `@scrubbable_residue_paths` are eligible, and only when tracked.
+  Returns `{:ok, paths}` naming what was removed, `:noop` when the tree
+  carries none, `{:error, reason}` when git refused (an uncommitted
+  modification to a tracked residue file will do it — `-f` is withheld on
+  purpose, since a scrub may destroy history but never live work).
+
+  Never raises: this is hygiene, and hygiene is not allowed to fail the
+  thing it is cleaning.
+  """
+  @spec scrub_committed_residue(String.t()) :: {:ok, [String.t()]} | :noop | {:error, String.t()}
+  def scrub_committed_residue(wt) do
+    case Enum.filter(@scrubbable_residue_paths, &tracked_path?(wt, &1)) do
+      [] ->
+        :noop
+
+      paths ->
+        with {_, 0} <-
+               safe_cmd(["-C", wt, "rm", "-r", "-q", "--"] ++ paths, stderr_to_stdout: true),
+             {_, 0} <-
+               safe_cmd(["-C", wt, "commit", "-q", "-m", @residue_scrub_message],
+                 stderr_to_stdout: true
+               ) do
+          {:ok, paths}
+        else
+          {out, code} -> {:error, "git exited #{code}: #{String.slice(to_string(out), 0, 200)}"}
+        end
+    end
+  rescue
+    e -> {:error, "residue scrub raised: #{Exception.message(e)}"}
+  end
+
+  defp tracked_path?(wt, path) do
+    case safe_cmd(["-C", wt, "ls-files", "--", path]) do
+      {out, 0} -> String.trim(to_string(out)) != ""
+      _ -> false
+    end
+  end
+
   @doc """
   Reverts uncommitted changes to TRACKED files in `wt`, returning the list
   of paths that were restored (empty when the tree was already clean).

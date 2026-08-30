@@ -813,6 +813,9 @@ defmodule GiTF.Major.PhasePrompts do
     accepted_block =
       render_accepted_requirements_block(Keyword.get(opts, :accepted_requirements, []))
 
+    contested_block =
+      render_contested_requirements_block(Keyword.get(opts, :contested_requirements, []))
+
     # An overruled design review is a live lead for validation: the
     # reviewer's unresolved concern is exactly where the implementation is
     # most likely to fall short of the requirements.
@@ -924,7 +927,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-    #{changed_files_block}#{accepted_block}#{lsp_diagnostics_block}#{exec_validation_block}#{infra_notes_block}#{base_moved_block}#{merge_conflicts_block}#{unresolved_review_block}
+    #{changed_files_block}#{accepted_block}#{contested_block}#{lsp_diagnostics_block}#{exec_validation_block}#{infra_notes_block}#{base_moved_block}#{merge_conflicts_block}#{unresolved_review_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's
@@ -1003,6 +1006,53 @@ defmodule GiTF.Major.PhasePrompts do
     the execution validation above is ground truth. If either fails, the
     verdict is `fail` — even when every requirement is accepted.
     """
+  end
+
+  # The counter-ratchet. msn-978954's validator read the same code its
+  # parent's validator had already judged short on FR-5, called it met,
+  # and filed the identical concern in `gaps` as "minor, non-blocking" —
+  # because nothing in the prompt made it confront the standing verdict.
+  # The floor is quoted from `GiTF.Phases.Validation` rather than repeated
+  # here: a prompt that advertises a threshold the gate does not enforce
+  # is worse than no prompt at all.
+  defp render_contested_requirements_block([]), do: ""
+
+  defp render_contested_requirements_block(entries) when is_list(entries) do
+    floor = GiTF.Phases.Validation.rebuttal_min_chars()
+
+    lines =
+      entries
+      |> Enum.filter(&(is_map(&1) and is_binary(&1["req_id"])))
+      |> Enum.map_join("\n", fn entry -> "- #{entry["req_id"]}: #{entry["reason"]}" end)
+
+    if lines == "" do
+      ""
+    else
+      """
+
+      ## PREVIOUSLY JUDGED UNMET — a flip requires a rebuttal
+
+      An earlier validation round — this mission, or the lineage it was
+      resumed from — judged these requirements UNMET, for the reasons
+      quoted:
+
+      ```
+      #{lines}
+      ```
+
+      A verdict may not flip on amnesia. To report any of these with
+      `met: true`, that entry MUST also carry a `rebuttal` field of at
+      least #{floor} characters that either names the specific code change
+      which answers the quoted reason, or explains concretely why the prior
+      verdict was wrong. `met: true` here WITHOUT such a rebuttal is
+      mechanically downgraded to unmet by the factory and fails the round —
+      and that includes marking it met while filing the same concern in
+      `gaps` as minor or non-blocking.
+
+      If the quoted reason still stands, say so. `met: false` with the
+      evidence is the honest answer and costs you nothing.
+      """
+    end
   end
 
   # The factory could not obtain its own read on the tree this round.

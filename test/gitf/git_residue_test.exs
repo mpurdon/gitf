@@ -53,6 +53,22 @@ defmodule GiTF.GitResidueTest do
     out |> String.split("\n", trim: true)
   end
 
+  defp tracked(wt) do
+    {out, 0} = System.cmd(@git, ["ls-files"], cd: wt)
+    String.split(out, "\n", trim: true)
+  end
+
+  defp head_count(wt) do
+    {out, 0} = System.cmd(@git, ["rev-list", "--count", "HEAD"], cd: wt)
+    out |> String.trim() |> String.to_integer()
+  end
+
+  defp commit_probe_residue!(wt, git) do
+    write_probe_artifacts!(wt)
+    git.(["add", "-Af"])
+    git.(["commit", "-qm", "an earlier run committed the probe output"])
+  end
+
   describe "tree_fingerprint/1 ignores probe residue" do
     test "a tree that differs only by probe artifacts has the SAME fingerprint", %{wt: wt} do
       before = Git.tree_fingerprint(wt)
@@ -125,6 +141,72 @@ defmodule GiTF.GitResidueTest do
       Git.unstage_residue(wt)
 
       assert File.exists?(Path.join([wt, ".gitf-probe", "boot.png"]))
+    end
+  end
+
+  # Every other guard here protects the index from now on. None of them
+  # touch what an earlier run already COMMITTED — and a resumed mission's
+  # tree is cut from exactly such a run, so the inherited screenshots ride
+  # into every diff it produces and out through its PR.
+  describe "scrub_committed_residue/1" do
+    test "removes committed probe output and records the removal", %{wt: wt, git: git} do
+      commit_probe_residue!(wt, git)
+      assert Enum.any?(tracked(wt), &String.starts_with?(&1, ".gitf-probe/"))
+      before = head_count(wt)
+
+      assert {:ok, paths} = Git.scrub_committed_residue(wt)
+      assert ".gitf-probe/" in paths
+      assert ".gitf-probe-home/" in paths
+
+      refute Enum.any?(tracked(wt), &String.starts_with?(&1, ".gitf-probe"))
+      refute File.exists?(Path.join([wt, ".gitf-probe", "boot.png"]))
+      assert head_count(wt) == before + 1
+    end
+
+    test "the ghost's real work is left alone", %{wt: wt, git: git} do
+      commit_probe_residue!(wt, git)
+
+      assert {:ok, _} = Git.scrub_committed_residue(wt)
+
+      assert "README.md" in tracked(wt)
+      assert File.exists?(Path.join(wt, "README.md"))
+    end
+
+    test "a clean tree is a noop, and costs no commit", %{wt: wt} do
+      before = head_count(wt)
+
+      assert Git.scrub_committed_residue(wt) == :noop
+      assert head_count(wt) == before
+    end
+
+    test "UNCOMMITTED probe output is not the scrub's business", %{wt: wt} do
+      write_probe_artifacts!(wt)
+
+      # `unstage_residue/1` already keeps this out of every commit, and
+      # deleting a live probe's working files would break the probe.
+      assert Git.scrub_committed_residue(wt) == :noop
+      assert File.exists?(Path.join([wt, ".gitf-probe", "boot.png"]))
+    end
+
+    test "a repo that legitimately tracks .claude/ keeps it", %{wt: wt, git: git} do
+      # `.claude/` is residue at a commit sink and NOT scrubbable here:
+      # nothing in a worktree distinguishes an operator's committed agent
+      # config from a ghost's generated settings, and deleting the former
+      # would be a far worse defect than leaving the latter.
+      File.mkdir_p!(Path.join(wt, ".claude"))
+      File.write!(Path.join([wt, ".claude", "settings.json"]), "{}")
+      git.(["add", "-Af"])
+      git.(["commit", "-qm", "the operator's own agent config"])
+
+      assert Git.scrub_committed_residue(wt) == :noop
+      assert ".claude/settings.json" in tracked(wt)
+    end
+
+    test "a path that is not a git repo answers, rather than raising" do
+      # Nothing is tracked where there is no repo, and a scrub is hygiene:
+      # it may not raise in the middle of seeding the tree it is cleaning.
+      assert Git.scrub_committed_residue(Path.join(System.tmp_dir!(), "gitf_not_a_repo")) ==
+               :noop
     end
   end
 
