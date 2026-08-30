@@ -1814,9 +1814,13 @@ defmodule GiTF.Ghost.Worker do
                 _ -> "op #{state.op_id}"
               end
 
-            # Add all changes except .claude/ (generated settings that cause merge conflicts)
+            # Add all changes except the factory's own residue — generated
+            # `.claude/` settings (merge conflicts between siblings) and the
+            # runtime probe's `.gitf-probe*` screenshots, which every fix op
+            # re-committed and which churned the exec-validation verdict
+            # cache's tree fingerprint. See `GiTF.Git.residue_paths/0`.
             safe_git_cmd(["add", "-A"], path, 30_000)
-            safe_git_cmd(["reset", "HEAD", "--", ".claude/"], path, 30_000)
+            GiTF.Git.unstage_residue(path)
 
             # Lockfile rewritten without its manifest = install residue from a
             # build/test run, not the ghost's work — keep it out of the commit

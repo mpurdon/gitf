@@ -17,7 +17,7 @@ this document rather than normalizing an SSM workaround.
 | Watch a mission | `show_mission`, `mission_timeline`, `list_ops` | `show_mission` includes ops, pipeline mode, provenance, and (since 0.65.226) `failure_reason` |
 | Post-mortem a failure | `mission_diagnosis`, `show_artifact`, `show_op`, `ghost_output` | Diagnosis bundles artifacts + transitions; `show_artifact` reads a single phase artifact (incl. `exec_validation`, `conflict_markers`) |
 | Kill / close / delete | `kill_mission`, `close_mission`, `delete_mission` | All `confirm: true`; killed missions notify the requester before deletion |
-| Re-run a failure without re-running the pipeline | `resume_mission` | **`confirm: true`, and resume IMPLIES start — no `start_mission` after.** Needs `archive/<parent_id>` in the sector clone (`fail_quest`/`kill` create it). v1 only re-enters at `from_phase: "validation"` |
+| Re-run a failure without re-running the pipeline | `resume_mission` | Param is **`id`** (the failed parent — same name as `show_mission`), not `mission_id`. **`confirm: true`, and resume IMPLIES start — no `start_mission` after.** Needs `archive/<parent_id>` in the sector clone (`fail_quest`/`kill` create it). v1 only re-enters at `from_phase: "validation"`. **Returns immediately**: the worktree is cut from the archive branch in the background, so the child comes back `status: "pending"` with `resume_seeding: true` — poll `show_mission` until it goes `active`. One live resume per parent: a repeat call returns the existing child with `already_resumed: true` and creates nothing |
 | Op surgery | `show_op`, `reset_op`, `kill_op` | `show_op` carries `depends_on`, retry fields, audit_result, changed_files |
 | Ghost inspection | `list_ghosts`, `ghost_output`, `stop_ghost` | `ghost_output` requires `op_id` |
 | Money | `costs_summary`, `ledger_stats` | **Known gap:** per-mission cost attribution does not survive the 168h cost-record pruning (efficiency plan B5) |
@@ -68,6 +68,16 @@ only legitimate SSM/SSH uses:
   `inherited from <parent_id>` to keep them apart from real ones. If a
   resumed run fails in a way that could implicate inherited state, the
   answer is a fresh full run, not a second resume.
+- **A resume response is a receipt, not a finished job**: the call
+  returns as soon as the mission record and its inherited provenance
+  exist. Worktree seeding (and the first `advance_quest`) run in a
+  supervised task behind it, which is why the response carries
+  `seeding: true` and the mission starts at `status: "pending"`. If
+  seeding fails, the mission is FAILED with a `failure_reason` naming
+  it — never left pending. Do not retry on a slow response: retries are
+  answered from the existing child (`already_resumed: true`), because two
+  timed-out calls once produced four missions racing for one archive
+  branch.
 
 ## Implementation
 

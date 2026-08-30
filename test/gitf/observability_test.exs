@@ -115,4 +115,29 @@ defmodule GiTF.ObservabilityTest do
       assert Map.has_key?(status, :alerts)
     end
   end
+
+  # Measured 2026-08-29: this process held 303MB of a 912MB BEAM. It keeps
+  # nothing — `Medic.run_all/1` and `Alerts.check_alerts/0` just allocate
+  # large lists once a minute, and a GenServer heap keeps its high-water
+  # mark until something hands it back.
+  describe "periodic check memory" do
+    # One `run_checks/0` for both claims: it is the expensive call this
+    # whole describe block is about, and running it twice would only widen
+    # the window in which this (non-async, store-restarting) suite can
+    # collide with the async ones.
+    test "the check hibernates and carries nothing forward" do
+      state = %{interval: 60_000}
+
+      assert {:noreply, after_check, :hibernate} =
+               Observability.handle_info(:run_checks, state)
+
+      assert after_check == state, "no check result may be retained in the process state"
+      assert Map.keys(after_check) == [:interval]
+    end
+
+    test "unknown messages are dropped without touching the state" do
+      state = %{interval: 60_000}
+      assert Observability.handle_info(:something_else, state) == {:noreply, state}
+    end
+  end
 end

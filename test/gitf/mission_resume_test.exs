@@ -388,4 +388,171 @@ defmodule GiTF.MissionResumeTest do
       refute reloaded[:resumed_from]
     end
   end
+
+  # A parent has exactly ONE resumable tree, so it may have at most one
+  # live child. Two MCP calls that timed out client-side (while succeeding
+  # server-side) produced FOUR missions racing for the same archive branch.
+  describe "resume/3 — one live resume per parent" do
+    setup %{repo: repo, sector: sector, git: git} do
+      parent = mission_with_work(sector, repo, git)
+      {:ok, _} = Missions.fail_quest(parent.mission_id, "died")
+      {:ok, first} = Missions.resume(parent.mission_id, "validation", advance: false)
+
+      %{parent: parent, first: first}
+    end
+
+    test "a second resume returns the FIRST child and creates nothing", %{
+      parent: parent,
+      first: first
+    } do
+      assert {:ok, again} = Missions.resume(parent.mission_id, "validation", advance: false)
+      assert again.id == first.id
+
+      children = Archive.filter(:missions, &(&1[:resumed_from] == parent.mission_id))
+      assert length(children) == 1
+    end
+
+    test "the repeat is reported as :already_resumed, not as a new mission", %{
+      parent: parent,
+      first: first
+    } do
+      assert {:ok, mission, :already_resumed} =
+               Missions.resume_with_status(parent.mission_id, "validation", advance: false)
+
+      assert mission.id == first.id
+    end
+
+    test "the FIRST call is reported as :created", %{repo: repo, sector: sector, git: git} do
+      other = mission_with_work(sector, repo, git)
+      {:ok, _} = Missions.fail_quest(other.mission_id, "died")
+
+      assert {:ok, _mission, :created} =
+               Missions.resume_with_status(other.mission_id, "validation", advance: false)
+    end
+
+    test "a SPENT child releases the parent for another resume", %{
+      parent: parent,
+      first: first
+    } do
+      # The guard is about live work, not about history: a failed resume
+      # must not lock the parent out forever.
+      {:ok, _} = Missions.fail_quest(first.id, "the resume failed too")
+
+      assert {:ok, second, :created} =
+               Missions.resume_with_status(parent.mission_id, "validation", advance: false)
+
+      refute second.id == first.id
+    end
+
+    test "live_resume_of/1 names the child, or nothing", %{parent: parent, first: first} do
+      assert Missions.live_resume_of(parent.mission_id)[:id] == first.id
+      assert Missions.live_resume_of("msn-unrelated") == nil
+    end
+  end
+
+  # The synchronous seed took >60s under load, the MCP client timed out,
+  # and the operator retried a call that had in fact succeeded.
+  describe "resume/3 — async seeding" do
+    setup %{repo: repo, sector: sector, git: git} do
+      parent = mission_with_work(sector, repo, git)
+      {:ok, _} = Missions.fail_quest(parent.mission_id, "died")
+
+      %{parent: parent}
+    end
+
+    test "returns before the worktree exists, parked at pending", %{parent: parent} do
+      assert {:ok, child, :created} =
+               Missions.resume_with_status(parent.mission_id, "validation",
+                 async: true,
+                 advance: false
+               )
+
+      assert child.resumed_from == parent.mission_id
+      # "pending", not "active": nothing may advance a mission whose tree
+      # has not been cut yet.
+      assert child.status == "pending"
+      assert child[:resume_seeding] == true
+    end
+
+    test "the seeding task finishes the job", %{parent: parent} do
+      {:ok, child, :created} =
+        Missions.resume_with_status(parent.mission_id, "validation",
+          async: true,
+          advance: false
+        )
+
+      assert eventually(fn ->
+               {:ok, m} = Missions.get(child.id)
+               m.status == "active" and m.current_phase == "implementation"
+             end)
+
+      {:ok, seeded} = Missions.get(child.id)
+      refute seeded[:resume_seeding]
+
+      [op] = Ops.list(mission_id: child.id)
+      ghost = Archive.get(:ghosts, op.ghost_id)
+      shell = Archive.get(:shells, ghost.shell_id)
+      assert File.exists?(Path.join(shell.worktree_path, "feature.ex"))
+    end
+
+    test "a seeding failure FAILS the mission with a reason — never a pending zombie", %{
+      repo: repo,
+      sector: sector,
+      git: git
+    } do
+      parent = mission_with_work(sector, repo, git)
+      {:ok, _} = Missions.fail_quest(parent.mission_id, "died")
+
+      # Every check `resume/3` performs up front still passes — the clone
+      # is there and the archive branch survived — but `git worktree add`
+      # cannot put anything under `<repo>/ghosts` when that name is a
+      # FILE. That is the shape of the failure this guard exists for: the
+      # tree cannot be provisioned AFTER the mission record is live.
+      Git.worktree_remove(repo, Path.join([repo, "ghosts", "x"]), force: true)
+      File.rm_rf!(Path.join(repo, "ghosts"))
+      File.write!(Path.join(repo, "ghosts"), "not a directory")
+
+      {:ok, child, :created} =
+        Missions.resume_with_status(parent.mission_id, "validation",
+          async: true,
+          advance: false
+        )
+
+      assert eventually(fn ->
+               {:ok, m} = Missions.get(child.id)
+               m.status == "failed"
+             end),
+             "a resume that cannot provision its tree must FAIL, not sit at pending"
+
+      {:ok, settled} = Missions.get(child.id)
+      assert settled[:failure_reason] =~ "worktree"
+
+      refute settled[:resume_seeding],
+             "the seeding flag must be cleared whichever way the task ended"
+    end
+
+    test "the async path is still guarded by the one-live-resume rule", %{parent: parent} do
+      {:ok, first, :created} =
+        Missions.resume_with_status(parent.mission_id, "validation",
+          async: true,
+          advance: false
+        )
+
+      assert {:ok, again, :already_resumed} =
+               Missions.resume_with_status(parent.mission_id, "validation",
+                 async: true,
+                 advance: false
+               )
+
+      assert again.id == first.id
+    end
+  end
+
+  defp eventually(fun, attempts \\ 100) do
+    cond do
+      fun.() -> true
+      attempts <= 0 -> false
+      true -> Process.sleep(50) && eventually(fun, attempts - 1)
+    end
+  end
 end

@@ -248,7 +248,11 @@ defmodule GiTF.MCPServer.Tools do
             "in the sector clone. Resume IMPLIES start — do not call start_mission after. " <>
             "Inherited state is a suspect in every failure of a resumed run: if the resumed run " <>
             "fails in a way that could implicate the inherited design, plan or tree, run the " <>
-            "mission fresh instead of resuming again. Requires confirm: true.",
+            "mission fresh instead of resuming again. Returns IMMEDIATELY: the worktree is " <>
+            "seeded in the background, so the mission comes back status \"pending\" with " <>
+            "resume_seeding true — poll show_mission until it is \"active\". One live resume " <>
+            "per parent: calling again returns the existing child with already_resumed true " <>
+            "and creates nothing. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{

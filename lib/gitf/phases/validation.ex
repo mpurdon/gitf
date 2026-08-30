@@ -18,7 +18,13 @@ defmodule GiTF.Phases.Validation do
 
   ## verdict/2 logic, by case
 
-    * `artifact == nil` → `:wait` (no validation ghost has completed yet).
+    * `artifact == nil` → `:wait` if a validation op is pending/assigned/
+      running (the ghost is simply still working). If NOTHING is in
+      flight, the phase is stranded rather than busy, and the verdict
+      respawns validation — up to `@max_validation_respawns`, then raises
+      a `:mission_stalled` alert and holds. msn-05bebd sat here for hours
+      because `nil` meant "wait" unconditionally and the ghost it was
+      waiting for had never been spawned.
 
     * `overall_verdict == "pass"`:
       * Emits `[:gitf, :validation, :passed]` telemetry
@@ -101,6 +107,11 @@ defmodule GiTF.Phases.Validation do
   # `GiTF.Tournament` instead of a single `validation` key.
   @impl true
   def verdict(mission, _artifact) when is_map(mission) do
+    mission =
+      mission
+      |> record_accepted_requirements()
+      |> clear_respawns_if_validated()
+
     cond do
       # Tournament already resolved — winner_variant stamped; stay on the
       # single-variant path so subsequent polls don't re-run the
@@ -172,7 +183,12 @@ defmodule GiTF.Phases.Validation do
     verdict_single(Map.put(mission, :winning_variant, winning_variant), winner_artifact)
   end
 
-  defp verdict_single(_mission, nil), do: :wait
+  # No validation artifact. Normally that just means the ghost is still
+  # working — but on msn-05bebd the ghost was never born (the exec
+  # validation aborted the spawn after the phase had already transitioned)
+  # and this clause answered `:wait` to the Janitor every three minutes,
+  # forever, with nothing in flight to wait FOR.
+  defp verdict_single(mission, nil), do: heal_or_wait(mission)
 
   defp verdict_single(mission, %{"overall_verdict" => "pass"} = artifact) do
     # Idempotent fast-path: this branch fires on every poll while
@@ -206,6 +222,148 @@ defmodule GiTF.Phases.Validation do
   end
 
   defp verdict_single(_mission, _artifact), do: :wait
+
+  # -- Self-heal: a validation phase with nobody working on it ----------------
+
+  # Three respawns, then stop and shout. The bound matters more than the
+  # number: an unbounded self-heal against a genuinely un-spawnable
+  # validation is just the same wedge with a token bill attached.
+  @max_validation_respawns 3
+
+  defp heal_or_wait(mission) do
+    cond do
+      Map.get(mission, :current_phase) != "validation" ->
+        :wait
+
+      # Someone IS coming — this is the ordinary "ghost still working" case.
+      GiTF.Major.PhaseLauncher.validation_in_flight?(mission.id) ->
+        :wait
+
+      true ->
+        respawn_validation(mission)
+    end
+  end
+
+  defp respawn_validation(mission) do
+    attempts = Map.get(mission, :validation_respawns) || 0
+
+    if attempts >= @max_validation_respawns do
+      hold_stalled_validation(mission, attempts)
+    else
+      Logger.warning(
+        "Quest #{mission.id}: phase is validation with no artifact and no validation op " <>
+          "in flight — respawning validation (#{attempts + 1}/#{@max_validation_respawns})"
+      )
+
+      GiTF.Archive.update(:missions, mission.id, fn m ->
+        Map.put(m, :validation_respawns, attempts + 1)
+      end)
+
+      GiTF.Telemetry.emit([:gitf, :validation, :respawned], %{attempt: attempts + 1}, %{
+        mission_id: mission.id
+      })
+
+      # The counter is incremented BEFORE the attempt, and the attempt
+      # itself is isolated: the whole point of this path is that the
+      # validation start can die, and a self-heal that dies with it would
+      # take the Janitor's advance down instead of the mission's wedge.
+      try do
+        GiTF.Major.PhaseLauncher.start_validation(mission)
+      rescue
+        e ->
+          Logger.error("Quest #{mission.id}: validation respawn failed: #{Exception.message(e)}")
+      catch
+        kind, reason ->
+          Logger.error("Quest #{mission.id}: validation respawn #{kind}ed: #{inspect(reason)}")
+      end
+
+      :wait
+    end
+  end
+
+  # Deliberately still `:wait`, not `:terminal_fail`: the tree is intact
+  # and the mission is recoverable by hand, so a human decides. What
+  # changes is that the operator is now told, instead of the Janitor
+  # advancing a silent mission every three minutes.
+  defp hold_stalled_validation(mission, attempts) do
+    Logger.error(
+      "Quest #{mission.id}: validation could not be spawned after #{attempts} attempts — holding"
+    )
+
+    GiTF.Observability.Alerts.dispatch_webhook(
+      :mission_stalled,
+      "Quest #{mission.id}: phase is validation but no validation ghost exists and " <>
+        "#{attempts} respawn attempts failed. The mission is HELD — inspect the sector's " <>
+        "toolchain and re-dispatch by hand.",
+      dedup_key: "validation_unspawnable:#{mission.id}"
+    )
+
+    :wait
+  end
+
+  # -- The ratchet: requirements a validator already accepted -----------------
+
+  @doc """
+  Merges every `met: true` requirement id from the mission's validation
+  artifacts into `mission.accepted_requirements`, returning the mission
+  with the field up to date.
+
+  A fix round costs a full validation pass, and the last two runs spent
+  theirs re-proving requirements an earlier round had already accepted —
+  hitting the fix cap with one real gap outstanding. Persisting the
+  accepted set lets the next round's prompt pin them as settled
+  (`PhasePrompts` renders them as ACCEPTED) so the budget goes to the open
+  set. Monotonic on purpose: a requirement is never un-accepted by a later
+  round that simply did not look at it.
+  """
+  @spec record_accepted_requirements(map()) :: map()
+  def record_accepted_requirements(mission) do
+    previous = Map.get(mission, :accepted_requirements) || []
+    merged = Enum.uniq(previous ++ accepted_in_artifacts(mission))
+
+    if merged == previous do
+      mission
+    else
+      GiTF.Archive.update(:missions, mission.id, &Map.put(&1, :accepted_requirements, merged))
+      Map.put(mission, :accepted_requirements, merged)
+    end
+  end
+
+  # Every `validation` / `validation_<variant>` artifact, so a tournament's
+  # losing variants still contribute what they proved.
+  defp accepted_in_artifacts(mission) do
+    mission
+    |> validation_artifacts()
+    |> Enum.flat_map(&met_requirement_ids/1)
+  end
+
+  defp validation_artifacts(mission) do
+    (Map.get(mission, :artifacts) || %{})
+    |> Enum.filter(fn {key, value} ->
+      is_binary(key) and String.starts_with?(key, "validation") and is_map(value)
+    end)
+    |> Enum.map(fn {_key, artifact} -> artifact end)
+  end
+
+  # A validator DID report on this mission, so the "nobody is coming"
+  # budget is spent and starts fresh for any later stall.
+  defp clear_respawns_if_validated(mission) do
+    if Map.get(mission, :validation_respawns, 0) > 0 and validation_artifacts(mission) != [] do
+      GiTF.Archive.update(:missions, mission.id, &Map.put(&1, :validation_respawns, 0))
+      Map.put(mission, :validation_respawns, 0)
+    else
+      mission
+    end
+  end
+
+  defp met_requirement_ids(%{"requirements_met" => entries}) when is_list(entries) do
+    for %{"met" => true} = entry <- entries,
+        id = entry["req_id"] || entry["id"],
+        is_binary(id) and id != "",
+        do: id
+  end
+
+  defp met_requirement_ids(_), do: []
 
   defp validate_pass(mission, artifact) do
     Validation.emit_confidence(mission)

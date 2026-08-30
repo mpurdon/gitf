@@ -266,6 +266,17 @@ defmodule GiTF.Missions do
       and inspect it without spawning a validation ghost; production always
       advances, because a resumed mission nobody advances is a checked-out
       worktree holding the parent's only tree and doing nothing.
+    * `:async` (default `false`) — return as soon as the record and its
+      provenance exist, seeding the worktree in a supervised task. See
+      `resume_with_status/3`.
+
+  ## One live resume per parent
+
+  A parent has exactly one resumable tree, so it gets at most one live
+  child: if a non-terminal mission already carries
+  `resumed_from == parent_id`, that mission is returned instead of a
+  second one being built. Two timed-out MCP calls produced FOUR duplicate
+  missions racing for the same archive branch before this guard existed.
 
   Returns `{:ok, mission}` or one of `{:error, :parent_not_found |
   :parent_not_failed | :unsupported_from_phase | :sector_unavailable |
@@ -274,15 +285,67 @@ defmodule GiTF.Missions do
   @spec resume(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def resume(parent_id, from_phase \\ "validation", opts \\ [])
 
-  def resume(parent_id, from_phase, opts) when is_binary(parent_id) and is_binary(from_phase) do
-    with :ok <- validate_from_phase(from_phase),
-         {:ok, parent} <- fetch_resumable_parent(parent_id),
-         {:ok, archive_branch} <- fetch_archive_branch(parent) do
-      build_resumed_mission(parent, from_phase, archive_branch, opts)
+  def resume(parent_id, from_phase, opts) do
+    case resume_with_status(parent_id, from_phase, opts) do
+      {:ok, mission, _status} -> {:ok, mission}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  def resume(_parent_id, _from_phase, _opts), do: {:error, :parent_not_found}
+  @doc """
+  `resume/3`, plus whether the returned mission was built by THIS call.
+
+  `:created` means a new child; `:already_resumed` means the parent's
+  existing live child was returned untouched. The MCP handler needs the
+  difference — an operator who calls `resume_mission` twice must be told
+  the second call did nothing, not shown a mission id and left to assume
+  a second run started.
+
+  With `async: true` the seeding half (`GiTF.Shell.create` cutting a
+  worktree from the archive branch, then `advance_quest`) runs in a
+  supervised task and this returns as soon as the record, its inherited
+  artifacts and its replayed transitions exist. The child is left
+  `status: "pending"` until seeding completes precisely so no scheduler
+  can advance a mission whose tree does not exist yet; failure fails the
+  mission with a reason rather than leaving a pending zombie. Watch it
+  with `show_mission`.
+  """
+  @spec resume_with_status(String.t(), String.t(), keyword()) ::
+          {:ok, map(), :created | :already_resumed} | {:error, term()}
+  def resume_with_status(parent_id, from_phase \\ "validation", opts \\ [])
+
+  def resume_with_status(parent_id, from_phase, opts)
+      when is_binary(parent_id) and is_binary(from_phase) do
+    # Serialized on the PARENT: the duplicate storm was two concurrent
+    # calls, so a check that is not inside the lock is not a guard.
+    GiTF.MissionLock.with_lock({:resume, parent_id}, [on_contention: {:wait, 30_000}], fn ->
+      with :ok <- validate_from_phase(from_phase),
+           {:ok, parent} <- fetch_resumable_parent(parent_id),
+           {:ok, archive_branch} <- fetch_archive_branch(parent) do
+        case live_resume_of(parent_id) do
+          nil -> build_resumed_mission(parent, from_phase, archive_branch, opts)
+          existing -> {:ok, existing, :already_resumed}
+        end
+      end
+    end)
+  end
+
+  def resume_with_status(_parent_id, _from_phase, _opts), do: {:error, :parent_not_found}
+
+  @doc """
+  The parent's live resumed child, or nil.
+
+  "Live" is anything not in `terminal_phases/0` — a failed or completed
+  resume is spent and the parent may be resumed again.
+  """
+  @spec live_resume_of(String.t()) :: map() | nil
+  def live_resume_of(parent_id) do
+    Archive.filter(:missions, fn m ->
+      m[:resumed_from] == parent_id and m[:status] not in @terminal_phases
+    end)
+    |> Enum.sort_by(& &1[:inserted_at], {:asc, DateTime})
+    |> List.first()
+  end
 
   defp validate_from_phase(phase) do
     if phase in @resumable_phases, do: :ok, else: {:error, :unsupported_from_phase}
@@ -322,36 +385,94 @@ defmodule GiTF.Missions do
   end
 
   defp build_resumed_mission(parent, from_phase, archive_branch, opts) do
-    with {:ok, child} <- create_resumed_record(parent, from_phase),
+    async? = Keyword.get(opts, :async, false)
+
+    with {:ok, child} <- create_resumed_record(parent, from_phase, async?),
          :ok <- inherit_artifacts(child, parent, from_phase),
-         :ok <- replay_transitions(child, parent, from_phase),
-         {:ok, _op} <- seed_inherited_tree(child, parent, archive_branch) do
-      # The synthetic op is already "done", so the journey's implementation
-      # leg is complete the moment it starts: `check_implementation_complete`
-      # sees every impl op done and walks straight into start_validation.
-      # Nothing here has to know that — it just has to put the mission at
-      # the right phase and let the orchestrator read it.
+         :ok <- replay_transitions(child, parent, from_phase) do
+      if async? do
+        seed_async(child, parent, archive_branch, from_phase, opts)
+        with {:ok, mission} <- get(child.id), do: {:ok, mission, :created}
+      else
+        with :ok <- seed_and_launch(child, parent, archive_branch, from_phase, opts),
+             {:ok, mission} <- get(child.id),
+             do: {:ok, mission, :created}
+      end
+    end
+  end
+
+  # The slow half — minutes under load, because `GiTF.Shell.create` cuts a
+  # real worktree from the archive branch and `advance_quest` may spawn a
+  # ghost. The same code either way; only the process it runs in differs.
+  defp seed_and_launch(child, parent, archive_branch, from_phase, opts) do
+    with {:ok, _op} <- seed_inherited_tree(child, parent, archive_branch) do
+      # Only NOW may a scheduler see it. The synthetic op is already
+      # "done", so `check_implementation_complete` walks straight into
+      # start_validation — and it must not do that against a tree that
+      # does not exist yet.
+      update(child.id, %{status: "active", resume_seeding: false})
       transition_phase(child.id, "implementation", "resumed from #{parent.id} at #{from_phase}")
 
       if Keyword.get(opts, :advance, true) do
         GiTF.Major.Orchestrator.advance_quest(child.id)
       end
 
-      get(child.id)
+      :ok
     end
   end
 
-  defp create_resumed_record(parent, from_phase) do
+  # Seeding synchronously took >60s under load: the MCP client timed out,
+  # the operator retried, and the server carried on regardless — four
+  # missions out of two calls. The caller now gets its id back immediately
+  # and watches `show_mission`. The one rule this task must honour is that
+  # it never leaves a mission parked at "pending" forever.
+  defp seed_async(child, parent, archive_branch, from_phase, opts) do
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      case guarded_seed(child, parent, archive_branch, from_phase, opts) do
+        :ok -> :ok
+        {:error, reason} -> abandon_resume(child.id, reason)
+      end
+    end)
+  end
+
+  defp guarded_seed(child, parent, archive_branch, from_phase, opts) do
+    seed_and_launch(child, parent, archive_branch, from_phase, opts)
+  rescue
+    e -> {:error, {:crashed, Exception.message(e)}}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp abandon_resume(child_id, reason) do
+    Logger.error("Quest #{child_id}: resume seeding failed: #{inspect(reason)}")
+    Archive.update(:missions, child_id, &Map.put(&1, :resume_seeding, false))
+
+    fail_quest(
+      child_id,
+      "Resume could not provision the inherited worktree (#{inspect(reason)}) — " <>
+        "no tree was seeded, so nothing ran"
+    )
+
+    :ok
+  end
+
+  defp create_resumed_record(parent, from_phase, async?) do
     with {:ok, child} <-
            create(%{
              goal: parent.goal,
              sector_id: parent[:sector_id],
              name: "#{parent[:name] || parent.id}-resume",
-             status: "active"
+             # An async resume parks at "pending" until its worktree
+             # exists; "active" would invite the scheduler to advance a
+             # mission that has no tree.
+             status: if(async?, do: "pending", else: "active")
            }) do
       update(child.id, %{
         resumed_from: parent.id,
         resumed_at_phase: from_phase,
+        # Visible in `show_mission` so an operator watching an async resume
+        # can tell "worktree still being cut" from "nothing is happening".
+        resume_seeding: async?,
         # An operator's forced pipeline mode is a decision about the WORK,
         # not about the run that carried it — it survives the resume.
         pipeline_mode: parent[:pipeline_mode],

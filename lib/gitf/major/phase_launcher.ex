@@ -444,7 +444,18 @@ defmodule GiTF.Major.PhaseLauncher do
     end
   end
 
-  defp validation_in_flight?(mission_id) do
+  @doc """
+  True when a validation-phase op for `mission_id` is pending, assigned or
+  running.
+
+  One owner for the question, because two callers ask it for opposite
+  reasons: the launcher asks "may I spawn?" and
+  `GiTF.Phases.Validation` asks "is anyone still coming?" before deciding
+  a phase with no artifact is stranded. Two definitions that drifted apart
+  would either double-spawn or wait forever.
+  """
+  @spec validation_in_flight?(String.t()) :: boolean()
+  def validation_in_flight?(mission_id) do
     Archive.by_index(:ops, :mission_id, mission_id)
     |> Enum.any?(fn op ->
       op[:phase_job] == true and op[:phase] == "validation" and
@@ -587,18 +598,24 @@ defmodule GiTF.Major.PhaseLauncher do
          changed_files,
          merge_conflicts
        ) do
-    lsp_diagnostics = collect_lsp_diagnostics_for_validation(mission, changed_files)
-    exec_validation = GroundTruth.run_exec_validation(mission, variant_id)
+    lsp_diagnostics =
+      without_aborting([], fn ->
+        collect_lsp_diagnostics_for_validation(mission, changed_files)
+      end)
+
+    {exec_validation, infra_notes} = exec_validation_or_note(mission, variant_id)
 
     # Main can move under a mission that takes an hour. The fix loop was
     # reconciling other people's merged work without ever being told what
     # that work was — and when the merge was clean, nothing signalled that
     # the plan might have been overtaken at all.
     base_moved =
-      case GiTF.Validation.canonical_impl_shell(mission) do
-        %{worktree_path: wt} -> GiTF.Drift.main_advance_summary(wt)
-        _ -> nil
-      end
+      without_aborting(nil, fn ->
+        case GiTF.Validation.canonical_impl_shell(mission) do
+          %{worktree_path: wt} -> GiTF.Drift.main_advance_summary(wt)
+          _ -> nil
+        end
+      end)
 
     prompt =
       PhasePrompts.validation_prompt(mission, requirements, planning, ctx,
@@ -606,6 +623,8 @@ defmodule GiTF.Major.PhaseLauncher do
         changed_files: changed_files,
         lsp_diagnostics: lsp_diagnostics,
         exec_validation: exec_validation,
+        infra_notes: infra_notes,
+        accepted_requirements: Map.get(mission, :accepted_requirements) || [],
         merge_conflicts: merge_conflicts,
         base_moved: base_moved,
         unresolved_review: GiTF.Phases.Review.unresolved_objection(mission)
@@ -621,6 +640,93 @@ defmodule GiTF.Major.PhaseLauncher do
 
     opts = [model: "general"] ++ base_opts ++ if variant_id, do: [variant: variant_id], else: []
     spawn_phase_ghost(mission, "validation", prompt, opts)
+  end
+
+  # -- Nothing gathered for the prompt may abort the spawn ---------------------
+
+  # msn-05bebd: `do_start_validation/3` transitions the mission to
+  # `validation` and only THEN gathers the prompt's inputs. Everything in
+  # that window is best-effort context — but the exec validation in the
+  # middle of it shells out, and when it died it took the calling process
+  # with it. The mission was left at `phase = validation` with no
+  # validation op in existence, which `Phases.Validation.verdict/2` reads
+  # as "no artifact yet" and answers `:wait` — forever. The window is now
+  # closed at both ends: nothing here can abort the spawn (this half), and
+  # the verdict self-heals if a spawn is somehow still missing (the other
+  # half, in `GiTF.Phases.Validation`).
+  defp without_aborting(default, fun) do
+    fun.()
+  rescue
+    e ->
+      Logger.warning("Validation prompt input failed (non-fatal): #{Exception.message(e)}")
+      default
+  catch
+    kind, reason ->
+      Logger.warning("Validation prompt input #{kind}ed (non-fatal): #{inspect(reason)}")
+      default
+  end
+
+  # The exec validation gets stronger isolation than `without_aborting/2`
+  # because its failure mode is not an exception. `GiTF.Validator`'s
+  # command runner spawns a LINKED `Task`; an `:enoent` raised inside it by
+  # `System.cmd` (missing sandbox binary, a resume-seeded worktree path
+  # that no longer exists) reaches this process as an exit signal, which no
+  # `rescue` in `GroundTruth` or `Validator` can see. `async_nolink` breaks
+  # the link, so the failure comes back as a value.
+  #
+  # Returns `{verdict, notes}`. An unreachable ground truth is still
+  # recorded as an INFRA verdict, so the downstream guard holds the fix
+  # budget instead of spending an attempt on code that was never judged.
+  @doc false
+  def exec_validation_or_note(mission, variant_id) do
+    timeout = exec_validation_timeout_ms(mission)
+
+    task =
+      Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+        GroundTruth.run_exec_validation(mission, variant_id)
+      end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, 5_000) do
+      {:ok, verdict} ->
+        {verdict, []}
+
+      {:exit, reason} ->
+        abort_note(mission, "the validation command runner crashed: #{inspect(reason)}")
+
+      nil ->
+        abort_note(
+          mission,
+          "the validation command did not return within #{div(timeout, 1000)}s and was killed"
+        )
+    end
+  end
+
+  defp abort_note(mission, why) do
+    Logger.error(
+      "Quest #{mission.id}: exec validation aborted — #{why}; spawning validation anyway"
+    )
+
+    GiTF.Telemetry.emit([:gitf, :validation, :exec_aborted], %{}, %{
+      mission_id: mission.id,
+      reason: why
+    })
+
+    GroundTruth.store_infra_verdict(mission, "TOOL MISSING on host — #{why}")
+
+    {nil, ["Ground truth was UNAVAILABLE this round: #{why}."]}
+  end
+
+  # The runner already enforces the sector's own deadline; this is the
+  # outer backstop for a runner that never returns at all, so it is the
+  # sector budget plus slack rather than a competing limit.
+  defp exec_validation_timeout_ms(mission) do
+    sector =
+      case Map.get(mission, :sector_id) do
+        id when is_binary(id) -> Archive.get(:sectors, id)
+        _ -> nil
+      end
+
+    GiTF.Validator.validation_timeout_ms(sector) + :timer.seconds(60)
   end
 
   # -- Simplify and scoring: the tail ------------------------------------------

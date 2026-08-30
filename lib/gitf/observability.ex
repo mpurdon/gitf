@@ -37,6 +37,10 @@ defmodule GiTF.Observability do
     interval = Keyword.get(opts, :interval, @default_interval)
     Alerts.attach_webhook_handler()
     schedule_check(interval)
+    # The state is two words and stays that way: the interval, and nothing
+    # else. Every check result is consumed inside `run_checks/0` and
+    # dropped — deliberately, so this process cannot become a second
+    # unbounded store beside the Archive.
     {:ok, %{interval: interval}}
   end
 
@@ -44,7 +48,15 @@ defmodule GiTF.Observability do
   def handle_info(:run_checks, state) do
     run_checks()
     schedule_check(state.interval)
-    {:noreply, state}
+
+    # `run_checks/0` allocates far more than it keeps: `Medic.run_all/1`
+    # and `Alerts.check_alerts/0` each materialise large lists over whole
+    # Archive collections, and a GenServer heap keeps its high-water mark
+    # forever. Measured 2026-08-29: this process alone held 303MB of the
+    # BEAM's 912MB. Hibernating hands it back; the next tick is a minute
+    # away, so the wakeup cost is noise. Same reasoning as
+    # `Tachikoma.handle_info(:patrol, …)` and the Archive flush.
+    {:noreply, state, :hibernate}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}

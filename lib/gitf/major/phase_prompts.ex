@@ -808,6 +808,10 @@ defmodule GiTF.Major.PhasePrompts do
 
     lsp_diagnostics_block = render_lsp_diagnostics_block(lsp_diagnostics)
     exec_validation_block = render_exec_validation_block(Keyword.get(opts, :exec_validation))
+    infra_notes_block = render_infra_notes_block(Keyword.get(opts, :infra_notes, []))
+
+    accepted_block =
+      render_accepted_requirements_block(Keyword.get(opts, :accepted_requirements, []))
 
     # An overruled design review is a live lead for validation: the
     # reviewer's unresolved concern is exactly where the implementation is
@@ -920,7 +924,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     #{planning_json}
     ```
-    #{changed_files_block}#{lsp_diagnostics_block}#{exec_validation_block}#{base_moved_block}#{merge_conflicts_block}#{unresolved_review_block}
+    #{changed_files_block}#{accepted_block}#{lsp_diagnostics_block}#{exec_validation_block}#{infra_notes_block}#{base_moved_block}#{merge_conflicts_block}#{unresolved_review_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's
@@ -970,6 +974,57 @@ defmodule GiTF.Major.PhasePrompts do
     anyway. Use `[]` when every requirement is covered.
 
     Set `overall_verdict` to "fail" if any must-have requirements are not met.
+    """
+  end
+
+  # The ratchet. Without it every fix round re-verified all 16
+  # requirements, and the last two runs hit the fix cap re-proving
+  # requirements a previous validator had already accepted — the budget
+  # was spent on litigation, not on the one open gap.
+  defp render_accepted_requirements_block([]), do: ""
+
+  defp render_accepted_requirements_block(ids) when is_list(ids) do
+    """
+
+    ## ALREADY ACCEPTED — do not re-litigate
+
+    An earlier validation round verified these requirement ids and
+    accepted them. They are SETTLED. Report each in `requirements_met`
+    with `met: true` and the evidence "accepted in an earlier validation
+    round", and spend this round entirely on the requirements NOT listed
+    here:
+
+    ```
+    #{Enum.join(ids, ", ")}
+    ```
+
+    Two things are never settled and MUST be re-checked every round
+    regardless of this list: the project's build/typecheck must pass, and
+    the execution validation above is ground truth. If either fails, the
+    verdict is `fail` — even when every requirement is accepted.
+    """
+  end
+
+  # The factory could not obtain its own read on the tree this round.
+  # Said plainly so the validator does not mistake missing ground truth
+  # for passing ground truth.
+  defp render_infra_notes_block([]), do: ""
+
+  defp render_infra_notes_block(notes) when is_list(notes) do
+    """
+
+    ## GROUND TRUTH UNAVAILABLE (infrastructure)
+
+    The factory could not run the sector's validation command this round:
+
+    ```
+    #{Enum.join(notes, "\n")}
+    ```
+
+    This is a HOST problem, not a code problem. Absence of ground truth is
+    NOT evidence that the build passes — judge the diff on its merits, and
+    say in `summary` that execution validation was unavailable so the
+    verdict is read as provisional.
     """
   end
 

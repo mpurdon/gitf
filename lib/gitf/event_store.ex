@@ -213,6 +213,35 @@ defmodule GiTF.EventStore do
   end
 
   @doc """
+  Caps the event collection at `max` rows, deleting the oldest surplus.
+
+  Age retention alone does not bound this table. Measured 2026-08-29:
+  `:events` held 194,727 rows (194MB of a 313MB ETS footprint) — every
+  one of them younger than the retention window, so the age prune deleted
+  nothing at all. One busy week is enough to rebuild that, so the row cap
+  is the real ceiling and retention is only the tidy-up.
+
+  Returns the count of deleted events.
+  """
+  @spec cap(pos_integer()) :: non_neg_integer()
+  def cap(max) when is_integer(max) and max > 0 do
+    all = Archive.all(@collection)
+
+    case length(all) - max do
+      surplus when surplus > 0 ->
+        all
+        |> Enum.sort_by(& &1.timestamp, {:asc, DateTime})
+        |> Enum.take(surplus)
+        |> Enum.each(fn event -> Archive.delete(@collection, event.id) end)
+
+        surplus
+
+      _ ->
+        0
+    end
+  end
+
+  @doc """
   Counts events matching the given filters.
 
   Accepts the same filter options as `list/1` (except `:limit`).

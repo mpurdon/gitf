@@ -988,7 +988,7 @@ defmodule GiTF.Tachikoma do
     # Prune old tachikoma scores (keep last 50 per model)
     prune_old_scores()
 
-    # Prune old events (keep 30 days)
+    # Prune old events (7 days) and cap the collection at 50k rows
     prune_event_store()
 
     # Prune costs and audit_results for completed missions
@@ -1059,12 +1059,31 @@ defmodule GiTF.Tachikoma do
     _ -> :ok
   end
 
+  # Events are a debugging convenience with a very long tail of value and a
+  # very fast rate of production. 30 days of them reached 194,727 rows
+  # (194MB of a 313MB ETS footprint) and pushed the BEAM past its 1GB
+  # health threshold — and the AGE prune deleted none of it, because every
+  # row was younger than the window. So: a short window, plus a hard row
+  # cap that a busy week cannot outrun.
+  @event_retention_days 7
+  @event_max_rows 50_000
+
   defp prune_event_store do
-    if Code.ensure_loaded?(GiTF.EventStore) and function_exported?(GiTF.EventStore, :prune, 1) do
-      GiTF.EventStore.prune(days: 30)
+    pruned = GiTF.EventStore.prune(days: @event_retention_days)
+    capped = GiTF.EventStore.cap(@event_max_rows)
+
+    if capped > 0 do
+      Logger.warning(
+        "Events exceeded the #{@event_max_rows}-row cap — dropped #{capped} oldest " <>
+          "(the #{@event_retention_days}-day age prune took #{pruned})"
+      )
     end
+
+    pruned + capped
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Event store prune failed: #{Exception.message(e)}")
+      0
   end
 
   defp completed_mission_ids do

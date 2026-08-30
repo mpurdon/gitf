@@ -307,12 +307,13 @@ defmodule GiTF.Runtime.Loadout do
 
     # A model emitting "-A", "--all" or "." here bypassed every guard the
     # auto-commit path has — flags are rejected outright, and the same
-    # exclusions (.claude/, uninstructed lockfiles) apply after staging.
+    # exclusions (factory residue, uninstructed lockfiles) apply after
+    # staging.
     case Enum.filter(paths, &String.starts_with?(&1, "-")) do
       [] ->
         case GiTF.Git.safe_cmd(["add", "--" | paths], cd: working_dir, stderr_to_stdout: true) do
           {_, 0} ->
-            GiTF.Git.safe_cmd(["reset", "-q", "HEAD", "--", ".claude/"], cd: working_dir)
+            GiTF.Git.unstage_residue(working_dir)
 
             case GiTF.Git.unstage_uninstructed_lockfiles(working_dir) do
               [] ->

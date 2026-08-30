@@ -467,14 +467,42 @@ defmodule GiTF.MCPServer.Handlers do
     with :ok <- require_confirm(args) do
       from_phase = args["from_phase"] || "validation"
 
-      case GiTF.Missions.resume(id, from_phase) do
-        {:ok, mission} ->
+      # `async: true`: the record and its provenance are built here, the
+      # worktree seeding runs supervised behind it. Seeding synchronously
+      # took longer than the client's timeout under load — the operator
+      # retried a call that had in fact succeeded, and two calls became
+      # four missions.
+      case GiTF.Missions.resume_with_status(id, from_phase, async: true) do
+        {:ok, mission, :created} ->
           audit_write("mission.resume", mission.id, %{
             parent_id: id,
             from_phase: from_phase
           })
 
-          {:ok, json_text(serialize_mission(mission))}
+          {:ok,
+           mission
+           |> serialize_mission()
+           |> Map.merge(%{
+             already_resumed: false,
+             seeding: true,
+             note:
+               "Mission created. Its worktree is being cut from archive/#{id} in the " <>
+                 "background — poll show_mission until status is \"active\"."
+           })
+           |> json_text()}
+
+        {:ok, mission, :already_resumed} ->
+          {:ok,
+           mission
+           |> serialize_mission()
+           |> Map.merge(%{
+             already_resumed: true,
+             seeding: mission[:resume_seeding] == true,
+             note:
+               "Mission #{id} already has a live resume (#{mission.id}); no second mission " <>
+                 "was created. Kill or complete it before resuming this parent again."
+           })
+           |> json_text()}
 
         {:error, reason} ->
           {:error, resume_error_message(reason, id, from_phase)}
@@ -1625,6 +1653,9 @@ defmodule GiTF.MCPServer.Handlers do
       # pipeline this run actually executed.
       resumed_from: m[:resumed_from],
       resumed_at_phase: m[:resumed_at_phase],
+      # True while an async resume is still cutting its worktree — the
+      # difference between "being provisioned" and "stuck at pending".
+      resume_seeding: m[:resume_seeding] == true,
       target_branch: m[:target_branch],
       cost_cap_usd: m[:cost_cap_usd],
       inserted_at: to_string(m[:inserted_at]),

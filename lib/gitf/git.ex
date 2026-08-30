@@ -755,21 +755,67 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  Paths written by the factory's own agent tooling INSIDE a ghost's
+  worktree. None of it is the ghost's work:
+
+    * `.claude/` — generated agent settings; committing them produced
+      merge conflicts between sibling worktrees.
+    * `.gitf-probe/`, `.gitf-probe-home/` — the runtime probe's
+      screenshots and its throwaway `$HOME` (see
+      `priv/probes/*/…-smoke.sh`). Every fix op re-ran the probe, swept
+      the new PNGs into the commit, and — worse — changed
+      `status --porcelain`, which is half of `tree_fingerprint/1`. The
+      exec-validation verdict cache could therefore never hit: each
+      round re-paid `npm ci` + build under the sector lock to re-derive
+      a verdict for a tree whose only change was a screenshot.
+  """
+  @residue_paths [".claude/", ".gitf-probe/", ".gitf-probe-home/"]
+
+  @spec residue_paths() :: [String.t()]
+  def residue_paths, do: @residue_paths
+
+  # Pathspecs that subtract the residue from a scan. `.` keeps the scan
+  # rooted at the worktree top (git resolves pathspecs against the prefix,
+  # and `-C wt` puts us there).
+  defp residue_excluded_pathspec do
+    ["." | Enum.map(@residue_paths, &":(exclude)#{String.trim_trailing(&1, "/")}")]
+  end
+
+  @doc """
   Identity of the worktree's exact content: HEAD sha + a digest of
   `status --porcelain`. Any commit, resolution, or install residue changes
   it, so a cached verdict keyed on this can only ever be reused for a
   byte-identical tree. nil on any git failure — never fingerprint blind.
+
+  Factory residue (`residue_paths/0`) is subtracted from the status scan:
+  it is not the ghost's work, so a tree that differs only by a probe
+  screenshot IS the same tree as far as a validation verdict is concerned.
   """
   @spec tree_fingerprint(String.t()) :: String.t() | nil
   def tree_fingerprint(wt) do
     with {head, 0} <- safe_cmd(["-C", wt, "rev-parse", "HEAD"]),
-         {status, 0} <- safe_cmd(["-C", wt, "status", "--porcelain"]) do
+         {status, 0} <-
+           safe_cmd(["-C", wt, "status", "--porcelain", "--"] ++ residue_excluded_pathspec()) do
       :md5 |> :crypto.hash([to_string(head), to_string(status)]) |> Base.encode16()
     else
       _ -> nil
     end
   rescue
     _ -> nil
+  end
+
+  @doc """
+  Resets factory residue (`residue_paths/0`) out of the index in `wt`.
+
+  Call it immediately after any `git add` on a ghost worktree. The
+  working-tree files are left alone — only the commit is protected.
+  """
+  @spec unstage_residue(String.t()) :: :ok
+  def unstage_residue(wt) do
+    safe_cmd(["-C", wt, "reset", "-q", "HEAD", "--" | @residue_paths])
+    :ok
+  rescue
+    _ -> :ok
   end
 
   # A lockfile changing WITHOUT its manifest is the signature of install

@@ -112,6 +112,33 @@ defmodule GiTF.Major.GroundTruth do
       nil
   end
 
+  @doc """
+  Records an infra verdict for a run that never produced one.
+
+  `run_exec_validation/2` classifies every failure it SEES, but it can
+  also fail to return at all — the command runner spawns a linked
+  `Task`, so an `:enoent` raised by `System.cmd` (a missing sandbox
+  binary, a worktree path that no longer exists) arrives at the caller as
+  an EXIT that no `rescue` here or in `GiTF.Validator` can catch. The
+  caller isolates that (see `PhaseLauncher.exec_validation_or_note/2`)
+  and calls this so the verdict artifact still says "infrastructure" —
+  which is what stops `Phases.Validation` burning a fix attempt on code
+  that was never judged.
+  """
+  @spec store_infra_verdict(map(), String.t()) :: :ok
+  def store_infra_verdict(mission, output) do
+    store_exec_verdict(mission, %{
+      "status" => "fail",
+      "infra_failure" => true,
+      "kind" => "runner_aborted",
+      "output" => String.slice(output, 0, 500),
+      # No fingerprint: nothing was measured, so nothing may be cached.
+      "tree" => nil
+    })
+
+    :ok
+  end
+
   # Tree identity lives beside the other git primitives.
   defp tree_fingerprint(wt), do: GiTF.Git.tree_fingerprint(wt)
 
