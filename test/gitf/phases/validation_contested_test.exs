@@ -364,6 +364,23 @@ defmodule GiTF.Phases.ValidationContestedTest do
       assert prompt =~ "gaps` as minor"
     end
 
+    test "the rebuttal field lives in the Output Format example, not only the block" do
+      # msn-ac0539 round 2: the validator read the contested block (its
+      # evidence opened "re-verified with rebuttal"), then followed the
+      # schema example — which had no such field — and folded the argument
+      # into `evidence`. The gate downgraded every entry and a fix attempt
+      # burned on prompt compliance. The example is what a model anchors on.
+      prompt =
+        PhasePrompts.validation_prompt(%{goal: "x", id: "msn-1"}, %{}, %{}, "",
+          contested_requirements: [%{"req_id" => "FR-5", "reason" => "no retry on 5xx responses"}]
+        )
+
+      [_, output_format] = String.split(prompt, "## Output Format", parts: 2)
+      [schema] = Regex.run(~r/```json\n(.*?)```/s, output_format, capture: :all_but_first)
+      assert schema =~ ~s("rebuttal")
+      assert prompt =~ "SEPARATE field from `evidence`"
+    end
+
     test "an empty set adds nothing to the prompt" do
       prompt =
         PhasePrompts.validation_prompt(%{goal: "x", id: "msn-1"}, %{}, %{}, "",

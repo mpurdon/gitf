@@ -816,6 +816,36 @@ defmodule GiTF.Major.PhasePrompts do
     contested_block =
       render_contested_requirements_block(Keyword.get(opts, :contested_requirements, []))
 
+    # The rebuttal must also appear in the Output Format's canonical
+    # example, not only in the contested block's prose: msn-ac0539 round 2
+    # read the contested block (its evidence opened "re-verified with
+    # rebuttal"), then followed the schema example — which had no such
+    # field — and folded the argument into `evidence`. The gate downgraded
+    # every entry and a fix attempt burned on prompt compliance. A model
+    # anchors on the example schema; the contract's field has to live there.
+    contested? = contested_block != ""
+
+    rebuttal_example =
+      if contested?,
+        do:
+          ",\n      \"rebuttal\": \"ONLY for ids under PREVIOUSLY JUDGED UNMET: " <>
+            "what in the current tree answers the quoted prior verdict\"",
+        else: ""
+
+    rebuttal_schema_note =
+      if contested? do
+        """
+
+        `rebuttal` is a SEPARATE field from `evidence` and is read mechanically:
+        for a requirement listed under PREVIOUSLY JUDGED UNMET below, a
+        `met: true` whose entry has no `rebuttal` field is downgraded to unmet
+        by the factory even when the evidence contains the same argument.
+        Omit the field entirely for requirements that were never contested.
+        """
+      else
+        ""
+      end
+
     # An overruled design review is a live lead for validation: the
     # reviewer's unresolved concern is exactly where the implementation is
     # most likely to fall short of the requirements.
@@ -962,7 +992,7 @@ defmodule GiTF.Major.PhasePrompts do
         {
           "req_id": "FR-1",
           "met": true,
-          "evidence": "How this was verified"
+          "evidence": "How this was verified"#{rebuttal_example}
         }
       ],
       "uncovered_requirements": ["FR-2"],
@@ -971,7 +1001,7 @@ defmodule GiTF.Major.PhasePrompts do
       "summary": "Brief summary of validation results"
     }
     ```
-
+    #{rebuttal_schema_note}
     `uncovered_requirements` lists requirement ids that NO op claimed in its
     `requirement_ids` AND for which no evidence shows the work was delivered
     anyway. Use `[]` when every requirement is covered.
