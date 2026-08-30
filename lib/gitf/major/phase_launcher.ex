@@ -73,6 +73,7 @@ defmodule GiTF.Major.PhaseLauncher do
       "publish" => &GiTF.Publish.start/1,
       "scoring" => &start_scoring/1,
       "awaiting_approval" => &GiTF.Approval.request/1,
+      "awaiting_input" => &GiTF.Inquiry.Gate.start/1,
       "sync" => &GiTF.Publish.merge/1
     }
   end
@@ -981,9 +982,11 @@ defmodule GiTF.Major.PhaseLauncher do
 
         {prompt, "general"}
 
-      phase when phase in ["implementation", "sync", "awaiting_approval"] ->
-        # These phases don't use phase ghosts — handled by op spawning,
-        # sync queue, or user approval respectively. No prompt rebuild needed.
+      phase when phase in ["implementation", "sync", "awaiting_approval", "awaiting_input"] ->
+        # These phases don't use phase ghosts — handled by op spawning, the
+        # sync queue, or a human (approving, or answering a question). No
+        # prompt rebuild needed, and re-spawning a ghost for a phase whose
+        # blocker is a person would just burn tokens next to the wait.
         nil
 
       _ ->

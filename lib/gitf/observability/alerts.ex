@@ -41,6 +41,14 @@ defmodule GiTF.Observability.Alerts do
     # A pending approval blocks the mission until a human acts — the single
     # most important thing to push to the operator's phone.
     approval_requested: :critical,
+    # A question raised mid-run stops the mission dead and NOTHING will
+    # decide it — this gate never auto-answers, unlike approval. The
+    # mission waits until the operator's phone buzzes and they act, so
+    # the push is the entire escalation path, not a nicety.
+    input_requested: :critical,
+    # Still holding well past the alert window. Fired once per question,
+    # and still nothing has been decided for them.
+    input_stalled: :critical,
     # The factory stopped or is about to destroy/skip work without a human —
     # for unattended operation these must always reach the operator.
     factory_paused: :critical,
@@ -67,6 +75,14 @@ defmodule GiTF.Observability.Alerts do
     sandbox_broken: :critical,
     github_auth_broken: :high,
     workflow_phase_drift: :critical,
+    # A mission answered every question and has no recorded phase to
+    # return to. It is parked and only a human can route it — the same
+    # class of stranding as workflow drift.
+    input_return_unknown: :critical,
+    # A phase emitted a question no human could answer. The mission was
+    # NOT held (it proceeded on the phase's own judgement), so this is a
+    # prompt-compliance defect to fix, not an outage.
+    input_question_rejected: :medium,
     sync_conflict_theirs: :high,
     sync_retry: :medium,
     security_advisory: :medium,

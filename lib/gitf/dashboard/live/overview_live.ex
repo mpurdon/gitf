@@ -384,8 +384,15 @@ defmodule GiTF.Dashboard.OverviewLive do
   attr(:mission, :map, default: %{})
 
   defp mini_phase_pipeline(assigns) do
-    current = assigns.phase || "pending"
     phases = @mini_phases
+
+    # A mission held at `awaiting_input` is POSITIONALLY at the phase it
+    # will return to — the gate is a detour, not a step, and any phase can
+    # raise it. Driving the progress bar from the gate's own index would
+    # colour every later dot green (or every dot grey) depending purely on
+    # where the display list happens to put it. Same class of lie as the
+    # twelve hours msn-ac0539 rendered as "sync — actively merging".
+    current = positional_phase(assigns.mission, assigns.phase || "pending")
 
     current_idx = Enum.find_index(phases, &(&1 == current)) || -1
 
@@ -395,6 +402,7 @@ defmodule GiTF.Dashboard.OverviewLive do
       |> assign(:current_idx, current_idx)
       # One derivation per mission row, not one per dot.
       |> assign(:gate_state, GiTF.Approval.gate_state(assigns.mission))
+      |> assign(:input_state, GiTF.Inquiry.gate_state(assigns.mission))
 
     ~H"""
     <div style="display:flex; align-items:center; gap:0px">
@@ -403,9 +411,13 @@ defmodule GiTF.Dashboard.OverviewLive do
           <div style={"width:6px; height:1px; background:#{if idx <= @current_idx, do: "#22c55e", else: "#30363d"}"}></div>
         <% end %>
         <div
-          title={mini_phase_title(phase, @gate_state)}
+          title={mini_phase_title(phase, @gate_state, @input_state)}
           style={"width:6px; height:6px; border-radius:50%; background:#{cond do
             phase == "awaiting_approval" and @gate_state == :skipped -> "#4b5563"
+            phase == "awaiting_input" and @input_state == :held -> "#f59e0b"
+            phase == "awaiting_input" and @input_state == :answered -> "#22c55e"
+            phase == "awaiting_input" and @input_state == :skipped -> "#4b5563"
+            phase == "awaiting_input" -> "#30363d"
             idx < @current_idx -> "#22c55e"
             idx == @current_idx -> "#3b82f6"
             true -> "#30363d"
@@ -416,14 +428,39 @@ defmodule GiTF.Dashboard.OverviewLive do
     """
   end
 
-  defp mini_phase_title("awaiting_approval", :held),
+  # A held mission is POSITIONALLY where it will return to. Falls back to
+  # the gate id only when a record somehow carries no return phase, which
+  # renders as an unknown phase (index -1) rather than inventing progress.
+  defp positional_phase(mission, "awaiting_input") do
+    case Map.get(mission || %{}, :input_return_phase) do
+      phase when is_binary(phase) and phase != "" -> phase
+      _ -> "awaiting_input"
+    end
+  end
+
+  defp positional_phase(_mission, phase), do: phase
+
+  # The input dot never takes its colour or its title from the position of
+  # the mission, only from whether a question was asked and answered.
+  defp mini_phase_title("awaiting_input", _approval, :held),
+    do: "input — HELD, waiting on an answer from you"
+
+  defp mini_phase_title("awaiting_input", _approval, :answered),
+    do: "input — a question was asked and answered"
+
+  defp mini_phase_title("awaiting_input", _approval, :skipped),
+    do: "input — skipped, nothing was asked"
+
+  defp mini_phase_title("awaiting_input", _approval, _), do: "input"
+
+  defp mini_phase_title("awaiting_approval", :held, _input),
     do: "approval — HELD, waiting on a human"
 
-  defp mini_phase_title("awaiting_approval", :skipped),
+  defp mini_phase_title("awaiting_approval", :skipped, _input),
     do: "approval — skipped, nothing needed approving"
 
-  defp mini_phase_title("awaiting_approval", _), do: "approval"
-  defp mini_phase_title(phase, _), do: phase
+  defp mini_phase_title("awaiting_approval", _, _input), do: "approval"
+  defp mini_phase_title(phase, _, _input), do: phase
 
   defp mission_status_badge("active"), do: "badge-blue"
   defp mission_status_badge("completed"), do: "badge-green"

@@ -5,6 +5,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.InquiryCard
 
   @heartbeat_interval :timer.seconds(15)
 
@@ -52,6 +53,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           |> assign(:report, nil)
           |> assign(:report_loading, false)
           |> assign(:sectors, if(connected?(socket), do: load_sectors(), else: []))
+          |> assign(:inquiries, if(connected?(socket), do: load_inquiries(id), else: []))
+          |> assign(:inquiry_draft, %{})
           |> init_toasts()
           |> assign(:budget_info, %{
             budget: 0,
@@ -330,6 +333,56 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     {:noreply, assign(socket, :expanded_ops, expanded)}
   end
 
+  # A held mission has to be answerable where the operator already is.
+  # The Questions page is the queue; this is the same decision reachable
+  # from the run it is blocking, without a second navigation to find out
+  # which mission the question belongs to.
+  def handle_event("draft_answer", %{"id" => id, "value" => value}, socket) do
+    {:noreply, assign(socket, :inquiry_draft, Map.put(socket.assigns.inquiry_draft, id, value))}
+  end
+
+  def handle_event("answer_inquiry", %{"id" => id} = params, socket) do
+    answer = params["value"] || socket.assigns.inquiry_draft[id]
+
+    case GiTF.Inquiry.answer(id, answer, answered_by: actor(socket)) do
+      {:ok, inquiry, :answered} ->
+        GiTF.AuditLog.record(actor(socket), "inquiry.answer", inquiry.mission_id, %{
+          inquiry_id: id,
+          key: inquiry[:key],
+          answer: inquiry[:answer]
+        })
+
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Answered. The mission resumes #{inquiry[:phase]} on the next sweep."
+         )
+         |> reload()}
+
+      {:ok, inquiry, :already_answered} ->
+        # Not an error — a second answer means the caller did not know it
+        # was decided. Show them the standing decision.
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Already answered (#{inquiry[:answer_label] || inquiry[:answer]}) by " <>
+             "#{inquiry[:answered_by]}. The first answer stands — work has already been " <>
+             "re-dispatched against it."
+         )
+         |> reload()}
+
+      {:error, {:invalid, reason}} ->
+        {:noreply, put_flash(socket, :error, "Cannot record that answer: #{reason}")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Answer failed: #{inspect(reason)}")}
+    end
+  end
+
+  defp actor(socket), do: GiTF.Web.TailnetAuth.actor(socket.assigns)
+
   defp reload(socket) do
     id = socket.assigns.mission.id
 
@@ -416,6 +469,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         |> assign(
           mission: mission,
           ops: GiTF.Ops.list(mission_id: id),
+          inquiries: load_inquiries(id),
           sectors: load_sectors(),
           budget_info: budget_info,
           rollback_status: rollback_status,
@@ -430,6 +484,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
       {:error, _} ->
         socket
     end
+  end
+
+  # Best-effort, like every other join in `reload/1`: a mission page must
+  # still render if the inquiry store is unreadable.
+  defp load_inquiries(mission_id) do
+    GiTF.Inquiry.list(mission_id)
+  rescue
+    _ -> []
   end
 
   defp compute_op_stats(socket) do
@@ -946,6 +1008,28 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <% end %>
         </div>
       </div>
+
+      <%!-- Open questions. A mission blocked on a person must say so where
+            the operator is already looking, and be answerable there. --%>
+      <%= if @inquiries != [] do %>
+        <div class="panel">
+          <div class="panel-title">
+            Operator questions
+            <span :if={Enum.any?(@inquiries, &(&1[:status] == "open"))} class="badge badge-orange" style="margin-left:0.5rem">
+              held
+            </span>
+          </div>
+          <div :if={Enum.any?(@inquiries, &(&1[:status] == "open"))} style="font-size:0.78rem; color:#8b949e; margin-bottom:0.75rem">
+            This mission is holding at <b>awaiting_input</b> and will not move until these are
+            answered. It never auto-answers — waiting is the intended behaviour.
+          </div>
+          <.inquiry_card
+            :for={inquiry <- @inquiries}
+            inquiry={inquiry}
+            draft={@inquiry_draft[inquiry.id]}
+          />
+        </div>
+      <% end %>
 
       <%!-- Tournament Panel (only when parallel-impl tournament is active) --%>
       <%= if GiTF.Tournament.running?(@mission) do %>
@@ -1467,6 +1551,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp phase_icon(%{phase: "awaiting_approval"} = assigns),
     do: ~H"<Heroicons.hand_raised mini class='w-4 h-4' />"
 
+  # The other human gate, and the other kind of blocking: not "sign this
+  # off" but "answer this". A question mark, so the two are never confused
+  # at a glance on the same strip.
+  defp phase_icon(%{phase: "awaiting_input"} = assigns),
+    do: ~H"<Heroicons.question_mark_circle mini class='w-4 h-4' />"
+
   defp phase_icon(%{phase: "sync"} = assigns),
     do: ~H"<Heroicons.arrow_path_rounded_square mini class='w-4 h-4' />"
 
@@ -1481,12 +1571,38 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   defp phase_icon(assigns), do: ~H"<span>{@phase |> String.first() |> String.upcase()}</span>"
 
-  # "awaiting_approval" crowds the strip next to "implementation"; the
-  # phase id stays canonical everywhere else.
+  # The gate ids crowd the strip next to "implementation"; the phase ids
+  # stay canonical everywhere else.
   defp phase_label("awaiting_approval"), do: "approval"
+  defp phase_label("awaiting_input"), do: "input"
   defp phase_label(phase), do: phase
 
   defp current_phase(mission), do: Map.get(mission, :current_phase) || "pending"
+
+  # WHERE the mission is, as distinct from WHAT it is doing.
+  #
+  # `awaiting_input` has no position in the pipeline — any phase can raise
+  # a question and the mission returns to that same phase. Its index in the
+  # display list is a layout choice, so letting it drive progress would make
+  # a mission held during `design` render every later phase as done (if the
+  # gate were placed late) or the entire run as not-yet-started (if early).
+  # Both are lies of the same family as the twelve hours msn-ac0539 spent
+  # rendering as "sync — actively merging".
+  #
+  # The truthful position of a held mission is the phase it will return to.
+  # The gate step itself is drawn from `Inquiry.gate_state/1`, not from this.
+  defp positional_phase(mission) do
+    case current_phase(mission) do
+      "awaiting_input" ->
+        case Map.get(mission, :input_return_phase) do
+          phase when is_binary(phase) and phase != "" -> phase
+          _ -> "awaiting_input"
+        end
+
+      phase ->
+        phase
+    end
+  end
 
   defp phase_index(phase), do: Enum.find_index(@phases, &(&1 == phase))
 
@@ -1499,8 +1615,15 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   # unrecognised phase on EITHER side means "cannot say it is done", which
   # is the only honest answer and the fail-closed one: a widget may
   # under-report progress, never invent it.
+  # The input gate is the one step whose "done" cannot be an index
+  # comparison: the mission returns to a phase BEFORE it, so a positional
+  # test would render an answered gate as still pending forever. Asked and
+  # answered is the only thing "done" can mean here.
+  defp phase_done?(mission, "awaiting_input"),
+    do: GiTF.Inquiry.gate_state(mission) == :answered
+
   defp phase_done?(mission, phase) do
-    case {phase_index(current_phase(mission)), phase_index(phase)} do
+    case {phase_index(positional_phase(mission)), phase_index(phase)} do
       {current_idx, phase_idx} when is_integer(current_idx) and is_integer(phase_idx) ->
         phase_idx < current_idx
 
@@ -1509,11 +1632,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
-  # The gate is skipped when the mission passed it without a human ever
-  # being asked. Derived by GiTF.Approval so the overview's mini-pipeline
-  # cannot disagree with this one.
+  # The gates are skipped when the mission got past them without a human
+  # ever being asked. Derived by GiTF.Approval / GiTF.Inquiry so the
+  # overview's mini-pipeline cannot disagree with this one.
   defp phase_skipped?(mission, "awaiting_approval"),
     do: GiTF.Approval.gate_state(mission) == :skipped
+
+  defp phase_skipped?(mission, "awaiting_input"),
+    do: GiTF.Inquiry.gate_state(mission) == :skipped
 
   defp phase_skipped?(mission, phase) do
     Map.get(mission, :pipeline_mode) == "fast" and phase in @fast_skipped_phases

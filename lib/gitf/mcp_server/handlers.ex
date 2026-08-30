@@ -715,6 +715,80 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("reject_mission", _), do: {:error, "Missing required parameters: id, reason, confirm"}
 
+  # -- Questions (the input gate) --------------------------------------------
+
+  # The MCP is the primary control surface, so a mission that stops for a
+  # human has to be answerable here or the gate is not usable — the
+  # Catwalk is the visual surface, not the one the operator drives from.
+  # Same confirm-gating, receipt shape and @mcp_actor attribution as the
+  # approval trio; the difference is that an answer is not binary and the
+  # mission goes BACKWARDS to the phase that asked.
+  def call("list_questions", args) when is_map(args) do
+    safe_handler("list_questions", args, fn ->
+      mission_id = args["mission_id"]
+
+      inquiries =
+        cond do
+          args["answered"] == true and is_binary(mission_id) -> GiTF.Inquiry.list(mission_id)
+          args["answered"] == true -> all_inquiries()
+          true -> GiTF.Inquiry.list_open(mission_id)
+        end
+
+      {:ok,
+       json_text(%{
+         count: length(inquiries),
+         open: Enum.count(inquiries, &(&1[:status] == "open")),
+         questions: Enum.map(inquiries, &summarize_inquiry/1),
+         note: questions_note(inquiries)
+       })}
+    end)
+  end
+
+  def call("show_question", %{"id" => id} = args) do
+    safe_handler("show_question", args, fn ->
+      case GiTF.Inquiry.get(id) do
+        nil -> {:error, "Question not found: #{id}"}
+        inquiry -> {:ok, json_text(serialize_inquiry(inquiry))}
+      end
+    end)
+  end
+
+  def call("show_question", _), do: {:error, "Missing required parameter: id"}
+
+  def call("answer_question", %{"id" => id, "answer" => answer} = args) do
+    with :ok <- require_confirm(args) do
+      safe_handler("answer_question", %{"id" => id}, fn ->
+        case GiTF.Inquiry.answer(id, answer, answered_by: @mcp_actor) do
+          {:ok, inquiry, :answered} ->
+            audit_write("inquiry.answer", inquiry.mission_id, %{
+              inquiry_id: id,
+              key: inquiry[:key],
+              answer: inquiry[:answer]
+            })
+
+            {:ok, json_text(answer_receipt(inquiry))}
+
+          {:ok, inquiry, :already_answered} ->
+            {:ok, json_text(already_answered(inquiry))}
+
+          {:error, :not_found} ->
+            {:error, "Question not found: #{id}"}
+
+          {:error, {:invalid, reason}} ->
+            {:error, "Cannot record that answer: #{reason}"}
+
+          {:error, reason} ->
+            {:error, log_and_sanitize("answer_question", reason)}
+        end
+      end)
+    end
+  end
+
+  def call("answer_question", %{"id" => _} = args) when not is_map_key(args, "answer"),
+    do: {:error, "Missing required parameter: answer"}
+
+  def call("answer_question", _), do: {:error, "Missing required parameters: id, answer, confirm"}
+
   # The approval timeout is a factory-wide CONFIG value
   # (`[:approvals, :timeout_hours]`), not a per-sector record like
   # set_validation_timeout — so it persists through the config file plus a
@@ -1701,6 +1775,130 @@ defmodule GiTF.MCPServer.Handlers do
           "tree survives as archive/#{mission.id} so resume_mission can re-enter it. The " <>
           "reason is stored on the approval artifact and the audit log, but NO ghost " <>
           "consumes it today — nothing is scheduled to act on it."
+    }
+  end
+
+  # -- Question helpers ------------------------------------------------------
+
+  defp all_inquiries do
+    GiTF.Archive.all(:inquiries)
+    |> Enum.sort_by(&(&1[:asked_at] || &1[:inserted_at]), {:asc, DateTime})
+  rescue
+    _ -> []
+  end
+
+  defp questions_note([]),
+    do:
+      "Nothing is waiting on you. A held mission never auto-answers and never times out, " <>
+        "so an empty list is proof, not a default."
+
+  defp questions_note(inquiries) do
+    open = Enum.count(inquiries, &(&1[:status] == "open"))
+
+    if open == 0 do
+      "All decided. Each mission resumed the phase that asked and re-ran it with the answer."
+    else
+      "#{open} #{if open == 1, do: "mission is", else: "missions are"} STOPPED until answered. " <>
+        "This gate never auto-answers — nothing gets picked for you while you are away."
+    end
+  end
+
+  defp summarize_inquiry(inquiry) do
+    %{
+      id: inquiry[:id],
+      mission_id: inquiry[:mission_id],
+      phase: inquiry[:phase],
+      key: inquiry[:key],
+      kind: to_string(inquiry[:kind]),
+      status: inquiry[:status],
+      prompt: inquiry[:prompt],
+      options: Enum.map(inquiry[:options] || [], &serialize_option/1),
+      asked_at: to_string(inquiry[:asked_at]),
+      awake_hours_waiting: awake_hours_since(inquiry[:asked_at]),
+      answer: inquiry[:answer],
+      answered_by: inquiry[:answered_by]
+    }
+  end
+
+  defp serialize_inquiry(inquiry) do
+    mission = mission_or_nil(inquiry[:mission_id])
+
+    inquiry
+    |> summarize_inquiry()
+    |> Map.merge(%{
+      default: inquiry[:default],
+      asked_by: inquiry[:asked_by],
+      answer_label: inquiry[:answer_label],
+      answered_at: inquiry[:answered_at] && to_string(inquiry[:answered_at]),
+      # An inherited answer was given on an ancestor run and carried across
+      # a resume. It cost nobody's attention on THIS mission, and it does
+      # not count against this mission's question budget.
+      inherited_from: inquiry[:inherited_from],
+      mission_goal: mission && mission[:goal],
+      mission_phase: mission && mission[:current_phase],
+      returns_to: mission && mission[:input_return_phase],
+      budget_remaining: GiTF.Inquiry.budget_remaining(inquiry[:mission_id]),
+      note: show_question_note(inquiry)
+    })
+  end
+
+  defp serialize_option(option) do
+    %{id: option[:id], label: option[:label], rationale: option[:rationale]}
+  end
+
+  defp show_question_note(%{status: "answered"} = inquiry),
+    do:
+      "Already answered (#{inquiry[:answer_label] || inquiry[:answer]}). The first answer " <>
+        "stands — work has already been re-dispatched against it."
+
+  defp show_question_note(%{kind: :choice}),
+    do:
+      "answer_question takes the option ID, not the label. The mission re-runs the asking " <>
+        "phase with your choice in its prompt."
+
+  defp show_question_note(_),
+    do:
+      "The mission is stopped until this is answered, and will re-run the asking phase with " <>
+        "your answer in its prompt."
+
+  defp mission_or_nil(mission_id) do
+    case GiTF.Missions.get(mission_id) do
+      {:ok, mission} -> mission
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp answer_receipt(inquiry) do
+    %{
+      id: inquiry[:id],
+      mission_id: inquiry[:mission_id],
+      answered: true,
+      answer: inquiry[:answer],
+      answer_label: inquiry[:answer_label],
+      answered_by: @mcp_actor,
+      resumes_phase: inquiry[:phase],
+      note:
+        "Recorded. Once every open question on this mission is answered it transitions back " <>
+          "to #{inquiry[:phase]} and RE-RUNS it with the answer in the prompt — poll " <>
+          "show_mission. The answer also survives a resume, so a later run will not ask again."
+    }
+  end
+
+  defp already_answered(inquiry) do
+    %{
+      id: inquiry[:id],
+      mission_id: inquiry[:mission_id],
+      answered: false,
+      answer: inquiry[:answer],
+      answer_label: inquiry[:answer_label],
+      answered_by: inquiry[:answered_by],
+      answered_at: inquiry[:answered_at] && to_string(inquiry[:answered_at]),
+      note:
+        "Already answered — nothing changed. The FIRST answer stands because the asking " <>
+          "phase has already been re-dispatched against it; changing a decision is a new " <>
+          "mission, not an edit."
     }
   end
 

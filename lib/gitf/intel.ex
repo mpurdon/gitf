@@ -102,6 +102,15 @@ defmodule GiTF.Intel do
   Karpathy-style wiki context (sector indexes + top-K relevant pages) is
   appended to the historical context. Backward compatible: the old
   arity-2 form remains for callers without a mission in hand.
+
+  Any question the operator has answered on this mission is appended
+  LAST, and unconditionally — this is the only injection here that is
+  not an intelligence-layer feature and not default-off. A phase that
+  asked a question is re-dispatched after it is answered, so the answer
+  has to reach its prompt or the phase asks again; `GiTF.Inquiry.ask/2`
+  would hand back the standing answer rather than hold twice, but a run
+  that has to rely on that has already wasted a ghost. Injecting once
+  here is why no prompt builder has to remember.
   """
   def get_prompt_context(sector_id, phase) do
     PromptContext.for_phase(sector_id, phase)
@@ -110,10 +119,33 @@ defmodule GiTF.Intel do
   def get_prompt_context(sector_id, phase, mission) when is_map(mission) do
     historical = PromptContext.for_phase(sector_id, phase)
     knowledge = GiTF.Knowledge.PromptContext.for_phase(sector_id, phase, mission)
+    decisions = operator_decisions(mission)
+    invitation = operator_invitation(mission, phase)
 
-    [historical, knowledge]
+    [historical, knowledge, decisions, invitation]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
+  end
+
+  # Both best-effort: a prompt must still be built if the inquiry store is
+  # unreadable. The cost of missing a block is one re-asked question or one
+  # unaskable one; the cost of raising here is a phase that never launches.
+  defp operator_decisions(mission) do
+    case Map.get(mission, :id) do
+      id when is_binary(id) -> GiTF.Inquiry.prompt_block(id)
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  end
+
+  defp operator_invitation(mission, phase) do
+    case Map.get(mission, :id) do
+      id when is_binary(id) -> GiTF.Inquiry.invitation_block(id, phase)
+      _ -> ""
+    end
+  rescue
+    _ -> ""
   end
 
   @doc """

@@ -17,7 +17,7 @@ defmodule GiTF.Vault.Renderer.Kanban do
   |---------|-----------------------------------------------------------|
   | Todo    | pending, planning, requirements                           |
   | Doing   | active, research, design, implementation, validation      |
-  | Review  | review, awaiting_approval                                 |
+  | Review  | review, awaiting_approval, awaiting_input                  |
   | Done    | completed, merged                                         |
 
   Failed and closed missions are rendered into a separate section below
@@ -37,6 +37,7 @@ defmodule GiTF.Vault.Renderer.Kanban do
     "validation" => "Doing",
     "review" => "Review",
     "awaiting_approval" => "Review",
+    "awaiting_input" => "Review",
     "completed" => "Done",
     "merged" => "Done"
   }

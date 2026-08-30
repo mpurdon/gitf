@@ -11,6 +11,13 @@ defmodule GiTF.Major.Orchestrator do
       implementation → validation → awaiting_approval → sync → simplify →
       publish → scoring
 
+  One phase is missing from that line because it is not on it:
+  `awaiting_input` is a *detour* any leg can take. A phase that hits a
+  decision only the operator can make emits a question, the mission holds,
+  and it returns to the same phase with the answer — sideways and back, not
+  forward. `advance_mission_phase/1` settles it above the workflow fork; the
+  reasoning lives in `GiTF.Inquiry.Gate`.
+
   The personas it calls out to:
 
   | Module | Its role in the journey |
@@ -51,7 +58,17 @@ defmodule GiTF.Major.Orchestrator do
   # user-visibly `status: "completed"` once publish lands; scoring + learning
   # (`ingest_mission_outcome`) continue in the background while
   # `post_processing_status` reflects their state. See `GiTF.Publish.start/1`.
-  @phases ~w(triage research requirements design review planning implementation validation awaiting_approval sync simplify publish scoring)
+  #
+  # `awaiting_input` has no true position in this list and its neighbours are
+  # a display choice, not a claim. ANY phase can raise a question, and the
+  # mission returns to whichever one did (`input_return_phase`) — so the gate
+  # is entered from everywhere and exited backwards. It sits next to
+  # `awaiting_approval` because the two share a meaning the operator reads off
+  # the strip at a glance: this region is where the factory stops for a
+  # person. Progress is never computed from its index — the widgets resolve a
+  # held mission's position from the phase it will return to, and
+  # `GiTF.Inquiry.gate_state/1` decides how the step itself renders.
+  @phases ~w(triage research requirements design review planning implementation validation awaiting_input awaiting_approval sync simplify publish scoring)
 
   # -- Public API --------------------------------------------------------------
 
@@ -350,6 +367,14 @@ defmodule GiTF.Major.Orchestrator do
   # Two maps of the same journey: a declarative workflow definition when the
   # mission carries one, and the hardcoded ladder otherwise. The bridge can
   # always fall back here, so the ladder is the ground the workflow stands on.
+  #
+  # The input gate is settled ABOVE the fork, on both sides of it, because it
+  # belongs to neither map. Any phase may ask the operator a question it
+  # cannot honestly answer itself, and the mission returns to that same phase
+  # afterwards — a leg that goes sideways and comes back cannot be a step in
+  # a linear itinerary. Handling it here also spares every workflow YAML from
+  # declaring a phase it never routes to; one that forgot would send its held
+  # missions down the Advancer's WORKFLOW DRIFT path. See `GiTF.Inquiry.Gate`.
   defp advance_mission_phase(mission) do
     phase = Map.get(mission, :current_phase, "pending")
 
@@ -357,10 +382,18 @@ defmodule GiTF.Major.Orchestrator do
       "Orchestrator: advancing #{mission.id} from phase=#{phase} status=#{mission.status}"
     )
 
-    if WorkflowBridge.workflow_dispatch_active?(mission) do
-      WorkflowBridge.advance_via_workflow(mission, phase)
-    else
-      advance_via_legacy(mission, phase)
+    cond do
+      phase == GiTF.Inquiry.gate_phase() ->
+        GiTF.Inquiry.Gate.handle_result(mission)
+
+      match?({:held, _}, GiTF.Inquiry.Gate.intercept(mission)) ->
+        {:ok, GiTF.Inquiry.gate_phase()}
+
+      WorkflowBridge.workflow_dispatch_active?(mission) ->
+        WorkflowBridge.advance_via_workflow(mission, phase)
+
+      true ->
+        advance_via_legacy(mission, phase)
     end
   end
 
@@ -424,6 +457,13 @@ defmodule GiTF.Major.Orchestrator do
       # only then does a validation ghost judge the tree against ground truth.
       "validation" ->
         GiTF.Validation.handle_result(mission)
+
+      # AWAITING INPUT — the journey pauses for a human MID-ROUTE and then
+      # doubles back. Normally settled in `advance_mission_phase/1` above the
+      # workflow fork; this arm catches the mission if a fallback ever lands
+      # here directly, so the ladder cannot strand it.
+      "awaiting_input" ->
+        GiTF.Inquiry.Gate.handle_result(mission)
 
       # AWAITING APPROVAL — the journey pauses for a human.
       "awaiting_approval" ->

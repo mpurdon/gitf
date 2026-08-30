@@ -21,7 +21,7 @@ defmodule GiTF.Vault.Renderer.Mission do
 
   @phases ~w(
     triage research requirements design review planning implementation
-    validation awaiting_approval sync simplify publish scoring
+    validation awaiting_input awaiting_approval sync simplify publish scoring
   )
 
   @doc "Returns the canonical phase order used to render the checklist."

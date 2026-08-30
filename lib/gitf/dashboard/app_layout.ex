@@ -85,6 +85,16 @@ defmodule GiTF.Dashboard.AppLayout do
         _ -> 0
       end
 
+    # Every one of these is a mission that is stopped RIGHT NOW waiting on
+    # the person reading this nav bar. The badge is the only thing that
+    # tells them, from any page, that the factory is holding.
+    open_questions =
+      try do
+        length(GiTF.Inquiry.list_open())
+      rescue
+        _ -> 0
+      end
+
     active_ghosts =
       try do
         GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
@@ -95,6 +105,7 @@ defmodule GiTF.Dashboard.AppLayout do
     assigns =
       assigns
       |> assign(:pending_approvals, pending_count)
+      |> assign(:open_questions, open_questions)
       |> assign(:active_ghosts, active_ghosts)
       |> assign(:prefix, @prefix)
 
@@ -121,6 +132,12 @@ defmodule GiTF.Dashboard.AppLayout do
             Approvals
             <%= if @pending_approvals > 0 do %>
               <span class="nav-badge nav-badge-orange">{@pending_approvals}</span>
+            <% end %>
+          </a>
+          <a href={"#{@prefix}/questions"} class={if active?(@current_path, "/questions"), do: "active"}>
+            Questions
+            <%= if @open_questions > 0 do %>
+              <span class="nav-badge nav-badge-orange">{@open_questions}</span>
             <% end %>
           </a>
 

@@ -6,6 +6,11 @@ defmodule GiTF.Archive.Indexes do
     op_dependencies: [:op_id, :depends_on_id],
     failure_analyses: [:sector_id, :failure_type, :model],
     skills: [:scope, :sector_id, :status],
+    # Read on EVERY advance sweep by the input gate's interception, which
+    # runs before any mission is dispatched. A full-collection scan there
+    # would be a per-tick cost paid by every mission for a feature almost
+    # none of them use.
+    inquiries: [:mission_id, :status],
     mission_outcomes: [:mission_id, :sector_id, :outcome_category, :tracking_stopped, :pr_url]
   }
 

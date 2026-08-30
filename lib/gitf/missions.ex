@@ -72,6 +72,34 @@ defmodule GiTF.Missions do
   @spec terminal_phases() :: [String.t()]
   def terminal_phases, do: @terminal_phases
 
+  # The phases whose meaning is "the factory has stopped and a PERSON is
+  # the blocker". Four separate mechanisms have to know this list, and
+  # every one of them is wrong in a way that costs something real if it
+  # drifts:
+  #
+  #   * Tachikoma's stall detector — a held mission has no live ghost BY
+  #     DESIGN, which is the exact shape it calls a stall. Without the
+  #     exclusion every human gate pages the operator as an orchestration
+  #     failure ten minutes in.
+  #   * The mission age cap — force-completing a mission because a human
+  #     was asleep is the cap punishing the wrong party.
+  #   * The budget cap — a held mission spends nothing while it waits.
+  #   * The vault kanban — both gates belong in Review, not Doing.
+  #
+  # One list, so adding a third gate cannot silently miss one of them.
+  @human_gate_phases ~w(awaiting_approval awaiting_input)
+
+  @doc "Phases where the mission is stopped and a human is the blocker."
+  @spec human_gate_phases() :: [String.t()]
+  def human_gate_phases, do: @human_gate_phases
+
+  @doc "True when the mission is stopped waiting on a person."
+  @spec held_for_human?(map()) :: boolean()
+  def held_for_human?(mission) when is_map(mission),
+    do: Map.get(mission, :current_phase) in @human_gate_phases
+
+  def held_for_human?(_), do: false
+
   @doc """
   When the mission actually ENDED: the timestamp of its transition into a
   terminal phase, from a pre-sorted transition list or a mission id. Nil when
@@ -495,7 +523,14 @@ defmodule GiTF.Missions do
         # both lists is a contradiction, and the fail-closed reading is
         # the only safe one.
         contested_requirements: contested,
-        accepted_requirements: inherited_accepted(parent, contested_ids)
+        accepted_requirements: inherited_accepted(parent, contested_ids),
+        # A question the operator has already answered is a decision, not
+        # state the child gets to re-derive. Re-asking it spends their
+        # attention a second time on a matter that was settled, and the
+        # second answer can differ from the first — which would make the
+        # resumed run's provenance unreadable in exactly the way the
+        # requirement registers exist to prevent.
+        answered_inquiries: inherited_answers(parent)
       })
     end
   end
@@ -551,6 +586,48 @@ defmodule GiTF.Missions do
 
   defp inherited_accepted(parent, contested_ids) do
     (parent[:accepted_requirements] || []) -- contested_ids
+  end
+
+  @doc """
+  Every question the operator answered anywhere in `parent`'s resume
+  lineage, as the register `GiTF.Inquiry.ask/2` consults before it opens
+  anything: `%{"phase" => _, "key" => _, "answer" => _, ...}`.
+
+  Keyed on `{phase, key}`, never on prompt text — a ghost that rewords
+  its own question between runs is asking the same question, and the
+  operator should not have to notice that.
+
+  Later entries win, and the lineage walks oldest-first, so a decision
+  made further down the chain outranks the one it superseded. Both the
+  parent's own answered inquiries and the register it inherited are
+  included: a lineage three resumes deep must not quietly forget the
+  answer given at the top of it.
+  """
+  @spec inherited_answers(map()) :: [map()]
+  def inherited_answers(parent) do
+    parent
+    |> resume_lineage()
+    |> Enum.flat_map(&lineage_answer_entries/1)
+    |> Enum.reduce(%{}, fn entry, acc ->
+      Map.put(acc, {entry["phase"], entry["key"]}, entry)
+    end)
+    |> Map.values()
+    |> Enum.sort_by(&{&1["phase"], &1["key"]})
+  rescue
+    # An unreadable register must cost the child its inheritance, not its
+    # existence. Worst case the operator is asked one question twice.
+    _ -> []
+  end
+
+  defp lineage_answer_entries(record) do
+    inherited =
+      for entry <- record[:answered_inquiries] || [],
+          is_map(entry),
+          is_binary(entry["phase"]),
+          is_binary(entry["key"]),
+          do: entry
+
+    inherited ++ GiTF.Inquiry.answered_register(record[:id])
   end
 
   # Oldest ancestor first, `parent` last. A missing ancestor record (the
@@ -1582,6 +1659,7 @@ defmodule GiTF.Missions do
   @pipeline_phases [
     "implementation",
     "validation",
+    "awaiting_input",
     "awaiting_approval",
     "sync",
     "simplify",

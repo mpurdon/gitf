@@ -33,6 +33,18 @@ defmodule GiTF.Major.Lifecycle do
 
   alias GiTF.Config.Provider, as: Config
 
+  # Phases where neither the clock nor the meter may act, because the thing
+  # the mission is waiting for is not the factory: the human gates
+  # (`Missions.human_gate_phases/0`, one list so a gate added later cannot
+  # miss this), plus the two ends of the journey.
+  #
+  # For `awaiting_input` the reason is sharper than for approval: that gate
+  # never auto-answers, so a mission held on a question would otherwise be
+  # force-completed for the crime of the operator being asleep — the
+  # decision it escalated silently replaced by a timeout, which is the
+  # exact outcome the no-auto-answer policy exists to prevent.
+  defp unmetered_phases, do: ["completed", "pending"] ++ GiTF.Missions.human_gate_phases()
+
   # -- The meter ---------------------------------------------------------------
 
   @doc false
@@ -42,7 +54,9 @@ defmodule GiTF.Major.Lifecycle do
 
     # Skip the check once the mission is user-visibly done — post-processing
     # cost is bounded by the scoring-failure cap, not the mission budget.
-    if status == "completed" or phase in ["completed", "awaiting_approval", "pending"] do
+    # A mission held at a human gate spends nothing while it waits, so the
+    # meter has nothing to say about it either.
+    if status == "completed" or phase in unmetered_phases() do
       false
     else
       # Fail CLOSED: an unverifiable budget blocks advancement (the arm
@@ -91,12 +105,12 @@ defmodule GiTF.Major.Lifecycle do
         hours = GiTF.Clock.awake_elapsed(started) / 3600
         phase = Map.get(mission, :current_phase, "pending")
         status = Map.get(mission, :status, "pending")
-        # Don't timeout missions that are completed or awaiting approval.
+        # Don't timeout missions that are completed or held at a human gate.
         # Also skip missions that are user-visibly completed but still running
         # async post-processing (status="completed" with phase="scoring") —
         # post-processing has its own failure path that doesn't regress status.
         status != "completed" and
-          phase not in ["completed", "awaiting_approval", "pending"] and
+          phase not in unmetered_phases() and
           hours > max_quest_age_hours()
 
       _ ->

@@ -387,9 +387,17 @@ defmodule GiTF.Vault.Writer do
        when s in ["active", "research", "design", "implementation", "validation"],
        do: :doing
 
-  defp lane_for_status(s) when s in ["review", "awaiting_approval"], do: :review
-  defp lane_for_status(s) when s in ["completed", "merged"], do: :done
-  defp lane_for_status(_), do: nil
+  # Both human gates belong in Review: the mission is stopped and a person
+  # is the blocker. Read from `Missions.human_gate_phases/0` so a gate
+  # added later cannot end up filed under Doing.
+  defp lane_for_status("review"), do: :review
+
+  defp lane_for_status(s) do
+    if s in GiTF.Missions.human_gate_phases(), do: :review, else: lane_for_other_status(s)
+  end
+
+  defp lane_for_other_status(s) when s in ["completed", "merged"], do: :done
+  defp lane_for_other_status(_), do: nil
 
   defp active_ghosts do
     Archive.filter(:ghosts, fn g -> g[:status] in [:running, "running", :provisioning] end)

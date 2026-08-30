@@ -29,6 +29,9 @@ defmodule GiTF.Dashboard.Helpers do
   def phase_badge("implementation"), do: "badge-purple"
   def phase_badge("validation"), do: "badge-purple"
   def phase_badge("awaiting_approval"), do: "badge-yellow"
+  # Orange, not yellow: this one is not "a human should look", it is
+  # "nothing moves until a human answers".
+  def phase_badge("awaiting_input"), do: "badge-orange"
   def phase_badge("sync"), do: "badge-blue"
   def phase_badge("simplify"), do: "badge-purple"
   def phase_badge("scoring"), do: "badge-blue"

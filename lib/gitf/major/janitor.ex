@@ -474,7 +474,7 @@ defmodule GiTF.Major.Janitor do
 
   @phase_statuses ~w(
     research requirements design review planning implementation
-    validation awaiting_approval sync simplify scoring
+    validation awaiting_input awaiting_approval sync simplify scoring
   )
 
   defp advance_stuck_mission_phases do

@@ -534,6 +534,74 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "list_questions",
+        description:
+          "Open operator questions — missions holding at awaiting_input because a phase hit " <>
+            "a decision only you can make. Each entry carries the mission, the phase that " <>
+            "asked, the kind (choice/text/confirm), the prompt, the options with their " <>
+            "rationale, and how long it has been waiting in AWAKE hours. Oldest first: the " <>
+            "one that has been holding longest is costing the most wall clock. Optional " <>
+            "mission_id narrows it to one mission, and answered: true includes decided ones. " <>
+            "A held mission NEVER auto-answers and never times out — it waits until you " <>
+            "answer or kill it, so an empty list here is the only proof nothing is stuck " <>
+            "on you.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            mission_id: %{
+              type: "string",
+              description: "Only questions for this mission (optional)"
+            },
+            answered: %{
+              type: "boolean",
+              description: "Include already-answered questions (default false)"
+            }
+          },
+          required: []
+        }
+      },
+      %{
+        name: "show_question",
+        description:
+          "One question in full: prompt, kind, every option with its id, label and " <>
+            "rationale, the mission's goal and current phase, the phase that asked, the " <>
+            "budget remaining on that mission, and — once decided — the answer, who gave " <>
+            "it and when. Read this before answer_question: the option id, not the label, " <>
+            "is what answer_question takes for a :choice.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Question ID (inq-…)"}
+          },
+          required: ["id"]
+        }
+      },
+      %{
+        name: "answer_question",
+        description:
+          "[WRITE] Answer an open question, releasing the mission. It transitions back to " <>
+            "the phase that asked and RE-RUNS it with your answer in the prompt, so the " <>
+            "answer shapes what gets built rather than being filed next to it. For a " <>
+            ":choice pass answer as the option id (an unknown id is refused, with the valid " <>
+            "ids listed); for :confirm pass true/false; for :text pass the text. Answering " <>
+            "is idempotent and the FIRST answer wins: an already-answered question comes " <>
+            "back answered: false with the standing decision rather than an error, because " <>
+            "work has already been re-dispatched against it. Recorded as answered_by " <>
+            "\"mcp_operator\" — the MCP has no person-level identity. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Question ID (inq-…)"},
+            answer: %{
+              description: "Option id for :choice, true/false for :confirm, the text for :text",
+              type: ["string", "boolean"]
+            },
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "answer", "confirm"]
+        }
+      },
+      %{
         name: "set_approval_timeout",
         description:
           "[WRITE] Set the auto-approve timeout (hours) for pending approvals — config " <>

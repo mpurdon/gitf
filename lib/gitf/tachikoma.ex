@@ -247,15 +247,21 @@ defmodule GiTF.Tachikoma do
   # caught one 72 minutes before any factory mechanism did. Liveness is
   # PROCESS truth (mission_has_live_ghost?: Registry + Process.alive?),
   # not op-status records, which are maintained by exactly the machinery
-  # whose failure this exists to catch. awaiting_approval is excluded:
-  # quietly waiting on a human is the intended behaviour there.
+  # whose failure this exists to catch. Every human gate is excluded:
+  # quietly waiting on a person is the intended behaviour there. A held
+  # mission has no live ghost BY DESIGN — it is exactly the shape this
+  # check calls a stall — so without the exclusion every question raised
+  # would page the operator as an orchestration failure ten minutes later.
+  # The list is `Missions.human_gate_phases/0` rather than a local copy
+  # precisely so a gate added later cannot miss this. `GiTF.Inquiry` does
+  # its own, differently-worded escalation for a question nobody answers.
   @mission_stall_threshold_ms 10 * 60 * 1000
 
   defp check_mission_stalls do
     now = DateTime.utc_now()
 
     GiTF.Archive.filter(:missions, &(&1[:status] in GiTF.Missions.active_statuses()))
-    |> Enum.reject(&(&1[:current_phase] == "awaiting_approval"))
+    |> Enum.reject(&GiTF.Missions.held_for_human?/1)
     |> Enum.each(&check_one_mission_stall(&1, now))
   end
 

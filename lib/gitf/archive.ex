@@ -1100,6 +1100,7 @@ defmodule GiTF.Archive do
   defp collection_prefix(:context_snapshots), do: :ctx
   defp collection_prefix(:model_reputation), do: :mrp
   defp collection_prefix(:approval_requests), do: :apr
+  defp collection_prefix(:inquiries), do: :inq
   defp collection_prefix(:debriefs), do: :prv
   defp collection_prefix(:backups), do: :ckp
   defp collection_prefix(:model_scores), do: :msc
