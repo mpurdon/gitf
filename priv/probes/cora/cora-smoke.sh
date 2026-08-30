@@ -62,6 +62,11 @@ if ! flock -w 60 9; then
   pkill -f 'WebKitWebDriver' 2>/dev/null
   pkill -x cora 2>/dev/null
   pkill -f 'http\.server 1420' 2>/dev/null
+  pkill -f 'probes/monkey\.mjs' 2>/dev/null
+  # monkey.mjs and Xvfb inherit fd 9 and hold the flock past a SIGKILLed
+  # probe's death (msn-05bebd's resume stall — fuser named Xvfb, pid 1775).
+  pkill -f 'xvfb-run' 2>/dev/null
+  pkill -x Xvfb 2>/dev/null
   sleep 2
   if ! flock -w 120 9; then
     say "TOOL MISSING on host: probe lock still held after sweep; this is an infrastructure problem, not a code problem"
@@ -76,6 +81,11 @@ pkill -f 'tauri-driver' 2>/dev/null
 pkill -f 'WebKitWebDriver' 2>/dev/null
 pkill -x cora 2>/dev/null
 pkill -f 'http\.server 1420' 2>/dev/null
+pkill -f 'probes/monkey\.mjs' 2>/dev/null
+# monkey.mjs and Xvfb inherit fd 9 and hold the flock past a SIGKILLed
+# probe's death (msn-05bebd's resume stall — fuser named Xvfb, pid 1775).
+pkill -f 'xvfb-run' 2>/dev/null
+pkill -x Xvfb 2>/dev/null
 sleep 1
 if curl -s -m 2 -o /dev/null http://127.0.0.1:1420/; then
   say "FAIL: something still serves :1420 after cleanup — stale process outside this namespace"
@@ -171,7 +181,7 @@ SQL
 # the monkey false-passed on the empty page. Serving the real production
 # bundle on that port keeps debug builds (fast, shared cache) honest.
 say "serving dist/ on :1420"
-(cd dist && python3 -m http.server 1420 >/dev/null 2>&1) &
+(cd dist && python3 -m http.server 1420 >/dev/null 2>&1 9>&-) &
 HTTP_PID=$!
 
 for _ in $(seq 1 15); do
@@ -187,7 +197,7 @@ fi
 # --- 4. driver under Xvfb ----------------------------------------------------
 say "starting tauri-driver under Xvfb"
 xvfb-run -a --server-args="-screen 0 1400x900x24" tauri-driver --port "$DRIVER_PORT" --native-port "$NATIVE_PORT" \
-  >"$ART/tauri-driver.log" 2>&1 &
+  >"$ART/tauri-driver.log" 2>&1 9>&- &
 DRIVER_PID=$!
 if [ "${KEEP_DATA:-0}" = "1" ]; then
   trap 'kill "$DRIVER_PID" "$HTTP_PID" 2>/dev/null' EXIT
@@ -207,7 +217,7 @@ fi
 
 # --- 5. the monkey -----------------------------------------------------------
 say "launching app + monkey probe"
-timeout 300 node /var/lib/gitf/probes/monkey.mjs "$BIN" "$ART"
+timeout 300 node /var/lib/gitf/probes/monkey.mjs "$BIN" "$ART" 9>&-
 RC=$?
 
 # A timeout usually means the app died before first paint (the monkey then
