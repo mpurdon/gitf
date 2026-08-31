@@ -30,6 +30,14 @@ data "aws_iam_policy_document" "gitf" {
     resources = ["arn:aws:ssm:${var.region}:*:parameter/${var.project}/*"]
   }
 
+  # A ministry box hands the Cabinet its API key through Parameter Store
+  # (SecureString) so the secret never transits an operator session.
+  statement {
+    sid       = "PublishCabinetParameters"
+    actions   = ["ssm:PutParameter"]
+    resources = ["arn:aws:ssm:${var.region}:*:parameter/${var.project}/cabinet/*"]
+  }
+
   statement {
     sid = "InvokeBedrock"
     actions = [

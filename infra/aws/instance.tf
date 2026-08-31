@@ -34,14 +34,19 @@ resource "aws_instance" "gitf" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 12
+    # Grown 12 → 24 GB by hand on 2026-08 (EBS cannot shrink); config
+    # follows reality so applies stop trying to shrink it.
+    volume_size = 24
   }
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
     backup_bucket = aws_s3_bucket.backup.bucket
   })
 
-  tags = { Name = var.project }
+  tags = {
+    Name            = var.project
+    "gitf:ministry" = "home-affairs"
+  }
 
   lifecycle {
     # AMI updates roll via `terraform apply -replace`; don't churn the box
