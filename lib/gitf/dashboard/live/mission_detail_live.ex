@@ -760,7 +760,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
       "sync" ->
         maybe(artifact["status"], &{"outcome", &1, "purple"}) ++
-          maybe(artifact["pr_url"], fn _ -> {"pr", "opened", "green"} end)
+          maybe(artifact["pr_url"], fn url -> {"pr", pr_label(url), "green"} end)
 
       "simplify" ->
         if artifact["skipped"] == true do
@@ -784,6 +784,49 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   def decisions(_phase, _artifact), do: []
+
+  # The one link an operator wants from a finished mission is the PR, and
+  # until now it lived only inside the generated report — a second click
+  # behind a "Generate report" button. The publish phase records it on
+  # the "sync" artifact; the outcome record is the fallback for missions
+  # whose artifacts were pruned but whose PR is still being tracked.
+  @doc false
+  def pr_url(mission) do
+    artifacts = Map.get(mission, :artifacts) || %{}
+
+    from_artifacts =
+      Enum.find_value(["sync", "publish"], fn key ->
+        case Map.get(artifacts, key) || Map.get(artifacts, String.to_atom(key)) do
+          %{} = a -> present(a["pr_url"] || a[:pr_url])
+          _ -> nil
+        end
+      end)
+
+    from_artifacts || pr_url_from_outcome(mission)
+  end
+
+  defp pr_url_from_outcome(%{id: id}) when is_binary(id) do
+    case GiTF.Outcomes.get_for_mission(id) do
+      %{pr_url: url} -> present(url)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp pr_url_from_outcome(_), do: nil
+
+  defp present(url) when is_binary(url) and url != "", do: url
+  defp present(_), do: nil
+
+  # "#20" for a GitHub-shaped URL; "open" for anything else, so the pill
+  # still reads as a link rather than a bare number.
+  def pr_label(url) do
+    case Regex.run(~r{/pull/(\d+)}, url) do
+      [_, n] -> "#" <> n
+      _ -> "open"
+    end
+  end
 
   defp maybe(nil, _fun), do: []
   defp maybe([], _fun), do: []
@@ -943,6 +986,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               <.link navigate={"/dashboard/workflows/" <> workflow_id} style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:#1f6feb33; color:#58a6ff; text-decoration:none">
                 workflow: {workflow_id}
               </.link>
+            <% end %>
+            <% pr = pr_url(@mission) %>
+            <%= if pr do %>
+              <a href={pr} target="_blank" rel="noopener" style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:#23863633; color:#3fb950; text-decoration:none; font-weight:600" title="Open the pull request this mission published">
+                PR {pr_label(pr)} &#8599;
+              </a>
             <% end %>
             <% inf = get_in(@mission, [:artifacts, "workflow_inference"]) %>
             <%= if is_map(inf) do %>

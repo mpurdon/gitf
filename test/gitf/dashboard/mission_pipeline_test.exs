@@ -46,6 +46,32 @@ defmodule GiTF.Dashboard.MissionPipelineTest do
     :ok
   end
 
+  describe "the pull request link" do
+    test "a mission that published a PR links to it from the header" do
+      mission =
+        mission!(%{
+          status: "completed",
+          current_phase: "completed",
+          artifacts: %{
+            "sync" => %{
+              "status" => "pr_created",
+              "pr_url" => "https://github.com/acme/app/pull/20"
+            }
+          }
+        })
+
+      html = render_pipeline(mission)
+
+      assert html =~ ~s(href="https://github.com/acme/app/pull/20")
+      assert html =~ "PR #20"
+    end
+
+    test "a mission with no PR shows no link" do
+      html = render_pipeline(mission!(%{status: "active", current_phase: "design"}))
+      refute html =~ "PR #"
+    end
+  end
+
   defp mission!(fields) do
     {:ok, m} =
       Archive.insert(
