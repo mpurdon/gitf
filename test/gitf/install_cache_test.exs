@@ -119,7 +119,9 @@ defmodule GiTF.InstallCacheTest do
     end
 
     assert %{removed: 2, kept: 2} = InstallCache.prune(2)
-    remaining = File.ls!(root)
+    # Doomed trees are renamed `<key>.rm-N` and unlinked in the background;
+    # they are no longer keys, whether or not the rm has finished.
+    remaining = root |> File.ls!() |> Enum.reject(&String.contains?(&1, ".rm-"))
     assert length(remaining) == 2
     assert %{removed: 0, kept: 2} = InstallCache.prune(2)
   end

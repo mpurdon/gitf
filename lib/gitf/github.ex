@@ -271,16 +271,18 @@ defmodule GiTF.GitHub do
     end
   end
 
-  defp pr_number(n) when is_integer(n), do: n
+  @doc "The PR number in a GitHub PR URL, a bare number string, or an integer; nil otherwise."
+  @spec pr_number(term()) :: integer() | nil
+  def pr_number(n) when is_integer(n), do: n
 
-  defp pr_number(ref) when is_binary(ref) do
+  def pr_number(ref) when is_binary(ref) do
     case Regex.run(~r{/pull/(\d+)}, ref) do
       [_, n] -> String.to_integer(n)
       _ -> if(Regex.match?(~r/^\d+$/, ref), do: String.to_integer(ref))
     end
   end
 
-  defp pr_number(_), do: nil
+  def pr_number(_), do: nil
 
   @doc """
   Lists recent repository events (`GET /repos/{owner}/{repo}/events`).

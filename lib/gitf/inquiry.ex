@@ -157,10 +157,17 @@ defmodule GiTF.Inquiry do
   # the question was asked and answered — stamped `inherited_from`, the
   # same honesty `Missions.inherit_artifacts/3` applies to artifacts.
   defp ask_fresh(mission_id, question) do
-    case inherited_answer(mission_id, question.phase, question.key) ||
-           standing_answer(mission_id, question) do
-      %{} = prior ->
-        {:ok, record} = insert_inherited(mission_id, question, prior)
+    case prior_answer(mission_id, question) do
+      {:inherited, prior} ->
+        {:ok, record} =
+          insert_answered(mission_id, question, prior, inherited_from: prior["mission_id"])
+
+        {:ok, record, :already_answered}
+
+      {:duplicate, prior} ->
+        {:ok, record} =
+          insert_answered(mission_id, question, to_register_entry(prior), duplicate_of: prior.id)
+
         {:ok, record, :already_answered}
 
       nil ->
@@ -204,17 +211,24 @@ defmodule GiTF.Inquiry do
     {:ok, record, :asked}
   end
 
-  defp insert_inherited(mission_id, question, prior) do
-    Logger.info(
-      if prior["mission_id"] do
-        "Quest #{mission_id}: #{question.phase}/#{question.key} was already answered by " <>
-          "#{prior["mission_id"]} — inheriting the answer, not re-asking"
-      else
-        "Quest #{mission_id}: #{question.phase}/#{question.key} is #{question.phase}/" <>
-          "#{prior["key"]} asked again under a new key — answering it with the standing " <>
-          "decision (#{prior["answer_label"] || prior["answer"]}), not holding"
-      end
-    )
+  # An answer from the lineage (`inherited_from`) or from this run under
+  # another key (`duplicate_of`) is materialized as a real answered record
+  # so every surface reads one shape; the provenance says which.
+  defp insert_answered(mission_id, question, prior, provenance) do
+    case provenance do
+      [inherited_from: from] ->
+        Logger.info(
+          "Quest #{mission_id}: #{question.phase}/#{question.key} was already answered by " <>
+            "#{from || "an ancestor run"} — inheriting the answer, not re-asking"
+        )
+
+      [duplicate_of: _] ->
+        Logger.info(
+          "Quest #{mission_id}: #{question.phase}/#{question.key} is #{question.phase}/" <>
+            "#{prior["key"]} asked again under a new key — answering it with the standing " <>
+            "decision (#{prior["answer_label"] || prior["answer"]}), not holding"
+        )
+    end
 
     Archive.insert(:inquiries, %{
       mission_id: mission_id,
@@ -231,8 +245,8 @@ defmodule GiTF.Inquiry do
       answer_label: prior["answer_label"],
       answered_by: prior["answered_by"],
       answered_at: prior["answered_at"],
-      inherited_from: prior["mission_id"],
-      duplicate_of: prior["duplicate_of"]
+      inherited_from: provenance[:inherited_from],
+      duplicate_of: provenance[:duplicate_of]
     })
   end
 
@@ -423,9 +437,7 @@ defmodule GiTF.Inquiry do
   # happening silently and only to the questions the heuristic misread.
   # A guard whose misfire reintroduces the bug it guards against is worse
   # than no guard. That load is carried by `invitation_block/2`.
-  defp comparable_label(%{label: label}) do
-    label |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "")
-  end
+  defp comparable_label(%{label: label}), do: comparable_text(label)
 
   defp normalize_option(option) when is_map(option) do
     label = fetch(option, [:label, "label"])
@@ -797,18 +809,21 @@ defmodule GiTF.Inquiry do
     |> Enum.filter(&(&1[:status] == "answered" and &1[:phase] == phase))
     |> oldest_first()
     |> Enum.find(&same_question?(&1, question))
-    |> case do
-      nil ->
-        nil
-
-      prior ->
-        prior
-        |> to_register_entry()
-        |> Map.put("mission_id", nil)
-        |> Map.put("duplicate_of", prior.id)
-    end
   rescue
     _ -> nil
+  end
+
+  defp prior_answer(mission_id, question) do
+    case inherited_answer(mission_id, question.phase, question.key) do
+      %{} = prior ->
+        {:inherited, prior}
+
+      nil ->
+        case standing_answer(mission_id, question) do
+          %{} = prior -> {:duplicate, prior}
+          nil -> nil
+        end
+    end
   end
 
   defp same_question?(prior, %{kind: :choice, options: options}) do
@@ -830,7 +845,7 @@ defmodule GiTF.Inquiry do
   # different questions could both offer "default". At least half of the
   # new options must also have been on the first question, by id or by
   # label — a re-asked question re-offers its options; a new one does not.
-  defp options_mostly_shared?(prior_options, options) when options != [] do
+  defp options_mostly_shared?(prior_options, options) do
     prior_ids = MapSet.new(prior_options, & &1[:id])
     prior_labels = MapSet.new(prior_options, &comparable_text(&1[:label]))
 
@@ -842,8 +857,6 @@ defmodule GiTF.Inquiry do
 
     shared * 2 >= length(options)
   end
-
-  defp options_mostly_shared?(_, _), do: false
 
   defp comparable_text(text) when is_binary(text),
     do: text |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "")

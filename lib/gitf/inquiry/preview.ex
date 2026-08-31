@@ -250,7 +250,9 @@ defmodule GiTF.Inquiry.Preview do
   def attach(mission, phase, %{kind: :choice, options: options} = question, artifact_key)
       when is_list(options) do
     if enabled?() and Enum.any?(options, &previewable?/1) do
-      render = &render_option(mission, phase, artifact_key, question, &1)
+      # One worktree per question, resolved once, not once per option.
+      root = source_root(mission, phase, artifact_key)
+      render = &render_option(mission, phase, root, question, &1)
       %{question | options: Enum.map(options, render)}
     else
       disable_previews(question)
@@ -287,9 +289,9 @@ defmodule GiTF.Inquiry.Preview do
 
   defp previewable?(option), do: is_binary(option[:preview_source])
 
-  defp render_option(mission, phase, artifact_key, question, option) do
+  defp render_option(mission, phase, root, question, option) do
     if previewable?(option) do
-      case build(mission, phase, artifact_key, question, option) do
+      case build(mission, root, question, option) do
         {:ok, preview} ->
           %{option | preview: preview, preview_error: nil}
 
@@ -307,7 +309,7 @@ defmodule GiTF.Inquiry.Preview do
     end
   end
 
-  defp build(mission, phase, artifact_key, question, option) do
+  defp build(mission, root, question, option) do
     png = png_path(mission.id, question.key, option.id)
 
     # The same question re-asked on a later advance sweep, or re-emitted by
@@ -318,7 +320,7 @@ defmodule GiTF.Inquiry.Preview do
     if File.regular?(png) do
       {:ok, describe_existing(png)}
     else
-      with {:ok, root} <- source_root(mission, phase, artifact_key),
+      with {:ok, root} <- root,
            {:ok, bytes} <- read_source(root, option[:preview_source]),
            :ok <- self_contained(bytes),
            {:ok, source_copy} <- stage_source(png, option[:preview_source], bytes),
@@ -374,26 +376,19 @@ defmodule GiTF.Inquiry.Preview do
     |> List.first()
   end
 
-  # "design_minimal" → "minimal"; "design_minimal_asked" (a moved-aside
-  # key, if one is ever passed) → "minimal"; "design" → nil.
+  # "design_minimal" → "minimal"; "design_minimal_asked" (the key after
+  # the gate moves the artifact aside) → "minimal"; "design" → nil.
   defp strategy_of(key, phase) when is_binary(key) and is_binary(phase) do
-    case String.replace_prefix(key, phase <> "_", "") do
-      ^key ->
-        nil
-
-      "" ->
-        nil
-
-      rest ->
-        rest |> String.replace_suffix("_asked", "") |> String.replace_suffix("_rejected", "")
+    case String.split(key, phase <> "_", parts: 2) do
+      ["", rest] when rest != "" -> String.replace_suffix(rest, "_asked", "")
+      _ -> nil
     end
   end
 
   defp strategy_of(_, _), do: nil
 
-  defp variant?(op, strategy) do
-    op[:strategy] == strategy or String.contains?(op[:title] || "", "[#{strategy}]")
-  end
+  # The same rule the design board uses to tell variants apart.
+  defp variant?(op, strategy), do: GiTF.Major.ModelPolicy.op_strategy(op) == strategy
 
   # `GiTF.Inquiry.normalize_option/1` has already refused an absolute path
   # and any `..` segment. Re-checking containment AFTER expansion is not

@@ -993,16 +993,11 @@ defmodule GiTF.Git do
   # in the suite (git_residue_test failed CI on exactly that). In
   # production PATH never changes after boot, so caching costs nothing.
   defp git_executable do
-    case :persistent_term.get({__MODULE__, :git_executable}, nil) do
-      nil ->
-        case System.find_executable("git") do
-          nil -> nil
-          path -> :persistent_term.put({__MODULE__, :git_executable}, path) && path
-        end
-
-      path ->
+    :persistent_term.get({__MODULE__, :git_executable}, nil) ||
+      with path when is_binary(path) <- System.find_executable("git") do
+        :persistent_term.put({__MODULE__, :git_executable}, path)
         path
-    end
+      end
   end
 
   @doc """

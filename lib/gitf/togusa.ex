@@ -26,15 +26,15 @@ defmodule GiTF.Togusa do
 
   Returns `{:ok, :pass | :fail, result}`.
   """
-  @spec run_quality_gate(String.t()) :: {:ok, :pass | :fail | :infra, map()} | {:error, term()}
-  def run_quality_gate(op_id) do
-    opts =
-      case GiTF.Ops.get(op_id) do
-        {:ok, op} -> gate_opts(op)
-        _ -> []
-      end
+  @spec run_quality_gate(String.t() | map()) ::
+          {:ok, :pass | :fail | :infra, map()} | {:error, term()}
+  def run_quality_gate(%{id: op_id} = op), do: GiTF.Audit.verify_job(op_id, gate_opts(op))
 
-    GiTF.Audit.verify_job(op_id, opts)
+  def run_quality_gate(op_id) when is_binary(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} -> run_quality_gate(op)
+      _ -> GiTF.Audit.verify_job(op_id, [])
+    end
   end
 
   # Phases that run AFTER the mission's own validation has passed.
@@ -63,12 +63,10 @@ defmodule GiTF.Togusa do
   # (Tachikoma's review task) is not reachable from a unit test.
   @doc false
   def ensure_mission_live(op) do
-    case GiTF.Missions.get(op.mission_id) do
-      {:ok, mission} ->
-        status = Map.get(mission, :status)
-
-        if status in GiTF.Missions.terminal_phases(),
-          do: {:error, {:mission_terminal, status}},
+    case GiTF.Archive.get(:missions, op.mission_id) do
+      %{} = mission ->
+        if GiTF.Missions.terminal?(mission),
+          do: {:error, {:mission_terminal, Map.get(mission, :status)}},
           else: :ok
 
       _ ->

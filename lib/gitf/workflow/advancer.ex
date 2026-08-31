@@ -74,7 +74,12 @@ defmodule GiTF.Workflow.Advancer do
             run_before_advance(phase_config, mission, verdict, artifact)
             # `before_advance` may have enriched the phase artifact (e.g.
             # `GiTF.Phases.Triage` writing a derived flag a conditional
-            # `next:` rule reads); re-read so routing sees the latest.
+            # `next:` rule reads) AND the mission itself (Triage writes
+            # pipeline_mode). Re-read both, so routing and the handler this
+            # dispatches to see the latest — a stale map here is how a fast
+            # mission spawned the full three-variant design tournament
+            # (msn-1729cb, msn-f48ae9, msn-5f2be2).
+            mission = refresh_mission(mission)
             ctx = %{artifact: GiTF.Missions.get_artifact(mission.id, phase_id), mission: mission}
 
             case verdict do
@@ -287,4 +292,13 @@ defmodule GiTF.Workflow.Advancer do
       _ -> 0
     end
   end
+
+  defp refresh_mission(%{id: id} = mission) when is_binary(id) do
+    case GiTF.Missions.get(id) do
+      {:ok, fresh} -> fresh
+      _ -> mission
+    end
+  end
+
+  defp refresh_mission(mission), do: mission
 end

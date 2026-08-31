@@ -72,6 +72,43 @@ defmodule GiTF.Missions do
   @spec terminal_phases() :: [String.t()]
   def terminal_phases, do: @terminal_phases
 
+  @doc """
+  Whether the mission is over. A plain store read — no ops list — because
+  the callers (quality gates, fix requests) only need the status.
+  Unknown missions are not terminal; absence is the caller's problem.
+  """
+  @spec terminal?(String.t() | map()) :: boolean()
+  def terminal?(%{status: status}), do: status in @terminal_phases
+
+  def terminal?(mission_id) when is_binary(mission_id) do
+    case Archive.get(:missions, mission_id) do
+      %{} = mission -> Map.get(mission, :status) in @terminal_phases
+      _ -> false
+    end
+  end
+
+  def terminal?(_), do: false
+
+  @doc """
+  The pull request a mission published, or nil. Read from the mission's
+  own `publish`/`sync` artifact first; the outcome record is the fallback
+  for a mission whose artifacts were pruned but whose PR is still tracked.
+  """
+  @spec pr_url(map()) :: String.t() | nil
+  def pr_url(%{id: id} = mission) when is_binary(id) do
+    artifacts = Map.get(mission, :artifacts) || %{}
+
+    Enum.find_value(["publish", "sync"], &present_url(get_in(artifacts, [&1, "pr_url"]))) ||
+      present_url(GiTF.Outcomes.get_for_mission(id)[:pr_url])
+  rescue
+    _ -> nil
+  end
+
+  def pr_url(_), do: nil
+
+  defp present_url(url) when is_binary(url) and url != "", do: url
+  defp present_url(_), do: nil
+
   # The phases whose meaning is "the factory has stopped and a PERSON is
   # the blocker". Four separate mechanisms have to know this list, and
   # every one of them is wrong in a way that costs something real if it

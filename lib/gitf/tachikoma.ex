@@ -1375,33 +1375,31 @@ defmodule GiTF.Tachikoma do
   # -- Quality Gate (single-shot, delegates to Togusa for fixes) ----------
 
   defp do_review_job(op_id, _ghost_id, shell_id) do
-    if mission_terminal?(op_id) do
-      # msn-0434e9: a simplify op's gate ran 18 minutes after the op
-      # finished (queued behind validation), failed on a stale tree, and
-      # spawned "Fix quality issues (attempt 1)" 43 seconds AFTER the
-      # mission had completed and its PR was open. Nothing can act on a
-      # verdict for a mission that is already over.
-      Logger.info("Tachikoma: op #{op_id} belongs to a terminal mission — quality gate skipped")
+    # The op is fetched ONCE here and handed down; the gate, its options
+    # and the fix request all read the same map.
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         :ok <- GiTF.Togusa.ensure_mission_live(op) do
+      run_quality_gate_for(op, shell_id)
     else
-      run_quality_gate_for(op_id, shell_id)
+      {:error, {:mission_terminal, _}} ->
+        # msn-0434e9: a simplify op's gate ran 18 minutes after the op
+        # finished (queued behind validation), failed on a stale tree, and
+        # spawned "Fix quality issues (attempt 1)" 43 seconds AFTER the
+        # mission had completed and its PR was open. Nothing can act on a
+        # verdict for a mission that is already over.
+        Logger.info("Tachikoma: op #{op_id} belongs to a terminal mission — quality gate skipped")
+
+      other ->
+        Logger.warning("Tachikoma: op #{op_id} is not reviewable (#{inspect(other)}) — skipped")
     end
   rescue
     e ->
       Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
   end
 
-  defp mission_terminal?(op_id) do
-    with {:ok, op} <- GiTF.Ops.get(op_id),
-         {:ok, mission} <- GiTF.Missions.get(op.mission_id) do
-      mission.status in GiTF.Missions.terminal_phases()
-    else
-      _ -> false
-    end
-  end
-
-  defp run_quality_gate_for(op_id, shell_id) do
+  defp run_quality_gate_for(%{id: op_id} = op, shell_id) do
     # Run quality gate once — no retries against unchanged code
-    case GiTF.Togusa.run_quality_gate(op_id) do
+    case GiTF.Togusa.run_quality_gate(op) do
       {:ok, :pass, result} ->
         Logger.info("Tachikoma: op #{op_id} passed quality gate")
         update_reputation(op_id)

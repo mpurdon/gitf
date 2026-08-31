@@ -64,39 +64,28 @@ defmodule GiTF.InstallCache do
 
   @doc "Whether the cache is on (`[:install_cache, :enabled]`, default true)."
   @spec enabled?() :: boolean()
-  def enabled? do
-    GiTF.Config.Provider.get([:install_cache, :enabled], true) != false
-  rescue
-    _ -> true
-  end
+  def enabled?, do: GiTF.Config.Provider.get([:install_cache, :enabled], true) != false
 
   @doc "The cache directory: `<gitf root>/.gitf/cache/node_modules`, or the test override."
   @spec root() :: {:ok, Path.t()} | {:error, term()}
   def root do
-    case Application.get_env(:gitf, :install_cache_root) do
-      path when is_binary(path) ->
-        {:ok, Path.expand(path)}
-
-      _ ->
-        case GiTF.gitf_dir() do
-          {:ok, gitf_root} -> {:ok, Path.join([gitf_root, ".gitf", "cache", "node_modules"])}
-          {:error, _} = err -> err
-        end
+    with nil <- Application.get_env(:gitf, :install_cache_root),
+         {:ok, gitf_root} <- GiTF.gitf_dir() do
+      {:ok, Path.join([gitf_root, ".gitf", "cache", "node_modules"])}
+    else
+      path when is_binary(path) -> {:ok, Path.expand(path)}
+      err -> err
     end
   end
 
   @doc "The cache key for `worktree`: SHA-256 of its lockfile, or nil without one."
   @spec key(Path.t()) :: String.t() | nil
   def key(worktree) do
-    case lockfile(worktree) do
-      nil ->
-        nil
-
-      path ->
-        case File.read(path) do
-          {:ok, bytes} -> :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
-          _ -> nil
-        end
+    with path when is_binary(path) <- lockfile(worktree),
+         {:ok, bytes} <- File.read(path) do
+      GiTF.Vault.File.content_hash(bytes)
+    else
+      _ -> nil
     end
   end
 
@@ -114,11 +103,8 @@ defmodule GiTF.InstallCache do
       cached = cached_tree(root, key)
 
       cond do
-        File.dir?(target) and marker(target) == key ->
-          {:restored, key}
-
         File.dir?(target) ->
-          {:present, key}
+          if marker(target) == key, do: {:restored, key}, else: {:present, key}
 
         File.dir?(cached) ->
           case link_tree(cached, target) do
@@ -151,10 +137,16 @@ defmodule GiTF.InstallCache do
   key when the cache lacks it. Call after a validation command SUCCEEDED
   — a failed install must not be enshrined.
   """
-  @spec store(Path.t()) :: :stored | :exists | :not_applicable | {:error, term()}
-  def store(worktree) do
+  @spec store(Path.t(), restore_result() | nil) ::
+          :stored | :exists | :not_applicable | {:error, term()}
+  def store(worktree, install \\ nil)
+
+  # Restored from the cache means it is already in the cache.
+  def store(_worktree, {:restored, _key}), do: :exists
+
+  def store(worktree, install) do
     with true <- enabled?(),
-         key when is_binary(key) <- key(worktree),
+         key when is_binary(key) <- known_key(install) || key(worktree),
          {:ok, root} <- root(),
          source = Path.join(worktree, "node_modules"),
          true <- File.dir?(source) do
@@ -190,9 +182,11 @@ defmodule GiTF.InstallCache do
 
   @doc "Environment for the validation command, from a `restore/1` result."
   @spec env(restore_result()) :: [{String.t(), String.t()}]
-  def env({:restored, key}), do: [{"GITF_INSTALL_KEY", key}, {"GITF_INSTALL_RESTORED", "1"}]
-  def env({:present, key}), do: [{"GITF_INSTALL_KEY", key}, {"GITF_INSTALL_RESTORED", "0"}]
-  def env({:miss, key}), do: [{"GITF_INSTALL_KEY", key}, {"GITF_INSTALL_RESTORED", "0"}]
+  def env({state, key}) when state in [:restored, :present, :miss] do
+    restored = if state == :restored, do: "1", else: "0"
+    [{"GITF_INSTALL_KEY", key}, {"GITF_INSTALL_RESTORED", restored}]
+  end
+
   def env(_), do: []
 
   @doc """
@@ -202,15 +196,18 @@ defmodule GiTF.InstallCache do
   @spec prune(pos_integer()) :: %{removed: non_neg_integer(), kept: non_neg_integer()}
   def prune(keep \\ @default_keep) do
     with {:ok, root} <- root(), true <- File.dir?(root) do
+      # Only real keys: a `.tmp-*` is a store in progress and a `.rm-*` is
+      # a tree already condemned and being unlinked in the background.
       entries =
         root
         |> File.ls!()
+        |> Enum.reject(&(String.contains?(&1, ".tmp-") or String.contains?(&1, ".rm-")))
         |> Enum.map(&Path.join(root, &1))
         |> Enum.filter(&File.dir?/1)
         |> Enum.sort_by(&mtime/1, :desc)
 
       {kept, doomed} = Enum.split(entries, keep)
-      Enum.each(doomed, &File.rm_rf/1)
+      Enum.each(doomed, &remove_tree_async/1)
       %{removed: length(doomed), kept: length(kept)}
     else
       _ -> %{removed: 0, kept: 0}
@@ -220,6 +217,27 @@ defmodule GiTF.InstallCache do
   end
 
   # -- internals ---------------------------------------------------------------
+
+  # A cached tree is tens of thousands of files. Renaming it out of the
+  # way is instant and hides it from `restore/1`; the unlinking happens
+  # off the caller (Tachikoma's sweep runs in its GenServer) and in
+  # coreutils, not a BEAM directory walk.
+  defp remove_tree_async(dir) do
+    doomed = "#{dir}.rm-#{System.unique_integer([:positive])}"
+
+    case File.rename(dir, doomed) do
+      :ok ->
+        Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+          System.cmd("rm", ["-rf", doomed])
+        end)
+
+      {:error, _} ->
+        File.rm_rf(dir)
+    end
+  end
+
+  defp known_key({_state, key}) when is_binary(key), do: key
+  defp known_key(_), do: nil
 
   defp lockfile(worktree) do
     Enum.find_value(@lockfiles, fn name ->
@@ -243,19 +261,16 @@ defmodule GiTF.InstallCache do
   defp link_tree(source, target) do
     File.mkdir_p!(Path.dirname(target))
 
-    case System.cmd("cp", ["-al", source, target], stderr_to_stdout: true) do
-      {_, 0} ->
-        :ok
-
-      {out, _} ->
-        File.rm_rf(target)
-
-        case System.cmd("cp", ["-a", source, target], stderr_to_stdout: true) do
-          {_, 0} -> :ok
-          {out2, code} -> {:error, {:cp, code, String.slice(out <> out2, 0, 300)}}
-        end
+    with {out, code} when code != 0 <- cp(["-al", source, target]),
+         _ <- File.rm_rf(target),
+         {out2, code2} when code2 != 0 <- cp(["-a", source, target]) do
+      {:error, {:cp, code2, String.slice(out <> out2, 0, 300)}}
+    else
+      _ -> :ok
     end
   end
+
+  defp cp(args), do: System.cmd("cp", args, stderr_to_stdout: true)
 
   defp mtime(path) do
     case File.stat(path, time: :posix) do

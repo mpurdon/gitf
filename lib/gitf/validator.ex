@@ -172,7 +172,7 @@ defmodule GiTF.Validator do
       {:ok, {output, 0}} ->
         # Only a PASSING run may seed the cache — a broken install must
         # not be enshrined for every later worktree.
-        GiTF.InstallCache.store(cwd)
+        GiTF.InstallCache.store(cwd, install)
         {:ok, output}
 
       {:ok, {output, exit_code}} when exit_code in [126, 127] ->

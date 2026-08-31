@@ -185,6 +185,10 @@ defmodule GiTF.Inquiry.PreviewTest do
     mission
   end
 
+  defp bars_or_dots,
+    do:
+      question([%{"label" => "Bars", "preview" => ".gitf-mockups/a.html"}, %{"label" => "Dots"}])
+
   defp question(options) do
     {:ok, validated} =
       Inquiry.validate(%{
@@ -619,13 +623,7 @@ defmodule GiTF.Inquiry.PreviewTest do
     test "the artifact key names the asking variant, and its tree is the one read" do
       mission = mission_with_variants()
 
-      q =
-        question([
-          %{"label" => "Bars", "preview" => ".gitf-mockups/a.html"},
-          %{"label" => "Dots"}
-        ])
-
-      %{options: [bars, _]} = Preview.attach(mission, "design", q, "design_minimal")
+      %{options: [bars, _]} = Preview.attach(mission, "design", bars_or_dots(), "design_minimal")
       assert %{png: png} = bars.preview
       assert File.regular?(png)
       assert bars.preview_error == nil
@@ -634,13 +632,7 @@ defmodule GiTF.Inquiry.PreviewTest do
     test "naming the wrong variant degrades honestly rather than reading a sibling's tree" do
       mission = mission_with_variants()
 
-      q =
-        question([
-          %{"label" => "Bars", "preview" => ".gitf-mockups/a.html"},
-          %{"label" => "Dots"}
-        ])
-
-      %{options: [bars, _]} = Preview.attach(mission, "design", q, "design_normal")
+      %{options: [bars, _]} = Preview.attach(mission, "design", bars_or_dots(), "design_normal")
       assert bars.preview == nil
       assert bars.preview_error =~ "no such file"
     end
@@ -648,13 +640,9 @@ defmodule GiTF.Inquiry.PreviewTest do
     test "a moved-aside key still resolves the variant" do
       mission = mission_with_variants()
 
-      q =
-        question([
-          %{"label" => "Bars", "preview" => ".gitf-mockups/a.html"},
-          %{"label" => "Dots"}
-        ])
+      %{options: [bars, _]} =
+        Preview.attach(mission, "design", bars_or_dots(), "design_minimal_asked")
 
-      %{options: [bars, _]} = Preview.attach(mission, "design", q, "design_minimal_asked")
       assert %{png: _} = bars.preview
     end
   end

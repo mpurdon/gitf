@@ -28,7 +28,9 @@ defmodule GiTF.Report do
   def generate(mission_id) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       gitf_root = gitf_root()
-      ops = enrich_jobs(mission.ops, gitf_root)
+      # One ledger read per report, not one collection scan per op.
+      costs_by_ghost = mission.id |> GiTF.Costs.for_quest() |> Enum.group_by(& &1.ghost_id)
+      ops = enrich_jobs(mission.ops, gitf_root, costs_by_ghost)
       tokens = aggregate_tokens(ops)
       timing = compute_timing(ops)
       files = aggregate_files(mission.ops)
@@ -97,11 +99,11 @@ defmodule GiTF.Report do
 
   # -- Private: data enrichment ------------------------------------------------
 
-  defp enrich_jobs(ops, gitf_root) do
+  defp enrich_jobs(ops, gitf_root, costs_by_ghost) do
     Enum.map(ops, fn op ->
       ghost_id = Map.get(op, :ghost_id)
       ghost = if ghost_id, do: Archive.get(:ghosts, ghost_id)
-      log_tokens = tokens_for_ghost(ghost_id, gitf_root)
+      log_tokens = tokens_for_ghost(ghost_id, gitf_root, costs_by_ghost)
 
       %{
         op_id: op.id,
@@ -124,26 +126,25 @@ defmodule GiTF.Report do
   # the fallback for a ghost that predates the ledger; on the box the
   # report was showing 0 tokens for a $9.91 mission because the log path
   # it guessed did not exist there.
-  defp tokens_for_ghost(nil, _gitf_root), do: empty_tokens()
+  defp tokens_for_ghost(nil, _gitf_root, _costs), do: empty_tokens()
 
-  defp tokens_for_ghost(ghost_id, gitf_root) do
-    case GiTF.Costs.for_ghost(ghost_id) do
-      [] ->
-        parse_bee_log(ghost_id, gitf_root)
-
-      costs ->
-        Enum.reduce(costs, empty_tokens(), fn cost, acc ->
-          %{
-            input: acc.input + (cost[:input_tokens] || 0),
-            output: acc.output + (cost[:output_tokens] || 0),
-            cache_read: acc.cache_read + (cost[:cache_read_tokens] || 0),
-            cache_create: acc.cache_create + (cost[:cache_write_tokens] || 0),
-            cost_usd: acc.cost_usd + (cost[:cost_usd] || 0.0)
-          }
-        end)
+  defp tokens_for_ghost(ghost_id, gitf_root, costs_by_ghost) do
+    case Map.get(costs_by_ghost, ghost_id, []) do
+      [] -> parse_bee_log(ghost_id, gitf_root)
+      costs -> sum_tokens(costs)
     end
-  rescue
-    _ -> parse_bee_log(ghost_id, gitf_root)
+  end
+
+  defp sum_tokens(costs) do
+    Enum.reduce(costs, empty_tokens(), fn cost, acc ->
+      %{
+        input: acc.input + (cost[:input_tokens] || 0),
+        output: acc.output + (cost[:output_tokens] || 0),
+        cache_read: acc.cache_read + (cost[:cache_read_tokens] || 0),
+        cache_create: acc.cache_create + (cost[:cache_write_tokens] || 0),
+        cost_usd: acc.cost_usd + (cost[:cost_usd] || 0.0)
+      }
+    end)
   end
 
   defp parse_bee_log(nil, _gitf_root), do: empty_tokens()
@@ -153,18 +154,7 @@ defmodule GiTF.Report do
 
     case File.read(log_path) do
       {:ok, content} ->
-        events = StreamParser.parse_chunk(content)
-        costs = StreamParser.extract_costs(events)
-
-        Enum.reduce(costs, empty_tokens(), fn cost, acc ->
-          %{
-            input: acc.input + (cost[:input_tokens] || 0),
-            output: acc.output + (cost[:output_tokens] || 0),
-            cache_read: acc.cache_read + (cost[:cache_read_tokens] || 0),
-            cache_create: acc.cache_create + (cost[:cache_write_tokens] || 0),
-            cost_usd: acc.cost_usd + (cost[:cost_usd] || 0.0)
-          }
-        end)
+        content |> StreamParser.parse_chunk() |> StreamParser.extract_costs() |> sum_tokens()
 
       {:error, _} ->
         empty_tokens()
