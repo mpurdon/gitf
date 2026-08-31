@@ -136,6 +136,7 @@ defmodule GiTF.Web.Router do
       live("/progress", ProgressLive)
       live("/approvals", ApprovalsLive)
       live("/questions", QuestionsLive)
+      live("/cabinet", CabinetLive)
       live("/ops/:id", OpDetailLive)
       live("/sectors", SectorsLive)
       live("/workflows", WorkflowsLive)
@@ -166,6 +167,15 @@ defmodule GiTF.Web.Router do
     pipe_through(:webhooks)
     post("/github", WebhookController, :github)
     post("/sentry", WebhookController, :sentry)
+  end
+
+  # Cabinet ingress: every ministry's GitHub webhooks land here, verified
+  # against that ministry's secret, then the activation ruleset decides
+  # wake/queue/drop. Publicly exposed at deploy time via tailscale funnel
+  # path-routing — only this path; everything else stays tailnet-only.
+  scope "/hooks", GiTF.Web do
+    pipe_through(:webhooks)
+    post("/:ministry", CabinetHookController, :receive)
   end
 
   # Metrics — auth required (local bypass gated by config + optional

@@ -255,7 +255,17 @@ defmodule GiTF.Application do
          ]}
     }
 
-    children = foundation ++ [core, interface, plugins] ++ background_children()
+    # Cabinet mode: the fleet's front door runs the foundation (Archive,
+    # Config, PubSub, TaskSupervisor) and the interface (dashboard, MCP)
+    # and NONE of the factory — no Major, no ghosts, no sector
+    # supervision, no background sweeps. docs/plans/ministry.md.
+    children =
+      if GiTF.Cabinet.mode?() do
+        Logger.info("CABINET MODE — factory supervision skipped")
+        foundation ++ [interface]
+      else
+        foundation ++ [core, interface, plugins] ++ background_children()
+      end
 
     opts = [strategy: :one_for_one, name: GiTF.Supervisor]
     result = Supervisor.start_link(children, opts)

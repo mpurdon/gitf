@@ -12,7 +12,7 @@ defmodule GiTF.Web.CacheBodyReader do
   when the path matches.
   """
 
-  @prefixes ["/api/v1/webhooks"]
+  @prefixes ["/api/v1/webhooks", "/hooks"]
 
   @spec read_body(Plug.Conn.t(), keyword()) ::
           {:ok, binary(), Plug.Conn.t()} | {:more, binary(), Plug.Conn.t()} | {:error, term()}
