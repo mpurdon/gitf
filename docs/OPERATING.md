@@ -379,6 +379,44 @@ publish, scoring) skip the exec command entirely — see `Togusa.gate_opts/1`.
 Before this, msn-5f2be2 spent 5m29s installing before validation and another
 5m14s while a simplify gate installed again with publish blocked behind it.
 
+## 9c. Ministries and the Cabinet
+
+A **Ministry** is a client: a complete Section (factory) on its own EC2 box
+that sleeps to $0. The **Cabinet** is the one always-on node — this same
+release with `[cabinet] enabled = true` (or app env `:cabinet_mode`), which
+keeps the dashboard/MCP/Archive and skips the factory entirely. Plan of
+record: `docs/plans/ministry.md`.
+
+What the Cabinet does:
+
+- **Registry** — `:ministries` records (slug, name, box url, instance id,
+  mode, cost cap, JDM rules). Secrets by env-variable NAME only
+  (`webhook_secret_env`, `api_key_env`; values in `/etc/gitf/cabinet.env`).
+- **Ingress** — point every ministry's GitHub webhooks at
+  `POST /hooks/<slug>`. Expose ONLY that path publicly via
+  `tailscale funnel` path routing; everything else stays tailnet-only.
+  Verified per-ministry; the event is classified (bug / feature /
+  pr_review / ci / noise) and the ministry's JDM ruleset under its mode
+  decides wake / queue / drop. Every failure queues — never wakes.
+- **Modes** — normal (bugs + PR reviews wake, cost-cap gated), vacation
+  (same; features queue for an explicit start), off (everything queues).
+- **The inbox** — queued events with "start this": wakes the Section and
+  forwards the ORIGINAL body + signature verbatim; the Section verifies
+  with the same secret and handles it as if it had been awake. The
+  Section's events poller stays the backstop regardless.
+- **MCP tools** — `cabinet_status`, `register_ministry`,
+  `set_ministry_mode`, `wake_ministry`, `stop_ministry`, `cabinet_inbox`,
+  `start_inbox_entry`, and `ministry_call` (forward any gitf tool to a
+  ministry's Section, `wake: true` to start it first).
+- **Per-box ministry config** (identity, PAT, Bedrock) is just that box's
+  ordinary config — see the plan. Git identity: `[git] author_name /
+  author_email / attribution` (M1); written repo-local at sector add and
+  shell creation.
+
+CLI note: there is no `-m` flag yet — drive a specific ministry with
+`GITF_SERVER=https://<slug>.ghostinthefactory.com gitf ...`, or via the
+Cabinet's `ministry_call` tool.
+
 ## 10. Feature flags
 
 Most of the differentiating intelligence layer ships **default-off**. The

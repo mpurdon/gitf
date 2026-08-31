@@ -198,6 +198,115 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{type: "object", properties: %{}}
       },
       %{
+        name: "cabinet_status",
+        description:
+          "The fleet at a glance: every registered ministry with its mode, box state, and " <>
+            "queued inbox count. Only meaningful on a Cabinet node.",
+        inputSchema: %{type: "object", properties: %{}}
+      },
+      %{
+        name: "register_ministry",
+        description:
+          "[WRITE] Register a ministry (a client Section) with the Cabinet: slug, name, box " <>
+            "url, instance_id, and env-variable NAMES for its webhook secret and API key " <>
+            "(values live in /etc/gitf/cabinet.env, never the store). Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            slug: %{type: "string", description: "lowercase-dashes identifier, e.g. trajector"},
+            name: %{type: "string"},
+            url: %{type: "string", description: "The Section's base URL"},
+            instance_id: %{type: "string", description: "EC2 instance id (i-...)"},
+            webhook_secret_env: %{type: "string"},
+            api_key_env: %{type: "string"},
+            cost_cap_usd: %{type: "number"},
+            confirm: %{type: "boolean"}
+          },
+          required: ["slug", "name", "confirm"]
+        }
+      },
+      %{
+        name: "set_ministry_mode",
+        description:
+          "[WRITE] Set a ministry's activation mode: normal (bugs+reviews wake), vacation " <>
+            "(same, cost-capped; features queue), off (everything queues). Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            slug: %{type: "string"},
+            mode: %{type: "string", enum: ["normal", "vacation", "off"]},
+            confirm: %{type: "boolean"}
+          },
+          required: ["slug", "mode", "confirm"]
+        }
+      },
+      %{
+        name: "wake_ministry",
+        description:
+          "[WRITE] Start a ministry's box. await: true blocks until its Section answers " <>
+            "health (~60-90s cold). Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            slug: %{type: "string"},
+            await: %{type: "boolean", default: false},
+            confirm: %{type: "boolean"}
+          },
+          required: ["slug", "confirm"]
+        }
+      },
+      %{
+        name: "stop_ministry",
+        description:
+          "[WRITE] Stop a ministry's box. In-flight missions die with it — check first. " <>
+            "Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{slug: %{type: "string"}, confirm: %{type: "boolean"}},
+          required: ["slug", "confirm"]
+        }
+      },
+      %{
+        name: "cabinet_inbox",
+        description:
+          "Queued webhook events awaiting the operator (features, over-cap bugs, everything " <>
+            "in off mode). Optional slug filter.",
+        inputSchema: %{
+          type: "object",
+          properties: %{slug: %{type: "string"}},
+          required: []
+        }
+      },
+      %{
+        name: "start_inbox_entry",
+        description:
+          "[WRITE] Start a queued inbox entry: wakes the ministry's Section and forwards the " <>
+            "original event so the Section handles it exactly as if it had been awake. " <>
+            "Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{id: %{type: "string"}, confirm: %{type: "boolean"}},
+          required: ["id", "confirm"]
+        }
+      },
+      %{
+        name: "ministry_call",
+        description:
+          "Forward one gitf tool call to a ministry's Section and return its answer verbatim " <>
+            "— the Cabinet as router. wake: true starts and awaits the box first. The " <>
+            "Section's own confirm rules still apply to the forwarded tool.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            slug: %{type: "string"},
+            tool: %{type: "string", description: "The tool name to call on the Section"},
+            arguments: %{type: "object", description: "Arguments for that tool"},
+            wake: %{type: "boolean", default: false}
+          },
+          required: ["slug", "tool"]
+        }
+      },
+      %{
         name: "mission_timeline",
         description:
           "Get the full chronological event timeline for a mission. Shows every spawn, completion, failure, merge, and phase transition. Essential for diagnosing what went wrong.",

@@ -105,3 +105,11 @@ The AI's conversation log. GiTF watches transcript files to track token usage an
 | `gitf dashboard` | Web UI |
 | `gitf plugin list` | List plugins |
 | `gitf watch` | Live progress |
+
+## Fleet terms (docs/plans/ministry.md)
+
+| Term | Meaning |
+|------|---------|
+| **Ministry** | A client. A complete Section on its own EC2 box, with its own git/GitHub identity, model credentials and cost cap. Stopping the box is the tenancy control. |
+| **Cabinet** | The fleet's always-on front door: registry, webhook ingress, activation ruleset (JDM decision tables), modes, inbox, wake/stop. Holds no mission state, PATs or model credentials. |
+| **Mode** | A ministry's activation posture on the Cabinet: `normal`, `vacation` (bugs/reviews only, features queue), `off` (everything queues). |

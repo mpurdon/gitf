@@ -407,6 +407,113 @@ defmodule GiTF.MCPServer.Handlers do
     {:ok, json_text(GiTF.DiskUsage.report())}
   end
 
+  def call("cabinet_status", _args) do
+    ministries =
+      Enum.map(GiTF.Cabinet.Registry.list(), fn m ->
+        %{
+          slug: m.slug,
+          name: m.name,
+          mode: m[:mode],
+          url: m[:url],
+          instance_id: m[:instance_id],
+          box_state: to_string(GiTF.Cabinet.Fleet.instance_state(m)),
+          queued: Enum.count(GiTF.Cabinet.Gate.inbox(m.slug), &(&1.status == "queued"))
+        }
+      end)
+
+    {:ok, json_text(%{cabinet_mode: GiTF.Cabinet.mode?(), ministries: ministries})}
+  end
+
+  def call("register_ministry", args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Cabinet.Registry.create(args) do
+        {:ok, m} -> {:ok, json_text(%{id: m.id, slug: m.slug, mode: m.mode})}
+        {:error, reason} -> {:error, "register_ministry failed: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("set_ministry_mode", %{"slug" => slug, "mode" => mode} = args) do
+    with :ok <- require_confirm(args),
+         %{} = m <- GiTF.Cabinet.Registry.by_slug(slug) || {:error, "no ministry #{slug}"},
+         {:ok, updated} <- GiTF.Cabinet.Registry.set_mode(m.id, mode) do
+      {:ok, json_text(%{slug: updated.slug, mode: updated.mode})}
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, inspect(reason)}
+    end
+  end
+
+  def call("set_ministry_mode", _), do: {:error, "Missing required parameters: slug, mode"}
+
+  def call("wake_ministry", %{"slug" => slug} = args) do
+    with :ok <- require_confirm(args),
+         %{} = m <- GiTF.Cabinet.Registry.by_slug(slug) || {:error, "no ministry #{slug}"} do
+      result =
+        if args["await"],
+          do: GiTF.Cabinet.Fleet.wake_and_await(m),
+          else: GiTF.Cabinet.Fleet.wake(m)
+
+      case result do
+        :ok -> {:ok, json_text(%{slug: slug, status: "waking", awaited: args["await"] == true})}
+        {:error, reason} -> {:error, "wake failed: #{inspect(reason)}"}
+      end
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, inspect(reason)}
+    end
+  end
+
+  def call("wake_ministry", _), do: {:error, "Missing required parameter: slug"}
+
+  def call("stop_ministry", %{"slug" => slug} = args) do
+    with :ok <- require_confirm(args),
+         %{} = m <- GiTF.Cabinet.Registry.by_slug(slug) || {:error, "no ministry #{slug}"},
+         :ok <- GiTF.Cabinet.Fleet.stop(m) do
+      {:ok, json_text(%{slug: slug, status: "stopping"})}
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, "stop failed: #{inspect(reason)}"}
+    end
+  end
+
+  def call("stop_ministry", _), do: {:error, "Missing required parameter: slug"}
+
+  def call("cabinet_inbox", args) do
+    entries =
+      (args["slug"] && GiTF.Cabinet.Gate.inbox(args["slug"])) ||
+        GiTF.Cabinet.Gate.inbox()
+
+    {:ok,
+     json_text(%{
+       count: length(entries),
+       entries:
+         Enum.map(entries, fn e ->
+           Map.take(e, [:id, :ministry_slug, :class, :event, :summary, :status, :inserted_at])
+         end)
+     })}
+  end
+
+  def call("start_inbox_entry", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Cabinet.Gate.start_queued(id) do
+        :ok -> {:ok, json_text(%{id: id, status: "waking"})}
+        {:error, reason} -> {:error, "start failed: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("start_inbox_entry", _), do: {:error, "Missing required parameter: id"}
+
+  def call("ministry_call", %{"slug" => slug, "tool" => tool} = args) do
+    case GiTF.Cabinet.Proxy.call(slug, tool, args["arguments"] || %{}, wake: args["wake"] == true) do
+      {:ok, text} -> {:ok, text}
+      {:error, reason} -> {:error, "ministry_call failed: #{inspect(reason)}"}
+    end
+  end
+
+  def call("ministry_call", _), do: {:error, "Missing required parameters: slug, tool"}
+
   def call("health_check", _args) do
     health = GiTF.Observability.Health.check()
 
