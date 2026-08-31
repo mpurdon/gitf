@@ -158,7 +158,7 @@ defmodule GiTF.Dashboard.InputGatePipelineTest do
 
     test "the question is answerable from the mission page", %{html: html} do
       assert html =~ ~s{phx-click="answer_inquiry"}
-      assert html =~ ~s{phx-value-value="grid"}
+      assert html =~ ~s{phx-value-answer="grid"}
     end
   end
 
@@ -240,11 +240,48 @@ defmodule GiTF.Dashboard.InputGatePipelineTest do
       {:ok, view, _html} = live(build_conn(), "/dashboard/questions")
 
       view
-      |> element(~s{button[phx-click="answer_inquiry"][phx-value-value="list"]})
+      |> element(~s{button[phx-click="answer_inquiry"][phx-value-answer="list"]})
       |> render_click()
 
       assert Inquiry.status(inquiry.id) == :answered
       assert Inquiry.get(inquiry.id).answer == "list"
+    end
+
+    # phoenix_live_view's `extractMeta` copies the clicked element's native
+    # `el.value` into the params AFTER the phx-value-* attributes, and a
+    # <button> with no value attribute reports "". A real click therefore
+    # arrives as {"value" => "", ...} on top of whatever phx-value-* named.
+    # `render_click/1` never simulates that, which is how the original
+    # `phx-value-value` shipped green and failed on the first real click
+    # (inq-acd882, 2026-08-31). The answer must ride under a key the
+    # browser cannot clobber, and "" must never be read as an answer.
+    test "a browser-shaped click carrying an empty native value still records the option" do
+      mission = mission!(%{current_phase: "awaiting_input", input_return_phase: "design"})
+      inquiry = ask!(mission.id)
+
+      {:ok, view, _html} = live(build_conn(), "/dashboard/questions")
+
+      render_click(view, "answer_inquiry", %{
+        "id" => inquiry.id,
+        "answer" => "list",
+        "value" => ""
+      })
+
+      assert Inquiry.get(inquiry.id).answer == "list"
+    end
+
+    test "a browser-shaped click on a text question answers from the draft, not the empty value" do
+      mission = mission!(%{current_phase: "awaiting_input", input_return_phase: "design"})
+
+      {:ok, inquiry, :asked} =
+        Inquiry.ask(mission.id, %{key: "name", phase: "design", kind: :text, prompt: "Name it?"})
+
+      {:ok, view, _html} = live(build_conn(), "/dashboard/questions")
+
+      render_change(view, "draft_answer", %{"id" => inquiry.id, "value" => "priority-rail"})
+      render_click(view, "answer_inquiry", %{"id" => inquiry.id, "value" => ""})
+
+      assert Inquiry.get(inquiry.id).answer == "priority-rail"
     end
 
     test "an answered question leaves the queue" do

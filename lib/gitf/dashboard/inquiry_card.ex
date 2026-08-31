@@ -112,11 +112,17 @@ defmodule GiTF.Dashboard.InquiryCard do
 
   defp answer_controls(%{inquiry: %{kind: :choice}} = assigns), do: text_choice(assigns)
 
+  # The answer rides on `phx-value-answer`, NOT `phx-value-value`.
+  # phoenix_live_view's click extractor copies the element's native
+  # `el.value` into the params after the phx-value-* attributes, and a
+  # <button> without a value attribute reports "" — so `phx-value-value`
+  # always reached the server as "". Every answer path on the Catwalk was
+  # broken that way until inq-acd882 (2026-08-31). Do not rename it back.
   defp answer_controls(%{inquiry: %{kind: :confirm}} = assigns) do
     ~H"""
     <div class="action-bar" style="justify-content:flex-start">
-      <button phx-click="answer_inquiry" phx-value-id={@inquiry.id} phx-value-value="true" class="btn btn-green">Yes</button>
-      <button phx-click="answer_inquiry" phx-value-id={@inquiry.id} phx-value-value="false" class="btn btn-red">No</button>
+      <button phx-click="answer_inquiry" phx-value-id={@inquiry.id} phx-value-answer="true" class="btn btn-green">Yes</button>
+      <button phx-click="answer_inquiry" phx-value-id={@inquiry.id} phx-value-answer="false" class="btn btn-red">No</button>
     </div>
     """
   end
@@ -160,7 +166,7 @@ defmodule GiTF.Dashboard.InquiryCard do
         :for={option <- @inquiry[:options] || []}
         phx-click="answer_inquiry"
         phx-value-id={@inquiry.id}
-        phx-value-value={option.id}
+        phx-value-answer={option.id}
         class="btn btn-grey"
         style="text-align:left; display:block; width:100%; padding:0.5rem; white-space:normal"
       >
@@ -199,7 +205,7 @@ defmodule GiTF.Dashboard.InquiryCard do
         :for={option <- @inquiry[:options] || []}
         phx-click="answer_inquiry"
         phx-value-id={@inquiry.id}
-        phx-value-value={option.id}
+        phx-value-answer={option.id}
         class="btn btn-grey"
         style="text-align:left; display:block; width:100%; padding:0.6rem 0.75rem; white-space:normal"
       >

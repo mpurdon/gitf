@@ -117,8 +117,8 @@ defmodule GiTF.Dashboard.InquiryCardTest do
       html = card(choice([previewed("bars", "Bars"), previewed("dots", "Dots")]))
 
       assert html =~ ~s(phx-click="answer_inquiry")
-      assert html =~ ~s(phx-value-value="bars")
-      assert html =~ ~s(phx-value-value="dots")
+      assert html =~ ~s(phx-value-answer="bars")
+      assert html =~ ~s(phx-value-answer="dots")
     end
 
     # A pruned or 404ing image must not leave a broken-picture card. The

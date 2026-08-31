@@ -342,7 +342,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   def handle_event("answer_inquiry", %{"id" => id} = params, socket) do
-    answer = params["value"] || socket.assigns.inquiry_draft[id]
+    answer = params["answer"] || socket.assigns.inquiry_draft[id]
 
     case GiTF.Inquiry.answer(id, answer, answered_by: actor(socket)) do
       {:ok, inquiry, :answered} ->

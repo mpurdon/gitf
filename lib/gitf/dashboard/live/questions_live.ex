@@ -85,7 +85,7 @@ defmodule GiTF.Dashboard.QuestionsLive do
   end
 
   def handle_event("answer_inquiry", %{"id" => id} = params, socket) do
-    answer = params["value"] || socket.assigns.draft[id]
+    answer = params["answer"] || socket.assigns.draft[id]
     actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
 
     case GiTF.Inquiry.answer(id, answer, answered_by: actor) do
