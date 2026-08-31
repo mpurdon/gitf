@@ -157,6 +157,12 @@ defmodule GiTF.Major.PhaseLauncher do
 
   @doc false
   def start_design(mission) do
+    # Triage writes pipeline_mode and dispatches design in the same sweep,
+    # with the mission map it read BEFORE writing. fast_mode?/1 on that
+    # stale map is false, so a fast mission spawned the full three-variant
+    # tournament (msn-1729cb, msn-f48ae9, msn-5f2be2) — two wasted ghosts
+    # and every tie-on-inserted_at bug downstream of them.
+    mission = refresh(mission)
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     research = GiTF.Missions.get_artifact(mission.id, "research")
 
@@ -238,6 +244,15 @@ defmodule GiTF.Major.PhaseLauncher do
       {:ok, "review"}
     end
   end
+
+  defp refresh(%{id: id} = mission) when is_binary(id) do
+    case GiTF.Missions.get(id) do
+      {:ok, fresh} -> fresh
+      _ -> mission
+    end
+  end
+
+  defp refresh(mission), do: mission
 
   # -- Planning: turn the chosen design into ops -------------------------------
 

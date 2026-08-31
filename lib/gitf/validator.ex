@@ -157,13 +157,22 @@ defmodule GiTF.Validator do
 
     {cmd, cmd_args} = GiTF.Sandbox.wrap_shell(guarded, cd: cwd)
 
+    # A cached node_modules is hardlinked in BEFORE the command runs and
+    # the command is told through GITF_INSTALL_RESTORED whether it may
+    # skip its install. See GiTF.InstallCache for the contract.
+    install = GiTF.InstallCache.restore(cwd)
+    env = [{"MIX_ENV", "test"} | GiTF.InstallCache.env(install)]
+
     task =
       Task.async(fn ->
-        System.cmd(cmd, cmd_args, cd: cwd, stderr_to_stdout: true, env: [{"MIX_ENV", "test"}])
+        System.cmd(cmd, cmd_args, cd: cwd, stderr_to_stdout: true, env: env)
       end)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, 0}} ->
+        # Only a PASSING run may seed the cache — a broken install must
+        # not be enshrined for every later worktree.
+        GiTF.InstallCache.store(cwd)
         {:ok, output}
 
       {:ok, {output, exit_code}} when exit_code in [126, 127] ->

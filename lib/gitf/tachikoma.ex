@@ -1041,6 +1041,14 @@ defmodule GiTF.Tachikoma do
     # question's images are exempt from both.
     previews = GiTF.Inquiry.Preview.prune()
 
+    # The node_modules cache: one ~200 MB tree per lockfile version, keep
+    # the three most recently restored. See GiTF.InstallCache.
+    installs = GiTF.InstallCache.prune()
+
+    if installs.removed > 0 do
+      Logger.info("Pruned #{installs.removed} cached node_modules trees (kept #{installs.kept})")
+    end
+
     if previews.removed > 0 do
       Logger.info(
         "Pruned #{previews.removed} inquiry preview files " <>

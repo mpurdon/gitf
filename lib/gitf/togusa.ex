@@ -28,8 +28,34 @@ defmodule GiTF.Togusa do
   """
   @spec run_quality_gate(String.t()) :: {:ok, :pass | :fail | :infra, map()} | {:error, term()}
   def run_quality_gate(op_id) do
-    GiTF.Audit.verify_job(op_id)
+    opts =
+      case GiTF.Ops.get(op_id) do
+        {:ok, op} -> gate_opts(op)
+        _ -> []
+      end
+
+    GiTF.Audit.verify_job(op_id, opts)
   end
+
+  # Phases that run AFTER the mission's own validation has passed.
+  @post_validation_phases ~w(simplify publish scoring)
+
+  @doc """
+  Options for the quality gate of `op`.
+
+  A phase op that runs after mission validation (simplify, publish,
+  scoring) does not pay the sector's exec validation command again. The
+  tree it touched was validated minutes ago; re-running `npm ci` and the
+  build for each of three simplify ops, serialized under the sector
+  lock, is what publish was waiting behind: 5m14s on msn-5f2be2, 16m on
+  msn-0434e9. The LLM quality checks still run — they are cheap and they
+  are the point of the gate.
+  """
+  @spec gate_opts(map()) :: keyword()
+  def gate_opts(%{phase_job: true, phase: phase}) when phase in @post_validation_phases,
+    do: [skip_validation_command: true]
+
+  def gate_opts(_op), do: []
 
   # -- Fix Request -----------------------------------------------------------
 

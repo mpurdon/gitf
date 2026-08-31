@@ -353,6 +353,32 @@ enough, the daemon caches at boot.
 Upgrades: CI builds an arm64 tarball on every `main` push; install with
 `sudo rel/install-systemd.sh <tarball>`. State is untouched.
 
+## 9b. The node_modules cache and the validation command
+
+`GiTF.InstallCache` hardlinks a cached `node_modules` (keyed by the SHA-256 of
+`package-lock.json`, stored under `.gitf/cache/node_modules/<key>/`) into a
+worktree right before any validation command runs, and exports:
+
+```
+GITF_INSTALL_KEY=<sha256>       when the worktree has a lockfile
+GITF_INSTALL_RESTORED=1|0       whether node_modules came from the cache
+```
+
+`npm ci` deletes `node_modules` unconditionally, so a sector only benefits if
+its `validation_command` checks the variable. cora's:
+
+```sh
+{ [ "$GITF_INSTALL_RESTORED" = 1 ] && [ -f node_modules/typescript/lib/lib.es5.d.ts ]; } \
+  || { rm -rf node_modules && npm ci; } \
+  && npm run typecheck && bash /var/lib/gitf/probes/cora-smoke.sh
+```
+
+A passing run seeds the cache; a failing one never does. Three keys are kept
+(Tachikoma's sweep prunes the rest). Post-validation phase ops (simplify,
+publish, scoring) skip the exec command entirely — see `Togusa.gate_opts/1`.
+Before this, msn-5f2be2 spent 5m29s installing before validation and another
+5m14s while a simplify gate installed again with publish blocked behind it.
+
 ## 10. Feature flags
 
 Most of the differentiating intelligence layer ships **default-off**. The
