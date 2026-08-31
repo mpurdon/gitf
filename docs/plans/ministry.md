@@ -1,155 +1,191 @@
-# Ministries and the Cabinet — a fleet of Sections, one per client
+# Ministries and the Cabinet — a fleet of sleeping Sections behind one front door
 
-*Plan of record, 2026-08-31, revised same day after the operator settled the
-architecture. Supersedes the first draft's multi-tenant-in-one-box design.
-Origin: the inquiry-gate night
-(`docs/stories/2026-08-31-inquiry-gate-first-runs.md`) and the need to do
-employer (Trajector) work with the employer's Bedrock, git identity and
-GitHub account, with zero bleed into personal projects.*
+*Plan of record, 2026-08-31, third revision (operator-driven, same day).
+v1 was multi-tenant-in-one-box (retired). v2 was box-per-ministry + a
+convenience Cabinet. v3 promotes the Cabinet to the fleet's always-on front
+door: webhook ingress + an activation ruleset that decides when a Section is
+worth waking. Origin: `docs/stories/2026-08-31-inquiry-gate-first-runs.md`
+and the Trajector requirement (work Bedrock, work identity, zero bleed).*
 
 ## Decision record (operator, 2026-08-31)
 
-1. **Box per ministry.** Stopping a ministry's box IS the tenancy control:
-   off means no polling, no listening, no spend — and GitHub's dropped
-   webhooks are already reconciled on wake by the events poller (30-day
-   window), so "not listening" loses nothing by design.
-2. **All boxes live in the one gitf AWS account** (515020252848). Ministries
-   are not separated at the account level; they interact with the outside
-   world only through their own GitHub identity, and (where configured) pay
-   for their own model usage via their own Bedrock credentials. This kills
-   the cross-account-orchestration problem entirely.
-3. **GitHub auth per ministry = fine-grained PAT** (no GitHub App — no
-   security-team verification circus). Stored only on that ministry's box.
-4. **Attribution** (the Co-Authored-By / "generated with" tool credit, NOT
-   the author email) becomes a per-box setting: `on | off | custom`.
-   Client ministries default off unless decided otherwise.
-5. **The Cabinet is a tiny always-on tailnet node, not a serverless app.**
-   Phone access means a webpage over tailscale, which any tailnet device
-   (phone included) reaches; Claude keeps driving individual ministries
-   exactly as today (CLI/MCP → that box's URL). No public endpoint, no
-   OAuth layer, no DynamoDB.
+1. **Box per ministry.** A Ministry (client) is a complete Section on its own
+   EC2 box. Stopping the box is the tenancy control. Per-ministry config is
+   that box's ordinary global config — no multi-tenant code inside the
+   factory.
+2. **All boxes in the one gitf AWS account** (515020252848). Ministries face
+   the world only through their own GitHub identity; work model spend bills
+   to work via a Bedrock profile on the work box.
+3. **GitHub auth per ministry = fine-grained PAT**, stored only on that
+   ministry's box. No GitHub App.
+4. **Attribution** (tool-credit trailers, not author email) is a per-box
+   setting `on | off | custom`; client ministries default off. Author email
+   per box (e.g. `matthew@trajectorservices.com`).
+5. **The Cabinet is the one always-on node** — a t4g.micro (~$10.4/mo
+   all-in; see costs) on the tailnet, running this codebase in cabinet mode.
+   It is the *entire* always-on cost of the fleet: every Section sleeps to
+   $0, exactly as today. LLM calls dominate the bill anyway.
+6. **The Cabinet is the webhook ingress and the activation gate.** All
+   ministries' GitHub webhooks point at the Cabinet. A per-ministry
+   **ruleset** (editable in the dashboard) decides, per event, whether to
+   wake the Section, queue for the operator, or drop. **Modes** make the
+   vacation scenario first-class: on vacation, bugs get worked
+   autonomously; features queue until the operator explicitly tells the
+   Cabinet to start them.
 
 ## The shape
 
 ```
-                    Cabinet (t4g.nano, always on, tailnet-only)
-                    cabinet.ghostinthefactory.com
-                    registry · wake/stop · health · cost rollup · MCP proxy
-                        │                │                 │
-        factory.ghostinthefactory.com   trajector.ghost…   <next-client>.ghost…
-        Section: home-affairs           Section: trajector Section: …
-        (today's box, unchanged)        (new box)          (terraform away)
+                         GitHub (all ministries' repos)
+                                   │ webhooks
+                                   ▼
+              ┌─────────────────────────────────────────────┐
+              │  CABINET  t4g.micro · always on · tailnet   │
+              │  cabinet.ghostinthefactory.com              │
+              │  registry · ingress · ruleset · modes       │
+              │  wake/stop · fleet health · cost rollup     │
+              │  feature inbox · MCP proxy · release fanout │
+              └───────┬──────────────┬──────────────┬───────┘
+             wake+forward       wake+forward     (queued: waiting
+                      ▼              ▼            for the operator)
+        factory.ghost…      trajector.ghost…      <next-client>.ghost…
+        Section: home-affairs  Section: trajector  (terraform away)
+        sleeps to $0           sleeps to $0
 ```
 
-- **A ministry IS a box** — a complete Section: own daemon, sectors, Archive,
-  dashboard, pollers, idle-stop. Per-ministry config is just that box's
-  ordinary global config. No multi-tenant code paths inside the factory.
-- **The Cabinet** is a stripped deployment of this same codebase ("cabinet
-  mode": no Major, no ghosts, no sectors) reusing three things that already
-  exist and were exercised hard tonight: `GiTF.Tailnet` whois auth, the
-  HTTP MCP server (`/api/v1/mcp`), and the Archive (the registry is a
-  collection). It holds **no mission state**; every Section stays
-  authoritative. If the Cabinet is down, every ministry still works — only
-  the convenience layer is gone.
+Division of authority, deliberately strict:
+
+- **Sections stay authoritative** for everything about the work: missions,
+  ghosts, artifacts, PATs, model credentials. The Cabinet holds **no mission
+  state, no PATs, no model credentials** — only the registry, per-ministry
+  *webhook secrets* (needed to verify ingress signatures), the ruleset, the
+  queued-event inbox, and cached health/cost snapshots.
+- If the Cabinet is down: Sections still work when driven directly, and each
+  Section's **events poller remains the backstop** — on wake it reconciles
+  up to 30 days of missed GitHub events. The Cabinet makes reaction *timely*;
+  it is never the only path.
 - Same-account IAM: the Cabinet's instance role gets
-  `ec2:StartInstances/StopInstances/DescribeInstances` scoped by a
-  `gitf:ministry` tag, nothing else. No credentials leave the account.
+  `ec2:StartInstances/StopInstances/DescribeInstances` scoped by the
+  `gitf:ministry` tag. Nothing else.
 
-### What the Cabinet does
+### Ingress → ruleset → activation
 
-| Capability | Notes |
+1. GitHub delivers an event to `cabinet…/hooks/<ministry>/<repo>`; signature
+   verified against that ministry's webhook secret.
+2. The event is classified: `bug` (issue opened/labeled bug), `feature`
+   (issue/feature-request), `pr_review` (review or review-comment on a
+   factory PR — the review-intake flow), `ci`, `noise`.
+3. The ministry's ruleset, under the current **mode**, maps class → action:
+
+   | | normal | vacation | off |
+   |---|---|---|---|
+   | bug | wake → forward (Section creates+starts a mission per its own config) | wake → forward, **cost-capped** | queue |
+   | pr_review | wake → forward (amend-in-place intake) | wake → forward | queue |
+   | feature | queue in the **feature inbox**; operator starts it explicitly | queue | queue |
+   | ci / noise | drop (poller will see it anyway) | drop | drop |
+
+   Rules are per-ministry, editable in the Cabinet dashboard (the "visual
+   ruleset" — start as a simple matrix page, not a rule engine), with
+   per-ministry **monthly cost caps** enforced before any wake: a ministry
+   over cap queues instead of waking, and the queue page says so.
+4. "Wake → forward": start the instance (no-op if awake), wait healthy,
+   POST the event to the Section's existing webhook endpoint. The Section
+   does what it does today; the Cabinet never creates missions itself.
+5. Everything queued lands in the inbox with a one-tap "start this" that
+   wakes the Section and forwards — that is how a feature gets worked while
+   on vacation: only because the operator said so, from a phone browser on
+   the tailnet.
+
+### What stays per-box (unchanged from v2)
+
+Git identity + attribution (config, written as repo-local git config at
+clone/worktree creation — replacing the hardcoded `gitf`/`gitf@localhost` at
+`sector.ex:106`); `[github] token` (the PAT); the `[llm]` block (the work
+box: `CLAUDE_CODE_USE_BEDROCK=1` + work Bedrock profile); per-ministry
+backup bucket; approval/autonomy posture (client boxes stricter). Work box
+provisioning checklist: logged into nothing personal; `GITHUB_TOKEN` env
+must not shadow the box PAT.
+
+## Costs (honest, us-east-1, on-demand)
+
+| Item | Monthly |
 |---|---|
-| Registry | `:ministries` collection: slug, display name, box URL, instance id, notes. CRUD from the dashboard and MCP. |
-| Wake / stop | Start/stop by ministry; shows state + "idle for Nm" from each box's health endpoint. |
-| Fleet health | Fan-out `health_check` + version to every awake box; one page, phone-friendly. |
-| Cost rollup | Pulls each box's `costs_summary`; per-ministry monthly view (feeds Trajector invoicing later). |
-| MCP proxy | Every gitf tool grows an optional `ministry` param; the Cabinet forwards to that box's `/api/v1/mcp`, waking it first when asked. The local CLI/MCP can also keep talking straight to a box — the proxy is convenience, not a chokepoint. |
-| Release fan-out | "Install <version> on <ministry>" — the S3+SSM sequence from OPERATING.md §9, per box, same account so the existing tooling works verbatim. |
+| Cabinet t4g.micro (1 GiB — nano's 0.5 GiB is too tight for BEAM + tailscaled headroom) | ~$6.10 |
+| EBS gp3 8 GB | ~$0.65 |
+| Public IPv4 (required for egress without a NAT gateway) | ~$3.65 |
+| **Cabinet total — the fleet's entire always-on cost** | **~$10.40** |
+| Each ministry Section | $0 while stopped; hours-used + EBS (~$1–3/mo) + IPv4 while running |
 
-### What stays per-box (ministry config = box config)
-
-| Concern | Where on the box |
-|---|---|
-| Git identity | `[git] author_name / author_email` in config.toml → written as repo-local config at sector clone + worktree creation (today hardcoded `gitf`/`gitf@localhost` at `sector.ex:106` — this is the one real factory change). |
-| Attribution | `[git] attribution = "on"|"off"|"custom…"` — publish and the commit paths consult it. |
-| GitHub PAT | `[github] token` (already exists) — the work box holds the Trajector PAT; pushes use the https remote with that token. |
-| LLM routing | The existing `[llm]` block: the work box sets `execution_mode`/Bedrock profile/tiers globally. The Claude CLI on that box runs `CLAUDE_CODE_USE_BEDROCK=1` against the work Bedrock credentials (an AWS profile on that box for the work account's Bedrock — model spend bills to work; the instance itself bills to gitf). No scrub inversion, no per-request credentials: one box, one identity. |
-| Backups | Per-ministry S3 bucket, same account, provisioned by the module. Work source residing in the gitf account is accepted by decision 2. |
-| Approval posture | `require_human_approval` / autonomy defaults in that box's config — client boxes default stricter. |
-
-### What we no longer need (retired from the first draft)
-
-Per-ministry records inside one factory; the AWS env-scrub inversion;
-per-request Bedrock credentials in ProviderManager; sandbox bind narrowing
-between ministries (one box holds one ministry — though narrowing the bind
-away from `$HOME` is still worthwhile hardening *within* a box, tracked
-separately); per-ministry install-cache roots and `CLAUDE_CONFIG_DIR`
-juggling. Physical separation made ~70% of the first draft's code
-unnecessary.
+A 1-yr savings plan roughly halves the compute line later; not worth doing
+until the Cabinet is proven.
 
 ## Milestones
 
-**M1 — identity becomes config (no new spend, benefits today's box).**
-`[git] author_name/author_email/attribution` in config; `Sector.add` and
-worktree creation write repo-local git config from it; publish and every
-factory-made commit honour attribution. Acceptance: on the current box, set
-a test identity, run a trivial mission, and `git log --format='%an %ae %cn %ce'`
-plus the PR body show the configured identity and attribution; unset =
-today's behaviour.
+**M1 — identity becomes config** (pure code, no spend, improves today's box:
+every cora commit tonight was authored by `gitf@localhost`). `[git]`
+author/email/attribution; repo-local git config at clone + worktree
+creation; publish honours attribution. Acceptance: configured identity and
+attribution appear on a trivial mission's commits (author AND committer) and
+PR body; unset = today's behaviour.
 
-**M2 — the ministry box module (spend gate #1).** Terraform: parameterize
-the existing box provisioning by slug — instance (tagged `gitf:ministry`),
-EBS, tailscale join, DNS `slug.ghostinthefactory.com`, backup bucket,
-`/etc/gitf` seeding. Bring up `trajector`: work PAT, work git identity,
-Bedrock profile for the work account, attribution off, approval strict.
-Acceptance: a scratch repo under the work GitHub account onboarded as a
-sector; one mission end-to-end; the PR's commits (author AND committer) and
-comments all carry `matthew@trajectorservices.com` / the work account; the
-`costs` ledger shows only `bedrock:*` models; the home box untouched.
+**M2 — cabinet-mode build + Cabinet core** (code now; **provisioning
+spend-gated**). A config/flag that starts the app without Major/ghost/sector
+supervision; `:ministries` registry + CRUD; wake/stop via tag-scoped role;
+fleet health + cost rollup pages (phone-friendly, tailnet). Acceptance
+(post-provision): from a phone browser, wake a Section, watch it come
+healthy, stop it.
 
-**M3 — the Cabinet (spend gate #2).** Cabinet mode in the app (compile-time
-or config flag disabling Major/ghost supervision); registry collection +
-CRUD; wake/stop via tag-scoped instance role; fleet health + cost pages
-(phone-usable over tailnet); `cabinet.ghostinthefactory.com`. Acceptance:
-from a phone browser on the tailnet, wake trajector, watch it come healthy,
-stop it.
+**M3 — ingress + ruleset + modes.** Webhook endpoint per ministry/repo with
+signature verification; event classifier; the mode/ruleset matrix + editor;
+feature inbox with start-this; per-ministry cost caps gating wakes;
+repointing GitHub webhooks from boxes to the Cabinet (poller stays as
+backstop). Acceptance: with every Section stopped — a bug issue on a cora
+repo wakes home-affairs and a mission appears; a feature issue queues and
+does NOT wake anything; tapping it in the inbox does; in `off` mode nothing
+wakes.
 
-**M4 — routing + fan-out.** `ministry` param on the MCP tools via the
+**M4 — the trajector box** (**spend-gated**). Terraform ministry module
+(instance tagged `gitf:ministry`, EBS, tailscale, DNS slug, backup bucket,
+`/etc/gitf` seed); bring up trajector with work PAT/identity/Bedrock/strict
+posture. Acceptance: scratch work-account repo, one mission end-to-end, PR
+commits + comments all carry the work identity, `costs` shows only
+`bedrock:*` models, home box untouched.
+
+**M5 — routing + fan-out + docs.** `ministry` param on MCP tools via the
 Cabinet proxy; CLI `-m <slug>`; release install fan-out; OPERATING.md
-§"Ministries and the Cabinet"; GLOSSARY entries (Ministry, Cabinet).
+§"Ministries and the Cabinet"; GLOSSARY (Ministry, Cabinet, mode).
 
-Order matters: M1 is pure code and can ship now. M2 and M3 each raise a
-real (small) bill — a t4g box + EBS each, order of $5–30/mo depending on
-idle-stop discipline — and are **not to be provisioned without explicit
-operator approval, per standing rule**. M2 before M3 is fine (two boxes are
-manageable with direct URLs); M3 before M2 also works (Cabinet managing a
-fleet of one).
+M1 and the code halves of M2/M3 need no approval. Provisioning the Cabinet
+(~$10.4/mo) and the trajector box are each an explicit operator go, per the
+standing billable-decisions rule.
 
-## Edges that still bite (kept from the first draft, restated for the fleet)
+## Edges that still bite
 
-- **Every commit-maker needs the identity**, not just ghosts: consolidation
-  merges, sync, residue-scrub commits, publish. Repo-local git config at
-  clone/worktree creation covers all of them; that's why M1 is at that seam.
-- **The PAT is read in four places** (publish REST, review intake, events
-  poller, outcomes tracker) — on a one-ministry box they all read the same
-  `[github] token`, so this collapses to "config, not env". Verify the env
-  var (`GITHUB_TOKEN`) doesn't shadow it on the work box.
-- **Claude CLI state is per-box now** (`~/.claude` on the work box only ever
-  sees work code) — the side-channel concern dissolves, but the work box
-  must be *logged into nothing personal*: no personal Anthropic login, no
-  personal gh keyring. Provisioning checklist item.
-- **Idle-stop is the cost model.** A ministry box that wakes on demand
-  (Cabinet button, `gitf -m … wake`, or a morning cron) and reconciles via
-  the events poller costs hours-used. The Cabinet nano is the only always-on
-  spend.
-- **Shared release, divergent config**: all boxes run the same tarball;
-  config differences are data. Resist per-ministry forks.
+- **Webhook secrets on the Cabinet** are the only ministry secret it holds —
+  verify-only; a leaked webhook secret forges events but touches no code or
+  credentials. Keep it that way: never give the Cabinet PATs.
+- **Vacation-mode autonomy needs a leash**: the per-ministry cost cap is the
+  hard stop; the Section's own approval posture still applies to what the
+  missions do (a client box can require approval even for bug fixes, which
+  then queue at the Section's own gate — visible on the Cabinet's fleet
+  page).
+- **Operator notification while away** (a bug mission failed, a cap was
+  hit): the Cabinet page shows it, but push (email/ntfy) is an open item —
+  parked, not designed here.
+- **Classifier honesty**: "bug vs feature" from labels/heuristics will
+  misfire; the failure direction must always be *queue*, never *wake* — a
+  misclassified feature costs operator attention, a misclassified wake
+  costs money silently.
+- **Clock drift on modes**: mode is set by the operator, not inferred;
+  vacation doesn't end by calendar unless the operator sets a return date
+  (nice-to-have on the mode page).
 
 ## Open questions (none block M1)
 
-- Cabinet build: same repo behind a flag (preferred — one CI artifact) vs a
-  separate mix release target.
-- Whether the Cabinet should also be the webhook ingress hostname for
-  stopped ministries later (park: the events poller already covers the gap).
-- Within-box sandbox hardening (don't bind all of `$HOME`) — still worth
-  doing for defence in depth; tracked outside this plan.
+- Cabinet build as the same CI artifact behind a flag (preferred) vs a
+  second release target.
+- Notification channel for unattended failures (email/SES vs ntfy vs none).
+- Whether `pr_review` events in vacation mode should also honour the cost
+  cap separately from bugs (probably yes — same gate).
+- Within-box sandbox hardening (don't bind all of `$HOME`) — worthwhile
+  defence in depth, tracked outside this plan.
