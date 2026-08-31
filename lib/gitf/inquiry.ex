@@ -263,10 +263,18 @@ defmodule GiTF.Inquiry do
     * `prompt` — non-empty after trimming. A blank prompt is a mission
       held on nothing.
     * `options` — `:choice` only, at least two, each with a non-empty
-      `label`. An `id` is derived from the label when absent and must be
-      unique. `rationale` is optional but is the whole point of the
-      shape: the operator has to be able to judge between the options
+      `label`, and no two labels the same once case and punctuation are
+      normalized away. An `id` is derived from the label when absent and
+      must be unique. `rationale` is optional but is the whole point of
+      the shape: the operator has to be able to judge between the options
       without reading the code.
+    * `preview` — optional, `:choice` only. Either a relative path to a
+      mockup the asking ghost wrote (turned into an image by
+      `GiTF.Inquiry.Preview.attach/3` before the question is recorded),
+      or the stored image reference that step produces. A reference this
+      module cannot make sense of is DROPPED to a `preview_error` rather
+      than refused: a question that can still be answered from its labels
+      must not be rejected because a picture was malformed.
 
   Returns `{:ok, normalized}` or `{:error, {:invalid, reason}}`.
   """
@@ -357,14 +365,58 @@ defmodule GiTF.Inquiry do
         bad
 
       nil ->
-        ids = Enum.map(normalized, & &1.id)
-
-        if length(Enum.uniq(ids)) == length(ids) do
+        # Labels first: near-identical labels derive colliding ids, so the
+        # id check would otherwise win the race and report a slug clash for
+        # what is really two options saying the same thing.
+        with :ok <- distinct_labels(normalized), :ok <- unique_ids(normalized) do
           {:ok, normalized}
-        else
-          {:error, {:invalid, "option ids must be unique, got #{inspect(ids)}"}}
         end
     end
+  end
+
+  defp unique_ids(options) do
+    ids = Enum.map(options, & &1.id)
+
+    if length(Enum.uniq(ids)) == length(ids) do
+      :ok
+    else
+      {:error, {:invalid, "option ids must be unique, got #{inspect(ids)}"}}
+    end
+  end
+
+  defp distinct_labels(options) do
+    keys = Enum.map(options, &comparable_label/1)
+
+    if length(Enum.uniq(keys)) == length(keys) do
+      :ok
+    else
+      {:error,
+       {:invalid,
+        "two options say the same thing (#{inspect(Enum.map(options, & &1.label))}) — " <>
+          "a choice between identical options is not a question"}}
+    end
+  end
+
+  # The ONE mechanical taste guard, and it is deliberately syntactic.
+  #
+  # A `:choice` whose options say the same thing is not a taste call, it
+  # is a phase asking the operator to break a tie it invented — the same
+  # defect `require_options/2` already refuses in its one-option form,
+  # arrived at by a different route ("Option A" / "option a."). Comparing
+  # labels with case and punctuation normalized away catches that with
+  # essentially no false positives.
+  #
+  # What is NOT here is a materiality test on the options' MEANING, or a
+  # detector for prompts that ask permission rather than preference. Both
+  # were considered and both are heuristics over natural language, and
+  # the fail direction settles it: a wrongly-rejected question is refused
+  # at the seam and the phase proceeds on its own judgement — which is
+  # precisely the outcome this whole gate exists to prevent, now
+  # happening silently and only to the questions the heuristic misread.
+  # A guard whose misfire reintroduces the bug it guards against is worse
+  # than no guard. That load is carried by `invitation_block/2`.
+  defp comparable_label(%{label: label}) do
+    label |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "")
   end
 
   defp normalize_option(option) when is_map(option) do
@@ -377,6 +429,7 @@ defmodule GiTF.Inquiry do
           label: trimmed,
           rationale: trim_or_nil(fetch(option, [:rationale, "rationale"]))
         }
+        |> Map.merge(normalize_preview(option))
 
       _ ->
         {:error, {:invalid, "every option needs a non-empty label"}}
@@ -385,6 +438,73 @@ defmodule GiTF.Inquiry do
 
   defp normalize_option(other),
     do: {:error, {:invalid, "every option must be a map, got #{inspect(other, limit: 5)}"}}
+
+  # `preview` is the ghost's key and the store's key, and it holds a
+  # different thing on either side of the render step: a ghost writes the
+  # relative path of the mockup it drew, and
+  # `GiTF.Inquiry.Preview.attach/3` replaces it with the stored image
+  # reference. Normalizing splits the two apart so a re-normalized record
+  # (every `ask/2` re-validates) keeps both, and so nothing downstream has
+  # to ask which kind of `preview` it is holding.
+  #
+  # Nothing here returns an error. A mockup reference that is the wrong
+  # shape, absolute, or pointing outside the worktree is dropped to a
+  # `preview_error` and the option is asked with its label — for the same
+  # reason `Preview.attach/3` degrades rather than fails. The card can
+  # survive having no picture; a mission cannot survive being refused a
+  # question over one.
+  defp normalize_preview(option) do
+    {preview, source} =
+      case fetch(option, [:preview, "preview"]) do
+        %{} = rendered ->
+          {stored_preview(rendered), fetch(option, [:preview_source, "preview_source"])}
+
+        path when is_binary(path) ->
+          {nil, path}
+
+        _ ->
+          {nil, fetch(option, [:preview_source, "preview_source"])}
+      end
+
+    {clean_source, source_error} = normalize_preview_source(source)
+
+    %{
+      preview: preview,
+      preview_source: clean_source,
+      preview_error: trim_or_nil(fetch(option, [:preview_error, "preview_error"])) || source_error
+    }
+  end
+
+  defp normalize_preview_source(nil), do: {nil, nil}
+
+  defp normalize_preview_source(source) do
+    if GiTF.Inquiry.Preview.source_path?(source) do
+      {String.trim(source), nil}
+    else
+      {nil, GiTF.Inquiry.Preview.source_path_error()}
+    end
+  end
+
+  # Only a reference that actually names an image on disk is kept. A map
+  # with no `png` is a record of an intention, and rendering an `<img>`
+  # from it would put a broken picture on the one card that must stay
+  # answerable.
+  defp stored_preview(%{} = rendered) do
+    case fetch(rendered, [:png, "png"]) do
+      png when is_binary(png) and png != "" ->
+        %{
+          png: png,
+          source: fetch(rendered, [:source, "source"]),
+          width: fetch(rendered, [:width, "width"]),
+          height: fetch(rendered, [:height, "height"]),
+          bytes: fetch(rendered, [:bytes, "bytes"]),
+          rendered_at: fetch(rendered, [:rendered_at, "rendered_at"])
+        }
+
+      _ ->
+        nil
+    end
+  end
 
   defp option_id(option, label) do
     case fetch(option, [:id, "id"]) do
@@ -717,11 +837,30 @@ defmodule GiTF.Inquiry do
 
   @doc """
   The invitation, rendered for a phase prompt: what a question is for,
-  the exact JSON shape, and — at length — when NOT to ask.
+  the exact JSON shape, and — at length, with worked examples — when NOT
+  to ask.
 
   Returns `""` when the invitation is off or the mission's budget is
   spent. A ghost told it may ask three questions when it may ask none
   would spend its output on one and get refused at the seam.
+
+  ## Why this text carries so much of the design
+
+  The gate has exactly two enforcement mechanisms — the per-mission
+  budget and `validate/1`'s structural refusals — and neither of them can
+  tell a taste call from a lookup. "Which of these two icon sets?" and
+  "which file holds the priority enum?" are the same JSON. The line
+  between them is semantic, so it is drawn here or it is not drawn at
+  all, and `normalize_options/1` explains at length why the alternative —
+  a mechanical detector for questions-that-are-really-lookups — was
+  considered and refused.
+
+  The operator's framing is the requirement: *pause because we have a
+  taste/judgement call*. So the rule is stated as a distinction (fact
+  versus preference), given a floor (prefer deciding), given a price (the
+  operator's attention), and then given one worked example on each side —
+  because a rule with examples is followed and a rule without them is
+  argued with.
   """
   @spec invitation_block(String.t(), String.t()) :: String.t()
   def invitation_block(mission_id, phase) when is_binary(mission_id) and is_binary(phase) do
@@ -733,29 +872,60 @@ defmodule GiTF.Inquiry do
       """
       ## ASKING THE OPERATOR
 
-      If this phase turns on a decision that is genuinely the operator's —
-      a matter of taste, product direction, or naming, where two answers
-      are both defensible and the code cannot tell you which is wanted —
-      you may add a `questions` array to your JSON artifact. The mission
-      will HOLD until a human answers, and this phase will then run again
-      with their answer.
+      You may hold this mission and put ONE kind of question to a human:
+      a decision that is genuinely their **preference**, where the
+      requirements do not decide it and two answers are both defensible.
+      Visual style. Naming. Product feel. A tradeoff between two designs
+      that are each correct. Add a `questions` array to your JSON
+      artifact; the mission HOLDS until a human answers, and this phase
+      then runs again with their answer.
 
-      Ask only when ALL of these are true:
+      **The test is fact versus preference.** If you are uncertain about a
+      FACT, go and find it — read the file, run the command, grep the
+      repo, re-read the goal. If you are uncertain about a PREFERENCE,
+      ask.
 
-      - The answer is not discoverable. If reading the repo, the goal, or
-        the earlier artifacts would settle it, read them instead.
-      - Getting it wrong is expensive to undo — it shapes what gets built,
-        not just how a line is written.
-      - The operator can answer it in ten seconds, from your options
-        alone, without opening the code.
+      Never ask about anything discoverable:
 
-      Do NOT ask to confirm a decision you have already made, to hedge, to
-      check your work, or because a requirement is ambiguous in a way you
-      could resolve by picking the conservative reading and saying so.
-      Holding a mission costs the operator's attention and the factory's
-      wall clock; a question that did not need asking is worse than a
-      decision made and explained. You may ask at most #{remaining} more on
-      this mission; most missions should ask none.
+      - what the code currently does
+      - which files to touch
+      - whether an approach compiles, passes, or is possible
+      - what the requirements already state
+      - anything answerable by reading this repo or running a command
+
+      And never ask for permission. Do not ask permission to proceed, do
+      not ask anyone to confirm your own plan, and do not ask anyone to
+      check your work. None of those are preferences.
+
+      **Prefer deciding over asking.** If you can pick the defensible
+      answer and say plainly in your artifact that you picked it and why,
+      do that — it is the better outcome almost every time. Holding a
+      mission spends the operator's attention, which is the scarcest
+      thing this factory spends, and spends wall clock while the mission
+      sits still. You may ask at most #{remaining} more question#{if remaining == 1, do: "", else: "s"} on
+      this mission. Most missions should ask none.
+
+      ### Worked example — ASK
+
+      > The dashboard's priority column uses filled-circle glyphs that
+      > several people read as pie charts. Bars and dots are both clear,
+      > and they say different things about the scale: bars read as
+      > magnitude, dots read as category. Nothing in the goal or the
+      > codebase settles which of those this column means.
+
+      That is a preference. Both are defensible, the requirements are
+      silent, and the operator will know in one glance which they want.
+
+      ### Worked example — DO NOT ASK
+
+      > The plan says "update the priority indicator" and I can see two
+      > places that render priorities, so I do not know which one is
+      > meant.
+
+      That is a fact, and the repository has it. Open both call sites,
+      work out which one the goal is describing, and if they genuinely
+      both need it, change both and say so. Asking here costs a human
+      round trip to learn something you were two greps away from.
 
       Shape (omit the key entirely if you have nothing to ask):
 
@@ -773,10 +943,13 @@ defmodule GiTF.Inquiry do
       ]
       ```
 
-      `kind` is `"choice"` (needs 2+ options), `"text"` (free-form answer),
-      or `"confirm"` (yes/no). `key` must be stable: if you ask the same
-      question again after being answered, the same `key` returns the
-      standing answer instead of asking the operator twice.
+      `kind` is `"choice"` (needs 2+ genuinely different options),
+      `"text"` (free-form answer), or `"confirm"` (yes/no — and note that
+      almost every honest use of `confirm` turns out to be asking
+      permission, which is not what this is for). `key` must be stable: if
+      you ask the same question again after being answered, the same `key`
+      returns the standing answer instead of asking the operator twice.
+      #{GiTF.Inquiry.Preview.contract_block()}
       """
     end
   end

@@ -1033,6 +1033,21 @@ defmodule GiTF.Tachikoma do
     compact_days = GiTF.Config.get(:artifact_compact_days) || 7
     compacted = GiTF.Missions.compact_old_artifacts(compact_days)
 
+    # Inquiry mockup images — the ONLY on-disk retention this factory has.
+    # Everything else pruned in this function is a store record; the
+    # screenshots tree, .gitf/run/*.log and .gitf/missions/ have never been
+    # pruned by anything, and the box is an EBS volume that cannot shrink.
+    # See GiTF.Inquiry.Preview for the age/budget policy and why an open
+    # question's images are exempt from both.
+    previews = GiTF.Inquiry.Preview.prune()
+
+    if previews.removed > 0 do
+      Logger.info(
+        "Pruned #{previews.removed} inquiry preview files " <>
+          "(#{div(previews.freed_bytes, 1024)} KB freed)"
+      )
+    end
+
     total =
       length(pruned_links) + length(pruned_runs) + pruned_costs + pruned_audits + pruned_llm_calls +
         pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_backups +

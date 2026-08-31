@@ -106,6 +106,25 @@ defmodule GiTF.InquiryTest do
       assert reason =~ "unique"
     end
 
+    # The one mechanical taste guard, and it is purely syntactic on
+    # purpose. A materiality test on the options' MEANING, or a detector
+    # for prompts that ask permission, would be a heuristic over natural
+    # language whose misfire refuses a real taste question at the seam —
+    # which is the factory silently deciding it, the exact outcome this
+    # gate exists to prevent.
+    test "two options that say the same thing are not a question" do
+      same = choice(%{options: [%{label: "Option A"}, %{label: "option a."}]})
+
+      assert {:error, {:invalid, reason}} = Inquiry.validate(same)
+      assert reason =~ "say the same thing"
+    end
+
+    test "options that merely look similar are still a question" do
+      close = choice(%{options: [%{label: "Filled circles"}, %{label: "Outlined circles"}]})
+
+      assert {:ok, %{options: [_, _]}} = Inquiry.validate(close)
+    end
+
     test "an unknown kind is refused and names the valid ones" do
       assert {:error, {:invalid, reason}} = Inquiry.validate(choice(%{kind: :essay}))
       assert reason =~ ":choice"
@@ -129,6 +148,80 @@ defmodule GiTF.InquiryTest do
 
       assert {:ok, _} =
                Inquiry.validate(%{key: "n", phase: "design", kind: :confirm, prompt: "?"})
+    end
+  end
+
+  # `preview` holds a different thing on either side of the render step —
+  # a ghost writes the relative path of the mockup it drew, and
+  # `GiTF.Inquiry.Preview.attach/3` replaces it with the stored image.
+  # Normalizing splits the two so a re-normalized record (every `ask/2`
+  # re-validates) keeps both.
+  describe "mockup references on an option" do
+    test "a ghost's relative path is carried through as the source to render" do
+      with_preview =
+        choice(%{options: [%{label: "Bars", preview: "mockups/bars.html"}, %{label: "Dots"}]})
+
+      assert {:ok, %{options: [bars, dots]}} = Inquiry.validate(with_preview)
+      assert bars.preview_source == "mockups/bars.html"
+      assert bars.preview == nil
+      assert dots.preview_source == nil
+    end
+
+    test "a rendered reference survives re-validation" do
+      # `ask/2` validates again on the way in, after the Gate has rendered.
+      rendered = %{
+        label: "Bars",
+        preview_source: "mockups/bars.html",
+        preview: %{png: "/tmp/x/bars.png", width: 640, height: 400}
+      }
+
+      assert {:ok, %{options: [bars, _]}} =
+               Inquiry.validate(choice(%{options: [rendered, %{label: "Dots"}]}))
+
+      assert bars.preview.png == "/tmp/x/bars.png"
+      assert bars.preview_source == "mockups/bars.html"
+    end
+
+    test "a reference with no image on it is NOT kept — a card must not draw a broken picture" do
+      intent = %{label: "Bars", preview: %{width: 640}}
+
+      assert {:ok, %{options: [bars, _]}} =
+               Inquiry.validate(choice(%{options: [intent, %{label: "Dots"}]}))
+
+      assert bars.preview == nil
+    end
+
+    test "a malformed mockup path is DROPPED, not refused — the question still stands" do
+      # The whole gate's worst outcome is a mission parked on a question
+      # nobody can act on. A bad picture must never be promoted into that.
+      for bad <- ["/etc/passwd.html", "../../out.html", "mockups/a.png", 42] do
+        assert {:ok, %{options: [bars, _]}} =
+                 Inquiry.validate(
+                   choice(%{options: [%{label: "Bars", preview: bad}, %{label: "Dots"}]})
+                 ),
+               "expected #{inspect(bad)} to degrade, not refuse"
+
+        assert bars.preview_source == nil
+        assert bars.label == "Bars"
+      end
+    end
+
+    test "a dropped path leaves a reason the operator can read" do
+      assert {:ok, %{options: [bars, _]}} =
+               Inquiry.validate(
+                 choice(%{
+                   options: [%{label: "Bars", preview: "/etc/passwd.html"}, %{label: "Dots"}]
+                 })
+               )
+
+      assert bars.preview_error =~ "relative"
+    end
+
+    test "an option with no preview at all carries no preview fields" do
+      assert {:ok, %{options: [grid, _]}} = Inquiry.validate(choice())
+      assert grid.preview == nil
+      assert grid.preview_source == nil
+      assert grid.preview_error == nil
     end
   end
 
@@ -464,6 +557,59 @@ defmodule GiTF.InquiryTest do
       assert Inquiry.invitation_block(m.id, "sync") == ""
       assert Inquiry.invitation_block(m.id, "awaiting_input") == ""
       assert Inquiry.invitation_block(m.id, "design") != ""
+    end
+
+    # The gate has two enforcement mechanisms — the budget and validate/1 —
+    # and neither can tell "which of these two icon sets?" from "which file
+    # holds the priority enum?". They are the same JSON. So the line
+    # between taste and lookup is drawn in this text or it is not drawn.
+    test "it draws the line at fact versus preference, in those words" do
+      GiTF.Config.Provider.put([:inquiries], %{enabled: true})
+      block = Inquiry.invitation_block(mission!().id, "design")
+
+      assert block =~ "preference"
+      assert block =~ "uncertain about a"
+      assert block =~ "FACT"
+    end
+
+    test "it names the discoverable things it must never be used for" do
+      GiTF.Config.Provider.put([:inquiries], %{enabled: true})
+      block = Inquiry.invitation_block(mission!().id, "design")
+
+      assert block =~ "discoverable"
+      assert block =~ "what the code currently does"
+      assert block =~ "which files to touch"
+      assert block =~ "permission to proceed"
+      assert block =~ "confirm your own plan"
+    end
+
+    test "it tells the ghost to prefer deciding, and what a question costs" do
+      GiTF.Config.Provider.put([:inquiries], %{enabled: true})
+      block = Inquiry.invitation_block(mission!().id, "design")
+
+      assert block =~ "Prefer deciding"
+      assert block =~ "attention"
+      assert block =~ "Most missions should ask none"
+    end
+
+    # A rule with examples is followed and a rule without them is argued
+    # with, so both worked examples are part of the contract, not prose.
+    test "it carries one worked example on each side of the line" do
+      GiTF.Config.Provider.put([:inquiries], %{enabled: true})
+      block = Inquiry.invitation_block(mission!().id, "design")
+
+      assert block =~ "Worked example — ASK"
+      assert block =~ "Worked example — DO NOT ASK"
+      # The positive one is a visual taste call with two defensible answers.
+      assert block =~ "pie charts"
+      # The negative one is an ambiguity the repository already answers.
+      assert block =~ "two greps away"
+    end
+
+    test "the singular budget reads as a singular" do
+      GiTF.Config.Provider.put([:inquiries], %{enabled: true, max_per_mission: 1})
+
+      assert Inquiry.invitation_block(mission!().id, "design") =~ "at most 1 more question on"
     end
   end
 

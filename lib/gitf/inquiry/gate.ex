@@ -62,6 +62,7 @@ defmodule GiTF.Inquiry.Gate do
 
   require Logger
 
+  alias GiTF.Inquiry.Preview
   alias GiTF.{Archive, Inquiry, Missions, Observability}
 
   @gate_phase "awaiting_input"
@@ -148,9 +149,33 @@ defmodule GiTF.Inquiry.Gate do
     end
   end
 
+  # Validate, then RENDER, then record.
+  #
+  # `Inquiry.ask/2` validates again on the way in, so the first call here
+  # is not the enforcement — it is the ordering. Validation is pure and
+  # costs nothing, and there is no reason to spawn a headless browser for
+  # a question that is about to be refused as unanswerable. Rendering has
+  # to happen at this exact seam and nowhere later: the mockup lives in
+  # the asking ghost's worktree, and worktrees are reaped on completion
+  # and swept when they go orphan, so this is the last moment the source
+  # is guaranteed to exist. `Preview.attach/3` copies it out.
+  #
+  # `attach/3` cannot fail. Every unrenderable option comes back with its
+  # label, its rationale and a note saying why there is no picture, so a
+  # broken mockup costs the operator some context and never the question.
   defp ask_one(mission, phase, question) when is_map(question) do
     attrs = Map.merge(question, %{phase: phase, asked_by: "phase:#{phase}"})
 
+    case Inquiry.validate(attrs) do
+      {:ok, validated} -> record(mission, phase, Preview.attach(mission, phase, validated))
+      {:error, {:invalid, reason}} -> {:rejected, reason}
+    end
+  end
+
+  defp ask_one(_mission, _phase, other),
+    do: {:rejected, "a question must be a map, got #{inspect(other, limit: 5)}"}
+
+  defp record(mission, phase, attrs) do
     case Inquiry.ask(mission.id, attrs) do
       {:ok, inquiry, tag} when tag in [:asked, :open] ->
         {:held, inquiry}
@@ -173,9 +198,6 @@ defmodule GiTF.Inquiry.Gate do
         {:rejected, inspect(other, limit: 10)}
     end
   end
-
-  defp ask_one(_mission, _phase, other),
-    do: {:rejected, "a question must be a map, got #{inspect(other, limit: 5)}"}
 
   # A question nobody could answer must not become a mission nobody can
   # unstick. The refusal is written onto the artifact so it shows up in

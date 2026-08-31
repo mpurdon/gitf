@@ -567,7 +567,11 @@ defmodule GiTF.MCPServer.Tools do
             "rationale, the mission's goal and current phase, the phase that asked, the " <>
             "budget remaining on that mission, and — once decided — the answer, who gave " <>
             "it and when. Read this before answer_question: the option id, not the label, " <>
-            "is what answer_question takes for a :choice.",
+            "is what answer_question takes for a :choice. An option may also carry " <>
+            "preview_url — a rendered MOCKUP of that option on the Catwalk. When a visual " <>
+            "question has previews, look at them before answering; the rationale describes " <>
+            "the design, the image is the design. preview_error says why an option has no " <>
+            "picture.",
         inputSchema: %{
           type: "object",
           properties: %{

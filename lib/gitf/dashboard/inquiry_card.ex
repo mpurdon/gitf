@@ -15,14 +15,35 @@ defmodule GiTF.Dashboard.InquiryCard do
     * `"answer_inquiry"` with `id` and (for `:choice` / `:confirm`) `value`
     * `"draft_answer"` with `id` and `value`, for the `:text` box
 
-  The card is deliberately plain — a radio list of labelled options with
-  their rationale, or a text field. Stage two hangs visual previews off
-  `option.preview`; nothing else about this shape has to change for it.
+  The card is deliberately plain — a list of labelled options with their
+  rationale, or a text field — with ONE exception, and it is the reason
+  the gate is worth having for design work at all.
+
+  ## The mockup grid
+
+  A `:choice` whose options carry `option.preview` renders as a grid of
+  images instead of a list of buttons, because a visual decision asked in
+  prose is a decision the operator has to imagine before they can make
+  it. `GiTF.Inquiry.Preview` renders every option at the SAME fixed
+  viewport, and the grid lays them out at the same size for the same
+  reason: the operator is comparing designs, and any difference in
+  framing between the tiles is noise they will read as signal.
+
+  The image never replaces the label and the rationale — it sits above
+  them. A preview can fail to render (`preview_error`), and it can be
+  pruned out from under an old answered question by
+  `GiTF.Inquiry.Preview.prune/0`, so every tile stays answerable with the
+  picture missing. The `onerror` handler folds a broken image away and
+  reveals the frame's own "preview unavailable" text underneath, which is
+  what a pruned preview on an inherited answer looks like: a question the
+  operator can still read, not a broken card.
   """
 
   use Phoenix.Component
 
   import GiTF.Dashboard.Helpers
+
+  alias GiTF.Inquiry.Preview
 
   attr(:inquiry, :map, required: true)
   attr(:draft, :string, default: nil)
@@ -75,28 +96,21 @@ defmodule GiTF.Dashboard.InquiryCard do
   attr(:inquiry, :map, required: true)
   attr(:draft, :string, default: nil)
 
-  # The rationale is not decoration. It is the whole reason a choice can
-  # be answered in ten seconds from a phone: the operator has to be able
-  # to judge between the options without opening the code.
-  defp answer_controls(%{inquiry: %{kind: :choice}} = assigns) do
-    ~H"""
-    <div style="display:flex; flex-direction:column; gap:0.5rem">
-      <button
-        :for={option <- @inquiry[:options] || []}
-        phx-click="answer_inquiry"
-        phx-value-id={@inquiry.id}
-        phx-value-value={option.id}
-        class="btn btn-grey"
-        style="text-align:left; display:block; width:100%; padding:0.6rem 0.75rem; white-space:normal"
-      >
-        <div style="font-weight:600; color:#f0f6fc">{option.label}</div>
-        <div :if={option[:rationale]} style="font-size:0.78rem; color:#8b949e; margin-top:0.2rem">
-          {option.rationale}
-        </div>
-      </button>
-    </div>
-    """
+  # The grid arm is chosen on whether any option ACTUALLY has an image,
+  # not on whether one was asked for. A question whose mockups all failed
+  # to render must fall back to the plain list rather than draw a grid of
+  # empty frames — the operator loses the pictures either way, and a list
+  # of labelled options is the better thing to be left with.
+  defp answer_controls(%{inquiry: %{kind: :choice, options: options}} = assigns)
+       when is_list(options) do
+    if Enum.any?(options, &(&1[:preview] != nil)) do
+      preview_choice(assigns)
+    else
+      text_choice(assigns)
+    end
   end
+
+  defp answer_controls(%{inquiry: %{kind: :choice}} = assigns), do: text_choice(assigns)
 
   defp answer_controls(%{inquiry: %{kind: :confirm}} = assigns) do
     ~H"""
@@ -135,6 +149,65 @@ defmodule GiTF.Dashboard.InquiryCard do
     <div class="triage-warn">
       Unrecognised question kind {inspect(@inquiry[:kind])} — this cannot be answered from the
       Catwalk. Answer it over the MCP (<code>answer_question</code>) or kill the mission.
+    </div>
+    """
+  end
+
+  defp preview_choice(assigns) do
+    ~H"""
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:0.75rem">
+      <button
+        :for={option <- @inquiry[:options] || []}
+        phx-click="answer_inquiry"
+        phx-value-id={@inquiry.id}
+        phx-value-value={option.id}
+        class="btn btn-grey"
+        style="text-align:left; display:block; width:100%; padding:0.5rem; white-space:normal"
+      >
+        <%!-- The frame carries its own fallback text. A broken or pruned
+              image hides itself and the text underneath becomes visible,
+              so the tile degrades to a labelled option in place. --%>
+        <div style="position:relative; background:#0d1117; border:1px solid #30363d; border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
+          <span style="position:absolute; font-size:0.7rem; color:#6b7280; padding:0 0.5rem; text-align:center">
+            {option[:preview_error] || "no preview"}
+          </span>
+          <img
+            :if={Preview.url(@inquiry, option)}
+            src={Preview.url(@inquiry, option)}
+            alt={"Mockup of #{option.label}"}
+            loading="lazy"
+            onerror="this.style.display='none'"
+            style="position:relative; width:100%; height:100%; object-fit:contain; background:#0d1117"
+          />
+        </div>
+        <div style="font-weight:600; color:#f0f6fc; margin-top:0.45rem">{option.label}</div>
+        <div :if={option[:rationale]} style="font-size:0.78rem; color:#8b949e; margin-top:0.2rem">
+          {option.rationale}
+        </div>
+      </button>
+    </div>
+    """
+  end
+
+  # The rationale is not decoration. It is the whole reason a choice can
+  # be answered in ten seconds from a phone: the operator has to be able
+  # to judge between the options without opening the code.
+  defp text_choice(assigns) do
+    ~H"""
+    <div style="display:flex; flex-direction:column; gap:0.5rem">
+      <button
+        :for={option <- @inquiry[:options] || []}
+        phx-click="answer_inquiry"
+        phx-value-id={@inquiry.id}
+        phx-value-value={option.id}
+        class="btn btn-grey"
+        style="text-align:left; display:block; width:100%; padding:0.6rem 0.75rem; white-space:normal"
+      >
+        <div style="font-weight:600; color:#f0f6fc">{option.label}</div>
+        <div :if={option[:rationale]} style="font-size:0.78rem; color:#8b949e; margin-top:0.2rem">
+          {option.rationale}
+        </div>
+      </button>
     </div>
     """
   end

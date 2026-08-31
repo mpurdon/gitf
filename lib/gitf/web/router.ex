@@ -89,6 +89,25 @@ defmodule GiTF.Web.Router do
     get("/missions/:id/deck", DeckController, :show)
   end
 
+  # Mockup images for the input gate. Its own pipeline rather than
+  # `:dashboard` for one reason — `accepts(["html"])` is the wrong content
+  # negotiation for a PNG — and it keeps `TailnetAuth`, because the
+  # alternative shape (a `Plug.Static` mount) sits above the router and
+  # would serve unreleased design decisions to anyone who can reach the
+  # port. See `GiTF.Web.InquiryPreviewController`.
+  pipeline :dashboard_image do
+    plug(:accepts, ["png"])
+    plug(:fetch_session)
+    plug(GiTF.Web.TailnetAuth)
+    plug(:put_secure_browser_headers)
+  end
+
+  scope "/dashboard", GiTF.Web do
+    pipe_through(:dashboard_image)
+
+    get("/questions/:id/preview/:option_id", InquiryPreviewController, :show)
+  end
+
   scope "/floor", GiTF.Web do
     pipe_through(:browser)
 

@@ -66,6 +66,61 @@ defmodule GiTF.Visual.Capture do
     end
   end
 
+  @doc """
+  Renders a LOCAL html/svg file to `output_path` (PNG).
+
+  The deliberate exception to `screenshot/3`'s http(s)-only rule, and the
+  narrowest one that can exist. `screenshot/3` refuses `file://` because
+  a URL is caller-supplied and a headless browser pointed at a local path
+  is a file-read primitive. This entry point is for the opposite
+  situation: the factory itself produced the file, has already read every
+  byte of it, and has refused it if it reaches for anything outside
+  itself — see `GiTF.Inquiry.Preview.self_contained/1`, the only caller.
+
+  So the contract is inverted. `screenshot/3` validates the URL and
+  trusts the page; this validates the page and trusts the path. A caller
+  that has NOT scanned the file must use `screenshot/3` and serve the
+  content over http, not reach for this.
+
+  Same output containment as `screenshot/3` — the file lands under the
+  screenshots root or not at all — and the same `:visual_capture_enabled`
+  switch, because this still spawns a browser on the box.
+  """
+  @spec render_file(Path.t(), Path.t(), opts()) :: {:ok, Path.t()} | {:error, term()}
+  def render_file(source_path, output_path, opts \\ [])
+      when is_binary(source_path) and is_binary(output_path) do
+    cond do
+      not enabled?() ->
+        {:error, :disabled}
+
+      not available?() ->
+        {:error, :driver_unavailable}
+
+      not File.regular?(source_path) ->
+        {:error, :no_source}
+
+      true ->
+        case allowed_output_path(output_path) do
+          {:ok, expanded} ->
+            do_screenshot(
+              file_url(source_path),
+              expanded,
+              Keyword.put_new(opts, :full_page, false)
+            )
+
+          {:error, _} = err ->
+            err
+        end
+    end
+  end
+
+  # A sector path can contain spaces and other characters that make an
+  # unencoded file:// URL parse as something else entirely; `/` is the one
+  # reserved character that must survive.
+  defp file_url(path) do
+    "file://" <> URI.encode(Path.expand(path), &(URI.char_unreserved?(&1) or &1 in ~c"/"))
+  end
+
   # Reject anything that isn't http(s); that closes off file://, ftp://,
   # and the kind of URLs an attacker would supply for SSRF or local file
   # exfiltration through the headless browser.
@@ -116,7 +171,16 @@ defmodule GiTF.Visual.Capture do
     end
   end
 
-  defp screenshots_root do
+  @doc """
+  The one directory a headless browser driven by this factory may write
+  into: `:visual_screenshots_root`, or `<gitf_dir>/.gitf/screenshots`.
+
+  Public so `GiTF.Inquiry.Preview` can lay its tree out INSIDE the
+  boundary `allowed_output_path/1` already polices, rather than inventing
+  a second place images are allowed to land.
+  """
+  @spec screenshots_root() :: {:ok, Path.t()} | {:error, term()}
+  def screenshots_root do
     case Application.get_env(:gitf, :visual_screenshots_root) do
       path when is_binary(path) ->
         {:ok, Path.expand(path)}

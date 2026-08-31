@@ -90,6 +90,139 @@ defmodule GiTF.Inquiry.GateTest do
     end
   end
 
+  # Rendering happens HERE and nowhere later. The mockup lives in the
+  # asking ghost's worktree, and worktrees are reaped on completion and
+  # swept when they go orphan, so the interception is the last moment the
+  # source is guaranteed to exist. It sits after validation because
+  # validation is pure and there is no reason to spawn a browser for a
+  # question that is about to be refused as unanswerable.
+  describe "rendering mockups at the seam" do
+    defmodule SeamRenderer do
+      def render_file(source, output, _opts) do
+        send(self(), {:rendered, source})
+        File.mkdir_p!(Path.dirname(output))
+        File.write!(output, "PNG")
+        {:ok, output}
+      end
+    end
+
+    defmodule BrokenRenderer do
+      def render_file(_source, _output, _opts), do: {:error, :timeout}
+    end
+
+    setup do
+      root = Path.join(System.tmp_dir!(), "gitf_gate_prev_#{:erlang.unique_integer([:positive])}")
+
+      worktree =
+        Path.join(System.tmp_dir!(), "gitf_gate_wt_#{:erlang.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(worktree, "mockups"))
+      File.write!(Path.join(worktree, "mockups/a.html"), "<p>bars</p>")
+
+      previous = %{
+        root: Application.get_env(:gitf, :visual_screenshots_root),
+        capture: Application.get_env(:gitf, :visual_capture_enabled),
+        renderer: Application.get_env(:gitf, :inquiry_preview_renderer)
+      }
+
+      Application.put_env(:gitf, :visual_screenshots_root, root)
+      Application.put_env(:gitf, :visual_capture_enabled, true)
+      Application.put_env(:gitf, :inquiry_preview_renderer, SeamRenderer)
+
+      on_exit(fn ->
+        Enum.each(
+          [
+            {:visual_screenshots_root, previous.root},
+            {:visual_capture_enabled, previous.capture},
+            {:inquiry_preview_renderer, previous.renderer}
+          ],
+          fn
+            {key, nil} -> Application.delete_env(:gitf, key)
+            {key, value} -> Application.put_env(:gitf, key, value)
+          end
+        )
+
+        File.rm_rf(root)
+        File.rm_rf(worktree)
+      end)
+
+      {:ok, shell} =
+        Archive.insert(:shells, %{
+          sector_id: "no-such-sector",
+          worktree_path: worktree,
+          branch: "ghost/g1",
+          status: "active"
+        })
+
+      {:ok, ghost} =
+        Archive.insert(:ghosts, %{
+          shell_id: shell.id,
+          sector_id: "no-such-sector",
+          status: "running"
+        })
+
+      ops = [
+        %{
+          id: "op1",
+          phase_job: true,
+          phase: "design",
+          ghost_id: ghost.id,
+          status: "done",
+          inserted_at: DateTime.utc_now()
+        }
+      ]
+
+      previewed =
+        question(%{
+          "options" => [
+            %{"label" => "Bars", "rationale" => "Magnitude", "preview" => "mockups/a.html"},
+            %{"label" => "Dots", "rationale" => "Category"}
+          ]
+        })
+
+      %{ops: ops, previewed: previewed, worktree: worktree}
+    end
+
+    test "an option with a mockup is rendered and the reference is stored", ctx do
+      m = mission!(%{ops: ctx.ops, artifacts: %{"design" => artifact([ctx.previewed])}})
+
+      assert {:held, "design"} = Gate.intercept(reload(m))
+      assert_received {:rendered, _}
+
+      assert [inquiry] = Inquiry.list_open(m.id)
+      assert [bars, dots] = inquiry.options
+      assert File.regular?(bars.preview.png)
+      assert dots.preview == nil
+    end
+
+    test "a failed render still holds the mission and asks as text", ctx do
+      Application.put_env(:gitf, :inquiry_preview_renderer, BrokenRenderer)
+      m = mission!(%{ops: ctx.ops, artifacts: %{"design" => artifact([ctx.previewed])}})
+
+      # The whole point: a broken picture costs the operator context, never
+      # the question. A mission that failed to ask because a mockup did not
+      # render would be the factory deciding by accident.
+      assert {:held, "design"} = Gate.intercept(reload(m))
+
+      assert [inquiry] = Inquiry.list_open(m.id)
+      assert [bars, _] = inquiry.options
+      assert bars.preview == nil
+      assert bars.preview_error =~ "timed out"
+      assert bars.label == "Bars"
+      assert bars.rationale == "Magnitude"
+    end
+
+    test "an unanswerable question is refused BEFORE the browser is spawned", ctx do
+      one_option =
+        question(%{"options" => [%{"label" => "Bars", "preview" => "mockups/a.html"}]})
+
+      m = mission!(%{ops: ctx.ops, artifacts: %{"design" => artifact([one_option])}})
+
+      assert Gate.intercept(reload(m)) == :clear
+      refute_received {:rendered, _}
+    end
+  end
+
   describe "holding" do
     setup do
       m = mission!(%{artifacts: %{"design" => artifact([question()])}})

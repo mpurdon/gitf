@@ -1812,7 +1812,7 @@ defmodule GiTF.MCPServer.Handlers do
       kind: to_string(inquiry[:kind]),
       status: inquiry[:status],
       prompt: inquiry[:prompt],
-      options: Enum.map(inquiry[:options] || [], &serialize_option/1),
+      options: Enum.map(inquiry[:options] || [], &serialize_option(inquiry, &1)),
       asked_at: to_string(inquiry[:asked_at]),
       awake_hours_waiting: awake_hours_since(inquiry[:asked_at]),
       answer: inquiry[:answer],
@@ -1842,8 +1842,27 @@ defmodule GiTF.MCPServer.Handlers do
     })
   end
 
-  defp serialize_option(option) do
-    %{id: option[:id], label: option[:label], rationale: option[:rationale]}
+  # The MCP is a text channel, so it cannot show a mockup — but an
+  # operator answering a visual question from here has to KNOW there is
+  # one, and where to look at it, or they will answer a taste call from
+  # the prose alone. That is the failure the previews exist to close.
+  defp serialize_option(inquiry, option) do
+    %{
+      id: option[:id],
+      label: option[:label],
+      rationale: option[:rationale],
+      preview_url: preview_url(inquiry, option),
+      preview_error: option[:preview_error]
+    }
+  end
+
+  defp preview_url(inquiry, option) do
+    with path when is_binary(path) <- GiTF.Inquiry.Preview.url(inquiry, option),
+         base when is_binary(base) and base != "" <- GiTF.Config.server_url() do
+      String.trim_trailing(base, "/") <> path
+    else
+      _ -> nil
+    end
   end
 
   defp show_question_note(%{status: "answered"} = inquiry),
