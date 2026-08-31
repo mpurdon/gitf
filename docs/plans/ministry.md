@@ -1,232 +1,155 @@
-# Ministries — multi-tenant separation for the factory
+# Ministries and the Cabinet — a fleet of Sections, one per client
 
-*Plan of record, 2026-08-31. Written after the inquiry-gate night
-(`docs/stories/2026-08-31-inquiry-gate-first-runs.md`) surfaced the need: the
-operator wants the factory working on employer ("Trajector") codebases with
-the employer's Bedrock account, the employer's git identity, and a hard
-guarantee that nothing bleeds between that work and personal projects.*
+*Plan of record, 2026-08-31, revised same day after the operator settled the
+architecture. Supersedes the first draft's multi-tenant-in-one-box design.
+Origin: the inquiry-gate night
+(`docs/stories/2026-08-31-inquiry-gate-first-runs.md`) and the need to do
+employer (Trajector) work with the employer's Bedrock, git identity and
+GitHub account, with zero bleed into personal projects.*
 
-## The concept
+## Decision record (operator, 2026-08-31)
 
-Ghost in the Shell's chain of command is **Ministry → Bureau → Section**, and
-this codebase already calls the factory the *Section* ("Manage codebases
-(sectors) tracked by this section", `section:alerts`). The unit above sector
-that means "the organisation this work is done *for*, with its own authority,
-identity and budget" is the **Ministry**.
+1. **Box per ministry.** Stopping a ministry's box IS the tenancy control:
+   off means no polling, no listening, no spend — and GitHub's dropped
+   webhooks are already reconciled on wake by the events poller (30-day
+   window), so "not listening" loses nothing by design.
+2. **All boxes live in the one gitf AWS account** (515020252848). Ministries
+   are not separated at the account level; they interact with the outside
+   world only through their own GitHub identity, and (where configured) pay
+   for their own model usage via their own Bedrock credentials. This kills
+   the cross-account-orchestration problem entirely.
+3. **GitHub auth per ministry = fine-grained PAT** (no GitHub App — no
+   security-team verification circus). Stored only on that ministry's box.
+4. **Attribution** (the Co-Authored-By / "generated with" tool credit, NOT
+   the author email) becomes a per-box setting: `on | off | custom`.
+   Client ministries default off unless decided otherwise.
+5. **The Cabinet is a tiny always-on tailnet node, not a serverless app.**
+   Phone access means a webpage over tailscale, which any tailnet device
+   (phone included) reaches; Claude keeps driving individual ministries
+   exactly as today (CLI/MCP → that box's URL). No public endpoint, no
+   OAuth layer, no DynamoDB.
 
-- **Ministry** — a client/tenant. Owns: git identity, GitHub credentials, LLM
-  provider routing + cloud credentials, cost caps, autonomy defaults, and an
-  isolation boundary.
-- **Section** — the factory (unchanged).
-- **Sector** — a codebase, now carrying a `ministry_id`.
+## The shape
 
-Initial ministries: `home-affairs` (the operator's own projects — cora, gitf
-dogfooding) and `trajector` (employer work: work Bedrock, work email, work
-GitHub account).
-
-## Ground truth — what is global today (verified in code)
-
-| Concern | Today | Where |
-|---|---|---|
-| git author/committer | hardcoded `user.name=gitf`, `user.email=gitf@localhost` at sector clone | `lib/gitf/sector.ex:106-108` |
-| GitHub token | one: `GITHUB_TOKEN` env → `[github] token` in config.toml → `gh auth token` keyring | `lib/gitf/github.ex` `github_token/0` |
-| PR / push | `git push origin` from the sector clone (remote-URL creds), GitHub REST with the one token | `lib/gitf/publish.ex`, `lib/gitf/github.ex` |
-| Claude CLI auth | the box's one login state (shared `~/.claude`); ghost env deliberately **scrubs** AWS vars | `lib/gitf/runtime/claude.ex` `@scrubbed_env_vars`, `build_env/1` |
-| In-process LLM (bedrock/google) | one `[llm]` block: `execution_mode`, `provider_priority`, `[llm.providers.bedrock] aws_profile/region` + tier models; `Keys.load/0` loads **one** AWS profile into node env at boot | `lib/gitf/runtime/keys.ex`, `provider_manager.ex` |
-| Sector record | `validation_command`, `validation_timeout_ms`, `sync_strategy`, `require_human_approval` — no identity/provider fields | `api_controller.ex @sector_mutable_fields`, Archive `:sectors` |
-| Sandbox | bwrap binds the **whole factory home read-only** + worktree writable + shared `.claude/.config/.cache/.npm/.cargo` writable; `--share-net` | `lib/gitf/sandbox/bubblewrap.ex:52-141` |
-| Install cache | global, keyed by lockfile SHA-256, hardlinked across all sectors | `lib/gitf/install_cache.ex` |
-| Knowledge / skills / sector intelligence | already `sector_id`-scoped | `knowledge/prompt_context.ex`, `skills/retrieval.ex`, `intel/sector_profile.ex` |
-| Costs | per ghost → op → mission → sector; no ministry rollup or cap | `lib/gitf/costs.ex` |
-| Backups | one S3 bucket in the personal AWS account snapshots the whole data volume | `gitf-backup.timer` |
-
-## The edges that bite (why each ministry field exists)
-
-1. **Commits are made by more than ghosts.** Consolidation merges, sync
-   commits, `scrub_committed_residue`'s cleanup commit, publish — all run as
-   the daemon in the sector clone or worktrees. Setting identity per-command
-   would miss one; setting **repo-local `git config user.name/user.email` at
-   clone and worktree creation** covers every git operation in that tree
-   forever. This is the one-line-per-seam fix, and it's why identity lives on
-   the ministry, not in ghost env.
-2. **The GitHub token is read in four places** (publish REST, review intake,
-   events poller, outcomes tracker). All must resolve **sector → ministry →
-   token** or work PRs get opened/commented by the personal account. A
-   fine-grained PAT (or GitHub App installation) per ministry; org SSO
-   authorisation required for the Trajector one.
-3. **Push credentials are not the API token.** `git push origin` uses the
-   remote URL / credential helper. Per-ministry: embed `x-access-token:<token>@`
-   in the remote URL at clone (rotatable via `git remote set-url`), or a
-   per-ministry SSH key with an `core.sshCommand` repo-local config. Prefer
-   the https+token form — it reuses the same secret as the API.
-4. **The Claude CLI's identity is account-level, not per-spawn.** Ghosts for
-   `trajector` must not run on the personal Anthropic subscription. The CLI
-   supports `CLAUDE_CODE_USE_BEDROCK=1` + AWS creds + region via env, and
-   `CLAUDE_CONFIG_DIR` relocates its config/state. Per-ministry ghost env:
-   `CLAUDE_CONFIG_DIR=/var/lib/gitf/ministries/<slug>/claude`,
-   `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_*` creds for the ministry profile,
-   `AWS_REGION`. **This inverts today's scrub**: `Runtime.Claude.build_env/1`
-   deliberately deletes AWS vars from ghost env; the scrub must become
-   "scrub unless the ministry supplies them" — supplied creds are the
-   ministry's own Bedrock, which the ghost legitimately needs.
-5. **`Keys.load/0` puts ONE profile into node env.** Two ministries with two
-   AWS accounts cannot share node env. In-process Bedrock calls (ReqLLM) must
-   take credentials per request (per-ministry provider config resolved at
-   call time), and the node-env path becomes the `home-affairs` default only.
-   SSO-expiry handling (`env_creds_expired?`) must become per-profile.
-6. **A ghost can read every other ministry's code.** bwrap binds the whole
-   home read-only. An LLM in a `trajector` worktree can `cat` cora's source —
-   and vice versa, which is the worse direction (client code leaking into
-   personal-project prompts). The bind set must become: the ghost's own
-   worktree (rw) + the **ministry's** cache dirs (rw) + toolchains (ro) —
-   *not* `$HOME`, and never `sectors/` wholesale or `.gitf/` store files.
-7. **Shared caches are a side channel.** `~/.claude` (CLI memory/settings),
-   `~/.npm`, `~/.cargo`, and the install cache are shared. `.claude` memory
-   is the sharpest edge — the CLI can carry context between sectors. Fix:
-   per-ministry `CLAUDE_CONFIG_DIR`, per-ministry npm/cargo cache dirs bound
-   into the sandbox, and the install cache rooted per ministry
-   (`.gitf/cache/<ministry>/node_modules/<key>`); content-addressing already
-   prevents code mixing, the per-ministry root prevents hardlink coupling and
-   makes deletion-by-ministry trivial.
-8. **The box and its backups live in the personal AWS account.** Work source
-   sits on a personal EBS volume and is snapshotted to a personal S3 bucket.
-   This is a policy decision, not a code fix. Options, strongest first:
-   (a) a second box per ministry — the terraform + installer already support
-   it, and it makes every other isolation concern moot; (b) same box,
-   per-ministry backup exclusion or a work-owned bucket for the work
-   sector's paths; (c) accept and document. **Operator decision required
-   before real Trajector code lands.**
-9. **Costs must split for expensing.** Bedrock usage on the work profile
-   bills to the work account by construction (good — that's most of it), but
-   the factory's own ledger must roll up per ministry for caps and for the
-   Trajector invoicing flow. `costs` records reach ministry via sector; add
-   `ministry_id` at record time to avoid join-time archaeology.
-10. **Approval posture differs per client.** Work code likely wants
-    `require_human_approval` and a stricter autonomy tier by default —
-    ministry-level defaults that sectors inherit unless overridden.
-11. **Webhooks/events**: the events poller and review intake iterate
-    outcomes; each poll must use that outcome's ministry token, and webhook
-    secrets become per-repo as today (no change beyond token resolution).
-12. **Attribution trailers**: the `Co-Authored-By` / PR-body attribution the
-    factory writes should be per-ministry text (an employer may not want
-    tool attribution in commits at all).
-
-## Design
-
-### The record
-
-New Archive collection `:ministries`:
-
-```elixir
-%{
-  id: "min-...",            # generated
-  slug: "trajector",        # stable, used in paths
-  name: "Trajector",
-  git: %{author_name: "...", author_email: "work@..."},
-  github: %{auth: :env_ref, env: "GITF_MIN_TRAJECTOR_GITHUB_TOKEN",
-            attribution: :none | :default | "custom text"},
-  llm: %{execution_mode: :bedrock, provider_priority: ["bedrock"],
-         aws: %{profile_env: "GITF_MIN_TRAJECTOR_AWS", region: "us-east-1"},
-         tiers: %{fast: "...", general: "...", thinking: "..."}},
-  limits: %{cost_cap_usd_month: 200.0},
-  defaults: %{require_human_approval: true, autonomy_tier: :require_approval},
-  isolation: %{claude_config_dir: true, cache_root: true}
-}
+```
+                    Cabinet (t4g.nano, always on, tailnet-only)
+                    cabinet.ghostinthefactory.com
+                    registry · wake/stop · health · cost rollup · MCP proxy
+                        │                │                 │
+        factory.ghostinthefactory.com   trajector.ghost…   <next-client>.ghost…
+        Section: home-affairs           Section: trajector Section: …
+        (today's box, unchanged)        (new box)          (terraform away)
 ```
 
-**Secrets are never in the Archive.** Ministry records hold *references*;
-values live in `/etc/gitf/ministries/<slug>.env` (0600, root-owned, loaded at
-boot beside `gitf.env`, hot-reloadable via `Config.Provider.reload()` like
-everything else). AWS uses named profiles in the service user's
-`~/.aws/config` (SSO or keys), referenced by profile name.
+- **A ministry IS a box** — a complete Section: own daemon, sectors, Archive,
+  dashboard, pollers, idle-stop. Per-ministry config is just that box's
+  ordinary global config. No multi-tenant code paths inside the factory.
+- **The Cabinet** is a stripped deployment of this same codebase ("cabinet
+  mode": no Major, no ghosts, no sectors) reusing three things that already
+  exist and were exercised hard tonight: `GiTF.Tailnet` whois auth, the
+  HTTP MCP server (`/api/v1/mcp`), and the Archive (the registry is a
+  collection). It holds **no mission state**; every Section stays
+  authoritative. If the Cabinet is down, every ministry still works — only
+  the convenience layer is gone.
+- Same-account IAM: the Cabinet's instance role gets
+  `ec2:StartInstances/StopInstances/DescribeInstances` scoped by a
+  `gitf:ministry` tag, nothing else. No credentials leave the account.
 
-`:sectors` gains `ministry_id` (required). Migration backfills every existing
-sector to `home-affairs`, which is created with today's global values — so
-**M1 ships with zero behaviour change for existing sectors**.
+### What the Cabinet does
 
-### The three spawn-time seams
+| Capability | Notes |
+|---|---|
+| Registry | `:ministries` collection: slug, display name, box URL, instance id, notes. CRUD from the dashboard and MCP. |
+| Wake / stop | Start/stop by ministry; shows state + "idle for Nm" from each box's health endpoint. |
+| Fleet health | Fan-out `health_check` + version to every awake box; one page, phone-friendly. |
+| Cost rollup | Pulls each box's `costs_summary`; per-ministry monthly view (feeds Trajector invoicing later). |
+| MCP proxy | Every gitf tool grows an optional `ministry` param; the Cabinet forwards to that box's `/api/v1/mcp`, waking it first when asked. The local CLI/MCP can also keep talking straight to a box — the proxy is convenience, not a chokepoint. |
+| Release fan-out | "Install <version> on <ministry>" — the S3+SSM sequence from OPERATING.md §9, per box, same account so the existing tooling works verbatim. |
 
-Everything resolves through one function, `GiTF.Ministry.for_sector(sector_id)`,
-called at:
+### What stays per-box (ministry config = box config)
 
-1. **Worktree/clone creation** (`Sector.add`, `Ghosts.spawn_in_worktree`,
-   shell adoption): repo-local git config (name/email, remote URL with the
-   ministry token, attribution), per-ministry cache dirs created.
-2. **Ghost spawn env** (`Runtime.Claude.build_env/1` via `Loadout`):
-   `CLAUDE_CONFIG_DIR`, Bedrock env + creds when the ministry says so,
-   scrub otherwise (today's behaviour).
-3. **Every GitHub call** (`GitHub.request` gains a `ministry:`/`sector:`
-   option; publish, review intake, events poller, outcomes tracker pass it).
+| Concern | Where on the box |
+|---|---|
+| Git identity | `[git] author_name / author_email` in config.toml → written as repo-local config at sector clone + worktree creation (today hardcoded `gitf`/`gitf@localhost` at `sector.ex:106` — this is the one real factory change). |
+| Attribution | `[git] attribution = "on"|"off"|"custom…"` — publish and the commit paths consult it. |
+| GitHub PAT | `[github] token` (already exists) — the work box holds the Trajector PAT; pushes use the https remote with that token. |
+| LLM routing | The existing `[llm]` block: the work box sets `execution_mode`/Bedrock profile/tiers globally. The Claude CLI on that box runs `CLAUDE_CODE_USE_BEDROCK=1` against the work Bedrock credentials (an AWS profile on that box for the work account's Bedrock — model spend bills to work; the instance itself bills to gitf). No scrub inversion, no per-request credentials: one box, one identity. |
+| Backups | Per-ministry S3 bucket, same account, provisioned by the module. Work source residing in the gitf account is accepted by decision 2. |
+| Approval posture | `require_human_approval` / autonomy defaults in that box's config — client boxes default stricter. |
 
-Plus one render-time seam: `ProviderManager`/`ModelResolver` keyed by
-ministry for the in-process paths (validation LLM, knowledge embeddings,
-triage) — per-request credentials, not node env.
+### What we no longer need (retired from the first draft)
 
-### Sandbox
-
-`Sandbox.wrap_command` gains the sector's ministry context and binds:
-
-- rw: the worktree; `/var/lib/gitf/ministries/<slug>/{claude,npm,cargo,cache}`
-- ro: toolchains (`/usr`, `/opt/node`…), the sector's own clone (for git
-  alternates), **nothing else under the factory home**
-- keep `--unshare-all --share-net` (per-ministry egress control is out of
-  scope; note it as a later hardening)
-
-A regression test per direction: a sandboxed command in ministry A must fail
-to read a file in ministry B's sector and in `.gitf/`.
+Per-ministry records inside one factory; the AWS env-scrub inversion;
+per-request Bedrock credentials in ProviderManager; sandbox bind narrowing
+between ministries (one box holds one ministry — though narrowing the bind
+away from `$HOME` is still worthwhile hardening *within* a box, tracked
+separately); per-ministry install-cache roots and `CLAUDE_CONFIG_DIR`
+juggling. Physical separation made ~70% of the first draft's code
+unnecessary.
 
 ## Milestones
 
-**M1 — identity (the "work email" ask).** `:ministries` collection + CRUD
-(CLI/MCP/API) + `sector.ministry_id` + migration; repo-local git identity and
-remote-URL token at clone/worktree creation; `GitHub.*` per-ministry token;
-attribution per ministry; dashboard shows the ministry on sector/mission
-pages. *Acceptance: a scratch repo under the work GitHub account, onboarded
-as a `trajector` sector; one trivial mission; the PR, its commits (author
-AND committer), and any comments all carry the work identity, and `git log`
-on cora shows nothing changed for `home-affairs`.*
+**M1 — identity becomes config (no new spend, benefits today's box).**
+`[git] author_name/author_email/attribution` in config; `Sector.add` and
+worktree creation write repo-local git config from it; publish and every
+factory-made commit honour attribution. Acceptance: on the current box, set
+a test identity, run a trivial mission, and `git log --format='%an %ae %cn %ce'`
+plus the PR body show the configured identity and attribution; unset =
+today's behaviour.
 
-**M2 — provider routing (the "work Bedrock" ask).** Per-ministry `llm` block;
-ghost env inversion of the AWS scrub + `CLAUDE_CODE_USE_BEDROCK` +
-`CLAUDE_CONFIG_DIR`; per-request creds for in-process providers; per-ministry
-cost rollup (`ministry_id` on cost records) + monthly cap enforced where the
-mission cost cap already is. *Acceptance: the same trajector mission runs
-with zero calls on the personal Anthropic account (verify via `costs` model
-prefixes and the work account's Bedrock metrics), and cora still runs on
-today's routing.*
+**M2 — the ministry box module (spend gate #1).** Terraform: parameterize
+the existing box provisioning by slug — instance (tagged `gitf:ministry`),
+EBS, tailscale join, DNS `slug.ghostinthefactory.com`, backup bucket,
+`/etc/gitf` seeding. Bring up `trajector`: work PAT, work git identity,
+Bedrock profile for the work account, attribution off, approval strict.
+Acceptance: a scratch repo under the work GitHub account onboarded as a
+sector; one mission end-to-end; the PR's commits (author AND committer) and
+comments all carry `matthew@trajectorservices.com` / the work account; the
+`costs` ledger shows only `bedrock:*` models; the home box untouched.
 
-**M3 — isolation.** Sandbox bind narrowing + the two cross-read regression
-tests; per-ministry install-cache root, npm/cargo caches, claude config dir;
-`Skills.Retrieval`/knowledge verified to have no cross-sector fallback
-(they're sector-scoped; add the test that proves it). *Acceptance: the
-cross-read tests, plus one real mission per ministry run interleaved with no
-shared mutable path outside `/tmp`.*
+**M3 — the Cabinet (spend gate #2).** Cabinet mode in the app (compile-time
+or config flag disabling Major/ghost supervision); registry collection +
+CRUD; wake/stop via tag-scoped instance role; fleet health + cost pages
+(phone-usable over tailnet); `cabinet.ghostinthefactory.com`. Acceptance:
+from a phone browser on the tailnet, wake trajector, watch it come healthy,
+stop it.
 
-**M4 — posture + operator decisions.** Ministry-default
-`require_human_approval`/autonomy inherited by sectors; the backup/box
-decision implemented (second box, backup split, or documented acceptance);
-dashboard ministry filter; OPERATING.md §"Ministries"; GLOSSARY entry.
+**M4 — routing + fan-out.** `ministry` param on the MCP tools via the
+Cabinet proxy; CLI `-m <slug>`; release install fan-out; OPERATING.md
+§"Ministries and the Cabinet"; GLOSSARY entries (Ministry, Cabinet).
 
-Sizing: M1 is the largest single milestone (many call sites, one concept);
-M2 is riskier (credentials, the scrub inversion) but smaller; M3 is mostly
-sandbox args + tests; M4 is small code, one real decision.
+Order matters: M1 is pure code and can ship now. M2 and M3 each raise a
+real (small) bill — a t4g box + EBS each, order of $5–30/mo depending on
+idle-stop discipline — and are **not to be provisioned without explicit
+operator approval, per standing rule**. M2 before M3 is fine (two boxes are
+manageable with direct URLs); M3 before M2 also works (Cabinet managing a
+fleet of one).
 
-## Decisions only the operator can make
+## Edges that still bite (kept from the first draft, restated for the fleet)
 
-1. **Same box or a box per ministry?** (Edge 8. A second small Graviton box
-   in the work context is the clean answer if the employer cares where source
-   lives; everything in this plan still applies per box.)
-2. **Trajector GitHub auth**: fine-grained PAT from the work account vs a
-   GitHub App — PAT is M1-cheap; App is better long-term for org installs.
-3. **Attribution policy for work commits** (edge 12): none, default, custom.
-4. **Backup handling for work sectors** if staying on one box.
+- **Every commit-maker needs the identity**, not just ghosts: consolidation
+  merges, sync, residue-scrub commits, publish. Repo-local git config at
+  clone/worktree creation covers all of them; that's why M1 is at that seam.
+- **The PAT is read in four places** (publish REST, review intake, events
+  poller, outcomes tracker) — on a one-ministry box they all read the same
+  `[github] token`, so this collapses to "config, not env". Verify the env
+  var (`GITHUB_TOKEN`) doesn't shadow it on the work box.
+- **Claude CLI state is per-box now** (`~/.claude` on the work box only ever
+  sees work code) — the side-channel concern dissolves, but the work box
+  must be *logged into nothing personal*: no personal Anthropic login, no
+  personal gh keyring. Provisioning checklist item.
+- **Idle-stop is the cost model.** A ministry box that wakes on demand
+  (Cabinet button, `gitf -m … wake`, or a morning cron) and reconciles via
+  the events poller costs hours-used. The Cabinet nano is the only always-on
+  spend.
+- **Shared release, divergent config**: all boxes run the same tarball;
+  config differences are data. Resist per-ministry forks.
 
-## Explicitly out of scope (for now)
+## Open questions (none block M1)
 
-- Per-ministry dashboard *authentication* (tailnet identity already names the
-  one operator; multi-operator RBAC is a different project).
-- Per-ministry network egress policy in the sandbox.
-- OS-user-per-ministry separation (bwrap narrowing first; revisit if a
-  second box isn't chosen).
-- Moving phase-order knowledge (`@post_validation_phases`) into workflow
-  metadata — unrelated cleanup noted in the /simplify pass.
+- Cabinet build: same repo behind a flag (preferred — one CI artifact) vs a
+  separate mix release target.
+- Whether the Cabinet should also be the webhook ingress hostname for
+  stopped ministries later (park: the events poller already covers the gap).
+- Within-box sandbox hardening (don't bind all of `$HOME`) — still worth
+  doing for defence in depth; tracked outside this plan.
