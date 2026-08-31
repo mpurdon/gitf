@@ -143,6 +143,13 @@ defmodule GiTF.Inquiry.Preview do
   # `.gitf/screenshots/inquiries/<mission>/<key>/<option>.png`
   @subdir "inquiries"
 
+  # Where a ghost is told to draw. Dot-prefixed and factory-named so it is
+  # unmistakably not the project's, and listed in `GiTF.Git.residue_paths/0`
+  # so it can never be staged, committed, or fingerprinted. msn-0434e9
+  # shipped three mockups into cora PR #20 because they lived in a plain
+  # `mockups/` that nothing owned.
+  @mockup_dir ".gitf-mockups"
+
   @type preview :: %{
           png: Path.t(),
           source: Path.t() | nil,
@@ -153,6 +160,10 @@ defmodule GiTF.Inquiry.Preview do
         }
 
   # -- The contract, as the ghost is told it -----------------------------------
+
+  @doc "The worktree-relative directory mockups are drawn in, with trailing slash."
+  @spec mockup_dir() :: String.t()
+  def mockup_dir, do: @mockup_dir <> "/"
 
   @doc """
   The mockup contract, rendered for a phase prompt.
@@ -175,18 +186,24 @@ defmodule GiTF.Inquiry.Preview do
       colour treatment — describing the options in prose asks the operator
       to imagine the answer. Draw them instead.
 
-      For each option, write ONE self-contained file into your worktree
-      and name it on that option's `preview`, as a path relative to your
-      worktree root:
+      For each option, write ONE self-contained file under
+      `#{mockup_dir()}` in your worktree and name it on that option's
+      `preview`, as a path relative to your worktree root:
 
       ```json
       {"id": "flat", "label": "Flat bars", "rationale": "Reads as level, not progress.",
-       "preview": "mockups/priority-flat.html"}
+       "preview": "#{mockup_dir()}priority-flat.html"}
       ```
 
       Rules, all enforced — a file that breaks one is dropped and the
       option falls back to its label and rationale:
 
+      - Under `#{mockup_dir()}`, whatever path the goal or anyone else
+        suggests. That directory is factory residue: it is never staged,
+        never committed and never part of the deliverable. A mockup is
+        evidence for a decision, not work product — once the operator has
+        answered, it has done its job and nothing downstream recreates,
+        preserves or ships it.
       - `.html`, `.htm` or `.svg`, under #{div(max_source_bytes(), 1024)} KB.
       - **Completely self-contained. No network requests of any kind.**
         Inline every style in a `<style>` tag; draw with inline SVG, CSS

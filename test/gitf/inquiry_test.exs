@@ -519,6 +519,7 @@ defmodule GiTF.InquiryTest do
       block = Inquiry.prompt_block(m.id)
 
       assert block =~ "OPERATOR DECISIONS"
+      assert block =~ "not deliverables"
       assert block =~ "Which layout?"
       assert block =~ "List"
       assert block =~ "do not ask them again"

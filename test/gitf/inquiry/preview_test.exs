@@ -550,6 +550,8 @@ defmodule GiTF.Inquiry.PreviewTest do
       assert block =~ "No network requests"
       assert block =~ "#{elem(Preview.viewport(), 0)}x#{elem(Preview.viewport(), 1)}"
       assert block =~ "preview"
+      assert block =~ Preview.mockup_dir()
+      assert block =~ "never committed"
     end
 
     test "it is silent when the factory cannot render — inviting pictures nobody renders wastes output" do

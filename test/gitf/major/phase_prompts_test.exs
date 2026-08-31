@@ -230,6 +230,17 @@ defmodule GiTF.Major.PhasePromptsTest do
       assert prompt =~ "model_recommendation"
     end
 
+    # msn-0434e9: the planner turned the goal's "mock each one up" into an
+    # implementation op AFTER the operator had already chosen, and three
+    # mockups shipped in cora PR #20.
+    test "forbids planning mockup or preview files as deliverables" do
+      [design, requirements, review] = @planning_args
+      prompt = PhasePrompts.planning_prompt(@mission, design, requirements, review)
+
+      assert prompt =~ "Never plan an op whose deliverable is a mockup"
+      assert prompt =~ ".gitf-mockups/"
+    end
+
     test "requires requirement_ids per op with honest full coverage" do
       [design, requirements, review] = @planning_args
       prompt = PhasePrompts.planning_prompt(@mission, design, requirements, review)

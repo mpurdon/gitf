@@ -807,6 +807,11 @@ defmodule GiTF.Inquiry do
         DECISIONS, not suggestions — build to them, do not re-litigate them,
         and do not ask them again.
 
+        Any mockups, prototypes or previews drawn to ask them were evidence
+        for a decision that is now made. They are not deliverables: do not
+        recreate them, do not plan work for them, do not commit them, and do
+        not list them as target files. Implement the chosen option only.
+
         #{lines}
         """
     end

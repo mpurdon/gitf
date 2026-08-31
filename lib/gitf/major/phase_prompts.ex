@@ -720,6 +720,12 @@ defmodule GiTF.Major.PhasePrompts do
     #{decomposition_instructions(mission)}
     - Define clear acceptance criteria derived from requirements
     - Specify target files from the design — these must be real files in the project
+    - Never plan an op whose deliverable is a mockup, prototype or preview
+      file (`.gitf-mockups/`, `mockups/*.html`, a "design evidence" page).
+      Mockups exist only so the design phase can ask the operator a
+      question; they are rendered outside the repository and once the
+      question is answered they are spent. Plan the chosen option, nothing
+      that documents the choosing
     - Set up dependencies (op indices, 0-based)
     - Tag each op with "requirement_ids": the requirement ids THIS op delivers,
       drawn ONLY from the ids in the Requirements artifact above. Every

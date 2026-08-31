@@ -130,6 +130,21 @@ defmodule GiTF.GitResidueTest do
       assert remaining == ["feature.ex"]
     end
 
+    # msn-0434e9: three inquiry mockups rode into cora PR #20 because the
+    # directory they were drawn in was nobody's residue.
+    test "inquiry mockups never reach the index", %{wt: wt, git: git} do
+      File.mkdir_p!(Path.join(wt, ".gitf-mockups"))
+      File.write!(Path.join([wt, ".gitf-mockups", "bars.html"]), "<p>bars</p>")
+      File.write!(Path.join(wt, "priority.tsx"), "export const bars = 5;\n")
+
+      git.(["add", "-A"])
+      Git.unstage_residue(wt)
+
+      assert "priority.tsx" in staged(wt)
+      refute Enum.any?(staged(wt), &String.starts_with?(&1, ".gitf-mockups/"))
+      assert File.exists?(Path.join([wt, ".gitf-mockups", "bars.html"]))
+    end
+
     test "a clean index is not an error", %{wt: wt} do
       assert :ok = Git.unstage_residue(wt)
       assert staged(wt) == []
@@ -211,12 +226,14 @@ defmodule GiTF.GitResidueTest do
   end
 
   describe "residue_paths/0" do
-    test "names both probe directories and .claude" do
+    test "names both probe directories, .claude, and the inquiry mockup directory" do
       paths = Git.residue_paths()
 
       assert ".claude/" in paths
       assert ".gitf-probe/" in paths
       assert ".gitf-probe-home/" in paths
+      assert ".gitf-mockups/" in paths
+      assert GiTF.Inquiry.Preview.mockup_dir() in paths
     end
   end
 end

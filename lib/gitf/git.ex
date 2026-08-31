@@ -768,8 +768,13 @@ defmodule GiTF.Git do
       exec-validation verdict cache could therefore never hit: each
       round re-paid `npm ci` + build under the sector lock to re-derive
       a verdict for a tree whose only change was a screenshot.
+    * `.gitf-mockups/` — where `GiTF.Inquiry.Preview` tells a design
+      ghost to draw the mockups behind an operator question. They are
+      rendered out of the worktree and stored under `.gitf/screenshots`;
+      the files themselves are evidence for a decision, never a
+      deliverable. cora PR #20 (msn-0434e9) shipped three of them.
   """
-  @residue_paths [".claude/", ".gitf-probe/", ".gitf-probe-home/"]
+  @residue_paths [".claude/", ".gitf-probe/", ".gitf-probe-home/", ".gitf-mockups/"]
 
   @spec residue_paths() :: [String.t()]
   def residue_paths, do: @residue_paths
