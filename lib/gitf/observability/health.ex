@@ -9,18 +9,32 @@ defmodule GiTF.Observability.Health do
   @doc "Perform health check"
   @spec check() :: map()
   def check do
-    checks = [
-      {:pubsub, check_pubsub()},
-      {:store, check_store()},
-      {:disk, check_disk()},
-      {:memory, check_memory()},
-      {:missions, check_quests()},
-      {:model_api, check_model_api()},
-      {:git, check_git()},
-      {:major, check_major()},
-      {:sync_queue, check_sync_queue()},
-      {:sandbox, check_sandbox()}
-    ]
+    # A Cabinet deliberately runs no Major, no sync queue, no ghosts and
+    # calls no models; judging it by the factory's checks would report a
+    # healthy Cabinet as degraded forever (the first one did, 2026-08-31).
+    checks =
+      if GiTF.Cabinet.mode?() do
+        [
+          {:pubsub, check_pubsub()},
+          {:store, check_store()},
+          {:disk, check_disk()},
+          {:memory, check_memory()},
+          {:git, check_git()}
+        ]
+      else
+        [
+          {:pubsub, check_pubsub()},
+          {:store, check_store()},
+          {:disk, check_disk()},
+          {:memory, check_memory()},
+          {:missions, check_quests()},
+          {:model_api, check_model_api()},
+          {:git, check_git()},
+          {:major, check_major()},
+          {:sync_queue, check_sync_queue()},
+          {:sandbox, check_sandbox()}
+        ]
+      end
 
     status = if Enum.all?(checks, fn {_, s} -> s == :ok end), do: :healthy, else: :degraded
 
@@ -62,8 +76,9 @@ defmodule GiTF.Observability.Health do
   """
   @spec alive?([map()]) :: boolean()
   def alive?(active_quests) do
-    # Check critical processes exist
-    major_alive = Process.whereis(GiTF.Major) != nil
+    # Check critical processes exist. A Cabinet runs no Major by design —
+    # its liveness is the store and the endpoint answering.
+    major_alive = GiTF.Cabinet.mode?() or Process.whereis(GiTF.Major) != nil
     store_ok = check_store() == :ok
 
     if not major_alive or not store_ok do

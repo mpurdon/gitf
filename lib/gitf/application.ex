@@ -70,7 +70,10 @@ defmodule GiTF.Application do
 
       unless File.exists?(config_path) do
         File.mkdir_p!(Path.dirname(config_path))
-        File.write!(config_path, GiTF.Config.project_default_config())
+        # project_default_config/0 is a MAP; File.write!/2 of a map is a
+        # badarg that crash-looped the first Cabinet box (2026-08-31), the
+        # first brand-new homedir store since this seed was written.
+        GiTF.Config.write_config(config_path, GiTF.Config.project_default_config())
         File.chmod(config_path, 0o600)
       end
     end
