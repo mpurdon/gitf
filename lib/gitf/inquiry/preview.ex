@@ -244,17 +244,20 @@ defmodule GiTF.Inquiry.Preview do
   comes back with `preview: nil` and a `preview_error` naming the reason,
   and is asked as an ordinary labelled option.
   """
-  @spec attach(map(), String.t(), map()) :: map()
-  def attach(mission, phase, %{kind: :choice, options: options} = question)
+  @spec attach(map(), String.t(), map(), String.t() | nil) :: map()
+  def attach(mission, phase, question, artifact_key \\ nil)
+
+  def attach(mission, phase, %{kind: :choice, options: options} = question, artifact_key)
       when is_list(options) do
     if enabled?() and Enum.any?(options, &previewable?/1) do
-      %{question | options: Enum.map(options, &render_option(mission, phase, question, &1))}
+      render = &render_option(mission, phase, artifact_key, question, &1)
+      %{question | options: Enum.map(options, render)}
     else
       disable_previews(question)
     end
   end
 
-  def attach(_mission, _phase, question), do: question
+  def attach(_mission, _phase, question, _artifact_key), do: question
 
   # With previews off (or nothing to draw), an option that named a mockup
   # must still say WHY there is no picture. Silence here reads to the
@@ -284,9 +287,9 @@ defmodule GiTF.Inquiry.Preview do
 
   defp previewable?(option), do: is_binary(option[:preview_source])
 
-  defp render_option(mission, phase, question, option) do
+  defp render_option(mission, phase, artifact_key, question, option) do
     if previewable?(option) do
-      case build(mission, phase, question, option) do
+      case build(mission, phase, artifact_key, question, option) do
         {:ok, preview} ->
           %{option | preview: preview, preview_error: nil}
 
@@ -304,7 +307,7 @@ defmodule GiTF.Inquiry.Preview do
     end
   end
 
-  defp build(mission, phase, question, option) do
+  defp build(mission, phase, artifact_key, question, option) do
     png = png_path(mission.id, question.key, option.id)
 
     # The same question re-asked on a later advance sweep, or re-emitted by
@@ -315,7 +318,7 @@ defmodule GiTF.Inquiry.Preview do
     if File.regular?(png) do
       {:ok, describe_existing(png)}
     else
-      with {:ok, root} <- source_root(mission, phase),
+      with {:ok, root} <- source_root(mission, phase, artifact_key),
            {:ok, bytes} <- read_source(root, option[:preview_source]),
            :ok <- self_contained(bytes),
            {:ok, source_copy} <- stage_source(png, option[:preview_source], bytes),
@@ -330,8 +333,17 @@ defmodule GiTF.Inquiry.Preview do
   # at, the same op→ghost→shell chain `Major.Topology.variant_shell/2`
   # walks. A phase with no live worktree (re-dispatch after a reap, a
   # replayed artifact) degrades; it does not guess at another tree.
-  defp source_root(mission, phase) do
-    with %{ghost_id: ghost_id} when is_binary(ghost_id) <- latest_phase_op(mission, phase),
+  #
+  # WHICH phase op matters. A design tournament spawns one ghost per
+  # strategy in the same second, each with its own worktree, and only
+  # one of them asks. msn-f48ae9's minimal ghost drew three mockups and
+  # asked; "latest design op" was a three-way tie on inserted_at, the
+  # sort picked a sibling, and every preview came back "no such file in
+  # the worktree" while the files sat in the asking ghost's tree. The
+  # artifact key names the asker (`design_minimal`), so it picks the op.
+  defp source_root(mission, phase, artifact_key) do
+    with %{ghost_id: ghost_id} when is_binary(ghost_id) <-
+           asking_phase_op(mission, phase, artifact_key),
          %{shell_id: shell_id} when is_binary(shell_id) <- Archive.get(:ghosts, ghost_id),
          %{worktree_path: worktree} when is_binary(worktree) <- Archive.get(:shells, shell_id),
          true <- File.dir?(worktree) do
@@ -343,11 +355,44 @@ defmodule GiTF.Inquiry.Preview do
     _ -> {:error, :no_worktree}
   end
 
-  defp latest_phase_op(mission, phase) do
-    (Map.get(mission, :ops) || [])
-    |> Enum.filter(&(&1[:phase_job] == true and &1[:phase] == phase))
+  defp asking_phase_op(mission, phase, artifact_key) do
+    ops =
+      (Map.get(mission, :ops) || [])
+      |> Enum.filter(&(&1[:phase_job] == true and &1[:phase] == phase))
+
+    candidates =
+      case strategy_of(artifact_key, phase) do
+        nil -> ops
+        strategy -> Enum.filter(ops, &variant?(&1, strategy))
+      end
+
+    # An unknown variant (or a key with no suffix) falls back to the
+    # latest op for the phase — the pre-tournament behaviour, and right
+    # whenever there is exactly one.
+    if(candidates == [], do: ops, else: candidates)
     |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
     |> List.first()
+  end
+
+  # "design_minimal" → "minimal"; "design_minimal_asked" (a moved-aside
+  # key, if one is ever passed) → "minimal"; "design" → nil.
+  defp strategy_of(key, phase) when is_binary(key) and is_binary(phase) do
+    case String.replace_prefix(key, phase <> "_", "") do
+      ^key ->
+        nil
+
+      "" ->
+        nil
+
+      rest ->
+        rest |> String.replace_suffix("_asked", "") |> String.replace_suffix("_rejected", "")
+    end
+  end
+
+  defp strategy_of(_, _), do: nil
+
+  defp variant?(op, strategy) do
+    op[:strategy] == strategy or String.contains?(op[:title] || "", "[#{strategy}]")
   end
 
   # `GiTF.Inquiry.normalize_option/1` has already refused an absolute path

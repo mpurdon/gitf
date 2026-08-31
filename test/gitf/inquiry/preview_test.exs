@@ -132,6 +132,59 @@ defmodule GiTF.Inquiry.PreviewTest do
     %{mission: mission, worktree: worktree}
   end
 
+  # A design TOURNAMENT: two variant ghosts, two worktrees, spawned in the
+  # same instant. Only the minimal one drew mockups and asked.
+  defp mission_with_variants do
+    base = Path.join(System.tmp_dir!(), "gitf_variants_#{:erlang.unique_integer([:positive])}")
+    minimal_wt = Path.join(base, "minimal")
+    normal_wt = Path.join(base, "normal")
+    File.mkdir_p!(Path.join(minimal_wt, ".gitf-mockups"))
+    File.mkdir_p!(normal_wt)
+    File.write!(Path.join([minimal_wt, ".gitf-mockups", "a.html"]), @mockup)
+
+    op_for = fn strategy, wt ->
+      {:ok, shell} =
+        Archive.insert(:shells, %{
+          sector_id: "no-such-sector",
+          worktree_path: wt,
+          branch: "ghost/#{strategy}",
+          status: "active"
+        })
+
+      {:ok, ghost} =
+        Archive.insert(:ghosts, %{
+          shell_id: shell.id,
+          sector_id: "no-such-sector",
+          status: "running"
+        })
+
+      %{
+        id: "op-#{strategy}",
+        phase_job: true,
+        phase: "design",
+        strategy: strategy,
+        title: "Design [#{strategy}] for: pick",
+        ghost_id: ghost.id,
+        status: "done",
+        inserted_at: ~U[2026-08-31 04:25:45Z]
+      }
+    end
+
+    # normal is listed LAST so a naive "latest" pick lands on the wrong tree.
+    {:ok, mission} =
+      Archive.insert(:missions, %{
+        name: "tournament",
+        goal: "pick a header",
+        status: "active",
+        sector_id: "no-such-sector",
+        current_phase: "design",
+        artifacts: %{},
+        ops: [op_for.("minimal", minimal_wt), op_for.("normal", normal_wt)]
+      })
+
+    mission
+  end
+
   defp question(options) do
     {:ok, validated} =
       Inquiry.validate(%{
@@ -539,6 +592,70 @@ defmodule GiTF.Inquiry.PreviewTest do
 
     test "pruning an empty tree is a no-op, not a crash" do
       assert Preview.prune() == %{removed: 0, freed_bytes: 0}
+    end
+  end
+
+  describe "a design tournament — which worktree holds the mockup" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "gitf_prev_root_#{:erlang.unique_integer([:positive])}")
+      previous = Application.get_env(:gitf, :inquiry_preview_renderer)
+      previous_root = Application.get_env(:gitf, :visual_screenshots_root)
+      Application.put_env(:gitf, :visual_screenshots_root, root)
+      Application.put_env(:gitf, :visual_capture_enabled, true)
+      Application.put_env(:gitf, :inquiry_preview_renderer, StubRenderer)
+
+      on_exit(fn ->
+        Application.put_env(:gitf, :inquiry_preview_renderer, previous)
+        Application.put_env(:gitf, :visual_screenshots_root, previous_root)
+      end)
+
+      :ok
+    end
+
+    # msn-f48ae9: three variants in the same second, the minimal one asked,
+    # "latest design op" tied and picked a sibling — every preview failed
+    # with "no such file in the worktree" while the files sat in the
+    # asker's tree.
+    test "the artifact key names the asking variant, and its tree is the one read" do
+      mission = mission_with_variants()
+
+      q =
+        question([
+          %{"label" => "Bars", "preview" => ".gitf-mockups/a.html"},
+          %{"label" => "Dots"}
+        ])
+
+      %{options: [bars, _]} = Preview.attach(mission, "design", q, "design_minimal")
+      assert %{png: png} = bars.preview
+      assert File.regular?(png)
+      assert bars.preview_error == nil
+    end
+
+    test "naming the wrong variant degrades honestly rather than reading a sibling's tree" do
+      mission = mission_with_variants()
+
+      q =
+        question([
+          %{"label" => "Bars", "preview" => ".gitf-mockups/a.html"},
+          %{"label" => "Dots"}
+        ])
+
+      %{options: [bars, _]} = Preview.attach(mission, "design", q, "design_normal")
+      assert bars.preview == nil
+      assert bars.preview_error =~ "no such file"
+    end
+
+    test "a moved-aside key still resolves the variant" do
+      mission = mission_with_variants()
+
+      q =
+        question([
+          %{"label" => "Bars", "preview" => ".gitf-mockups/a.html"},
+          %{"label" => "Dots"}
+        ])
+
+      %{options: [bars, _]} = Preview.attach(mission, "design", q, "design_minimal_asked")
+      assert %{png: _} = bars.preview
     end
   end
 

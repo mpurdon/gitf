@@ -134,7 +134,7 @@ defmodule GiTF.Inquiry.Gate do
     results =
       for {key, artifact} <- pairs,
           question <- questions_of(artifact),
-          do: {key, ask_one(mission, phase, question)}
+          do: {key, ask_one(mission, phase, key, question)}
 
     held = for {_key, {:held, inquiry}} <- results, do: inquiry
     rejected = for {key, {:rejected, reason}} <- results, do: {key, reason}
@@ -163,16 +163,21 @@ defmodule GiTF.Inquiry.Gate do
   # `attach/3` cannot fail. Every unrenderable option comes back with its
   # label, its rationale and a note saying why there is no picture, so a
   # broken mockup costs the operator some context and never the question.
-  defp ask_one(mission, phase, question) when is_map(question) do
+  defp ask_one(mission, phase, key, question) when is_map(question) do
     attrs = Map.merge(question, %{phase: phase, asked_by: "phase:#{phase}"})
 
     case Inquiry.validate(attrs) do
-      {:ok, validated} -> record(mission, phase, Preview.attach(mission, phase, validated))
-      {:error, {:invalid, reason}} -> {:rejected, reason}
+      {:ok, validated} ->
+        # The artifact key names WHICH variant asked (design_minimal), and
+        # therefore which worktree holds the mockups.
+        record(mission, phase, Preview.attach(mission, phase, validated, key))
+
+      {:error, {:invalid, reason}} ->
+        {:rejected, reason}
     end
   end
 
-  defp ask_one(_mission, _phase, other),
+  defp ask_one(_mission, _phase, _key, other),
     do: {:rejected, "a question must be a map, got #{inspect(other, limit: 5)}"}
 
   defp record(mission, phase, attrs) do
