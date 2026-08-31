@@ -157,7 +157,8 @@ defmodule GiTF.Inquiry do
   # the question was asked and answered — stamped `inherited_from`, the
   # same honesty `Missions.inherit_artifacts/3` applies to artifacts.
   defp ask_fresh(mission_id, question) do
-    case inherited_answer(mission_id, question.phase, question.key) do
+    case inherited_answer(mission_id, question.phase, question.key) ||
+           standing_answer(mission_id, question) do
       %{} = prior ->
         {:ok, record} = insert_inherited(mission_id, question, prior)
         {:ok, record, :already_answered}
@@ -205,8 +206,14 @@ defmodule GiTF.Inquiry do
 
   defp insert_inherited(mission_id, question, prior) do
     Logger.info(
-      "Quest #{mission_id}: #{question.phase}/#{question.key} was already answered by " <>
-        "#{prior["mission_id"] || "an ancestor run"} — inheriting the answer, not re-asking"
+      if prior["mission_id"] do
+        "Quest #{mission_id}: #{question.phase}/#{question.key} was already answered by " <>
+          "#{prior["mission_id"]} — inheriting the answer, not re-asking"
+      else
+        "Quest #{mission_id}: #{question.phase}/#{question.key} is #{question.phase}/" <>
+          "#{prior["key"]} asked again under a new key — answering it with the standing " <>
+          "decision (#{prior["answer_label"] || prior["answer"]}), not holding"
+      end
     )
 
     Archive.insert(:inquiries, %{
@@ -224,7 +231,8 @@ defmodule GiTF.Inquiry do
       answer_label: prior["answer_label"],
       answered_by: prior["answered_by"],
       answered_at: prior["answered_at"],
-      inherited_from: prior["mission_id"]
+      inherited_from: prior["mission_id"],
+      duplicate_of: prior["duplicate_of"]
     })
   end
 
@@ -721,9 +729,12 @@ defmodule GiTF.Inquiry do
   end
 
   # Only questions this run actually put to a human count against the
-  # budget. An inherited answer cost the operator nothing.
+  # budget. An inherited answer cost the operator nothing, and neither
+  # did a duplicate answered from a standing decision.
   defp count_asked_here(mission_id) do
-    mission_id |> for_mission() |> Enum.count(&is_nil(&1[:inherited_from]))
+    mission_id
+    |> for_mission()
+    |> Enum.count(&(is_nil(&1[:inherited_from]) and is_nil(&1[:duplicate_of])))
   end
 
   # -- The answered register (crosses a resume) --------------------------------
@@ -758,6 +769,86 @@ defmodule GiTF.Inquiry do
       "answered_at" => inquiry[:answered_at] && to_string(inquiry[:answered_at])
     }
   end
+
+  # THE SAME QUESTION UNDER A NEW KEY.
+  #
+  # msn-1729cb: the design ghost asked "which header treatment?" as
+  # `cora-group-header-treatment`, the operator answered `band`, the phase
+  # was re-run with the decision in its prompt — "do not ask them again",
+  # the key, the answer, who and when — and the re-run ghost asked the
+  # identical question as `group-header-visual-treatment`, with the same
+  # option ids, and held the mission a second time. The key is chosen by
+  # the ghost, so idempotency on {phase, key} is only as good as the
+  # ghost's memory of a key it never sees again. Prompts do not hold.
+  #
+  # So a `:choice` from a phase that already holds an answer is the same
+  # question when that answer names one of the new question's options —
+  # by id, or by label with case and punctuation removed. That is a
+  # narrow test on purpose: two genuinely different questions in one
+  # phase will not share an option with the first one's ANSWER. Other
+  # kinds match only on the prompt itself, normalized the same way.
+  #
+  # A match is recorded as answered with the standing decision, exactly
+  # as an inherited answer is, and does not count against the budget.
+  # The first answer wins; this is the loop breaker's second lock.
+  defp standing_answer(mission_id, %{phase: phase} = question) do
+    mission_id
+    |> for_mission()
+    |> Enum.filter(&(&1[:status] == "answered" and &1[:phase] == phase))
+    |> oldest_first()
+    |> Enum.find(&same_question?(&1, question))
+    |> case do
+      nil ->
+        nil
+
+      prior ->
+        prior
+        |> to_register_entry()
+        |> Map.put("mission_id", nil)
+        |> Map.put("duplicate_of", prior.id)
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp same_question?(prior, %{kind: :choice, options: options}) do
+    answer = prior[:answer]
+    label = prior[:answer_label]
+
+    prior[:kind] == :choice and is_binary(answer) and
+      Enum.any?(options, fn option ->
+        option[:id] == answer or
+          (is_binary(label) and comparable_text(option[:label]) == comparable_text(label))
+      end) and options_mostly_shared?(prior[:options] || [], options)
+  end
+
+  defp same_question?(prior, %{kind: kind, prompt: prompt}) do
+    prior[:kind] == kind and comparable_text(prior[:prompt]) == comparable_text(prompt)
+  end
+
+  # The answer being on offer again is necessary but not sufficient: two
+  # different questions could both offer "default". At least half of the
+  # new options must also have been on the first question, by id or by
+  # label — a re-asked question re-offers its options; a new one does not.
+  defp options_mostly_shared?(prior_options, options) when options != [] do
+    prior_ids = MapSet.new(prior_options, & &1[:id])
+    prior_labels = MapSet.new(prior_options, &comparable_text(&1[:label]))
+
+    shared =
+      Enum.count(options, fn o ->
+        MapSet.member?(prior_ids, o[:id]) or
+          MapSet.member?(prior_labels, comparable_text(o[:label]))
+      end)
+
+    shared * 2 >= length(options)
+  end
+
+  defp options_mostly_shared?(_, _), do: false
+
+  defp comparable_text(text) when is_binary(text),
+    do: text |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "")
+
+  defp comparable_text(_), do: nil
 
   # The child's own records first, then the register it inherited — a
   # decision made in THIS run outranks the one it was seeded with.

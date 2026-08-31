@@ -267,6 +267,83 @@ defmodule GiTF.InquiryTest do
       assert length(Inquiry.list(m.id)) == 1
     end
 
+    # msn-1729cb: the re-run design ghost, with the answer in its prompt,
+    # asked the identical question under a NEW key with the same option
+    # ids and held the mission a second time. The key is the ghost's to
+    # choose, so it cannot be the only identity.
+    test "the same choice under a NEW key is answered with the standing decision, not re-asked" do
+      m = mission!()
+      {:ok, inquiry, :asked} = Inquiry.ask(m.id, choice())
+      {:ok, _, :answered} = Inquiry.answer(inquiry.id, "grid", answered_by: "matthew")
+
+      reasked =
+        choice(%{
+          key: "layout-treatment-v2",
+          prompt: "Three layouts are mocked up below — which should be implemented?",
+          options: [
+            %{id: "grid", label: "Grid / dense"},
+            %{id: "list", label: "List"},
+            %{id: "cards", label: "Cards"}
+          ]
+        })
+
+      assert {:ok, answered, :already_answered} = Inquiry.ask(m.id, reasked)
+      assert answered.answer == "grid"
+      assert answered.answered_by == "matthew"
+      assert answered.status == "answered"
+      refute Inquiry.open?(m.id)
+      # The duplicate is materialized as its own answered record (so the
+      # panel and the register read one shape) but costs no budget.
+      assert length(Inquiry.list(m.id)) == 2
+      assert Inquiry.budget_remaining(m.id) == Inquiry.max_per_mission() - 1
+    end
+
+    test "matching by label survives a ghost that renamed the option ids" do
+      m = mission!()
+      {:ok, inquiry, :asked} = Inquiry.ask(m.id, choice())
+      {:ok, _, :answered} = Inquiry.answer(inquiry.id, "grid", answered_by: "matthew")
+
+      reasked =
+        choice(%{
+          key: "another-key",
+          options: [%{id: "dense", label: "GRID."}, %{id: "loose", label: "List"}]
+        })
+
+      assert {:ok, answered, :already_answered} = Inquiry.ask(m.id, reasked)
+      assert answered.answer == "grid"
+    end
+
+    test "a genuinely different question in the same phase is still asked" do
+      m = mission!()
+      {:ok, inquiry, :asked} = Inquiry.ask(m.id, choice())
+      {:ok, _, :answered} = Inquiry.answer(inquiry.id, "grid", answered_by: "matthew")
+
+      other =
+        choice(%{
+          key: "naming",
+          prompt: "What should the feature be called?",
+          options: [%{id: "rail", label: "Rail"}, %{id: "shelf", label: "Shelf"}]
+        })
+
+      assert {:ok, _, :asked} = Inquiry.ask(m.id, other)
+      assert Inquiry.open?(m.id)
+    end
+
+    test "a text question is a duplicate only when its prompt is the same" do
+      m = mission!()
+      text = %{key: "name", phase: "design", kind: :text, prompt: "Name the feature?"}
+      {:ok, inquiry, :asked} = Inquiry.ask(m.id, text)
+      {:ok, _, :answered} = Inquiry.answer(inquiry.id, "Shelf", answered_by: "matthew")
+
+      assert {:ok, dup, :already_answered} =
+               Inquiry.ask(m.id, %{text | key: "name-2", prompt: "Name the feature"})
+
+      assert dup.answer == "Shelf"
+
+      assert {:ok, _, :asked} =
+               Inquiry.ask(m.id, %{text | key: "tagline", prompt: "Tagline for the feature?"})
+    end
+
     test "a reworded prompt with the same key is the same question" do
       m = mission!()
       {:ok, first, :asked} = Inquiry.ask(m.id, choice())
@@ -334,7 +411,17 @@ defmodule GiTF.InquiryTest do
       assert {:ok, _, :already_answered} = Inquiry.ask(m.id, choice())
       # The budget is untouched, so a genuinely new question still fits.
       assert Inquiry.budget_remaining(m.id) == 1
-      assert {:ok, _, :asked} = Inquiry.ask(m.id, choice(%{key: "palette"}))
+      # A genuinely different question: different key AND different options,
+      # so it cannot be mistaken for the inherited one asked again.
+      assert {:ok, _, :asked} =
+               Inquiry.ask(
+                 m.id,
+                 choice(%{
+                   key: "palette",
+                   prompt: "Which palette?",
+                   options: [%{id: "warm", label: "Warm"}, %{id: "cool", label: "Cool"}]
+                 })
+               )
     end
   end
 
