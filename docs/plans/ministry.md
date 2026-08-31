@@ -84,8 +84,17 @@ Division of authority, deliberately strict:
    | feature | queue in the **feature inbox**; operator starts it explicitly | queue | queue |
    | ci / noise | drop (poller will see it anyway) | drop | drop |
 
-   Rules are per-ministry, editable in the Cabinet dashboard (the "visual
-   ruleset" — start as a simple matrix page, not a rule engine), with
+   Rules are per-ministry, editable in the Cabinet dashboard. **Format
+   decision: GoRules JDM decision tables** — rules are stored as standard
+   JDM JSON in the Archive and edited with the embeddable open-source JDM
+   Editor component in the Cabinet UI (the "visual ruleset", without
+   building an editor). Evaluation v1 is a small Elixir interpreter for
+   the first-hit decision-table subset (~equality/in/threshold conditions);
+   the zen engine (Rust) via a Rustler NIF is the documented growth path
+   the day a rule needs expressions or decision graphs — the interpreter
+   refuses unknown constructs loudly, and every evaluation failure (no
+   match, invalid file, unsupported construct) resolves to QUEUE, never
+   wake. Comes with
    per-ministry **monthly cost caps** enforced before any wake: a ministry
    over cap queues instead of waking, and the queue page says so.
 4. "Wake → forward": start the instance (no-op if awake), wait healthy,
@@ -184,6 +193,8 @@ standing billable-decisions rule.
 
 - Cabinet build as the same CI artifact behind a flag (preferred) vs a
   second release target.
+- When (if ever) to take the zen-engine Rustler NIF: only on the first rule
+  the JDM-subset interpreter cannot express; adds a Rust toolchain to CI.
 - Notification channel for unattended failures (email/SES vs ntfy vs none).
 - Whether `pr_review` events in vacation mode should also honour the cost
   cap separately from bugs (probably yes — same gate).
