@@ -449,14 +449,29 @@ defmodule GiTF.MCPServer.Handlers do
   def call("wake_ministry", %{"slug" => slug} = args) do
     with :ok <- require_confirm(args),
          %{} = m <- GiTF.Cabinet.Registry.by_slug(slug) || {:error, "no ministry #{slug}"} do
+      # await waits at most 45s: an HTTP tool call has a ~60s request
+      # budget, and a cold box takes 60-90s. "starting" is a success
+      # with more waiting to do — poll cabinet_status; never an error.
       result =
         if args["await"],
-          do: GiTF.Cabinet.Fleet.wake_and_await(m),
+          do: GiTF.Cabinet.Fleet.wake_and_await(m, 45_000),
           else: GiTF.Cabinet.Fleet.wake(m)
 
       case result do
-        :ok -> {:ok, json_text(%{slug: slug, status: "waking", awaited: args["await"] == true})}
-        {:error, reason} -> {:error, "wake failed: #{inspect(reason)}"}
+        :ok ->
+          status = if args["await"], do: "healthy", else: "waking"
+          {:ok, json_text(%{slug: slug, status: status})}
+
+        {:error, :wake_timeout} ->
+          {:ok,
+           json_text(%{
+             slug: slug,
+             status: "starting",
+             note: "not healthy yet — poll cabinet_status"
+           })}
+
+        {:error, reason} ->
+          {:error, "wake failed: #{inspect(reason)}"}
       end
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
