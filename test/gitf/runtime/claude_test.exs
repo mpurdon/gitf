@@ -1,5 +1,7 @@
 defmodule GiTF.Runtime.ClaudeTest do
-  use ExUnit.Case, async: true
+  # NOT async: these tests rewrite the process-global PATH to prove the
+  # CLI is not found, which races every concurrent test that shells out.
+  use ExUnit.Case, async: false
 
   alias GiTF.Runtime.Claude
 

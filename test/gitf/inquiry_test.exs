@@ -520,6 +520,8 @@ defmodule GiTF.InquiryTest do
 
       assert block =~ "OPERATOR DECISIONS"
       assert block =~ "not deliverables"
+      assert block =~ "decided by"
+      assert block =~ "MET by the answer"
       assert block =~ "Which layout?"
       assert block =~ "List"
       assert block =~ "do not ask them again"

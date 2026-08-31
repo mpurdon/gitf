@@ -33,6 +33,23 @@ defmodule GiTF.Togusa do
 
   # -- Fix Request -----------------------------------------------------------
 
+  # Public so the guard can be asserted directly; the seam it protects
+  # (Tachikoma's review task) is not reachable from a unit test.
+  @doc false
+  def ensure_mission_live(op) do
+    case GiTF.Missions.get(op.mission_id) do
+      {:ok, mission} ->
+        status = Map.get(mission, :status)
+
+        if status in GiTF.Missions.terminal_phases(),
+          do: {:error, {:mission_terminal, status}},
+          else: :ok
+
+      _ ->
+        {:error, :mission_not_found}
+    end
+  end
+
   @doc """
   Spawns a fix ghost in the same worktree as the failed op.
 
@@ -46,6 +63,10 @@ defmodule GiTF.Togusa do
           {:ok, map()} | {:error, term()}
   def request_fix(op_id, shell_id, failures, %FixContext{} = fix_ctx) do
     with {:ok, op} <- GiTF.Ops.get(op_id),
+         # A fix op on a finished mission is an orphan from birth: nothing
+         # schedules it, nothing merges it, and it sits "pending" on the
+         # mission page forever (msn-0434e9, op-8ff3bc).
+         :ok <- ensure_mission_live(op),
          # A fix ghost can only fix CODE. Handing one an infrastructure
          # failure ("TOOL MISSING", exit 126/127) gives it nothing
          # actionable — run 7's quality fix ghost, prompted with exactly

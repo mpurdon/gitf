@@ -222,8 +222,14 @@ defmodule GiTF.Major.PhaseLauncher do
     # Collect all design variants (design_minimal, design_normal, design_complex)
     designs = DesignBoard.collect_design_variants(mission.id)
 
+    # The reviewer must see what the operator decided. msn-0434e9's review
+    # was the ONE phase prompt built without the context block, so it
+    # rejected the post-answer design twice for "bypassing" a question
+    # that had already been asked and answered.
+    ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "review", mission)
+
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "review") do
-      prompt = PhasePrompts.review_prompt(mission, designs, requirements, research)
+      prompt = PhasePrompts.review_prompt(mission, designs, requirements, research, ctx)
 
       spawn_phase_ghost(mission, "review", prompt,
         model: ModelPolicy.phase_model_for_complexity("review", mission)
@@ -962,7 +968,10 @@ defmodule GiTF.Major.PhaseLauncher do
         design = GiTF.Missions.get_artifact(mission.id, "design") || %{}
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
-        {PhasePrompts.review_prompt(mission, design, requirements, research), "thinking"}
+        review_ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "review", mission)
+
+        {PhasePrompts.review_prompt(mission, design, requirements, research, review_ctx),
+         "thinking"}
 
       "planning" ->
         design = GiTF.Missions.get_artifact(mission.id, "design") || %{}

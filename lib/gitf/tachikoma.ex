@@ -1367,6 +1367,31 @@ defmodule GiTF.Tachikoma do
   # -- Quality Gate (single-shot, delegates to Togusa for fixes) ----------
 
   defp do_review_job(op_id, _ghost_id, shell_id) do
+    if mission_terminal?(op_id) do
+      # msn-0434e9: a simplify op's gate ran 18 minutes after the op
+      # finished (queued behind validation), failed on a stale tree, and
+      # spawned "Fix quality issues (attempt 1)" 43 seconds AFTER the
+      # mission had completed and its PR was open. Nothing can act on a
+      # verdict for a mission that is already over.
+      Logger.info("Tachikoma: op #{op_id} belongs to a terminal mission — quality gate skipped")
+    else
+      run_quality_gate_for(op_id, shell_id)
+    end
+  rescue
+    e ->
+      Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
+  end
+
+  defp mission_terminal?(op_id) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         {:ok, mission} <- GiTF.Missions.get(op.mission_id) do
+      mission.status in GiTF.Missions.terminal_phases()
+    else
+      _ -> false
+    end
+  end
+
+  defp run_quality_gate_for(op_id, shell_id) do
     # Run quality gate once — no retries against unchanged code
     case GiTF.Togusa.run_quality_gate(op_id) do
       {:ok, :pass, result} ->
@@ -1419,9 +1444,6 @@ defmodule GiTF.Tachikoma do
         Logger.error("Tachikoma: quality gate error for op #{op_id}: #{inspect(reason)}")
         GiTF.Ops.reject(op_id)
     end
-  rescue
-    e ->
-      Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
   end
 
   # One owner for the "is this delivered via a mission-level PR?" policy;

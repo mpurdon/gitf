@@ -101,7 +101,7 @@ defmodule GiTF.Report do
     Enum.map(ops, fn op ->
       ghost_id = Map.get(op, :ghost_id)
       ghost = if ghost_id, do: Archive.get(:ghosts, ghost_id)
-      log_tokens = parse_bee_log(ghost_id, gitf_root)
+      log_tokens = tokens_for_ghost(ghost_id, gitf_root)
 
       %{
         op_id: op.id,
@@ -117,6 +117,33 @@ defmodule GiTF.Report do
         phase_job: Map.get(op, :phase_job, false)
       }
     end)
+  end
+
+  # The cost ledger is the source of truth — every provider path records
+  # into it, and it survives log rotation. Parsing the stream-json log is
+  # the fallback for a ghost that predates the ledger; on the box the
+  # report was showing 0 tokens for a $9.91 mission because the log path
+  # it guessed did not exist there.
+  defp tokens_for_ghost(nil, _gitf_root), do: empty_tokens()
+
+  defp tokens_for_ghost(ghost_id, gitf_root) do
+    case GiTF.Costs.for_ghost(ghost_id) do
+      [] ->
+        parse_bee_log(ghost_id, gitf_root)
+
+      costs ->
+        Enum.reduce(costs, empty_tokens(), fn cost, acc ->
+          %{
+            input: acc.input + (cost[:input_tokens] || 0),
+            output: acc.output + (cost[:output_tokens] || 0),
+            cache_read: acc.cache_read + (cost[:cache_read_tokens] || 0),
+            cache_create: acc.cache_create + (cost[:cache_write_tokens] || 0),
+            cost_usd: acc.cost_usd + (cost[:cost_usd] || 0.0)
+          }
+        end)
+    end
+  rescue
+    _ -> parse_bee_log(ghost_id, gitf_root)
   end
 
   defp parse_bee_log(nil, _gitf_root), do: empty_tokens()

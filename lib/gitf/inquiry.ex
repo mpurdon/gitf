@@ -797,7 +797,8 @@ defmodule GiTF.Inquiry do
         lines =
           Enum.map_join(entries, "\n", fn entry ->
             "- (#{entry["phase"]}/#{entry["key"]}) #{entry["prompt"]}\n" <>
-              "  ANSWER: #{entry["answer_label"] || entry["answer"]}"
+              "  ANSWER: #{entry["answer_label"] || entry["answer"]}" <>
+              decided_suffix(entry)
           end)
 
         """
@@ -805,7 +806,9 @@ defmodule GiTF.Inquiry do
 
         The operator was asked these questions and answered them. These are
         DECISIONS, not suggestions — build to them, do not re-litigate them,
-        and do not ask them again.
+        and do not ask them again. Where a requirement or the goal says to
+        ask the operator, that requirement is MET by the answer below; the
+        answer, with who decided it and when, is the auditable record.
 
         Any mockups, prototypes or previews drawn to ask them were evidence
         for a decision that is now made. They are not deliverables: do not
@@ -818,6 +821,20 @@ defmodule GiTF.Inquiry do
   end
 
   def prompt_block(_), do: ""
+
+  # "(decided by matthew@… at 2026-08-31T01:44:17Z)" — the reviewer that
+  # bounced msn-0434e9 twice asked for exactly this: a timestamp and an
+  # author it could treat as evidence rather than an assertion.
+  defp decided_suffix(entry) do
+    by = entry["answered_by"]
+    at = entry["answered_at"]
+
+    cond do
+      is_binary(by) and is_binary(at) -> " (decided by #{by} at #{at})"
+      is_binary(by) -> " (decided by #{by})"
+      true -> ""
+    end
+  end
 
   @doc """
   Whether phase ghosts are INVITED to ask questions

@@ -208,6 +208,22 @@ defmodule GiTF.Major.PhasePromptsTest do
       research = %{"tech_stack" => []}
 
       prompt = PhasePrompts.review_prompt(@mission, design, requirements, research)
+      assert prompt =~ "SATISFIED by an answer"
+    end
+
+    # msn-0434e9: review was the one phase prompt built without the context
+    # block, so it never saw the operator's answer and rejected the design
+    # twice for "bypassing" a question that had already been answered.
+    test "review carries the prompt context, so it can see operator decisions" do
+      design = %{"components" => []}
+      requirements = %{"functional_requirements" => []}
+      research = %{"tech_stack" => []}
+
+      ctx = "## OPERATOR DECISIONS\n- (design/glyphs) Which? ANSWER: bars (decided by op at now)"
+      prompt = PhasePrompts.review_prompt(@mission, design, requirements, research, ctx)
+
+      assert prompt =~ "OPERATOR DECISIONS"
+      assert prompt =~ "decided by op"
       assert prompt =~ "Design Review"
       assert prompt =~ "approved"
       assert prompt =~ "coverage"

@@ -488,8 +488,8 @@ defmodule GiTF.Major.PhasePrompts do
 
   Cross-validates design against requirements.
   """
-  @spec review_prompt(map(), map(), map(), map()) :: String.t()
-  def review_prompt(mission, designs, requirements, research) do
+  @spec review_prompt(map(), map(), map(), map(), String.t()) :: String.t()
+  def review_prompt(mission, designs, requirements, research, historical_context \\ "") do
     requirements_json = encode_or(requirements, "{}")
     research_json = encode_or(research, "{}")
 
@@ -568,14 +568,19 @@ defmodule GiTF.Major.PhasePrompts do
     ## Designs
 
     #{designs_section}
-
+    #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Instructions
 
     1. Verify every functional requirement has a design component
     2. Check that the design is feasible given the codebase architecture
     3. Identify any gaps, inconsistencies, or missing pieces
     4. Assess implementation risks
-    5. Approve or reject with specific feedback
+    5. Approve or reject with specific feedback. A requirement that says to
+       ask, consult, or let the operator choose is SATISFIED by an answer
+       under OPERATOR DECISIONS above — the answer is the auditable record
+       (who, when, what). Never reject a design for building to a decision
+       the operator has already made, and never demand the question be
+       asked again.
     #{selection_instruction}
     ## Output Format
 

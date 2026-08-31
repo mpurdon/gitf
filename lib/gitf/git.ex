@@ -987,6 +987,24 @@ defmodule GiTF.Git do
     end
   end
 
+  # Resolved once and pinned. `System.find_executable/1` reads PATH on
+  # every call, and PATH is process-global — a test that narrows it to
+  # prove "claude is not installed" would race every concurrent git call
+  # in the suite (git_residue_test failed CI on exactly that). In
+  # production PATH never changes after boot, so caching costs nothing.
+  defp git_executable do
+    case :persistent_term.get({__MODULE__, :git_executable}, nil) do
+      nil ->
+        case System.find_executable("git") do
+          nil -> nil
+          path -> :persistent_term.put({__MODULE__, :git_executable}, path) && path
+        end
+
+      path ->
+        path
+    end
+  end
+
   @doc """
   Runs a git command with a timeout to prevent hangs.
 
@@ -994,7 +1012,7 @@ defmodule GiTF.Git do
   Returns `{output, exit_code}` or `{"git command timed out", 1}`.
   """
   def safe_cmd(args, opts \\ []) do
-    case System.find_executable("git") do
+    case git_executable() do
       nil ->
         # Absent git previously raised :enoent INSIDE the task (killing the
         # caller with an exit no rescue caught) via the blind /usr/bin/git
