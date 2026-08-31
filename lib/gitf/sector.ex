@@ -98,14 +98,17 @@ defmodule GiTF.Sector do
   end
 
   defp init_git_repo(path) do
+    %{name: name, email: email} = GiTF.Git.identity() || %{name: "gitf", email: "gitf@localhost"}
+
     with {_, 0} <- GiTF.Git.safe_cmd(["init", "-b", "main"], cd: path),
+         :ok <- GiTF.Git.ensure_identity(path),
          {_, 0} <-
            GiTF.Git.safe_cmd(
              [
                "-c",
-               "user.name=gitf",
+               "user.name=#{name}",
                "-c",
-               "user.email=gitf@localhost",
+               "user.email=#{email}",
                "commit",
                "--allow-empty",
                "-m",
@@ -322,6 +325,9 @@ defmodule GiTF.Sector do
       }
 
       with {:ok, sector} <- Archive.insert(:sectors, record) do
+        # Ministry identity: every commit the factory makes in this repo
+        # (and its worktrees) carries the configured author, not the host's.
+        GiTF.Git.ensure_identity(expanded)
         set_current(sector.id)
         seed_vault(sector)
         {:ok, sector}

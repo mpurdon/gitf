@@ -30,9 +30,35 @@ defmodule GiTF.Signature do
     "*#{quote}* — #{speaker}, Ghost in the Shell"
   end
 
-  @doc "Appends the signature to a string with a horizontal rule."
+  @doc """
+  Appends the signature to a string, honouring `[git] attribution`:
+
+    * `""` or `"on"` — the Ghost in the Shell quote (today's behaviour)
+    * `"off"` — the text is returned untouched (client ministries)
+    * anything else — that literal text as the signature block
+
+  Ministry identity, docs/plans/ministry.md M1.
+  """
   @spec sign(String.t()) :: String.t()
   def sign(text) do
-    text <> "\n\n---\n" <> random() <> "\n"
+    case attribution() do
+      :on -> text <> "\n\n---\n" <> random() <> "\n"
+      :off -> text
+      {:custom, custom} -> text <> "\n\n---\n" <> custom <> "\n"
+    end
+  end
+
+  @doc false
+  def attribution do
+    case GiTF.Config.Provider.get([:git, :attribution]) do
+      nil -> :on
+      "" -> :on
+      "on" -> :on
+      "off" -> :off
+      custom when is_binary(custom) -> {:custom, String.trim(custom)}
+      _ -> :on
+    end
+  rescue
+    _ -> :on
   end
 end

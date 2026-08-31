@@ -779,6 +779,52 @@ defmodule GiTF.Git do
   @spec residue_paths() :: [String.t()]
   def residue_paths, do: @residue_paths
 
+  @doc """
+  The configured commit identity (`[git] author_name / author_email`), or
+  nil when either half is unset. One reading for the whole factory.
+  """
+  @spec identity() :: %{name: String.t(), email: String.t()} | nil
+  def identity do
+    name = GiTF.Config.Provider.get([:git, :author_name])
+    email = GiTF.Config.Provider.get([:git, :author_email])
+
+    if is_binary(name) and name != "" and is_binary(email) and email != "" do
+      %{name: name, email: email}
+    end
+  rescue
+    _ -> nil
+  end
+
+  @doc """
+  Writes the configured identity as REPO-LOCAL git config on `repo_path`.
+
+  Repo-local because worktrees share their main repo's `.git/config`, so
+  one write at the sector clone covers every commit-maker in every ghost
+  worktree — ghosts, consolidation merges, sync, residue-scrub commits,
+  publish. This is the ministry-identity seam (docs/plans/ministry.md M1):
+  a client box configures `[git] author_name/author_email` and every
+  commit the factory makes there carries it. Unconfigured = no-op, which
+  is today's behaviour (the host's git config applies). Idempotent and
+  cheap; failures are logged, never raised — identity must not stop work.
+  """
+  @spec ensure_identity(String.t()) :: :ok
+  def ensure_identity(repo_path) do
+    case identity() do
+      %{name: name, email: email} ->
+        {_, 0} = safe_cmd(["-C", repo_path, "config", "user.name", name])
+        {_, 0} = safe_cmd(["-C", repo_path, "config", "user.email", email])
+        :ok
+
+      nil ->
+        :ok
+    end
+  rescue
+    e ->
+      require Logger
+      Logger.warning("Git.ensure_identity(#{repo_path}) failed: #{Exception.message(e)}")
+      :ok
+  end
+
   # Pathspecs that subtract the residue from a scan. `.` keeps the scan
   # rooted at the worktree top (git resolves pathspecs against the prefix,
   # and `-C wt` puts us there).

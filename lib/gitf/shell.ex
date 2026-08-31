@@ -24,6 +24,9 @@ defmodule GiTF.Shell do
 
     with {:ok, sector} <- GiTF.Sector.get(sector_id),
          :ok <- validate_sector_path(sector),
+         # Idempotent: keeps repo-local identity in step with config for
+         # sectors that predate it (worktrees inherit the repo's config).
+         :ok <- GiTF.Git.ensure_identity(sector.path),
          :ok <- fetch_origin(sector.path),
          base_branch = resolve_base_branch(sector.path, Keyword.get(opts, :base_branch)),
          worktree_path = build_worktree_path(sector.path, ghost_id),

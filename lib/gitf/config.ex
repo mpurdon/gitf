@@ -33,6 +33,10 @@ defmodule GiTF.Config do
     },
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
+    # Ministry identity (docs/plans/ministry.md M1). Empty = today's
+    # behaviour: commits use whatever git identity the host has, and PR
+    # bodies get the Ghost in the Shell quote. A client box sets all three.
+    "git" => %{"author_name" => "", "author_email" => "", "attribution" => ""},
     "server" => %{"url" => ""},
     "observability" => %{"webhook_url" => ""}
   }
