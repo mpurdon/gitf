@@ -149,7 +149,7 @@ jobs:
             exit 1
           fi
           SHA=$(sha256sum gitf | cut -d' ' -f1)
-          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/mpurdon/homebrew-gitf" /tmp/tap
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/mpurdon/homebrew-tap" /tmp/tap
           sed -i \
             -e "s|download/v[0-9.]*/gitf|download/v${VERSION}/gitf|" \
             -e "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" \
