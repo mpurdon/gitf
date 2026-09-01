@@ -122,9 +122,6 @@ defmodule GiTF.Dashboard.AppLayout do
         <div class="nav-links">
           <%!-- Overview & Operations --%>
           <a href={@prefix} class={if @current_path == "/", do: "active"}>Overview</a>
-          <%= if GiTF.Cabinet.mode?() do %>
-            <a href={"#{@prefix}/cabinet"} class={if @current_path == "/cabinet", do: "active"}>Cabinet</a>
-          <% end %>
           <a href={"#{@prefix}/studio"} class={if active?(@current_path, "/studio"), do: "active"}>Studio</a>
           <a href={"#{@prefix}/missions"} class={if active?(@current_path, "/missions"), do: "active"}>Missions</a>
           <a href={"#{@prefix}/progress"} class={if @current_path == "/progress", do: "active"}>Activity</a>

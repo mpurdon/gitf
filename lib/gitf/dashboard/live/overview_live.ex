@@ -18,17 +18,10 @@ defmodule GiTF.Dashboard.OverviewLive do
   # Real updates come from PubSub handlers below.
   @heartbeat_interval :timer.seconds(30)
 
-  # On a Cabinet node the root IS the Cabinet page — cabinet.<domain>/ —
-  # not cabinet.<domain>/dashboard/cabinet. The router is compiled once
-  # for every box, so the overview delegates at runtime instead.
+  # In cabinet mode GiTF.Web.CabinetRouter serves "/" directly — this
+  # LiveView is factory-only.
   @impl true
-  def mount(params, session, socket) do
-    if GiTF.Cabinet.mode?() do
-      GiTF.Dashboard.CabinetLive.mount(params, session, socket)
-    else
-      mount_overview(params, session, socket)
-    end
-  end
+  def mount(params, session, socket), do: mount_overview(params, session, socket)
 
   defp mount_overview(_params, _session, socket) do
     if connected?(socket) do
@@ -100,9 +93,6 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   @impl true
-  def handle_info(msg, %{assigns: %{ministries: _}} = socket),
-    do: GiTF.Dashboard.CabinetLive.handle_info(msg, socket)
-
   def handle_info(:heartbeat, socket) do
     Process.send_after(self(), :heartbeat, @heartbeat_interval)
     {:noreply, assign_core_data(socket)}
@@ -142,9 +132,6 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   @impl true
-  def handle_event(event, params, %{assigns: %{ministries: _}} = socket),
-    do: GiTF.Dashboard.CabinetLive.handle_event(event, params, socket)
-
   def handle_event("toggle_dark_factory", _params, socket) do
     new_val = !socket.assigns.dark_factory
     parent = self()
@@ -547,7 +534,6 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   @impl true
-  def render(%{ministries: _} = assigns), do: GiTF.Dashboard.CabinetLive.render(assigns)
 
   def render(assigns) do
     ~H"""

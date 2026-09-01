@@ -136,7 +136,6 @@ defmodule GiTF.Web.Router do
       live("/progress", ProgressLive)
       live("/approvals", ApprovalsLive)
       live("/questions", QuestionsLive)
-      live("/cabinet", CabinetLive)
       live("/ops/:id", OpDetailLive)
       live("/sectors", SectorsLive)
       live("/workflows", WorkflowsLive)

@@ -86,4 +86,27 @@ defmodule GiTF.Web.CabinetBoundaryTest do
       assert text =~ "cabinet_mode"
     end
   end
+
+  describe "chrome" do
+    import Phoenix.ConnTest
+    import Phoenix.LiveViewTest
+
+    @endpoint GiTF.Web.Endpoint
+
+    test "the Console renders no factory navigation" do
+      GiTF.Test.StoreHelper.ensure_infrastructure()
+
+      {:ok, _view, html} =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> live_isolated(GiTF.Dashboard.CabinetLive)
+
+      # The factory dashboard's nav must never leak into the Cabinet.
+      refute html =~ "/dashboard/missions"
+      refute html =~ "Studio"
+      refute html =~ ">Ghosts<"
+      assert html =~ "Ministries"
+      assert html =~ "Inbox"
+    end
+  end
 end
