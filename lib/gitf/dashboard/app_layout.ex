@@ -2,14 +2,14 @@ defmodule GiTF.Dashboard.AppLayout do
   @moduledoc """
   LiveComponent that renders the navigation bar and wraps page content.
 
-  Navigation is organized into logical groups:
-  - Core: Overview, Missions, Ghosts, Ops activity
-  - Pipeline: Costs, Models, Approvals, Merges
-  - Infrastructure: Sectors, Shells, Providers
-  - Observability: Timeline, Health, Rollback, Autonomy
+  Navigation is the seven operator concepts of the GiTF Control Surface
+  plan (§03) — a dark icon rail — with each concept's pages in a
+  secondary bar. Capabilities are never top-level items.
   """
 
   use Phoenix.LiveComponent
+
+  import Phoenix.HTML, only: [raw: 1]
 
   alias Phoenix.LiveView.JS
   require GiTF.Ghost.Status, as: GhostStatus
@@ -110,87 +110,57 @@ defmodule GiTF.Dashboard.AppLayout do
       |> assign(:prefix, @prefix)
 
     ~H"""
-    <div>
-      <nav class="nav">
-        <div class="nav-brand">
-          <a href="/" style="color:inherit;text-decoration:none">The <span>GiTF</span></a>
-          <span style="font-size:0.65rem;color:#6b7280;font-weight:400;margin-left:0.3rem">v<%= GiTF.version() %></span>
-          <%= if @active_ghosts > 0 do %>
-            <span class="nav-activity pulse" style="background:#3fb950; margin-left:0.4rem" title={"#{@active_ghosts} ghost(s) working"}></span>
-          <% end %>
-        </div>
-        <div class="nav-links">
-          <%!-- Overview & Operations --%>
-          <a href={@prefix} class={if @current_path == "/", do: "active"}>Overview</a>
-          <a href={"#{@prefix}/studio"} class={if active?(@current_path, "/studio"), do: "active"}>Studio</a>
-          <a href={"#{@prefix}/missions"} class={if active?(@current_path, "/missions"), do: "active"}>Missions</a>
-          <a href={"#{@prefix}/progress"} class={if @current_path == "/progress", do: "active"}>Activity</a>
-          <a href={"#{@prefix}/costs"} class={if @current_path == "/costs", do: "active"}>Costs</a>
-          <a href={"#{@prefix}/timeline"} class={if active?(@current_path, "/timeline"), do: "active"}>Timeline</a>
-          <a href={"#{@prefix}/health"} class={if @current_path == "/health", do: "active"}>Health</a>
-          <a href={"#{@prefix}/approvals"} class={if active?(@current_path, "/approvals"), do: "active"}>
-            Approvals
-            <%= if @pending_approvals > 0 do %>
-              <span class="nav-badge nav-badge-orange">{@pending_approvals}</span>
-            <% end %>
-          </a>
-          <a href={"#{@prefix}/questions"} class={if active?(@current_path, "/questions"), do: "active"}>
-            Questions
-            <%= if @open_questions > 0 do %>
-              <span class="nav-badge nav-badge-orange">{@open_questions}</span>
-            <% end %>
-          </a>
-
-          <div class="nav-sep"></div>
-
-          <%!-- Infrastructure & Internals --%>
-          <a href={"#{@prefix}/ghosts"} class={if @current_path == "/ghosts", do: "active"}>Ghosts</a>
-          <a href={"#{@prefix}/shells"} class={if @current_path == "/shells", do: "active"}>Shells</a>
-          <a href={"#{@prefix}/merges"} class={if @current_path == "/merges", do: "active"}>Merges</a>
-          <a href={"#{@prefix}/links"} class={if @current_path == "/links", do: "active"}>Links</a>
-          <a href={"#{@prefix}/rollback"} class={if @current_path == "/rollback", do: "active"}>Rollback</a>
-          <a href={"#{@prefix}/models"} class={if @current_path == "/models", do: "active"}>Models</a>
-
-          <div class="nav-sep"></div>
-
-          <%!-- Configuration --%>
-          <a href={"#{@prefix}/sectors"} class={if @current_path == "/sectors", do: "active"}>Sectors</a>
-          <a href={"#{@prefix}/workflows"} class={if @current_path == "/workflows", do: "active"}>Workflows</a>
-          <a href={"#{@prefix}/providers"} class={if @current_path == "/providers", do: "active"}>Providers</a>
-          <a href={"#{@prefix}/settings"} class={if active?(@current_path, "/settings"), do: "active"}>Settings</a>
-          <span style="font-size:0.7rem; color:#484f58; cursor:help" title="Press ? for keyboard shortcuts">?</span>
-
-          <%!-- The panic control lives in the nav, not on one page: when
-                something is running away you should not have to navigate to
-                reach it. Only rendered when there is something to stop. --%>
-          <button
-            :if={@active_ghosts > 0 and not @confirming_stop}
-            phx-click="confirm_stop_all"
-            phx-target={@myself}
-            class="nav-stop"
-            title={"Stop all #{@active_ghosts} working ghost(s)"}
-          >
-            Stop All
-          </button>
-          <span :if={@confirming_stop} class="nav-stop-confirm">
-            Stop {@active_ghosts} ghost(s)?
-            <button phx-click="stop_all" phx-target={@myself} class="nav-stop">Yes</button>
-            <button phx-click="cancel_stop_all" phx-target={@myself} class="nav-stop-cancel">No</button>
+    <div class="layout">
+      <nav class="rail">
+        <a href="/" class="rail-logo" title={"GiTF v#{GiTF.version()}"}>
+          G
+          <span :if={@active_ghosts > 0} class="nav-activity pulse" style="background:var(--ok)" title={"#{@active_ghosts} ghost(s) working"}></span>
+        </a>
+        <a :for={{key, label, icon, _children} <- concepts()} href={concept_home(key)} class={["rail-item", concept_for(@current_path) == key && "active"]}>
+          <span class="rail-badge-anchor">
+            {raw(icon)}
+            <span :if={key == :operations and @pending_approvals + @open_questions > 0} class="rail-count">{@pending_approvals + @open_questions}</span>
           </span>
-          <span :if={@stop_result && @active_ghosts == 0} class="nav-stop-result">{@stop_result}</span>
-        </div>
+          {label}
+        </a>
+        <div class="rail-spacer"></div>
+        <button
+          :if={@active_ghosts > 0 and not @confirming_stop}
+          phx-click="confirm_stop_all"
+          phx-target={@myself}
+          class="rail-item rail-stop"
+          title={"Stop all #{@active_ghosts} working ghost(s)"}
+        >
+          <svg class="rail-ico" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+          Stop all
+        </button>
+        <span :if={@confirming_stop} class="rail-stop-confirm">
+          Stop {@active_ghosts}?
+          <button phx-click="stop_all" phx-target={@myself} class="yes">Yes</button>
+          <button phx-click="cancel_stop_all" phx-target={@myself}>No</button>
+        </span>
+        <span :if={@stop_result && @active_ghosts == 0} class="rail-stop-confirm">{@stop_result}</span>
+        <span class="rail-version">v{GiTF.version()}</span>
       </nav>
-      <main class="main">
-        <div :if={Phoenix.Flash.get(@parent_flash, :info)} class="flash-info" style="display:flex; justify-content:space-between; align-items:center">
-          <span>{Phoenix.Flash.get(@parent_flash, :info)}</span>
-          <button phx-click="lv:clear-flash" phx-value-key="info" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
+      <div style="min-width:0">
+        <div class="subnav">
+          <a :for={{label, path, badge} <- children_for(concept_for(@current_path), @pending_approvals, @open_questions)} href={"#{@prefix}#{path}"} class={(@current_path == path or (path != "/" and active?(@current_path, path))) && "active"}>
+            {label}
+            <span :if={badge && badge > 0} class="nav-badge nav-badge-orange">{badge}</span>
+          </a>
         </div>
-        <div :if={Phoenix.Flash.get(@parent_flash, :error)} class="flash-error" style="display:flex; justify-content:space-between; align-items:center">
-          <span>{Phoenix.Flash.get(@parent_flash, :error)}</span>
-          <button phx-click="lv:clear-flash" phx-value-key="error" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
-        </div>
-        {render_slot(@inner_block)}
-      </main>
+        <main class="main">
+          <div :if={Phoenix.Flash.get(@parent_flash, :info)} class="flash-info" style="display:flex; justify-content:space-between; align-items:center">
+            <span>{Phoenix.Flash.get(@parent_flash, :info)}</span>
+            <button phx-click="lv:clear-flash" phx-value-key="info" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
+          </div>
+          <div :if={Phoenix.Flash.get(@parent_flash, :error)} class="flash-error" style="display:flex; justify-content:space-between; align-items:center">
+            <span>{Phoenix.Flash.get(@parent_flash, :error)}</span>
+            <button phx-click="lv:clear-flash" phx-value-key="error" style="background:none; border:none; color:inherit; cursor:pointer; font-size:1.1rem; padding:0 0.3rem; opacity:0.7">&times;</button>
+          </div>
+          {render_slot(@inner_block)}
+        </main>
+      </div>
 
       <%!-- Toast notifications --%>
       <%= if @toasts != [] do %>
@@ -200,7 +170,7 @@ defmodule GiTF.Dashboard.AppLayout do
               <span style="flex:1">{toast.message}</span>
               <button
                 phx-click={JS.hide(to: "#toast-#{toast.id}", transition: {"transition-opacity duration-200", "opacity-100", "opacity-0"})}
-                style="background:none; border:none; color:#6b7280; cursor:pointer; font-size:1rem; padding:0; line-height:1"
+                style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:0; line-height:1"
               >&times;</button>
             </div>
           <% end %>
@@ -212,5 +182,100 @@ defmodule GiTF.Dashboard.AppLayout do
 
   defp active?(current, prefix) do
     current == prefix or String.starts_with?(current, prefix <> "/")
+  end
+
+  # -- the seven concepts (GiTF Control Surface plan §03) ----------------------
+
+  @concept_paths %{
+    overview: ["/", "/progress", "/costs"],
+    operations: [
+      "/missions",
+      "/approvals",
+      "/questions",
+      "/merges",
+      "/ghosts",
+      "/shells",
+      "/links"
+    ],
+    systems: ["/health", "/providers", "/models"],
+    resources: ["/sectors", "/rollback"],
+    investigations: ["/timeline"],
+    automation: ["/workflows", "/autonomy", "/studio"],
+    administration: ["/settings"]
+  }
+
+  defp concept_for(current_path) do
+    Enum.find_value(@concept_paths, :overview, fn {concept, paths} ->
+      Enum.any?(paths, fn
+        "/" -> current_path == "/"
+        p -> current_path == p or String.starts_with?(current_path, p <> "/")
+      end) && concept
+    end)
+  end
+
+  defp concept_home(:overview), do: "/dashboard/"
+  defp concept_home(concept), do: "/dashboard" <> hd(@concept_paths[concept])
+
+  defp children_for(concept, approvals, questions) do
+    case concept do
+      :overview ->
+        [{"Overview", "/", nil}, {"Activity", "/progress", nil}, {"Costs", "/costs", nil}]
+
+      :operations ->
+        [
+          {"Missions", "/missions", nil},
+          {"Approvals", "/approvals", approvals},
+          {"Questions", "/questions", questions},
+          {"Merges", "/merges", nil},
+          {"Ghosts", "/ghosts", nil},
+          {"Shells", "/shells", nil},
+          {"Links", "/links", nil}
+        ]
+
+      :systems ->
+        [{"Health", "/health", nil}, {"Providers", "/providers", nil}, {"Models", "/models", nil}]
+
+      :resources ->
+        [{"Sectors", "/sectors", nil}, {"Rollback", "/rollback", nil}]
+
+      :investigations ->
+        [{"Timeline", "/timeline", nil}]
+
+      :automation ->
+        [
+          {"Workflows", "/workflows", nil},
+          {"Autonomy", "/autonomy", nil},
+          {"Studio", "/studio", nil}
+        ]
+
+      :administration ->
+        [{"Settings", "/settings", nil}]
+    end
+  end
+
+  defp concepts do
+    [
+      {:overview, "Overview",
+       ~s(<svg class="rail-ico" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="2"/><rect x="13" y="13" width="7.5" height="7.5" rx="2"/></svg>),
+       nil},
+      {:operations, "Operations",
+       ~s(<svg class="rail-ico" viewBox="0 0 24 24"><path d="M3.5 13.5 6 5.5h12l2.5 8"/><path d="M3.5 13.5V18a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-4.5h-5a3.5 3.5 0 0 1-7 0h-5z"/></svg>),
+       nil},
+      {:systems, "Systems",
+       ~s(<svg class="rail-ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="16" height="6.5" rx="1.5"/><path d="M7.2 7.2h.01M7.2 16.7h.01"/></svg>),
+       nil},
+      {:resources, "Resources",
+       ~s(<svg class="rail-ico" viewBox="0 0 24 24"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h4l2 2.5h7A1.5 1.5 0 0 1 20 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/></svg>),
+       nil},
+      {:investigations, "Investigate",
+       ~s(<svg class="rail-ico" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15.5 15.5 4.5 4.5"/></svg>),
+       nil},
+      {:automation, "Automation",
+       ~s(<svg class="rail-ico" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg>),
+       nil},
+      {:administration, "Admin",
+       ~s(<svg class="rail-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 4v2.4M12 17.6V20M4 12h2.4M17.6 12H20M6.3 6.3l1.7 1.7M16 16l1.7 1.7M17.7 6.3 16 8M8 16l-1.7 1.7"/></svg>),
+       nil}
+    ]
   end
 end
