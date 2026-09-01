@@ -36,7 +36,7 @@ fi
 # mission (OOM-killed 56x on t4g.small). Swap turns future spikes into
 # slowdowns instead of SIGKILLs.
 if ! grep -q swapfile /etc/fstab; then
-  fallocate -l 2G /swapfile
+  fallocate -l 4G /swapfile  # debug Tauri builds on 4 GiB RAM need it
   chmod 600 /swapfile
   mkswap /swapfile
   swapon /swapfile
@@ -57,6 +57,15 @@ curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/a
 unzip -qo /tmp/awscliv2.zip -d /tmp
 /tmp/aws/install --update
 rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# Runtime-verification probe deps (priv/probes/cora): the app is BUILT and
+# DRIVEN under Xvfb + tauri-driver/WebKitWebDriver during validation. These
+# lived only on the root volume and were lost in the 2026-09-01 instance
+# replacement — cloud-init owns them now. (tauri-driver + cargo live in
+# /var/lib/gitf/.cargo on the data volume.)
+apt-get install -y xvfb webkit2gtk-driver sqlite3 build-essential pkg-config \
+  libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev libxdo-dev file
 
 # GitHub CLI (official apt repo)
 install -dm 0755 /etc/apt/keyrings
