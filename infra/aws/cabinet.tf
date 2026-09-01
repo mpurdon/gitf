@@ -88,6 +88,14 @@ data "aws_iam_policy_document" "cabinet" {
     resources = ["arn:aws:ssm:${var.region}:*:parameter/${var.project}/*"]
   }
 
+  # Ministry webhook secrets are minted on the Cabinet and handed to the
+  # ministry box through Parameter Store, never through an operator session.
+  statement {
+    sid       = "PublishCabinetParameters"
+    actions   = ["ssm:PutParameter"]
+    resources = ["arn:aws:ssm:${var.region}:*:parameter/${var.project}/cabinet/*"]
+  }
+
   statement {
     sid       = "DescribeInstances"
     actions   = ["ec2:DescribeInstances", "ec2:DescribeInstanceStatus"]
