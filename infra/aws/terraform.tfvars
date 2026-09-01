@@ -1,4 +1,4 @@
-factory_tailnet_ip = "100.67.128.58"
+factory_tailnet_ip = "100.85.242.81"
 google_site_verification = "google-site-verification=nhRU9QsFsXrQsx3EkZvhoNk2HzjI0LNqz4oX-_97SXg"
 instance_type = "t4g.medium"
 cabinet_tailnet_ip = "100.106.202.121"

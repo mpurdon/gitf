@@ -401,6 +401,13 @@ What the Cabinet does:
 - **Ingress** — point every ministry's GitHub webhooks at
   `POST /hooks/<slug>`. Expose ONLY that path publicly via
   `tailscale funnel` path routing; everything else stays tailnet-only.
+  Live: `sudo tailscale funnel --bg --https=8443 --set-path=/hooks
+  http://127.0.0.1:4000/hooks` on the cabinet (port 8443 — Caddy owns
+  443 for the tailnet dashboard), so GitHub webhooks point at
+  `https://gitf-cabinet.tailcf2c46.ts.net:8443/hooks/<slug>`. Creating
+  the hook needs repo admin — the ministry PAT deliberately lacks it; the
+  operator adds it once with the secret from Parameter Store
+  (`/gitf/cabinet/<slug>-webhook-secret`).
   Verified per-ministry; the event is classified (bug / feature /
   pr_review / ci / noise) and the ministry's JDM ruleset under its mode
   decides wake / queue / drop. Every failure queues — never wakes.
