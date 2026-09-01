@@ -1,37 +1,42 @@
 defmodule GiTF.Dashboard.CabinetLive do
   @moduledoc """
-  The Cabinet Console — the fleet's entire operator surface, served at
+  The Cabinet Console — the Cabinet's entire operator surface, served at
   `/` in cabinet mode by `GiTF.Web.CabinetRouter` under its own chrome
   (`GiTF.Dashboard.CabinetLayouts`), never the factory dashboard's.
 
   Frame (GiTF Control Surface plan §07, operator-chosen): dark icon rail
   on the left, workspace in the middle, contextual inspector on the
-  right. Views: Overview · Inbox · Systems · Registry · Policy. Selecting
-  a ministry or an activation fills the inspector with
-  Overview / Why / Raw — the why-chain reads the decision provenance the
-  Gate records on every inbox entry (rule row, mode, cap state).
+  right. Views: Overview · Inbox · Systems · Registry · Policy.
+  Selecting a ministry or an activation fills the inspector — the
+  why-chain reads the decision provenance the Gate records on every
+  inbox entry (rule row, mode, cap state). Every operator act lands in
+  the activity feed with the real actor.
   """
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
   import Phoenix.HTML, only: [raw: 1]
 
-  alias GiTF.Cabinet.{Fleet, Gate, Registry}
+  alias GiTF.Cabinet.{Activity, Fleet, Gate, Registry, Snapshot}
 
   @refresh :timer.seconds(20)
 
   @views ~w(overview inbox systems registry policy)
+  @ifilters ~w(waiting woke dropped all)
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     if connected?(socket), do: Process.send_after(self(), :refresh, @refresh)
 
     {:ok,
      socket
      |> assign(:page_title, "Cabinet")
+     |> assign(:actor, (is_map(session) && session["tailnet_login"]) || "operator")
      |> assign(:view, "overview")
      |> assign(:sel, nil)
      |> assign(:itab, "overview")
+     |> assign(:ifilter, "waiting")
+     |> assign(:editing, nil)
      |> init_toasts()
      |> load()}
   end
@@ -57,8 +62,14 @@ defmodule GiTF.Dashboard.CabinetLive do
     {:noreply, assign(socket, :itab, tab)}
   end
 
+  def handle_event("ifilter", %{"filter" => f}, socket) when f in @ifilters do
+    {:noreply, assign(socket, :ifilter, f)}
+  end
+
   def handle_event("wake", %{"id" => id}, socket) do
     with %{} = ministry <- Registry.get(id), :ok <- Fleet.wake(ministry) do
+      Activity.record(socket.assigns.actor, "wake", ministry.slug, "starting")
+
       {:noreply,
        socket |> put_flash(:info, "Waking #{ministry.slug} — healthy in ~60–90s.") |> load()}
     else
@@ -69,6 +80,7 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   def handle_event("stop", %{"id" => id}, socket) do
     with %{} = ministry <- Registry.get(id), :ok <- Fleet.stop(ministry) do
+      Activity.record(socket.assigns.actor, "stop", ministry.slug, "stopping")
       {:noreply, socket |> put_flash(:info, "Stopping #{ministry.slug}.") |> load()}
     else
       other ->
@@ -79,6 +91,7 @@ defmodule GiTF.Dashboard.CabinetLive do
   def handle_event("set_mode", %{"id" => id, "mode" => mode}, socket) do
     case Registry.set_mode(id, mode) do
       {:ok, m} ->
+        Activity.record(socket.assigns.actor, "mode", m.slug, mode)
         {:noreply, socket |> put_flash(:info, "#{m.slug} is now in #{mode} mode.") |> load()}
 
       other ->
@@ -89,10 +102,87 @@ defmodule GiTF.Dashboard.CabinetLive do
   def handle_event("start_entry", %{"id" => id}, socket) do
     case Gate.start_queued(id) do
       :ok ->
+        entry = Enum.find(socket.assigns.inbox, &(&1.id == id))
+        Activity.record(socket.assigns.actor, "start", (entry && entry.summary) || id, "waking")
         {:noreply, socket |> put_flash(:info, "Waking the factory and forwarding.") |> load()}
 
       other ->
         {:noreply, put_flash(socket, :error, "Start failed: #{inspect(other)}")}
+    end
+  end
+
+  def handle_event("snapshot", %{"id" => id}, socket) do
+    with %{} = ministry <- Registry.get(id) do
+      case Snapshot.refresh(ministry) do
+        :ok ->
+          {:noreply, socket |> put_flash(:info, "Snapshot refreshed from the factory.") |> load()}
+
+        {:error, reason} ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             "Snapshot needs a running, reachable factory (#{inspect(reason)})."
+           )}
+      end
+    end
+  end
+
+  def handle_event("edit", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :editing, id)}
+  end
+
+  def handle_event("edit", _params, socket) do
+    {:noreply, assign(socket, :editing, :new)}
+  end
+
+  def handle_event("cancel_edit", _params, socket) do
+    {:noreply, assign(socket, :editing, nil)}
+  end
+
+  def handle_event("save_ministry", %{"ministry_id" => id} = params, socket) when id != "" do
+    case Registry.edit(id, params) do
+      {:ok, m} ->
+        Activity.record(socket.assigns.actor, "edit", m.slug, "registry updated")
+
+        {:noreply,
+         socket |> assign(:editing, nil) |> put_flash(:info, "#{m.slug} updated.") |> load()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Edit failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("save_ministry", params, socket) do
+    case Registry.create(params) do
+      {:ok, m} ->
+        Activity.record(socket.assigns.actor, "register", m.slug, "ministry registered")
+
+        {:noreply,
+         socket |> assign(:editing, nil) |> put_flash(:info, "#{m.slug} registered.") |> load()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Register failed: #{inspect(reason)}")}
+    end
+  end
+
+  # One document, two views — clicking a cell in the Policy grid cycles
+  # its action (wake → queue → drop → wake) and writes the JDM back. The
+  # failure direction stays queue: an edit that can't be applied changes
+  # nothing.
+  def handle_event("cycle_rule", %{"id" => id, "rule" => rule_n}, socket) do
+    with %{} = ministry <- Registry.get(id),
+         {n, ""} <- Integer.parse(rule_n),
+         {:ok, updated_doc} <- cycle_rule_action(ministry, n),
+         {:ok, m} <- Registry.update(id, &Map.put(&1, :rules, updated_doc)) do
+      row = Enum.find(policy_rows(m), &(&1.n == n))
+      Activity.record(socket.assigns.actor, "rule", "#{m.slug} rule #{n}", row && row.action)
+
+      {:noreply,
+       socket |> put_flash(:info, "Rule #{n}: #{row && row.action} — first hit wins.") |> load()}
+    else
+      other ->
+        {:noreply, put_flash(socket, :error, "Rule edit failed: #{inspect(other)}")}
     end
   end
 
@@ -105,6 +195,7 @@ defmodule GiTF.Dashboard.CabinetLive do
     socket
     |> assign(:ministries, ministries)
     |> assign(:inbox, Enum.take(Gate.inbox(), 50))
+    |> assign(:activity, Activity.list(20))
   end
 
   # -- selection ---------------------------------------------------------------
@@ -115,7 +206,7 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   defp find_by_id(list, id), do: Enum.find(list, &(&1.id == id))
 
-  # -- vocabulary helpers ------------------------------------------------------
+  # -- helpers -----------------------------------------------------------------
 
   defp running?(m), do: m[:box_state] == "running"
 
@@ -126,13 +217,21 @@ defmodule GiTF.Dashboard.CabinetLive do
       "stopping" -> {"recon", "Stopping"}
       "stopped" -> {"off", "Stopped"}
       nil -> {"off", "No factory"}
-      other -> {"off", other}
+      other -> {"off", to_string(other)}
     end
   end
 
   defp queued(inbox, slug \\ nil) do
     Enum.filter(inbox, &(&1.status == "queued" and (slug == nil or &1.ministry_slug == slug)))
   end
+
+  defp filtered_inbox(inbox, "waiting"), do: Enum.filter(inbox, &(&1.status == "queued"))
+
+  defp filtered_inbox(inbox, "woke"),
+    do: Enum.filter(inbox, &(&1.status in ["waking", "forwarded", "forward_failed"]))
+
+  defp filtered_inbox(inbox, "dropped"), do: Enum.filter(inbox, &(&1.status == "dropped"))
+  defp filtered_inbox(inbox, _all), do: inbox
 
   defp initials(name) do
     name
@@ -148,6 +247,20 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   defp money(nil), do: "—"
   defp money(n) when is_number(n), do: "$" <> :erlang.float_to_binary(n / 1, decimals: 2)
+
+  defp money(str) when is_binary(str) do
+    case Float.parse(str) do
+      {n, _} -> money(n)
+      :error -> "—"
+    end
+  end
+
+  defp spend_line(m) do
+    case m[:spend_usd] do
+      nil -> "no snapshot yet"
+      n -> "#{money(n)} recent · snap #{hhmm(m[:spend_at])}"
+    end
+  end
 
   # The why-chain, straight from the Gate's recorded provenance.
   defp why(%{decision: %{} = d} = entry) do
@@ -186,24 +299,32 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   defp reason_sentence(_, _), do: nil
 
-  # Renders the ministry's JDM decision table as class-per-row cells.
+  # Renders the ministry's JDM decision table as one row per rule.
   # One document, two views: this grid and the Raw tab (Tailscale's ACL
   # editor pattern). Unknown constructs simply don't render here — the
   # raw view is always the truth.
+  defp policy_columns(ministry) do
+    doc = ministry[:rules] || GiTF.Cabinet.JDM.default_rules()
+
+    with %{"nodes" => nodes} <- doc,
+         %{"content" => %{"inputs" => inputs}} <-
+           Enum.find(nodes, &(&1["type"] == "decisionTableNode")) do
+      Enum.map(inputs, &(&1["name"] || &1["field"]))
+    else
+      _ -> []
+    end
+  end
+
   defp policy_rows(ministry) do
     doc = ministry[:rules] || GiTF.Cabinet.JDM.default_rules()
 
     with %{"nodes" => nodes} <- doc,
          %{"content" => %{"rules" => rules, "inputs" => inputs, "outputs" => [out | _]}} <-
            Enum.find(nodes, &(&1["type"] == "decisionTableNode")) do
-      class_id = Enum.find_value(inputs, &(&1["field"] == "class" && &1["id"]))
-      mode_id = Enum.find_value(inputs, &(&1["field"] == "mode" && &1["id"]))
-
       for {rule, idx} <- Enum.with_index(rules, 1) do
         %{
           n: idx,
-          class: unquote_cell(rule[class_id]),
-          mode: unquote_cell(rule[mode_id]),
+          cells: Enum.map(inputs, fn i -> unquote_cell(rule[i["id"]]) end),
           action: unquote_cell(rule[out["id"]])
         }
       end
@@ -212,9 +333,46 @@ defmodule GiTF.Dashboard.CabinetLive do
     end
   end
 
+  @action_cycle %{"wake" => "queue", "queue" => "drop", "drop" => "wake"}
+
+  defp cycle_rule_action(ministry, n) do
+    doc = ministry[:rules] || GiTF.Cabinet.JDM.default_rules()
+
+    with %{"nodes" => nodes} <- doc,
+         node_idx when is_integer(node_idx) <-
+           Enum.find_index(nodes, &(&1["type"] == "decisionTableNode")),
+         %{"content" => %{"rules" => rules, "outputs" => [out | _]}} <- Enum.at(nodes, node_idx),
+         rule when is_map(rule) <- Enum.at(rules, n - 1) do
+      current = rule[out["id"]] |> to_string() |> String.trim("\"")
+      next = Map.get(@action_cycle, current, "queue")
+      new_rule = Map.put(rule, out["id"], ~s("#{next}"))
+      new_rules = List.replace_at(rules, n - 1, new_rule)
+
+      new_doc =
+        update_in(doc, ["nodes"], fn ns ->
+          List.update_at(ns, node_idx, fn node ->
+            put_in(node, ["content", "rules"], new_rules)
+          end)
+        end)
+
+      if GiTF.Cabinet.JDM.supported?(new_doc), do: {:ok, new_doc}, else: {:error, :unsupported}
+    else
+      _ -> {:error, :no_such_rule}
+    end
+  end
+
   defp unquote_cell(nil), do: "any"
   defp unquote_cell(""), do: "any"
-  defp unquote_cell(v) when is_binary(v), do: String.trim(v, "\"")
+
+  # A JDM cell is a literal (`"bug"`, `false`) or an "in" list
+  # (`"normal", "vacation"`) — render lists as a · b.
+  defp unquote_cell(v) when is_binary(v) do
+    v
+    |> String.split(",")
+    |> Enum.map(&(&1 |> String.trim() |> String.trim("\"")))
+    |> Enum.join(" · ")
+  end
+
   defp unquote_cell(v), do: to_string(v)
 
   defp raw_json(term) do
@@ -256,7 +414,7 @@ defmodule GiTF.Dashboard.CabinetLive do
       </nav>
 
       <main class="workspace">
-        <div class="crumbs"><b>Fleet</b><span>·</span><span>{length(@ministries)} ministries</span></div>
+        <div class="crumbs"><b>Cabinet</b><span>·</span><span>{length(@ministries)} ministries</span><span>·</span><span>{@actor}</span></div>
 
         <%= case @view do %>
           <% "overview" -> %>
@@ -279,8 +437,8 @@ defmodule GiTF.Dashboard.CabinetLive do
             </div>
 
             <div class="panel">
-              <div class="panel-head"><h2>Ministries</h2></div>
-              <div :if={@ministries == []} class="empty">No ministries registered — use the register_ministry tool.</div>
+              <div class="panel-head"><h2>Ministries</h2><button class="end" phx-click="view" phx-value-view="registry">Registry</button></div>
+              <div :if={@ministries == []} class="empty">No ministries registered yet — Registry → Register a ministry.</div>
               <button :for={m <- @ministries} class={["mrow", match?({"ministry", id} when id == m.id, @sel) && "sel"]} phx-click="select" phx-value-type="ministry" phx-value-id={m.id}>
                 <span class="who">
                   <span class={["avatar", !running?(m) && "dim"]}>{initials(m.name)}</span>
@@ -291,7 +449,7 @@ defmodule GiTF.Dashboard.CabinetLive do
                 </span>
                 <.state_badge ministry={m} />
                 <span class="stat"><span class="k">Mode</span><span class="v"><b>{m.mode}</b></span></span>
-                <span class="stat"><span class="k">Cap</span><span class="v"><b>{money(m[:cost_cap_usd])}</b> / month</span></span>
+                <span class="stat"><span class="k">Spend</span><span class="v"><b>{money(m[:spend_usd])}</b> · cap {money(m[:cost_cap_usd])}</span></span>
                 <span class="stat"><span class="k">Waiting</span><span class="v"><b>{length(queued(@inbox, m.slug))}</b></span></span>
               </button>
             </div>
@@ -302,15 +460,32 @@ defmodule GiTF.Dashboard.CabinetLive do
               <.inbox_row :for={e <- Enum.take(@waiting, 5)} entry={e} sel={@sel} show_start={true} />
             </div>
 
-          <% "inbox" -> %>
-            <div class="view-head"><h1>Inbox</h1><span class="sub">activations — what the Cabinet decided, and what waits for you</span></div>
             <div class="panel">
-              <div :if={@inbox == []} class="empty">No activations yet — deliveries land here.</div>
-              <.inbox_row :for={e <- @inbox} entry={e} sel={@sel} show_start={e.status == "queued"} />
+              <div class="panel-head"><h2>Activity</h2></div>
+              <div :if={@activity == []} class="empty">Nothing yet — wakes, stops, mode changes and starts land here.</div>
+              <div :for={a <- @activity} class="irow" style="grid-template-columns:64px minmax(0,1fr) auto">
+                <span class="when">{hhmm(a.at)}</span>
+                <span><b>{a.actor}</b> · {a.action} <span class="mono">{a.target}</span></span>
+                <span class="muted" style="font-size:12.5px">{a.result}</span>
+              </div>
+            </div>
+
+          <% "inbox" -> %>
+            <div class="view-head">
+              <h1>Inbox</h1>
+              <span class="sub">activations — what the Cabinet decided, and what waits for you</span>
+              <span class="seg end">
+                <button :for={f <- ["waiting", "woke", "dropped", "all"]} class={@ifilter == f && "on"} phx-click="ifilter" phx-value-filter={f}>{f}</button>
+              </span>
+            </div>
+            <div class="panel">
+              <% shown = filtered_inbox(@inbox, @ifilter) %>
+              <div :if={shown == []} class="empty">Nothing here under "{@ifilter}".</div>
+              <.inbox_row :for={e <- shown} entry={e} sel={@sel} show_start={e.status == "queued"} />
             </div>
 
           <% "systems" -> %>
-            <div class="view-head"><h1>Systems</h1><span class="sub">the fleet as it is wired — health on every node</span></div>
+            <div class="view-head"><h1>Systems</h1><span class="sub">the Cabinet as it is wired — health on every node</span></div>
             <div class="systree">
               <div class="sysnode">
                 <span class="sysicon"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M8 9h8M8 15h8" /></svg></span>
@@ -331,30 +506,73 @@ defmodule GiTF.Dashboard.CabinetLive do
                   <span class="sysicon"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6.5" rx="1.5" /><rect x="4" y="13.5" width="16" height="6.5" rx="1.5" /><path d="M7.2 7.2h.01M7.2 16.7h.01" /></svg></span>
                   <span class="nm"><span class="ty">Factory</span>{m[:instance_id] || "not provisioned"}</span>
                   <span class="kv">{if m.url, do: m.url, else: "no url"}</span>
-                  <span class="kv"><b>{m[:box_state] || "—"}</b></span>
-                  <span class="kv"></span>
+                  <span class="kv"><b>{m[:box_state] || "—"}</b>{if m[:health], do: " · health #{m.health}"}</span>
+                  <span class="kv">{spend_line(m)}</span>
                 </div>
               <% end %>
             </div>
 
           <% "registry" -> %>
-            <div class="view-head"><h1>Registry</h1><span class="sub">ministries as configuration objects — secrets by NAME only</span></div>
+            <div class="view-head">
+              <h1>Registry</h1>
+              <span class="sub">ministries as configuration objects — secrets by NAME only</span>
+              <button class="btn pri sm end" phx-click="edit">Register a ministry</button>
+            </div>
+
+            <div :if={@editing == :new} class="panel">
+              <div class="panel-head"><h2>Register a ministry</h2></div>
+              <form phx-submit="save_ministry">
+                <div class="formgrid">
+                  <div class="field"><label>slug</label><input name="slug" placeholder="home-affairs" required /></div>
+                  <div class="field"><label>name</label><input name="name" placeholder="Home Affairs" /></div>
+                  <div class="field"><label>factory url</label><input name="url" placeholder="https://factory.ghostinthefactory.com" /></div>
+                  <div class="field"><label>factory instance id</label><input name="instance_id" placeholder="i-…" /></div>
+                  <div class="field"><label>webhook secret env</label><input name="webhook_secret_env" placeholder="GITF_MIN_…_WEBHOOK_SECRET" /></div>
+                  <div class="field"><label>api key env</label><input name="api_key_env" placeholder="GITF_MIN_…_API_KEY" /></div>
+                  <div class="field"><label>cost cap $/month</label><input name="cost_cap_usd" placeholder="100" /></div>
+                </div>
+                <div class="formfoot">
+                  <button type="button" class="btn sm" phx-click="cancel_edit">Cancel</button>
+                  <button type="submit" class="btn pri sm">Register</button>
+                </div>
+              </form>
+            </div>
+
             <div :for={m <- @ministries} class="panel">
-              <div class="panel-head"><h2>{m.name}</h2></div>
-              <div style="padding:6px 20px 18px">
+              <div class="panel-head">
+                <h2>{m.name}</h2>
+                <button :if={@editing != m.id} class="end" phx-click="edit" phx-value-id={m.id}>Edit</button>
+              </div>
+              <div :if={@editing != m.id} style="padding:6px 20px 18px">
                 <dl class="kv" style="border:0">
                   <dt>slug</dt><dd class="mono">{m.slug}</dd>
                   <dt>factory</dt><dd class="mono">{m[:instance_id] || "not provisioned"}</dd>
                   <dt>url</dt><dd>{m.url || "—"}</dd>
                   <dt>secrets</dt><dd class="mono" style="font-size:12px">{m[:webhook_secret_env] || "—"} · {m[:api_key_env] || "—"}</dd>
                   <dt>cost cap</dt><dd>{money(m[:cost_cap_usd])} / month</dd>
+                  <dt>spend</dt><dd>{spend_line(m)}</dd>
                   <dt>mode</dt><dd>{m.mode}</dd>
                 </dl>
               </div>
+              <form :if={@editing == m.id} phx-submit="save_ministry">
+                <input type="hidden" name="ministry_id" value={m.id} />
+                <div class="formgrid">
+                  <div class="field"><label>name</label><input name="name" value={m.name} /></div>
+                  <div class="field"><label>factory url</label><input name="url" value={m.url} /></div>
+                  <div class="field"><label>factory instance id</label><input name="instance_id" value={m[:instance_id]} /></div>
+                  <div class="field"><label>webhook secret env</label><input name="webhook_secret_env" value={m[:webhook_secret_env]} /></div>
+                  <div class="field"><label>api key env</label><input name="api_key_env" value={m[:api_key_env]} /></div>
+                  <div class="field"><label>cost cap $/month</label><input name="cost_cap_usd" value={m[:cost_cap_usd]} /></div>
+                </div>
+                <div class="formfoot">
+                  <button type="button" class="btn sm" phx-click="cancel_edit">Cancel</button>
+                  <button type="submit" class="btn pri sm">Save</button>
+                </div>
+              </form>
             </div>
 
           <% "policy" -> %>
-            <div class="view-head"><h1>Policy</h1><span class="sub">activation rulesets — one document, this grid and the raw JDM</span></div>
+            <div class="view-head"><h1>Policy</h1><span class="sub">activation rulesets — click an action to cycle it; the raw JDM is the same document</span></div>
             <div :for={m <- @ministries} class="panel">
               <div class="panel-head">
                 <h2>{m.name}</h2>
@@ -363,12 +581,19 @@ defmodule GiTF.Dashboard.CabinetLive do
                 </span>
               </div>
               <table class="polgrid">
-                <tr><th>#</th><th>class</th><th>mode</th><th>action</th></tr>
+                <tr>
+                  <th>#</th>
+                  <th :for={col <- policy_columns(m)}>{col}</th>
+                  <th>action</th>
+                </tr>
                 <tr :for={row <- policy_rows(m)}>
                   <td class="mono muted">{row.n}</td>
-                  <td class="n">{row.class}</td>
-                  <td>{row.mode}</td>
-                  <td><span class={"cell #{row.action}"}>{row.action}</span></td>
+                  <td :for={cell <- row.cells} class={cell != "any" && "n"}>{cell}</td>
+                  <td>
+                    <button class="cellbtn" phx-click="cycle_rule" phx-value-id={m.id} phx-value-rule={row.n} title="Click to cycle wake → queue → drop">
+                      <span class={"cell #{row.action}"}>{row.action}</span>
+                    </button>
+                  </td>
                 </tr>
               </table>
               <div class="footnote">
@@ -395,6 +620,7 @@ defmodule GiTF.Dashboard.CabinetLive do
                 </span>
                 <button :if={!running?(m)} class="btn pri sm" phx-click="wake" phx-value-id={m.id}>Wake factory</button>
                 <button :if={running?(m)} class="btn sm" phx-click="stop" phx-value-id={m.id}>Stop factory</button>
+                <button :if={running?(m)} class="btn sm" phx-click="snapshot" phx-value-id={m.id}>Refresh snapshot</button>
                 <a :if={m.url} class="btn sm" href={m.url} target="_blank">Dashboard ↗</a>
               </div>
             </div>
@@ -404,8 +630,9 @@ defmodule GiTF.Dashboard.CabinetLive do
                 <% "overview" -> %>
                   <dl class="kv">
                     <dt>factory</dt><dd class="mono">{m[:instance_id] || "not provisioned"}</dd>
-                    <dt>state</dt><dd>{m[:box_state] || "—"}</dd>
+                    <dt>state</dt><dd>{m[:box_state] || "—"}{if m[:health], do: " · health #{m.health}"}</dd>
                     <dt>url</dt><dd>{m.url || "—"}</dd>
+                    <dt>spend</dt><dd>{spend_line(m)}</dd>
                     <dt>cost cap</dt><dd>{money(m[:cost_cap_usd])} / month</dd>
                   </dl>
                   <div class="rel">

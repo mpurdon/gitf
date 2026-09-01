@@ -179,12 +179,31 @@ defmodule GiTF.Dashboard.CabinetLayouts do
           .insp pre.raw{border-radius:10px;border:1px solid var(--line-2)}
           .empty{color:var(--muted);font-size:13px;padding:16px 20px}
 
+          .field{display:grid;gap:4px;margin-bottom:12px}
+          .field label{font-size:11.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;font-weight:600}
+          .field input{font:inherit;color:var(--text);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;width:100%}
+          .field input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+          .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px;padding:14px 20px 4px}
+          .formfoot{display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px}
+          .cellbtn{border:0;background:none;padding:0;cursor:pointer}
           .flash{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:10px 18px;font-size:13.5px;z-index:50}
           .flash.err{border-color:var(--crit);color:var(--crit)}
         </style>
       </head>
       <body>
         {@inner_content}
+        <script src="/assets/phoenix.min.js">
+        </script>
+        <script src="/assets/phoenix_live_view.min.js">
+        </script>
+        <script>
+          const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+          const liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
+            params: { _csrf_token: csrfToken }
+          });
+          liveSocket.connect();
+          window.liveSocket = liveSocket;
+        </script>
       </body>
     </html>
     """
