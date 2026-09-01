@@ -13,6 +13,9 @@ and the Trajector requirement (work Bedrock, work identity, zero bleed).*
    EC2 box. Stopping the box is the tenancy control. Per-ministry config is
    that box's ordinary global config — no multi-tenant code inside the
    factory.
+   Every box is named `gitf-<ministry>` (EC2 `Name` tag = tailscale
+   hostname = DNS slug): `gitf-home-affairs`, `gitf-trajector`; the
+   Cabinet is `gitf-cabinet` (decided 2026-09-01).
 2. **All boxes in the one gitf AWS account** (515020252848). Ministries face
    the world only through their own GitHub identity; work model spend bills
    to work via a Bedrock profile on the work box.

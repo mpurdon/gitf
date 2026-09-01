@@ -387,6 +387,12 @@ release with `[cabinet] enabled = true` (or app env `:cabinet_mode`), which
 keeps the dashboard/MCP/Archive and skips the factory entirely. Plan of
 record: `docs/plans/ministry.md`.
 
+**Naming.** Every box is `gitf-<ministry>` everywhere a name appears:
+EC2 `Name` tag, tailscale hostname (`tailscale set --hostname
+gitf-home-affairs`), and the DNS slug. So: `gitf-home-affairs`,
+`gitf-trajector`, and the Cabinet is `gitf-cabinet`. A bare `gitf` machine
+is a leftover — delete it in the tailscale admin console.
+
 What the Cabinet does:
 
 - **Registry** — `:ministries` records (slug, name, box url, instance id,

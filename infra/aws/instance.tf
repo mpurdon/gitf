@@ -44,7 +44,10 @@ resource "aws_instance" "gitf" {
   })
 
   tags = {
-    Name            = var.project
+    # Naming convention (2026-09-01): every box is gitf-<ministry>; the
+    # tailscale hostname matches (gitf-home-affairs, gitf-trajector,
+    # gitf-cabinet). Tag changes are in-place — never a replacement.
+    Name            = "${var.project}-home-affairs"
     "gitf:ministry" = "home-affairs"
   }
 
