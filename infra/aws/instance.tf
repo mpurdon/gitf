@@ -52,6 +52,11 @@ resource "aws_instance" "gitf" {
     # AMI updates roll via `terraform apply -replace`; don't churn the box
     # every time Canonical publishes a new image.
     ignore_changes = [ami]
+    # A replacement throws away the root volume (release, /etc/gitf/gitf.env,
+    # tailscale identity, Caddy). The factory was silently replaced on
+    # 2026-09-01 by an apply whose plan nobody read; never again — a
+    # deliberate rebuild removes this line for one apply.
+    prevent_destroy = true
   }
 }
 
