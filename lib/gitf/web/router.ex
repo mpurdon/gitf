@@ -44,7 +44,7 @@ defmodule GiTF.Web.Router do
       bucket: :api
     )
 
-    plug(:require_local_or_api_key)
+    plug(GiTF.Web.ApiKeyGate)
   end
 
   pipeline :metrics do
@@ -56,7 +56,7 @@ defmodule GiTF.Web.Router do
       bucket: :metrics
     )
 
-    plug(:require_local_or_api_key)
+    plug(GiTF.Web.ApiKeyGate)
   end
 
   pipeline :dashboard do
@@ -246,74 +246,6 @@ defmodule GiTF.Web.Router do
     post("/mcp", ApiController, :mcp)
   end
 
-  # Restrict API to localhost unless a valid API key is provided.
-  # The API key is read from the section config file (api_key field).
-  #
-  # Local-IP auth bypass is gated by config:
-  #   config :gitf, :local_ip_bypass, true | false   (default: true in dev, false in prod)
-  #   config :gitf, :trust_x_forwarded_for, false    (if true, uses X-Forwarded-For for local? check)
-  #
-  # In reverse-proxied deployments all traffic appears as 127.0.0.1, so the
-  # bypass is unsafe unless explicitly enabled and (optionally) XFF is trusted.
-  defp require_local_or_api_key(conn, _opts) do
-    bypass_enabled? = Application.get_env(:gitf, :local_ip_bypass, false)
-    trust_xff? = Application.get_env(:gitf, :trust_x_forwarded_for, false)
-
-    remote_ip =
-      if trust_xff? do
-        case Plug.Conn.get_req_header(conn, "x-forwarded-for") do
-          [xff | _] ->
-            xff
-            |> String.split(",")
-            |> List.first()
-            |> String.trim()
-            |> parse_ip(conn.remote_ip)
-
-          _ ->
-            conn.remote_ip
-        end
-      else
-        conn.remote_ip
-      end
-
-    if bypass_enabled? and local_ip?(remote_ip) do
-      conn
-    else
-      case Plug.Conn.get_req_header(conn, "x-api-key") do
-        [key] when byte_size(key) > 0 ->
-          if valid_api_key?(key) do
-            conn
-          else
-            conn
-            |> Plug.Conn.put_status(401)
-            |> Phoenix.Controller.json(%{error: "invalid API key"})
-            |> Plug.Conn.halt()
-          end
-
-        _ ->
-          conn
-          |> Plug.Conn.put_status(401)
-          |> Phoenix.Controller.json(%{error: "API key required for non-local requests"})
-          |> Plug.Conn.halt()
-      end
-    end
-  end
-
-  defp local_ip?({127, 0, 0, 1}), do: true
-  defp local_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
-  defp local_ip?(_), do: false
-
-  defp parse_ip(str, fallback) do
-    case :inet.parse_address(String.to_charlist(str)) do
-      {:ok, ip} -> ip
-      _ -> fallback
-    end
-  end
-
-  defp valid_api_key?(key) do
-    case GiTF.Config.api_key() do
-      nil -> false
-      configured_key -> Plug.Crypto.secure_compare(key, configured_key)
-    end
-  end
+  # API authentication (localhost bypass + x-api-key) lives in
+  # GiTF.Web.ApiKeyGate — one seam shared with GiTF.Web.CabinetRouter.
 end

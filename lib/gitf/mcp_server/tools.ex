@@ -1,6 +1,18 @@
 defmodule GiTF.MCPServer.Tools do
   @moduledoc "MCP tool definitions with JSON Schema input specs."
 
+  @cabinet_tools ~w(health_check cabinet_status register_ministry set_ministry_mode
+                    wake_ministry stop_ministry cabinet_inbox start_inbox_entry ministry_call)
+
+  @doc """
+  The Cabinet's tool surface — fleet tools plus health, nothing of the
+  factory. `ministry_call` is the deliberate escape hatch: any factory
+  tool, executed BY the ministry's own factory, never here.
+  """
+  def cabinet, do: Enum.filter(all(), &(&1.name in @cabinet_tools))
+
+  def cabinet_tool_names, do: @cabinet_tools
+
   def all do
     [
       %{

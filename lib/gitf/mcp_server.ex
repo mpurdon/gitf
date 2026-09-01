@@ -123,10 +123,38 @@ defmodule GiTF.MCPServer do
   end
 
   defp handle_tools_list do
-    {:ok, %{tools: GiTF.MCPServer.Tools.all()}}
+    tools =
+      if GiTF.Cabinet.mode?(),
+        do: GiTF.MCPServer.Tools.cabinet(),
+        else: GiTF.MCPServer.Tools.all()
+
+    {:ok, %{tools: tools}}
   end
 
   defp handle_tools_call(%{"name" => name, "arguments" => args}) do
+    if GiTF.Cabinet.mode?() and name not in GiTF.MCPServer.Tools.cabinet_tool_names() do
+      {:ok,
+       %{
+         content: [
+           %{
+             type: "text",
+             text:
+               "Error: #{name} is a factory tool — the Cabinet does not run it. " <>
+                 "Use ministry_call to execute it on a ministry's factory."
+           }
+         ],
+         isError: true
+       }}
+    else
+      do_tools_call(name, args)
+    end
+  end
+
+  defp handle_tools_call(_) do
+    {:error, -32602, "Invalid params: name and arguments required"}
+  end
+
+  defp do_tools_call(name, args) do
     case GiTF.MCPServer.Handlers.call(name, args) do
       {:ok, text} ->
         {:ok, %{content: [%{type: "text", text: text}]}}
@@ -141,10 +169,6 @@ defmodule GiTF.MCPServer do
          content: [%{type: "text", text: "Internal error: #{Exception.message(e)}"}],
          isError: true
        }}
-  end
-
-  defp handle_tools_call(_) do
-    {:error, -32602, "Invalid params: name and arguments required"}
   end
 
   # Write directly to fd 1, bypassing the Erlang IO system.

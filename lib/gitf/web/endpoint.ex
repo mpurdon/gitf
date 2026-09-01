@@ -48,5 +48,13 @@ defmodule GiTF.Web.Endpoint do
   plug(Plug.MethodOverride)
   plug(Plug.Head)
   plug(GiTF.Web.RuntimeSessionPlug, endpoint: __MODULE__)
-  plug(GiTF.Web.Router)
+  # Cabinet mode is a HARD boundary: a different router with only the
+  # Cabinet's surface. Factory routes do not 404 politely — they do not
+  # exist. Decided at request time so one release serves both modes.
+  plug(:route_by_mode)
+
+  defp route_by_mode(conn, _opts) do
+    router = if GiTF.Cabinet.mode?(), do: GiTF.Web.CabinetRouter, else: GiTF.Web.Router
+    router.call(conn, router.init([]))
+  end
 end
