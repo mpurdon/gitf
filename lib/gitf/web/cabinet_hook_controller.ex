@@ -28,12 +28,9 @@ defmodule GiTF.Web.CabinetHookController do
         "headers" => forwardable_headers(conn)
       }
 
-      {outcome, _} = result = Gate.handle(ministry, event, conn.body_params, raw)
+      {outcome, _} = Gate.handle(ministry, event, conn.body_params, raw)
       Logger.info("Cabinet: #{slug} #{event} → #{outcome}")
       json(conn, %{ok: true, outcome: outcome, event: event})
-
-      _ = result
-      conn
     else
       _ ->
         conn |> put_status(404) |> json(%{error: "not found"})
