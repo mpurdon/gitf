@@ -23,13 +23,15 @@ defmodule GiTF.Cabinet.JDM do
 
   @doc """
   Evaluates a JDM document against an input map with string keys.
-  Returns `{:ok, output_map}` or `{:error, reason}` — the caller decides
-  what an error means (the Gate: queue).
+  Returns `{:ok, output_map, meta}` or `{:error, reason}` — the caller
+  decides what an error means (the Gate: queue). `meta.rule` is the
+  1-based index of the first-hit rule, so a decision can say WHICH row
+  decided it, not just what was decided.
   """
   def evaluate(doc, input) when is_map(doc) and is_map(input) do
     with {:ok, table} <- decision_table(doc),
-         {:ok, output} <- run_table(table, input) do
-      {:ok, output}
+         {:ok, output, meta} <- run_table(table, input) do
+      {:ok, output, meta}
     end
   end
 
@@ -62,13 +64,17 @@ defmodule GiTF.Cabinet.JDM do
       {:error, :unsupported}
     else
       rules
-      |> Enum.find(fn rule -> Enum.all?(inputs, &cell_matches?(rule[&1["id"]], &1, input)) end)
+      |> Enum.find_index(fn rule ->
+        Enum.all?(inputs, &cell_matches?(rule[&1["id"]], &1, input))
+      end)
       |> case do
         nil ->
           {:error, :no_match}
 
-        rule ->
-          {:ok, Map.new(outputs, fn out -> {out["field"], parse_literal(rule[out["id"]])} end)}
+        idx ->
+          rule = Enum.at(rules, idx)
+          output = Map.new(outputs, fn out -> {out["field"], parse_literal(rule[out["id"]])} end)
+          {:ok, output, %{rule: idx + 1, rule_count: length(rules)}}
       end
     end
   end

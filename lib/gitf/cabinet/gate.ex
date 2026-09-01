@@ -24,41 +24,46 @@ defmodule GiTF.Cabinet.Gate do
     class = Classifier.classify(event, payload)
 
     case decide(ministry, class) do
-      "drop" ->
+      {"drop", _prov} ->
         {:drop, class}
 
-      "wake" ->
-        entry = record(ministry, class, event, payload, "waking")
+      {"wake", prov} ->
+        entry = record(ministry, class, event, payload, "waking", prov)
         start_forward(ministry, entry, raw)
         {:wake, entry}
 
-      _queue ->
-        {:queue, record(ministry, class, event, payload, "queued")}
+      {_queue, prov} ->
+        {:queue, record(ministry, class, event, payload, "queued", prov)}
     end
   end
 
-  @doc "The ruleset verdict for `class` under the ministry's mode: \"wake\" | \"queue\" | \"drop\"."
+  @doc """
+  The ruleset verdict for `class` under the ministry's mode, WITH its
+  provenance: `{"wake" | "queue" | "drop", prov}`. The provenance map is
+  what lets the inbox answer "why?" — the rule row that matched, the mode
+  and cap state it saw, and when — instead of only what was decided.
+  """
   def decide(ministry, class) do
-    input = %{
-      "class" => to_string(class),
-      "mode" => to_string(ministry[:mode] || "normal"),
-      "over_cap" => over_cap?(ministry)
-    }
+    mode = to_string(ministry[:mode] || "normal")
+    over_cap = over_cap?(ministry)
+    input = %{"class" => to_string(class), "mode" => mode, "over_cap" => over_cap}
+
+    base = %{mode: mode, over_cap: over_cap, decided_at: DateTime.utc_now()}
 
     case JDM.evaluate(ministry[:rules] || JDM.default_rules(), input) do
-      {:ok, %{"action" => action}} when action in ["wake", "queue", "drop"] ->
-        action
+      {:ok, %{"action" => action}, meta} when action in ["wake", "queue", "drop"] ->
+        {action, Map.merge(base, %{action: action, rule: meta.rule, rule_count: meta.rule_count})}
 
       other ->
         Logger.warning(
           "Cabinet: ruleset for #{ministry[:slug]} did not decide (#{inspect(other)}) — queueing"
         )
 
-        "queue"
+        {"queue", Map.merge(base, %{action: "queue", rule: nil, fallback: inspect(other)})}
     end
   end
 
-  @doc "Starts a queued inbox entry: wake the Section, forward the event."
+  @doc "Starts a queued inbox entry: wake the factory, forward the event."
   def start_queued(entry_id) do
     with %{} = entry <- Archive.get(@inbox, entry_id),
          %{} = ministry <- Registry.by_slug(entry.ministry_slug) do
@@ -80,7 +85,7 @@ defmodule GiTF.Cabinet.Gate do
 
   # -- internals ---------------------------------------------------------------
 
-  defp record(ministry, class, event, payload, status) do
+  defp record(ministry, class, event, payload, status, prov) do
     {:ok, entry} =
       Archive.insert(@inbox, %{
         ministry_slug: ministry.slug,
@@ -88,6 +93,7 @@ defmodule GiTF.Cabinet.Gate do
         event: event,
         summary: summarize(event, payload),
         status: status,
+        decision: prov,
         raw: nil,
         inserted_at: DateTime.utc_now()
       })
@@ -108,13 +114,13 @@ defmodule GiTF.Cabinet.Gate do
       if result != :ok do
         Logger.warning(
           "Cabinet: forward to #{ministry.slug} failed (#{inspect(result)}) — " <>
-            "the Section's events poller will reconcile on its next wake"
+            "the factory's events poller will reconcile on its next wake"
         )
       end
     end)
   end
 
-  # The original body and signature pass through verbatim — the Section
+  # The original body and signature pass through verbatim — the factory
   # verifies with the same per-ministry secret GitHub signed with. The
   # Cabinet never re-signs anything.
   defp forward(%{url: url}, entry, raw) when is_binary(url) and is_map(raw) do

@@ -28,6 +28,9 @@ defmodule GiTF.Cabinet.GateTest do
              Gate.handle(m, "issues", bug_payload(), %{"body" => "{}", "headers" => []})
 
     assert entry.class == "bug"
+    # provenance: WHICH rule row decided, under what mode and cap state
+    assert %{rule: rule, mode: "normal", over_cap: false, action: "wake"} = entry.decision
+    assert is_integer(rule)
     # no instance_id and no url → the background forward fails safely and
     # marks the entry rather than crashing anything
   end
@@ -53,7 +56,7 @@ defmodule GiTF.Cabinet.GateTest do
   test "over the cost cap, a bug queues instead of waking" do
     m = ministry!(%{cost_cap_usd: 100.0})
     {:ok, m} = Registry.update(m.id, &Map.put(&1, :spend_month_usd, 150.0))
-    assert Gate.decide(m, :bug) == "queue"
+    assert {"queue", %{rule: _}} = Gate.decide(m, :bug)
   end
 
   test "noise drops without an inbox entry" do
@@ -65,7 +68,7 @@ defmodule GiTF.Cabinet.GateTest do
 
   test "broken rules queue — never wake" do
     m = ministry!(%{rules: %{"nodes" => [%{"type" => "functionNode"}]}})
-    assert Gate.decide(m, :bug) == "queue"
+    assert {"queue", %{rule: _}} = Gate.decide(m, :bug)
   end
 
   test "modes are validated" do

@@ -15,19 +15,25 @@ defmodule GiTF.Cabinet.JDMTest do
   end
 
   test "the plan's matrix, row by row" do
-    assert {:ok, %{"action" => "wake"}} = decide(%{})
-    assert {:ok, %{"action" => "wake"}} = decide(%{"class" => "bug", "mode" => "vacation"})
-    assert {:ok, %{"action" => "wake"}} = decide(%{"class" => "pr_review"})
-    assert {:ok, %{"action" => "queue"}} = decide(%{"class" => "feature"})
-    assert {:ok, %{"action" => "queue"}} = decide(%{"class" => "feature", "mode" => "vacation"})
-    assert {:ok, %{"action" => "drop"}} = decide(%{"class" => "noise"})
-    assert {:ok, %{"action" => "drop"}} = decide(%{"class" => "ci"})
-    assert {:ok, %{"action" => "queue"}} = decide(%{"mode" => "off"})
-    assert {:ok, %{"action" => "queue"}} = decide(%{"over_cap" => true})
+    assert {:ok, %{"action" => "wake"}, %{rule: _}} = decide(%{})
+
+    assert {:ok, %{"action" => "wake"}, %{rule: _}} =
+             decide(%{"class" => "bug", "mode" => "vacation"})
+
+    assert {:ok, %{"action" => "wake"}, %{rule: _}} = decide(%{"class" => "pr_review"})
+    assert {:ok, %{"action" => "queue"}, %{rule: _}} = decide(%{"class" => "feature"})
+
+    assert {:ok, %{"action" => "queue"}, %{rule: _}} =
+             decide(%{"class" => "feature", "mode" => "vacation"})
+
+    assert {:ok, %{"action" => "drop"}, %{rule: _}} = decide(%{"class" => "noise"})
+    assert {:ok, %{"action" => "drop"}, %{rule: _}} = decide(%{"class" => "ci"})
+    assert {:ok, %{"action" => "queue"}, %{rule: _}} = decide(%{"mode" => "off"})
+    assert {:ok, %{"action" => "queue"}, %{rule: _}} = decide(%{"over_cap" => true})
   end
 
   test "an unknown class falls through to the catch-all: queue" do
-    assert {:ok, %{"action" => "queue"}} = decide(%{"class" => "surprise"})
+    assert {:ok, %{"action" => "queue"}, %{rule: _}} = decide(%{"class" => "surprise"})
   end
 
   test "numeric comparison cells" do
@@ -51,8 +57,8 @@ defmodule GiTF.Cabinet.JDMTest do
       ]
     }
 
-    assert {:ok, %{"action" => "queue"}} = JDM.evaluate(doc, %{"spend" => 150})
-    assert {:ok, %{"action" => "wake"}} = JDM.evaluate(doc, %{"spend" => 12.5})
+    assert {:ok, %{"action" => "queue"}, %{rule: 1}} = JDM.evaluate(doc, %{"spend" => 150})
+    assert {:ok, %{"action" => "wake"}, %{rule: 2}} = JDM.evaluate(doc, %{"spend" => 12.5})
   end
 
   test "anything beyond one decision table is refused, not guessed" do
