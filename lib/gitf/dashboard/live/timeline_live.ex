@@ -165,7 +165,7 @@ defmodule GiTF.Dashboard.TimelineLive do
       %{
         type: :phase_transition,
         icon: "arrow-right",
-        color: "#8b5cf6",
+        color: "var(--recon)",
         title: "Phase: #{t[:from_phase] || "?"} → #{t[:to_phase] || "?"}",
         detail: t[:reason],
         mission_id: t[:mission_id],
@@ -224,7 +224,7 @@ defmodule GiTF.Dashboard.TimelineLive do
       %{
         type: :link,
         icon: "chat",
-        color: "#58a6ff",
+        color: "var(--accent)",
         title: "#{link.subject}: #{link.from} → #{link.to}",
         detail: String.slice(link.body || "", 0, 120),
         mission_id: nil,
@@ -249,9 +249,9 @@ defmodule GiTF.Dashboard.TimelineLive do
         icon: "shield",
         color:
           case req.status do
-            "approved" -> "#3fb950"
-            "rejected" -> "#f85149"
-            _ -> "#d29922"
+            "approved" -> "var(--ok)"
+            "rejected" -> "var(--crit)"
+            _ -> "var(--warn)"
           end,
         title: "Approval #{req.status}: #{Map.get(req, :quest_name, short_id(req.mission_id))}",
         detail:
@@ -270,10 +270,10 @@ defmodule GiTF.Dashboard.TimelineLive do
   defp op_icon("running"), do: "play"
   defp op_icon(_), do: "dot"
 
-  defp op_color("done"), do: "#3fb950"
-  defp op_color("failed"), do: "#f85149"
-  defp op_color("running"), do: "#3b82f6"
-  defp op_color(_), do: "#6b7280"
+  defp op_color("done"), do: "var(--ok)"
+  defp op_color("failed"), do: "var(--crit)"
+  defp op_color("running"), do: "var(--accent)"
+  defp op_color(_), do: "var(--muted)"
 
   defp event_type_label(:phase_transition), do: "Phase"
   defp event_type_label(:op_event), do: "Op"
@@ -289,10 +289,10 @@ defmodule GiTF.Dashboard.TimelineLive do
         <h1 class="page-title" style="margin-bottom:0">
           Factory Timeline
           <%= if @mission_name do %>
-            <span style="color:#6b7280; font-size:0.8rem; font-weight:400"> &mdash; {@mission_name}</span>
+            <span style="color:var(--muted); font-size:0.8rem; font-weight:400"> &mdash; {@mission_name}</span>
           <% end %>
         </h1>
-        <span style="color:#6b7280; font-size:0.8rem">{@event_count} events</span>
+        <span style="color:var(--muted); font-size:0.8rem">{@event_count} events</span>
       </div>
 
       <%!-- Filters --%>
@@ -313,7 +313,7 @@ defmodule GiTF.Dashboard.TimelineLive do
 
         <%!-- Mission filter --%>
         <form phx-change="filter_mission" style="display:flex; align-items:center; gap:0.5rem">
-          <label style="font-size:0.8rem; color:#6b7280">Mission:</label>
+          <label style="font-size:0.8rem; color:var(--muted)">Mission:</label>
           <select name="mission_id" class="form-input" style="font-size:0.8rem; padding:0.25rem 0.5rem; max-width:250px">
             <option value="">All missions</option>
             <%= for m <- @missions do %>
@@ -328,17 +328,17 @@ defmodule GiTF.Dashboard.TimelineLive do
       <%!-- Timeline --%>
       <div class="panel">
         <%= if @events_empty? do %>
-          <div class="empty">No events to display. Events appear as missions run through phases, ops complete, and the factory operates. <a href="/dashboard/missions/new" style="color:#58a6ff">Create a mission</a> to get started.</div>
+          <div class="empty">No events to display. Events appear as missions run through phases, ops complete, and the factory operates. <a href="/dashboard/missions/new" style="color:var(--accent)">Create a mission</a> to get started.</div>
         <% else %>
           <div style="position:relative; padding-left:2rem">
             <%!-- Vertical line --%>
-            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:#21262d"></div>
+            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:var(--line-2)"></div>
 
             <div id="timeline-events" phx-update="stream">
             <%= for {dom_id, event} <- @streams.events do %>
               <div id={dom_id} style="position:relative; padding-bottom:1rem; padding-left:1.5rem">
                 <%!-- Dot on the timeline --%>
-                <div style={"position:absolute; left:-0.55rem; top:0.3rem; width:10px; height:10px; border-radius:50%; background:#{event.color}; border:2px solid #0d1117"}></div>
+                <div style={"position:absolute; left:-0.55rem; top:0.3rem; width:10px; height:10px; border-radius:50%; background:#{event.color}; border:2px solid var(--ground)"}></div>
 
                 <div style="display:flex; justify-content:space-between; align-items:flex-start">
                   <div style="flex:1">
@@ -352,27 +352,27 @@ defmodule GiTF.Dashboard.TimelineLive do
                       end}"} style="font-size:0.6rem">
                         {event_type_label(event.type)}
                       </span>
-                      <span style="color:#f0f6fc; font-size:0.85rem; font-weight:500">{event.title}</span>
+                      <span style="color:var(--text); font-size:0.85rem; font-weight:500">{event.title}</span>
                     </div>
                     <%= if event.detail do %>
-                      <div style="color:#8b949e; font-size:0.8rem; margin-top:0.1rem; max-width:600px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+                      <div style="color:var(--muted); font-size:0.8rem; margin-top:0.1rem; max-width:600px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
                         {event.detail}
                       </div>
                     <% end %>
                     <div style="display:flex; gap:0.5rem; margin-top:0.2rem">
                       <%= if event[:mission_id] do %>
-                        <a href={"/dashboard/missions/#{event.mission_id}"} style="color:#58a6ff; font-size:0.7rem">
+                        <a href={"/dashboard/missions/#{event.mission_id}"} style="color:var(--accent); font-size:0.7rem">
                           mission:{short_id(event.mission_id)}
                         </a>
                       <% end %>
                       <%= if event[:op_id] do %>
-                        <a href={"/dashboard/ops/#{event.op_id}"} style="color:#58a6ff; font-size:0.7rem">
+                        <a href={"/dashboard/ops/#{event.op_id}"} style="color:var(--accent); font-size:0.7rem">
                           op:{short_id(event.op_id)}
                         </a>
                       <% end %>
                     </div>
                   </div>
-                  <span style="color:#6b7280; font-size:0.75rem; white-space:nowrap; margin-left:1rem">
+                  <span style="color:var(--muted); font-size:0.75rem; white-space:nowrap; margin-left:1rem">
                     <span title={format_timestamp(event.timestamp)}>{relative_time(event.timestamp)}</span>
                   </span>
                 </div>

@@ -837,7 +837,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     assigns = %{entries: entries, depth: depth}
 
     ~H"""
-    <div style={if @depth > 0, do: "border-left:2px solid var(--line, #333a45); padding-left:0.7rem; margin:0.3rem 0"}>
+    <div style={if @depth > 0, do: "border-left:2px solid var(--line, var(--line-strong)); padding-left:0.7rem; margin:0.3rem 0"}>
       <div :for={{k, v} <- @entries} style="margin-bottom:0.45rem">
         <span style="font-size:0.68rem; letter-spacing:0.06em; text-transform:uppercase; opacity:0.6">{humanize_key(k)}</span>
         {render_term(v, @depth + 1)}
@@ -950,27 +950,27 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <%= if Map.get(@mission, :review_plan) do %>
               <span class="badge badge-purple" style="font-size:0.55rem">REVIEW</span>
             <% end %>
-            <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">
+            <span style="font-family:monospace; font-size:0.75rem; color:var(--muted)">
               {short_id(@mission.id)}
             </span>
             <%= if @duration do %>
-              <span style="font-size:0.75rem; color:#6b7280">&middot; {@duration}</span>
+              <span style="font-size:0.75rem; color:var(--muted)">&middot; {@duration}</span>
             <% end %>
             <% workflow_id = Map.get(@mission, :workflow_id) %>
             <%= if is_binary(workflow_id) and workflow_id != "" do %>
-              <.link navigate={"/dashboard/workflows/" <> workflow_id} style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:#1f6feb33; color:#58a6ff; text-decoration:none">
+              <.link navigate={"/dashboard/workflows/" <> workflow_id} style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:var(--accent-soft); color:var(--accent); text-decoration:none">
                 workflow: {workflow_id}
               </.link>
             <% end %>
             <% pr = @pr_url %>
             <%= if pr do %>
-              <a href={pr} target="_blank" rel="noopener" style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:#23863633; color:#3fb950; text-decoration:none; font-weight:600" title="Open the pull request this mission published">
+              <a href={pr} target="_blank" rel="noopener" style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:var(--ok)33; color:var(--ok); text-decoration:none; font-weight:600" title="Open the pull request this mission published">
                 PR {pr_label(pr)} &#8599;
               </a>
             <% end %>
             <% inf = get_in(@mission, [:artifacts, "workflow_inference"]) %>
             <%= if is_map(inf) do %>
-              <span style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:#21262d; color:#8b949e" title={inf["rationale"] || ""}>
+              <span style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:var(--line-2); color:var(--muted)" title={inf["rationale"] || ""}>
                 auto-classified · {Float.round((inf["confidence"] || 0) * 1.0, 2)}
               </span>
             <% end %>
@@ -981,7 +981,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
       <div class="panel">
         <div class="panel-title" style="display:flex; justify-content:space-between; align-items:baseline">
           Phase Pipeline
-          <span style="font-size:0.68rem; font-weight:400; color:#6b7280">click a marked phase for its decisions</span>
+          <span style="font-size:0.68rem; font-weight:400; color:var(--muted)">click a marked phase for its decisions</span>
         </div>
         <div class="stepper">
           <%= for {phase, idx} <- Enum.with_index(@phases) do %>
@@ -1010,9 +1010,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               <div class="step-circle">
                 <%= cond do %>
                   <% phase_skipped?(@mission, phase) -> %>
-                    <span style="color:#4b5563">—</span>
+                    <span style="color:var(--muted)">—</span>
                   <% phase_failed?(@mission, phase) -> %>
-                    <Heroicons.exclamation_triangle mini class="w-4 h-4" style="color:#f85149" />
+                    <Heroicons.exclamation_triangle mini class="w-4 h-4" style="color:var(--crit)" />
                   <% phase_done?(@mission, phase) -> %>
                     <Heroicons.check mini class="w-4 h-4" />
                   <% true -> %>
@@ -1026,7 +1026,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 {phase_label(phase)}<span :if={detail} style="font-size:1.05rem; line-height:0; vertical-align:-0.12em; opacity:0.7; margin-left:0.22rem">{if detail == :page, do: "↗", else: "≡"}</span>
               </div>
               <%= if @phase_durations[phase] do %>
-                <div style="font-size:0.6rem; color:#6b7280; margin-top:0.1rem">{@phase_durations[phase]}</div>
+                <div style="font-size:0.6rem; color:var(--muted); margin-top:0.1rem">{@phase_durations[phase]}</div>
               <% end %>
             </div>
           <% end %>
@@ -1043,7 +1043,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               held
             </span>
           </div>
-          <div :if={Enum.any?(@inquiries, &(&1[:status] == "open"))} style="font-size:0.78rem; color:#8b949e; margin-bottom:0.75rem">
+          <div :if={Enum.any?(@inquiries, &(&1[:status] == "open"))} style="font-size:0.78rem; color:var(--muted); margin-bottom:0.75rem">
             This mission is holding at <b>awaiting_input</b> and will not move until these are
             answered. It never auto-answers — waiting is the intended behaviour.
           </div>
@@ -1093,7 +1093,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <%= if @report.pr_url do %>
               <div class="metric-card">
                 <div class="metric-label">Pull Request</div>
-                <div class="metric-value"><a href={@report.pr_url} target="_blank" style="color:#58a6ff">View PR</a></div>
+                <div class="metric-value"><a href={@report.pr_url} target="_blank" style="color:var(--accent)">View PR</a></div>
               </div>
             <% end %>
             <div class="metric-card">
@@ -1112,20 +1112,20 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <div class="panel">
             <div class="panel-title">
               Files Changed
-              <span style="font-weight:400; font-size:0.8rem; color:#8b949e; margin-left:0.5rem">
-                <span style="color:#3fb950">{@report.file_summary.added} added</span>
-                <span style="color:#d29922; margin-left:0.4rem">{@report.file_summary.modified} modified</span>
-                <span style="color:#f85149; margin-left:0.4rem">{@report.file_summary.deleted} deleted</span>
+              <span style="font-weight:400; font-size:0.8rem; color:var(--muted); margin-left:0.5rem">
+                <span style="color:var(--ok)">{@report.file_summary.added} added</span>
+                <span style="color:var(--warn); margin-left:0.4rem">{@report.file_summary.modified} modified</span>
+                <span style="color:var(--crit); margin-left:0.4rem">{@report.file_summary.deleted} deleted</span>
               </span>
             </div>
             <table style="width:100%; font-size:0.8rem; margin-top:0.5rem">
               <tbody>
                 <%= for file <- @report.files do %>
-                  <tr style="border-bottom:1px solid #21262d">
+                  <tr style="border-bottom:1px solid var(--line-2)">
                     <td style="width:2.5rem; text-align:center; padding:0.3rem 0.4rem">
                       <span class={"badge #{file_status_class(file.status)}"}>{file.status}</span>
                     </td>
-                    <td style="font-family:monospace; padding:0.3rem 0.4rem; color:#c9d1d9">{file.path}</td>
+                    <td style="font-family:monospace; padding:0.3rem 0.4rem; color:var(--text-2)">{file.path}</td>
                   </tr>
                 <% end %>
               </tbody>
@@ -1138,25 +1138,25 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <div class="panel-title">Ops Breakdown</div>
           <table style="width:100%; font-size:0.8rem; margin-top:0.5rem; border-collapse:collapse">
             <thead>
-              <tr style="border-bottom:1px solid #30363d">
-                <th style="text-align:left; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Op</th>
-                <th style="text-align:left; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Status</th>
-                <th style="text-align:right; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Duration</th>
-                <th style="text-align:right; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Files</th>
-                <th style="text-align:right; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Cost</th>
+              <tr style="border-bottom:1px solid var(--line)">
+                <th style="text-align:left; padding:0.4rem 0.5rem; color:var(--muted); font-weight:500">Op</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; color:var(--muted); font-weight:500">Status</th>
+                <th style="text-align:right; padding:0.4rem 0.5rem; color:var(--muted); font-weight:500">Duration</th>
+                <th style="text-align:right; padding:0.4rem 0.5rem; color:var(--muted); font-weight:500">Files</th>
+                <th style="text-align:right; padding:0.4rem 0.5rem; color:var(--muted); font-weight:500">Cost</th>
               </tr>
             </thead>
             <tbody>
               <%= for op <- @report.ops do %>
-                <tr style="border-bottom:1px solid #21262d">
-                  <td style="padding:0.4rem 0.5rem; color:#c9d1d9">
+                <tr style="border-bottom:1px solid var(--line-2)">
+                  <td style="padding:0.4rem 0.5rem; color:var(--text-2)">
                     {op.title}
-                    <%= if op.phase_job do %><span style="color:#8b949e; font-size:0.7rem; margin-left:0.3rem">phase</span><% end %>
+                    <%= if op.phase_job do %><span style="color:var(--muted); font-size:0.7rem; margin-left:0.3rem">phase</span><% end %>
                   </td>
                   <td style="padding:0.4rem 0.5rem"><span class={"badge #{status_badge(op.status)}"}>{op.status}</span></td>
-                  <td style="padding:0.4rem 0.5rem; text-align:right; color:#8b949e">{op.duration}</td>
-                  <td style="padding:0.4rem 0.5rem; text-align:right; color:#8b949e">{op.files_changed}</td>
-                  <td style="padding:0.4rem 0.5rem; text-align:right; color:#8b949e">{format_cost(op.cost_usd, 2)}</td>
+                  <td style="padding:0.4rem 0.5rem; text-align:right; color:var(--muted)">{op.duration}</td>
+                  <td style="padding:0.4rem 0.5rem; text-align:right; color:var(--muted)">{op.files_changed}</td>
+                  <td style="padding:0.4rem 0.5rem; text-align:right; color:var(--muted)">{format_cost(op.cost_usd, 2)}</td>
                 </tr>
               <% end %>
             </tbody>
@@ -1245,7 +1245,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 <%!-- Line 1: status icon + title --%>
                 <div class="op-card-title">
                   <span class={"status-icon status-icon-#{status_icon_class(op_status)}"}>{status_icon(op_status)}</span>
-                  <a href={"/dashboard/ops/#{op.id}"} style="color:#f0f6fc; font-size:0.9rem; flex:1" phx-click="toggle_op" phx-value-id={op.id}>
+                  <a href={"/dashboard/ops/#{op.id}"} style="color:var(--text); font-size:0.9rem; flex:1" phx-click="toggle_op" phx-value-id={op.id}>
                     {Map.get(op, :title, "-")}
                   </a>
                   <%= if Map.get(op, :status) == "failed" do %>
@@ -1276,7 +1276,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                     <% bar_width = max(ctx_pct, 2) %>
                     <% label = if ctx_pct < 1, do: "<1%", else: "#{trunc(ctx_pct)}%" %>
                     <div style="display:flex; align-items:center; gap:0.3rem; min-width:5rem" title={"#{format_tokens_mb(ctx_used)} / #{format_tokens_mb(ctx_limit)}"}>
-                      <div style="flex:1; height:5px; background:#1f2937; border-radius:3px; overflow:hidden">
+                      <div style="flex:1; height:5px; background:var(--panel-2); border-radius:3px; overflow:hidden">
                         <div style={"width:#{bar_width}%; height:100%; border-radius:3px; background:#{context_gauge_color(ctx_pct)}"}></div>
                       </div>
                       <span style={"font-size:0.65rem; font-family:monospace; color:#{context_gauge_color(ctx_pct)}"}>{label}</span>
@@ -1286,7 +1286,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               </div>
               <%!-- Expanded detail --%>
               <%= if MapSet.member?(@expanded_ops, op.id) do %>
-                <div class="plan-detail" style="border-bottom:1px solid #21262d">
+                <div class="plan-detail" style="border-bottom:1px solid var(--line-2)">
                   <dl class="metadata-grid" style="margin-bottom:0.75rem">
                     <dt>Type</dt><dd>{Map.get(op, :type, "-")}</dd>
                     <dt>Complexity</dt><dd>{Map.get(op, :complexity, "-")}</dd>
@@ -1294,7 +1294,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                     <dt>Retries</dt><dd>{Map.get(op, :retry_count, 0)}</dd>
                   </dl>
                   <%= if Map.get(op, :description) do %>
-                    <div style="color:#8b949e; font-size:0.85rem; white-space:pre-wrap; line-height:1.5">{op.description}</div>
+                    <div style="color:var(--muted); font-size:0.85rem; white-space:pre-wrap; line-height:1.5">{op.description}</div>
                   <% end %>
                 </div>
               <% end %>
@@ -1327,8 +1327,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <span class="sidebar-stat-label">Pending</span>
             <span class="sidebar-stat-value">{@counts.pending}</span>
           </div>
-          <div class="sidebar-stat-row" style="border-top:1px solid #30363d; margin-top:0.25rem; padding-top:0.5rem; cursor:pointer" phx-click="filter_ops" phx-value-filter="all">
-            <span class="sidebar-stat-label" style="font-weight:600; color:#f0f6fc">Total</span>
+          <div class="sidebar-stat-row" style="border-top:1px solid var(--line); margin-top:0.25rem; padding-top:0.5rem; cursor:pointer" phx-click="filter_ops" phx-value-filter="all">
+            <span class="sidebar-stat-label" style="font-weight:600; color:var(--text)">Total</span>
             <span class="sidebar-stat-value">{@total_ops}</span>
           </div>
         </div>
@@ -1337,24 +1337,24 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         <div class="panel" style="padding:0.85rem 1rem">
           <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.5rem; padding-bottom:0.4rem">Budget</div>
           <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:0.25rem">
-            <span style="color:#8b949e">Spent</span>
-            <span style="color:#3fb950">{format_cost(@budget_info.spent)} / {format_cost(@budget_info.budget)}</span>
+            <span style="color:var(--muted)">Spent</span>
+            <span style="color:var(--ok)">{format_cost(@budget_info.spent)} / {format_cost(@budget_info.budget)}</span>
           </div>
-          <div style="height:6px; background:#21262d; border-radius:3px; overflow:hidden">
+          <div style="height:6px; background:var(--line-2); border-radius:3px; overflow:hidden">
             <div style={"height:100%; border-radius:3px; background:#{cond do
-              @budget_info.pct >= 90 -> "#f85149"
-              @budget_info.pct >= 70 -> "#d29922"
-              true -> "#3fb950"
+              @budget_info.pct >= 90 -> "var(--crit)"
+              @budget_info.pct >= 70 -> "var(--warn)"
+              true -> "var(--ok)"
             end}; width:#{min(@budget_info.pct, 100)}%"}></div>
           </div>
-          <div style="display:flex; justify-content:space-between; margin-top:0.4rem; font-size:0.7rem; color:#6b7280">
+          <div style="display:flex; justify-content:space-between; margin-top:0.4rem; font-size:0.7rem; color:var(--muted)">
             <span>{@budget_info.pct}% used</span>
             <span>{format_cost(@budget_info.remaining)} remaining</span>
           </div>
           <%= if @budget_info.estimated_remaining > 0 do %>
-            <div style="margin-top:0.4rem; font-size:0.7rem; color:#8b949e; border-top:1px solid #21262d; padding-top:0.3rem">
+            <div style="margin-top:0.4rem; font-size:0.7rem; color:var(--muted); border-top:1px solid var(--line-2); padding-top:0.3rem">
               Est. {format_cost(@budget_info.estimated_remaining)} more
-              <span style="color:#484f58">({@budget_info.pending_ops} ops @ {format_cost(if @budget_info.done_ops > 0, do: @budget_info.spent / @budget_info.done_ops, else: 0)}/op)</span>
+              <span style="color:var(--line-strong)">({@budget_info.pending_ops} ops @ {format_cost(if @budget_info.done_ops > 0, do: @budget_info.spent / @budget_info.done_ops, else: 0)}/op)</span>
             </div>
           <% end %>
           <div style="display:flex; gap:0.4rem; margin-top:0.5rem; align-items:center">
@@ -1376,9 +1376,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         <div class="panel" style="padding:0.85rem 1rem">
           <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.5rem; padding-bottom:0.4rem">Navigate</div>
           <div style="display:flex; flex-direction:column; gap:0.35rem">
-            <a href={"/dashboard/timeline/#{@mission.id}"} style="color:#58a6ff; font-size:0.8rem">Event Timeline &rarr;</a>
-            <a href={"/dashboard/progress"} style="color:#58a6ff; font-size:0.8rem">Ghost Progress &rarr;</a>
-            <a href={"/dashboard/costs"} style="color:#58a6ff; font-size:0.8rem">Cost Details &rarr;</a>
+            <a href={"/dashboard/timeline/#{@mission.id}"} style="color:var(--accent); font-size:0.8rem">Event Timeline &rarr;</a>
+            <a href={"/dashboard/progress"} style="color:var(--accent); font-size:0.8rem">Ghost Progress &rarr;</a>
+            <a href={"/dashboard/costs"} style="color:var(--accent); font-size:0.8rem">Cost Details &rarr;</a>
           </div>
         </div>
 
@@ -1425,8 +1425,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <button phx-click="confirm_remove" class="btn btn-red" style="margin-top:0.25rem">Remove</button>
 
             <%= if @confirm_remove do %>
-              <div style="margin-top:0.75rem; padding:0.75rem; background:#1c1010; border:1px solid #f85149; border-radius:6px">
-                <p style="color:#f85149; font-size:0.85rem; margin:0 0 0.5rem">Permanently remove this mission and all its data? This cannot be undone.</p>
+              <div style="margin-top:0.75rem; padding:0.75rem; background:var(--crit-bg); border:1px solid var(--crit); border-radius:6px">
+                <p style="color:var(--crit); font-size:0.85rem; margin:0 0 0.5rem">Permanently remove this mission and all its data? This cannot be undone.</p>
                 <div style="display:flex; gap:0.5rem">
                   <button phx-click="remove" class="btn btn-red" disabled={@removing}>
                     <%= if @removing do %>
@@ -1497,14 +1497,14 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             winner: {@tournament_winner}
           </span>
         <% else %>
-          <span class="badge" style="font-size:0.6rem; background:#21262d; color:#8b949e">
+          <span class="badge" style="font-size:0.6rem; background:var(--line-2); color:var(--muted)">
             unresolved
           </span>
         <% end %>
       </div>
       <table style="width:100%; font-size:0.8rem; border-collapse:collapse">
         <thead>
-          <tr style="text-align:left; color:#8b949e; border-bottom:1px solid #21262d">
+          <tr style="text-align:left; color:var(--muted); border-bottom:1px solid var(--line-2)">
             <th style="padding:0.4rem 0.5rem">variant</th>
             <th style="padding:0.4rem 0.5rem">score</th>
             <th style="padding:0.4rem 0.5rem">verdict</th>
@@ -1515,11 +1515,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         </thead>
         <tbody>
           <%= for row <- @tournament_rank do %>
-            <tr style={"border-bottom:1px solid #161b22; #{if row.variant == @tournament_winner, do: "background:#13361f"}"}>
+            <tr style={"border-bottom:1px solid var(--panel); #{if row.variant == @tournament_winner, do: "background:var(--ok-bg)"}"}>
               <td style="padding:0.4rem 0.5rem; font-family:monospace">
                 {row.variant}
                 <%= if row.variant == @tournament_winner do %>
-                  <Heroicons.trophy mini class="w-3 h-3" style="display:inline; color:#3fb950; margin-left:0.25rem" />
+                  <Heroicons.trophy mini class="w-3 h-3" style="display:inline; color:var(--ok); margin-left:0.25rem" />
                 <% end %>
               </td>
               <td style="padding:0.4rem 0.5rem; font-family:monospace">
@@ -1530,13 +1530,13 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                   {row.verdict}
                 </span>
               </td>
-              <td style="padding:0.4rem 0.5rem; color:#8b949e">
+              <td style="padding:0.4rem 0.5rem; color:var(--muted)">
                 {row.requirements_met}/{row.requirements_total}
               </td>
-              <td style={"padding:0.4rem 0.5rem; color:#{if row.gaps > 0, do: "#f85149", else: "#8b949e"}"}>
+              <td style={"padding:0.4rem 0.5rem; color:#{if row.gaps > 0, do: "var(--crit)", else: "var(--muted)"}"}>
                 {row.gaps}
               </td>
-              <td style="padding:0.4rem 0.5rem; color:#8b949e; font-size:0.7rem">
+              <td style="padding:0.4rem 0.5rem; color:var(--muted); font-size:0.7rem">
                 {row.disqualified_reason || ""}
               </td>
             </tr>
@@ -1737,9 +1737,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   defp format_tokens_mb(_), do: "-"
 
-  defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"
-  defp context_gauge_color(pct) when pct >= 35, do: "#f59e0b"
-  defp context_gauge_color(_pct), do: "#22c55e"
+  defp context_gauge_color(pct) when pct >= 45, do: "var(--crit)"
+  defp context_gauge_color(pct) when pct >= 35, do: "var(--warn)"
+  defp context_gauge_color(_pct), do: "var(--ok)"
 
   # -- Report helpers ----------------------------------------------------------
 

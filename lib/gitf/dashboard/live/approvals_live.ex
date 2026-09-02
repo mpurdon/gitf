@@ -278,16 +278,16 @@ defmodule GiTF.Dashboard.ApprovalsLive do
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem">
               <div style="min-width:0; flex:1">
                 <div style="display:flex; align-items:baseline; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.2rem">
-                  <span style="font-weight:600; color:#f0f6fc">
+                  <span style="font-weight:600; color:var(--text)">
                     {mission_title(approval)}
                   </span>
                   <a
                     :if={approval[:mission_id]}
                     href={"/dashboard/missions/#{approval.mission_id}"}
-                    style="font-family:monospace; font-size:0.75rem; color:#58a6ff; text-decoration:none"
+                    style="font-family:monospace; font-size:0.75rem; color:var(--accent); text-decoration:none"
                   >{approval.mission_id}</a>
                 </div>
-                <div style="font-size:0.78rem; color:#8b949e; margin-bottom:0.6rem">
+                <div style="font-size:0.78rem; color:var(--muted); margin-bottom:0.6rem">
                   Publish approval — validation finished; approving merges and opens the PR.
                   <span :if={approval[:requested_at]}>
                     Requested {format_timestamp(approval[:requested_at])}.
@@ -305,7 +305,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
                   <a
                     :if={approval[:mission_id]}
                     href={"/dashboard/missions/#{approval.mission_id}/plan"}
-                    style="font-size:0.75rem; color:#58a6ff"
+                    style="font-size:0.75rem; color:var(--accent)"
                   >plan</a>
                 </div>
               </div>
@@ -365,19 +365,19 @@ defmodule GiTF.Dashboard.ApprovalsLive do
             <% end %>
 
             <%!-- Discussion: the validator's prose and the mission goal --%>
-            <div :if={Map.get(approval, :validation_summary)} style="margin-top:0.9rem; font-size:0.85rem; color:#c9d1d9; white-space:pre-wrap">
+            <div :if={Map.get(approval, :validation_summary)} style="margin-top:0.9rem; font-size:0.85rem; color:var(--text-2); white-space:pre-wrap">
               {approval.validation_summary}
             </div>
 
             <details :if={goal_text(approval) != ""} style="margin-top:0.6rem">
-              <summary style="cursor:pointer; font-size:0.78rem; color:#8b949e">
+              <summary style="cursor:pointer; font-size:0.78rem; color:var(--muted)">
                 {String.slice(goal_text(approval), 0, 140)}…
               </summary>
-              <div style="color:#8b949e; font-size:0.85rem; margin-top:0.5rem; white-space:pre-wrap">{goal_text(approval)}</div>
+              <div style="color:var(--muted); font-size:0.85rem; margin-top:0.5rem; white-space:pre-wrap">{goal_text(approval)}</div>
             </details>
 
             <%= if @action_id == Map.get(approval, :id) do %>
-              <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid #30363d">
+              <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid var(--line)">
                 <%= if @action_type == :approve do %>
                   <div
                     :if={Map.get(approval, :triage, %{fails: []}).fails != []}
@@ -446,11 +446,11 @@ defmodule GiTF.Dashboard.ApprovalsLive do
         </div>
         <div :if={@item.requirement} class="triage-requirement">{@item.requirement}</div>
         <details :if={expandable?(@item)}>
-          <summary style="cursor:pointer; font-size:0.75rem; color:#8b949e">detail</summary>
+          <summary style="cursor:pointer; font-size:0.75rem; color:var(--muted)">detail</summary>
           <div class="triage-detail">{@item.detail}</div>
         </details>
         <details :if={@item.acceptance_criteria != []}>
-          <summary style="cursor:pointer; font-size:0.75rem; color:#8b949e">
+          <summary style="cursor:pointer; font-size:0.75rem; color:var(--muted)">
             {length(@item.acceptance_criteria)} acceptance criteria
           </summary>
           <ul class="triage-criteria">
@@ -458,7 +458,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
           </ul>
         </details>
         <details :if={@item.rebuttal}>
-          <summary style="cursor:pointer; font-size:0.75rem; color:#3fb950">rebuttal</summary>
+          <summary style="cursor:pointer; font-size:0.75rem; color:var(--ok)">rebuttal</summary>
           <div class="triage-rebuttal">{@item.rebuttal}</div>
         </details>
       </div>

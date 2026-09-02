@@ -118,7 +118,7 @@ defmodule GiTF.Dashboard.MergeQueueLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <h1 class="page-title" style="margin-bottom:0">Merge Queue</h1>
-        <span style="color:#6b7280; font-size:0.85rem">{@pending_count} pending</span>
+        <span style="color:var(--muted); font-size:0.85rem">{@pending_count} pending</span>
       </div>
 
       <%!-- Active merge --%>
@@ -128,12 +128,12 @@ defmodule GiTF.Dashboard.MergeQueueLive do
           <div style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0">
             <div class="loading-spinner" style="width:16px; height:16px; border-width:2px"></div>
             <div>
-              <a href={"/dashboard/ops/#{@active.op_id}"} style="color:#58a6ff; font-size:0.9rem">
+              <a href={"/dashboard/ops/#{@active.op_id}"} style="color:var(--accent); font-size:0.9rem">
                 {@active.op_title || short_id(@active.op_id)}
               </a>
               <%= if @active.mission_name do %>
-                <span style="color:#6b7280; font-size:0.8rem"> &mdash;
-                  <a href={"/dashboard/missions/#{@active.mission_id}"} style="color:#8b949e">{@active.mission_name}</a>
+                <span style="color:var(--muted); font-size:0.8rem"> &mdash;
+                  <a href={"/dashboard/missions/#{@active.mission_id}"} style="color:var(--muted)">{@active.mission_name}</a>
                 </span>
               <% end %>
             </div>
@@ -154,20 +154,20 @@ defmodule GiTF.Dashboard.MergeQueueLive do
             <tbody>
               <%= for {entry, idx} <- Enum.with_index(@pending) do %>
                 <tr>
-                  <td style="color:#6b7280">{idx + 1}</td>
+                  <td style="color:var(--muted)">{idx + 1}</td>
                   <td>
-                    <a href={"/dashboard/ops/#{entry.op_id}"} style="color:#58a6ff; font-size:0.85rem">
+                    <a href={"/dashboard/ops/#{entry.op_id}"} style="color:var(--accent); font-size:0.85rem">
                       {entry.op_title || short_id(entry.op_id)}
                     </a>
                   </td>
                   <td>
                     <%= if entry.mission_id do %>
-                      <a href={"/dashboard/missions/#{entry.mission_id}"} style="color:#8b949e; font-size:0.8rem">{entry.mission_name}</a>
+                      <a href={"/dashboard/missions/#{entry.mission_id}"} style="color:var(--muted); font-size:0.8rem">{entry.mission_name}</a>
                     <% else %>
-                      <span style="color:#6b7280">-</span>
+                      <span style="color:var(--muted)">-</span>
                     <% end %>
                   </td>
-                  <td style="font-family:monospace; font-size:0.75rem; color:#8b949e">{short_id(entry.shell_id || "-")}</td>
+                  <td style="font-family:monospace; font-size:0.75rem; color:var(--muted)">{short_id(entry.shell_id || "-")}</td>
                 </tr>
               <% end %>
             </tbody>
@@ -187,13 +187,13 @@ defmodule GiTF.Dashboard.MergeQueueLive do
               <%= for entry <- @completed do %>
                 <tr>
                   <td>
-                    <a href={"/dashboard/ops/#{entry.op_id}"} style="color:#58a6ff; font-size:0.85rem">
+                    <a href={"/dashboard/ops/#{entry.op_id}"} style="color:var(--accent); font-size:0.85rem">
                       {entry.op_title || short_id(entry.op_id)}
                     </a>
                   </td>
                   <td>
                     <%= if entry.mission_id do %>
-                      <a href={"/dashboard/missions/#{entry.mission_id}"} style="color:#8b949e; font-size:0.8rem">{entry.mission_name}</a>
+                      <a href={"/dashboard/missions/#{entry.mission_id}"} style="color:var(--muted); font-size:0.8rem">{entry.mission_name}</a>
                     <% end %>
                   </td>
                   <td>
@@ -203,7 +203,7 @@ defmodule GiTF.Dashboard.MergeQueueLive do
                       _ -> "badge-grey"
                     end}"}>{entry[:outcome] || "?"}</span>
                   </td>
-                  <td style="font-size:0.8rem; color:#8b949e">{format_timestamp(entry[:completed_at])}</td>
+                  <td style="font-size:0.8rem; color:var(--muted)">{format_timestamp(entry[:completed_at])}</td>
                 </tr>
               <% end %>
             </tbody>

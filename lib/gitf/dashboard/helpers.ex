@@ -376,15 +376,15 @@ defmodule GiTF.Dashboard.Helpers do
     <nav style="display:flex; align-items:center; gap:0.35rem; margin-bottom:0.75rem; font-size:0.8rem">
       <%= for {crumb, idx} <- Enum.with_index(@crumbs) do %>
         <%= if idx > 0 do %>
-          <span style="color:#30363d">/</span>
+          <span style="color:var(--line)">/</span>
         <% end %>
         <%= case crumb do %>
           <% {label, href} when is_binary(href) -> %>
-            <a href={href} style="color:#58a6ff">{label}</a>
+            <a href={href} style="color:var(--accent)">{label}</a>
           <% {label, _} -> %>
-            <span style="color:#c9d1d9; font-weight:500">{label}</span>
+            <span style="color:var(--text-2); font-weight:500">{label}</span>
           <% label when is_binary(label) -> %>
-            <span style="color:#c9d1d9; font-weight:500">{label}</span>
+            <span style="color:var(--text-2); font-weight:500">{label}</span>
         <% end %>
       <% end %>
     </nav>
@@ -398,12 +398,12 @@ defmodule GiTF.Dashboard.Helpers do
   Options:
   - `:width` - SVG width (default 80)
   - `:height` - SVG height (default 20)
-  - `:color` - stroke color (default "#58a6ff")
+  - `:color` - stroke color (default "var(--accent)")
   """
   attr(:values, :list, required: true)
   attr(:width, :integer, default: 80)
   attr(:height, :integer, default: 20)
-  attr(:color, :string, default: "#58a6ff")
+  attr(:color, :string, default: "var(--accent)")
 
   def sparkline(assigns) do
     values = assigns.values || []

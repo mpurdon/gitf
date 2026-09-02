@@ -94,8 +94,8 @@ defmodule GiTF.Dashboard.RollbackLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Rollback Management</h1>
 
-      <p style="color:#8b949e; font-size:0.85rem; margin-bottom:1.5rem">
-        Safely revert merged missions via <code style="color:#c9d1d9">git revert -m 1</code>.
+      <p style="color:var(--muted); font-size:0.85rem; margin-bottom:1.5rem">
+        Safely revert merged missions via <code style="color:var(--text-2)">git revert -m 1</code>.
         This creates a new commit that undoes the merge — no force push, no history rewrite.
       </p>
 
@@ -118,20 +118,20 @@ defmodule GiTF.Dashboard.RollbackLive do
               <%= for entry <- @revertible do %>
                 <tr>
                   <td>
-                    <a href={"/dashboard/missions/#{entry.mission.id}"} style="color:#58a6ff; font-size:0.85rem">
+                    <a href={"/dashboard/missions/#{entry.mission.id}"} style="color:var(--accent); font-size:0.85rem">
                       {Map.get(entry.mission, :name) || short_id(entry.mission.id)}
                     </a>
-                    <div style="font-size:0.7rem; color:#6b7280">
+                    <div style="font-size:0.7rem; color:var(--muted)">
                       {Map.get(entry.mission, :status, "?")}
                     </div>
                   </td>
-                  <td style="font-family:monospace; font-size:0.8rem; color:#c9d1d9">
+                  <td style="font-family:monospace; font-size:0.8rem; color:var(--text-2)">
                     {entry.branch || "-"}
                   </td>
-                  <td style="font-family:monospace; font-size:0.8rem; color:#8b949e">
+                  <td style="font-family:monospace; font-size:0.8rem; color:var(--muted)">
                     {String.slice(entry.merge_sha, 0, 7)}
                   </td>
-                  <td style="font-size:0.8rem; color:#8b949e">
+                  <td style="font-size:0.8rem; color:var(--muted)">
                     {entry.merged_at || "-"}
                   </td>
                   <td>
@@ -155,7 +155,7 @@ defmodule GiTF.Dashboard.RollbackLive do
                         Revert
                       </button>
                     <% else %>
-                      <span style="color:#6b7280; font-size:0.75rem">
+                      <span style="color:var(--muted); font-size:0.75rem">
                         {if entry.revert_status == :reverted, do: "already reverted", else: "not revertible"}
                       </span>
                     <% end %>

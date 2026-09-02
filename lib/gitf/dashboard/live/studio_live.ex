@@ -173,9 +173,9 @@ defmodule GiTF.Dashboard.StudioLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Planning Studio</h1>
       <%= if assigns[:boot_error] do %>
-        <p style="color:#f85149">Could not start a studio session: {@boot_error}</p>
+        <p style="color:var(--crit)">Could not start a studio session: {@boot_error}</p>
       <% else %>
-        <p style="color:#8b949e">Starting session…</p>
+        <p style="color:var(--muted)">Starting session…</p>
       <% end %>
     </.live_component>
     """
@@ -190,9 +190,9 @@ defmodule GiTF.Dashboard.StudioLive do
           <%= for {phase, cost} <- phases_with_cost() do %>
             <span class={"badge #{if @studio.phase == phase, do: "badge-green", else: "badge-grey"}"}
                   title={"Cost of changing your mind here: #{cost}"}>{phase}</span>
-            <%= if phase != "review" do %><span style="color:#30363d">→</span><% end %>
+            <%= if phase != "review" do %><span style="color:var(--line)">→</span><% end %>
           <% end %>
-          <span style="font-size:0.7rem; color:#8b949e; margin-left:0.4rem"
+          <span style="font-size:0.7rem; color:var(--muted); margin-left:0.4rem"
                 title="Gates are signed by confirming the planner's phase card. Cost of change rises left to right.">
             change: {commitment(@studio.phase)}
           </span>
@@ -208,17 +208,17 @@ defmodule GiTF.Dashboard.StudioLive do
           <div id="studio-transcript" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:0.6rem; padding-right:0.25rem" phx-hook="ScrollBottom">
             <%= for entry <- @studio.transcript do %>
               <div style={transcript_style(entry.role)}>
-                <div style="font-size:0.7rem; color:#8b949e; margin-bottom:0.15rem">{entry.role}</div>
+                <div style="font-size:0.7rem; color:var(--muted); margin-bottom:0.15rem">{entry.role}</div>
                 <div style="white-space:pre-wrap; font-size:0.85rem">{entry.text}</div>
               </div>
             <% end %>
             <%= if @studio.status == :thinking do %>
-              <div style="color:#8b949e; font-size:0.8rem">planner is thinking…</div>
+              <div style="color:var(--muted); font-size:0.8rem">planner is thinking…</div>
             <% end %>
           </div>
           <form phx-submit="send" style="display:flex; gap:0.5rem; margin-top:0.6rem">
             <input type="text" name="message[text]" value={@message} placeholder="Talk to the planner…" autocomplete="off"
-                   style="flex:1; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e6edf3; padding:0.5rem 0.7rem" />
+                   style="flex:1; background:var(--ground); border:1px solid var(--line); border-radius:6px; color:var(--text); padding:0.5rem 0.7rem" />
             <button type="submit" class="btn btn-blue">Send</button>
             <%= if @voice_available do %>
               <button type="button" phx-click="toggle_voice" id="studio-voice" phx-hook="StudioVoice"
@@ -237,16 +237,16 @@ defmodule GiTF.Dashboard.StudioLive do
             <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem">
               <%= for prp <- @studio.proposals do %>
                 <%= if prp.tool == "propose_schemes" do %>
-                  <div style="border:1px dashed #d29922; background:rgba(210,153,34,0.06); border-radius:8px; padding:0.6rem 0.7rem; width:100%">
-                    <div style="font-size:0.7rem; color:#d29922; margin-bottom:0.4rem">
+                  <div style="border:1px dashed var(--warn); background:rgba(210,153,34,0.06); border-radius:8px; padding:0.6rem 0.7rem; width:100%">
+                    <div style="font-size:0.7rem; color:var(--warn); margin-bottom:0.4rem">
                       Three schemes — {prp.args["axis"]}
                     </div>
                     <div style="display:flex; gap:0.6rem; flex-wrap:wrap">
                       <%= for scheme <- prp.args["schemes"] || [] do %>
-                        <div style="flex:1; min-width:200px; border:1px solid #30363d; border-radius:6px; padding:0.5rem; background:#0d1117">
+                        <div style="flex:1; min-width:200px; border:1px solid var(--line); border-radius:6px; padding:0.5rem; background:var(--ground)">
                           <div style="font-weight:600; margin-bottom:0.25rem">{scheme["name"]}</div>
-                          <div style="font-size:0.78rem; color:#e6edf3; margin-bottom:0.3rem">{scheme["thesis"]}</div>
-                          <div style="font-size:0.72rem; color:#f85149; margin-bottom:0.4rem">sacrifices: {scheme["sacrifice"]}</div>
+                          <div style="font-size:0.78rem; color:var(--text); margin-bottom:0.3rem">{scheme["thesis"]}</div>
+                          <div style="font-size:0.72rem; color:var(--crit); margin-bottom:0.4rem">sacrifices: {scheme["sacrifice"]}</div>
                           <button phx-click="choose_scheme" phx-value-id={prp.id} phx-value-scheme={scheme["name"]}
                                   class="btn btn-green" style="font-size:0.7rem; padding:0.15rem 0.5rem">Choose</button>
                         </div>
@@ -255,8 +255,8 @@ defmodule GiTF.Dashboard.StudioLive do
                     <button phx-click="dismiss_card" phx-value-id={prp.id} class="btn btn-grey" style="font-size:0.7rem; padding:0.15rem 0.5rem; margin-top:0.4rem">✕ None of these</button>
                   </div>
                 <% else %>
-                  <div style="border:1px dashed #58a6ff; background:rgba(88,166,255,0.07); border-radius:8px; padding:0.5rem 0.7rem; max-width:340px; opacity:0.85">
-                    <div style="font-size:0.7rem; color:#58a6ff; margin-bottom:0.2rem">{card_label(prp.tool)}</div>
+                  <div style="border:1px dashed var(--accent); background:rgba(88,166,255,0.07); border-radius:8px; padding:0.5rem 0.7rem; max-width:340px; opacity:0.85">
+                    <div style="font-size:0.7rem; color:var(--accent); margin-bottom:0.2rem">{card_label(prp.tool)}</div>
                     <div style="font-size:0.8rem; margin-bottom:0.4rem">{card_text(prp)}</div>
                     <div style="display:flex; gap:0.4rem">
                       <button phx-click="confirm_card" phx-value-id={prp.id} class="btn btn-green" style="font-size:0.7rem; padding:0.15rem 0.5rem">✓ Confirm</button>
@@ -293,18 +293,18 @@ defmodule GiTF.Dashboard.StudioLive do
         <div style="position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:50">
           <div class="card" style="width:440px">
             <h3 style="margin-top:0">Approve &amp; hand to Aramaki</h3>
-            <p style="color:#8b949e; font-size:0.85rem">{length(@studio.roadmap)} mission(s) will run in dependency order.</p>
+            <p style="color:var(--muted); font-size:0.85rem">{length(@studio.roadmap)} mission(s) will run in dependency order.</p>
             <form phx-submit="approve">
               <label style="display:block; margin-bottom:0.5rem">
                 <input type="radio" name="approve[mode]" value="existing" checked /> Existing sector
-                <select name="approve[sector_id]" style="width:100%; margin-top:0.3rem; background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:0.4rem">
+                <select name="approve[sector_id]" style="width:100%; margin-top:0.3rem; background:var(--ground); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:0.4rem">
                   <option value="">— pick —</option>
                   <%= for s <- @sectors do %><option value={s.id}>{s.name}</option><% end %>
                 </select>
               </label>
               <label style="display:block; margin-bottom:0.9rem">
                 <input type="radio" name="approve[mode]" value="new" /> New repository (git init)
-                <input type="text" name="approve[new_name]" placeholder="repo-name" style="width:100%; margin-top:0.3rem; background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:0.4rem" />
+                <input type="text" name="approve[new_name]" placeholder="repo-name" style="width:100%; margin-top:0.3rem; background:var(--ground); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:0.4rem" />
               </label>
               <div style="display:flex; gap:0.5rem; justify-content:flex-end">
                 <button type="button" phx-click="cancel_approve" class="btn btn-grey">Cancel</button>
@@ -325,34 +325,34 @@ defmodule GiTF.Dashboard.StudioLive do
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem">
       <div class="card" style="grid-column: 1 / -1; display:flex; gap:1rem">
         <div style="flex:1">
-          <div style="font-size:0.7rem; color:#8b949e; text-transform:uppercase">Vision</div>
+          <div style="font-size:0.7rem; color:var(--muted); text-transform:uppercase">Vision</div>
           <div style="font-size:0.95rem">{@studio.brief.vision || em("not set yet")}</div>
         </div>
-        <div style="flex:1; border-left:1px solid #30363d; padding-left:1rem">
-          <div style="font-size:0.7rem; color:#d29922; text-transform:uppercase">Parti — the one idea</div>
+        <div style="flex:1; border-left:1px solid var(--line); padding-left:1rem">
+          <div style="font-size:0.7rem; color:var(--warn); text-transform:uppercase">Parti — the one idea</div>
           <div style="font-size:0.95rem">{@studio.brief.parti || em("not set yet")}</div>
         </div>
       </div>
 
       <div class="card">
-        <div style="font-size:0.75rem; color:#3fb950; text-transform:uppercase; margin-bottom:0.5rem">Decided</div>
+        <div style="font-size:0.75rem; color:var(--ok); text-transform:uppercase; margin-bottom:0.5rem">Decided</div>
         <%= if @studio.brief.decisions == [] do %>{em("nothing yet")}<% end %>
         <%= for d <- @studio.brief.decisions do %>
-          <div style="border-left:3px solid #3fb950; padding:0.3rem 0.6rem; margin-bottom:0.4rem; background:#0d1117; border-radius:0 6px 6px 0; font-size:0.85rem">{d}</div>
+          <div style="border-left:3px solid var(--ok); padding:0.3rem 0.6rem; margin-bottom:0.4rem; background:var(--ground); border-radius:0 6px 6px 0; font-size:0.85rem">{d}</div>
         <% end %>
         <%= if @studio.brief.constraints != [] do %>
-          <div style="font-size:0.75rem; color:#f85149; text-transform:uppercase; margin:0.75rem 0 0.5rem">Constraints</div>
+          <div style="font-size:0.75rem; color:var(--crit); text-transform:uppercase; margin:0.75rem 0 0.5rem">Constraints</div>
           <%= for c <- @studio.brief.constraints do %>
-            <div style="border-left:3px solid #f85149; padding:0.3rem 0.6rem; margin-bottom:0.4rem; background:#0d1117; border-radius:0 6px 6px 0; font-size:0.85rem">{c}</div>
+            <div style="border-left:3px solid var(--crit); padding:0.3rem 0.6rem; margin-bottom:0.4rem; background:var(--ground); border-radius:0 6px 6px 0; font-size:0.85rem">{c}</div>
           <% end %>
         <% end %>
       </div>
 
       <div class="card">
-        <div style="font-size:0.75rem; color:#d29922; text-transform:uppercase; margin-bottom:0.5rem">Open questions</div>
+        <div style="font-size:0.75rem; color:var(--warn); text-transform:uppercase; margin-bottom:0.5rem">Open questions</div>
         <%= if @studio.brief.open_questions == [] do %>{em("none — nice")}<% end %>
         <%= for q <- @studio.brief.open_questions do %>
-          <div style="display:inline-block; border:1px solid #d29922; color:#d29922; padding:0.2rem 0.6rem; margin:0 0.3rem 0.3rem 0; border-radius:999px; font-size:0.8rem">{q}</div>
+          <div style="display:inline-block; border:1px solid var(--warn); color:var(--warn); padding:0.2rem 0.6rem; margin:0 0.3rem 0.3rem 0; border-radius:999px; font-size:0.8rem">{q}</div>
         <% end %>
       </div>
     </div>
@@ -397,11 +397,11 @@ defmodule GiTF.Dashboard.StudioLive do
           <%= for edge <- @edges do %>
             <line x1={edge.x1} y1={edge.y1} x2={edge.x2} y2={edge.y2} stroke={edge_color(edge.kind)}
                   stroke-width="2" stroke-dasharray={if edge.kind == "isolated_from", do: "6 4", else: ""} />
-            <text x={(edge.x1 + edge.x2) / 2} y={(edge.y1 + edge.y2) / 2 - 6} fill="#8b949e" font-size="10" text-anchor="middle">{edge.kind}</text>
+            <text x={(edge.x1 + edge.x2) / 2} y={(edge.y1 + edge.y2) / 2 - 6} fill="var(--muted)" font-size="10" text-anchor="middle">{edge.kind}</text>
           <% end %>
           <%= for m <- @modules do %>
-            <circle cx={m.x} cy={m.y} r={radius(m.effort)} fill="rgba(88,166,255,0.15)" stroke="#58a6ff" stroke-width="2" />
-            <text x={m.x} y={m.y} fill="#e6edf3" font-size="13" text-anchor="middle" dominant-baseline="middle">{m.label}</text>
+            <circle cx={m.x} cy={m.y} r={radius(m.effort)} fill="rgba(88,166,255,0.15)" stroke="var(--accent)" stroke-width="2" />
+            <text x={m.x} y={m.y} fill="var(--text)" font-size="13" text-anchor="middle" dominant-baseline="middle">{m.label}</text>
           <% end %>
         </svg>
       <% end %>
@@ -419,14 +419,14 @@ defmodule GiTF.Dashboard.StudioLive do
       <% else %>
         <%= for {level, idx} <- Enum.with_index(@levels) do %>
           <div style="display:flex; gap:0.75rem; margin-bottom:0.75rem; align-items:stretch">
-            <div style="color:#8b949e; font-size:0.75rem; writing-mode:vertical-rl; text-align:center">wave {idx + 1}</div>
+            <div style="color:var(--muted); font-size:0.75rem; writing-mode:vertical-rl; text-align:center">wave {idx + 1}</div>
             <%= for item <- level do %>
-              <div style="flex:1; border:1px solid #30363d; border-radius:8px; padding:0.6rem; background:#0d1117; max-width:320px">
-                <div style="font-size:0.7rem; color:#d29922">[{item.id}]</div>
+              <div style="flex:1; border:1px solid var(--line); border-radius:8px; padding:0.6rem; background:var(--ground); max-width:320px">
+                <div style="font-size:0.7rem; color:var(--warn)">[{item.id}]</div>
                 <div style="font-weight:600; margin:0.15rem 0">{item.title}</div>
-                <div style="font-size:0.78rem; color:#8b949e; max-height:4.5em; overflow:hidden">{String.slice(item.goal, 0, 220)}</div>
+                <div style="font-size:0.78rem; color:var(--muted); max-height:4.5em; overflow:hidden">{String.slice(item.goal, 0, 220)}</div>
                 <%= if item.depends_on != [] do %>
-                  <div style="font-size:0.7rem; color:#58a6ff; margin-top:0.3rem">after: {Enum.join(item.depends_on, ", ")}</div>
+                  <div style="font-size:0.7rem; color:var(--accent); margin-top:0.3rem">after: {Enum.join(item.depends_on, ", ")}</div>
                 <% end %>
               </div>
             <% end %>
@@ -447,10 +447,10 @@ defmodule GiTF.Dashboard.StudioLive do
           <%= for m <- @studio.mockups do %>
             <div class="card" style="padding:0.5rem">
               <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem">
-                <span style="font-size:0.75rem; color:#8b949e">{m.target} — <span style="color:#d29922">{m.style}</span></span>
+                <span style="font-size:0.75rem; color:var(--muted)">{m.target} — <span style="color:var(--warn)">{m.style}</span></span>
                 <button phx-click="zoom_mockup" phx-value-id={m.id} class="btn btn-grey" style="font-size:0.7rem; padding:0.1rem 0.4rem">⤢</button>
               </div>
-              <iframe sandbox="" srcdoc={m.html} style="width:100%; height:260px; border:1px solid #30363d; border-radius:6px; background:#fff"></iframe>
+              <iframe sandbox="" srcdoc={m.html} style="width:100%; height:260px; border:1px solid var(--line); border-radius:6px; background:#fff"></iframe>
             </div>
           <% end %>
         </div>
@@ -487,10 +487,10 @@ defmodule GiTF.Dashboard.StudioLive do
             <div style="font-weight:600; margin-bottom:0.5rem">{board.title}</div>
             <div style="display:flex; gap:0.6rem; overflow-x:auto; padding-bottom:0.5rem">
               <%= for {panel, idx} <- Enum.with_index(board.panels, 1) do %>
-                <div style="min-width:190px; max-width:190px; border:1px solid #30363d; border-radius:8px; background:#0d1117; padding:0.5rem">
-                  <div style="font-size:0.7rem; color:#d29922; margin-bottom:0.25rem">panel {idx}</div>
+                <div style="min-width:190px; max-width:190px; border:1px solid var(--line); border-radius:8px; background:var(--ground); padding:0.5rem">
+                  <div style="font-size:0.7rem; color:var(--warn); margin-bottom:0.25rem">panel {idx}</div>
                   <div style="font-size:0.85rem; font-weight:600; margin-bottom:0.3rem">{panel["caption"]}</div>
-                  <div style="font-size:0.75rem; color:#8b949e">{panel["description"]}</div>
+                  <div style="font-size:0.75rem; color:var(--muted)">{panel["description"]}</div>
                 </div>
               <% end %>
             </div>
@@ -517,14 +517,14 @@ defmodule GiTF.Dashboard.StudioLive do
 
   defp transcript_style(:user),
     do:
-      "align-self:flex-end; background:#1f6feb22; border:1px solid #1f6feb55; border-radius:10px 10px 2px 10px; padding:0.45rem 0.65rem; max-width:90%"
+      "align-self:flex-end; background:var(--accent)22; border:1px solid var(--accent)55; border-radius:10px 10px 2px 10px; padding:0.45rem 0.65rem; max-width:90%"
 
   defp transcript_style(:assistant),
     do:
-      "align-self:flex-start; background:#161b22; border:1px solid #30363d; border-radius:10px 10px 10px 2px; padding:0.45rem 0.65rem; max-width:95%"
+      "align-self:flex-start; background:var(--panel); border:1px solid var(--line); border-radius:10px 10px 10px 2px; padding:0.45rem 0.65rem; max-width:95%"
 
   defp transcript_style(_),
-    do: "align-self:center; color:#d29922; font-size:0.75rem; padding:0.2rem"
+    do: "align-self:center; color:var(--warn); font-size:0.75rem; padding:0.2rem"
 
   defp card_label(tool),
     do: tool |> String.replace(["upsert_", "add_", "set_"], "") |> String.replace("_", " ")
@@ -538,12 +538,12 @@ defmodule GiTF.Dashboard.StudioLive do
   defp radius("l"), do: 62
   defp radius(_), do: 46
 
-  defp edge_color("isolated_from"), do: "#f85149"
-  defp edge_color("shares_data"), do: "#d29922"
-  defp edge_color(_), do: "#58a6ff"
+  defp edge_color("isolated_from"), do: "var(--crit)"
+  defp edge_color("shares_data"), do: "var(--warn)"
+  defp edge_color(_), do: "var(--accent)"
 
   defp em(text),
-    do: Phoenix.HTML.raw("<span style=\"color:#8b949e; font-style:italic\">#{text}</span>")
+    do: Phoenix.HTML.raw("<span style=\"color:var(--muted); font-style:italic\">#{text}</span>")
 
   defp safe_sectors do
     GiTF.Sector.list()

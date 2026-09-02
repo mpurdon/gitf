@@ -63,7 +63,7 @@ defmodule GiTF.Dashboard.LinksLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
         <h1 class="page-title" style="margin-bottom:0">Link Messages</h1>
-        <button phx-click="refresh" style="background:#1f6feb33; color:#58a6ff; border:1px solid #1f6feb55; padding:0.4rem 1rem; border-radius:6px; cursor:pointer; font-size:0.85rem">
+        <button phx-click="refresh" style="background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent)55; padding:0.4rem 1rem; border-radius:6px; cursor:pointer; font-size:0.85rem">
           Refresh
         </button>
       </div>
@@ -113,11 +113,11 @@ defmodule GiTF.Dashboard.LinksLive do
                   <td style="font-family:monospace; font-size:0.8rem">{link_msg.from}</td>
                   <td style="font-family:monospace; font-size:0.8rem">{link_msg.to}</td>
                   <td class={unless link_msg.read, do: "link_msg-subject"}>{link_msg.subject || "(no subject)"}</td>
-                  <td style="font-size:0.8rem; color:#8b949e">{format_timestamp(link_msg.inserted_at)}</td>
+                  <td style="font-size:0.8rem; color:var(--muted)">{format_timestamp(link_msg.inserted_at)}</td>
                 </tr>
                 <tr id={"link-body-#{link_msg.id}"} style="display:none">
-                  <td colspan="6" style="padding:0.5rem 1rem; background:#0d1117; border-top:none">
-                    <div style="font-size:0.8rem; color:#c9d1d9; white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto">
+                  <td colspan="6" style="padding:0.5rem 1rem; background:var(--ground); border-top:none">
+                    <div style="font-size:0.8rem; color:var(--text-2); white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto">
                       {link_msg.body || "(empty)"}
                     </div>
                   </td>

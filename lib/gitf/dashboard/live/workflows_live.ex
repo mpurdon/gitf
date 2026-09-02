@@ -64,7 +64,7 @@ defmodule GiTF.Dashboard.WorkflowsLive do
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <div>
           <h1 class="page-title" style="margin:0">Workflows</h1>
-          <p style="color:#8b949e; font-size:0.85rem; margin:0.5rem 0 0 0">
+          <p style="color:var(--muted); font-size:0.85rem; margin:0.5rem 0 0 0">
             Declarative mission pipelines. Edit phases, branching, and gates without touching code.
           </p>
         </div>
@@ -79,21 +79,21 @@ defmodule GiTF.Dashboard.WorkflowsLive do
           <form phx-change="update_new" phx-submit="create_workflow">
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
               <div>
-                <label style="display:block; color:#8b949e; font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase">Name</label>
+                <label style="display:block; color:var(--muted); font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase">Name</label>
                 <input
                   type="text"
                   name="name"
                   value={@new_name}
                   placeholder="my-workflow"
                   pattern="[a-z0-9][a-z0-9\-]*"
-                  style="width:100%; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem"
+                  style="width:100%; background:var(--ground); border:1px solid var(--line); color:var(--text-2); padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem"
                 />
               </div>
               <div>
-                <label style="display:block; color:#8b949e; font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase">Fork from</label>
+                <label style="display:block; color:var(--muted); font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase">Fork from</label>
                 <select
                   name="template"
-                  style="width:100%; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem"
+                  style="width:100%; background:var(--ground); border:1px solid var(--line); color:var(--text-2); padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem"
                 >
                   <%= for w <- @workflows do %>
                     <option value={w.name} selected={@new_template == w.name}>{w.name}</option>
@@ -101,10 +101,10 @@ defmodule GiTF.Dashboard.WorkflowsLive do
                 </select>
               </div>
               <div>
-                <label style="display:block; color:#8b949e; font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase">Scope</label>
+                <label style="display:block; color:var(--muted); font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase">Scope</label>
                 <select
                   name="sector"
-                  style="width:100%; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem"
+                  style="width:100%; background:var(--ground); border:1px solid var(--line); color:var(--text-2); padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem"
                 >
                   <option value="" selected={@new_sector == ""}>Global</option>
                   <%= for {name, id} <- @sectors do %>
@@ -114,7 +114,7 @@ defmodule GiTF.Dashboard.WorkflowsLive do
               </div>
             </div>
             <button type="submit" class="btn btn-blue">Create</button>
-            <span style="color:#8b949e; font-size:0.75rem; margin-left:0.75rem">
+            <span style="color:var(--muted); font-size:0.75rem; margin-left:0.75rem">
               Forked workflows live in
               <span style="font-family:monospace">
                 <%= if @new_sector == "", do: "vault/Workflows/", else: "vault/Sectors/.../Workflows/" %>
@@ -128,29 +128,29 @@ defmodule GiTF.Dashboard.WorkflowsLive do
         <div class="panel-title">Available workflows</div>
 
         <%= if @workflows == [] do %>
-          <p style="color:#8b949e">
+          <p style="color:var(--muted)">
             No workflows defined yet. The bundled <strong>standard</strong> workflow ships with
             the Factory and is used by default.
           </p>
         <% else %>
           <table style="width:100%; border-collapse:collapse">
             <thead>
-              <tr style="text-align:left; color:#8b949e; font-size:0.75rem; text-transform:uppercase">
-                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid #30363d">Name</th>
-                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid #30363d">Phases</th>
-                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid #30363d">Description</th>
-                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid #30363d">Source</th>
+              <tr style="text-align:left; color:var(--muted); font-size:0.75rem; text-transform:uppercase">
+                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid var(--line)">Name</th>
+                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid var(--line)">Phases</th>
+                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid var(--line)">Description</th>
+                <th style="padding:0.5rem 0.5rem; border-bottom:1px solid var(--line)">Source</th>
               </tr>
             </thead>
             <tbody>
               <%= for w <- @workflows do %>
-                <tr style="border-bottom:1px solid #30363d">
+                <tr style="border-bottom:1px solid var(--line)">
                   <td style="padding:0.5rem 0.5rem">
-                    <.link navigate={"/dashboard/workflows/" <> w.name} style="color:#58a6ff">{w.name}</.link>
+                    <.link navigate={"/dashboard/workflows/" <> w.name} style="color:var(--accent)">{w.name}</.link>
                   </td>
                   <td style="padding:0.5rem 0.5rem">{length(w.phases)}</td>
-                  <td style="padding:0.5rem 0.5rem; color:#8b949e">{String.slice(w.description || "", 0, 80)}</td>
-                  <td style="padding:0.5rem 0.5rem; color:#8b949e; font-size:0.75rem; font-family:monospace">
+                  <td style="padding:0.5rem 0.5rem; color:var(--muted)">{String.slice(w.description || "", 0, 80)}</td>
+                  <td style="padding:0.5rem 0.5rem; color:var(--muted); font-size:0.75rem; font-family:monospace">
                     {short_path(w.source_path)}
                   </td>
                 </tr>

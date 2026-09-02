@@ -103,24 +103,24 @@ defmodule GiTF.Dashboard.AutonomyLive do
         <div class="panel-title">Auto-Scaling Status</div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:0.75rem; margin-top:0.5rem">
           <div>
-            <div style="font-size:0.7rem; color:#6b7280">Effective Ghost Cap</div>
-            <div style="font-size:1.2rem; font-weight:600; color:#58a6ff">{@scaling.effective_max} <span style="font-size:0.8rem; color:#6b7280">/ {@scaling.max_ghosts}</span></div>
+            <div style="font-size:0.7rem; color:var(--muted)">Effective Ghost Cap</div>
+            <div style="font-size:1.2rem; font-weight:600; color:var(--accent)">{@scaling.effective_max} <span style="font-size:0.8rem; color:var(--muted)">/ {@scaling.max_ghosts}</span></div>
           </div>
           <div>
-            <div style="font-size:0.7rem; color:#6b7280">Active Ghosts</div>
-            <div style="font-size:1.2rem; font-weight:600; color:#3fb950">{@scaling.active_ghosts}</div>
+            <div style="font-size:0.7rem; color:var(--muted)">Active Ghosts</div>
+            <div style="font-size:1.2rem; font-weight:600; color:var(--ok)">{@scaling.active_ghosts}</div>
           </div>
           <div>
-            <div style="font-size:0.7rem; color:#6b7280">Budget Pressure</div>
+            <div style="font-size:0.7rem; color:var(--muted)">Budget Pressure</div>
             <div style={"font-size:1.2rem; font-weight:600; color:#{cond do
-              @budget_util >= 85 -> "#f85149"
-              @budget_util >= 70 -> "#d29922"
-              true -> "#3fb950"
+              @budget_util >= 85 -> "var(--crit)"
+              @budget_util >= 70 -> "var(--warn)"
+              true -> "var(--ok)"
             end}"}>{@budget_util}%</div>
           </div>
           <div>
-            <div style="font-size:0.7rem; color:#6b7280">Scaling Curve</div>
-            <div style="font-size:0.8rem; color:#8b949e; margin-top:0.2rem">
+            <div style="font-size:0.7rem; color:var(--muted)">Scaling Curve</div>
+            <div style="font-size:0.8rem; color:var(--muted); margin-top:0.2rem">
               &lt;70%: full &middot; 70%: 0.75x &middot; 85%: 0.5x &middot; 95%: crawl
             </div>
           </div>
@@ -131,7 +131,7 @@ defmodule GiTF.Dashboard.AutonomyLive do
         <%!-- Self-Heal --%>
         <div class="panel">
           <div class="panel-title">Self-Heal</div>
-          <p style="color:#8b949e; font-size:0.85rem; margin-bottom:1rem">
+          <p style="color:var(--muted); font-size:0.85rem; margin-bottom:1rem">
             Detect and repair stuck processes, failed ops, and inconsistent state.
           </p>
           <button phx-click="self_heal" class="btn btn-green" disabled={@loading == :heal}>
@@ -145,10 +145,10 @@ defmodule GiTF.Dashboard.AutonomyLive do
           <%= if @heal_result do %>
             <div style="margin-top:1rem">
               <%= if @heal_result == [] do %>
-                <div style="color:#3fb950; font-size:0.85rem">All clear — no issues found.</div>
+                <div style="color:var(--ok); font-size:0.85rem">All clear — no issues found.</div>
               <% else %>
                 <%= for action <- List.wrap(@heal_result) do %>
-                  <div style="padding:0.35rem 0; font-size:0.85rem; border-bottom:1px solid #21262d">
+                  <div style="padding:0.35rem 0; font-size:0.85rem; border-bottom:1px solid var(--line-2)">
                     {inspect(action)}
                   </div>
                 <% end %>
@@ -160,7 +160,7 @@ defmodule GiTF.Dashboard.AutonomyLive do
         <%!-- Optimize --%>
         <div class="panel">
           <div class="panel-title">Optimize Resources</div>
-          <p style="color:#8b949e; font-size:0.85rem; margin-bottom:1rem">
+          <p style="color:var(--muted); font-size:0.85rem; margin-bottom:1rem">
             Analyze resource usage and suggest optimizations for ghost allocation and model selection.
           </p>
           <button phx-click="optimize" class="btn btn-blue" disabled={@loading == :optimize}>
@@ -174,10 +174,10 @@ defmodule GiTF.Dashboard.AutonomyLive do
           <%= if @optimize_result do %>
             <div style="margin-top:1rem">
               <%= if @optimize_result == [] do %>
-                <div style="color:#3fb950; font-size:0.85rem">No optimizations suggested.</div>
+                <div style="color:var(--ok); font-size:0.85rem">No optimizations suggested.</div>
               <% else %>
                 <%= for rec <- List.wrap(@optimize_result) do %>
-                  <div style="padding:0.5rem; margin-bottom:0.5rem; background:#0d1117; border-radius:6px; font-size:0.85rem; border:1px solid #30363d">
+                  <div style="padding:0.5rem; margin-bottom:0.5rem; background:var(--ground); border-radius:6px; font-size:0.85rem; border:1px solid var(--line)">
                     {inspect(rec)}
                   </div>
                 <% end %>
@@ -189,7 +189,7 @@ defmodule GiTF.Dashboard.AutonomyLive do
         <%!-- Predict Issues --%>
         <div class="panel">
           <div class="panel-title">Predict Issues</div>
-          <p style="color:#8b949e; font-size:0.85rem; margin-bottom:1rem">
+          <p style="color:var(--muted); font-size:0.85rem; margin-bottom:1rem">
             Analyze a sector for potential problems before they happen.
           </p>
           <form phx-change="select_sector" phx-submit="predict" style="display:flex; gap:0.5rem; align-items:flex-end">
@@ -212,10 +212,10 @@ defmodule GiTF.Dashboard.AutonomyLive do
           <%= if @predict_result do %>
             <div style="margin-top:1rem">
               <%= if @predict_result == [] do %>
-                <div style="color:#3fb950; font-size:0.85rem">No issues predicted.</div>
+                <div style="color:var(--ok); font-size:0.85rem">No issues predicted.</div>
               <% else %>
                 <%= for pred <- List.wrap(@predict_result) do %>
-                  <div style="padding:0.5rem; margin-bottom:0.5rem; background:#0d1117; border-radius:6px; font-size:0.85rem; border:1px solid #30363d">
+                  <div style="padding:0.5rem; margin-bottom:0.5rem; background:var(--ground); border-radius:6px; font-size:0.85rem; border:1px solid var(--line)">
                     {inspect(pred)}
                   </div>
                 <% end %>

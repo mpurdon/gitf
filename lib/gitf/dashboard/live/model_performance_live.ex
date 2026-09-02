@@ -80,7 +80,7 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
                   <td style="text-align:right">{m.total_ops}</td>
                   <td style="text-align:right">
                     <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.35rem">
-                      <div style="width:40px; height:4px; background:#21262d; border-radius:2px; overflow:hidden">
+                      <div style="width:40px; height:4px; background:var(--line-2); border-radius:2px; overflow:hidden">
                         <div style={"height:100%; border-radius:2px; background:#{rate_color(m.success_rate)}; width:#{Float.round((m.success_rate || 0) * 100, 0)}%"}></div>
                       </div>
                       <span style={"color:#{rate_color(m.success_rate)}; min-width:36px"}>{format_pct(m.success_rate)}</span>
@@ -107,7 +107,7 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
         <% else %>
           <%= for {phase, models} <- Enum.sort_by(@phase_comparison, fn {p, _} -> phase_order(p) end) do %>
             <div style="margin-bottom:1rem">
-              <div style="font-weight:600; margin-bottom:0.35rem; color:#c9d1d9">{phase}</div>
+              <div style="font-weight:600; margin-bottom:0.35rem; color:var(--text-2)">{phase}</div>
               <table style="margin-bottom:0">
                 <thead>
                   <tr>
@@ -165,20 +165,20 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
   defp format_pct(rate) when is_float(rate), do: "#{Float.round(rate * 100, 1)}%"
   defp format_pct(_), do: "-"
 
-  defp rate_color(rate) when is_float(rate) and rate >= 0.9, do: "#3fb950"
-  defp rate_color(rate) when is_float(rate) and rate >= 0.7, do: "#d29922"
-  defp rate_color(rate) when is_float(rate), do: "#f85149"
-  defp rate_color(_), do: "#8b949e"
+  defp rate_color(rate) when is_float(rate) and rate >= 0.9, do: "var(--ok)"
+  defp rate_color(rate) when is_float(rate) and rate >= 0.7, do: "var(--warn)"
+  defp rate_color(rate) when is_float(rate), do: "var(--crit)"
+  defp rate_color(_), do: "var(--muted)"
 
-  defp retry_color(rate) when is_float(rate) and rate > 0.3, do: "#f85149"
-  defp retry_color(rate) when is_float(rate) and rate > 0.1, do: "#d29922"
-  defp retry_color(_), do: "#8b949e"
+  defp retry_color(rate) when is_float(rate) and rate > 0.3, do: "var(--crit)"
+  defp retry_color(rate) when is_float(rate) and rate > 0.1, do: "var(--warn)"
+  defp retry_color(_), do: "var(--muted)"
 
   defp bar_pct(_, max) when max == 0 or max == 0.0, do: 0
   defp bar_pct(val, max), do: Float.round(val / max * 100, 1)
 
-  defp efficiency_color(model, [best | _]) when model.model == best.model, do: "#3fb950"
-  defp efficiency_color(_, _), do: "#1f6feb"
+  defp efficiency_color(model, [best | _]) when model.model == best.model, do: "var(--ok)"
+  defp efficiency_color(_, _), do: "var(--accent)"
 
   @phase_order ~w(research requirements design review planning implementation validation simplify scoring)
   defp phase_order(phase) do

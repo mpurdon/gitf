@@ -98,21 +98,21 @@ defmodule GiTF.Dashboard.HealthLive do
     |> assign(:open_circuits, open_circuits)
   end
 
-  defp check_color(:ok), do: "#3fb950"
-  defp check_color(:warning), do: "#d29922"
-  defp check_color(:error), do: "#f85149"
-  defp check_color(_), do: "#6b7280"
+  defp check_color(:ok), do: "var(--ok)"
+  defp check_color(:warning), do: "var(--warn)"
+  defp check_color(:error), do: "var(--crit)"
+  defp check_color(_), do: "var(--muted)"
 
   defp check_icon(:ok), do: "&#10003;"
   defp check_icon(:warning), do: "&#9888;"
   defp check_icon(:error), do: "&#10007;"
   defp check_icon(_), do: "?"
 
-  defp severity_color(:critical), do: "#f85149"
-  defp severity_color(:high), do: "#f97316"
-  defp severity_color(:medium), do: "#d29922"
-  defp severity_color(:low), do: "#6b7280"
-  defp severity_color(_), do: "#6b7280"
+  defp severity_color(:critical), do: "var(--crit)"
+  defp severity_color(:high), do: "var(--warn)"
+  defp severity_color(:medium), do: "var(--warn)"
+  defp severity_color(:low), do: "var(--muted)"
+  defp severity_color(_), do: "var(--muted)"
 
   @impl true
   def render(assigns) do
@@ -121,11 +121,11 @@ defmodule GiTF.Dashboard.HealthLive do
       <h1 class="page-title">System Health</h1>
 
       <%!-- Status banner --%>
-      <div style={"padding:0.75rem 1rem; border-radius:6px; margin-bottom:1.5rem; border:1px solid #{if @health.status == :healthy, do: "#238636", else: "#da3633"}; background:#{if @health.status == :healthy, do: "#0d1117", else: "#1c0a0a"}"}>
+      <div style={"padding:0.75rem 1rem; border-radius:6px; margin-bottom:1.5rem; border:1px solid #{if @health.status == :healthy, do: "var(--ok)", else: "var(--crit)"}; background:#{if @health.status == :healthy, do: "var(--ground)", else: "var(--crit-bg)"}"}>
         <div style="display:flex; justify-content:space-between; align-items:center">
           <div style="display:flex; align-items:center; gap:0.5rem">
-            <div style={"width:12px; height:12px; border-radius:50%; background:#{if @health.status == :healthy, do: "#3fb950", else: "#f85149"}"}></div>
-            <span style={"font-size:1.1rem; font-weight:600; color:#{if @health.status == :healthy, do: "#3fb950", else: "#f85149"}"}>
+            <div style={"width:12px; height:12px; border-radius:50%; background:#{if @health.status == :healthy, do: "var(--ok)", else: "var(--crit)"}"}></div>
+            <span style={"font-size:1.1rem; font-weight:600; color:#{if @health.status == :healthy, do: "var(--ok)", else: "var(--crit)"}"}>
               {if @health.status == :healthy, do: "All Systems Operational", else: "System Degraded"}
             </span>
           </div>
@@ -149,7 +149,7 @@ defmodule GiTF.Dashboard.HealthLive do
             <tbody>
               <%= for {name, status} <- Enum.sort(@health.checks) do %>
                 <tr>
-                  <td style="color:#c9d1d9">{name |> to_string() |> String.replace("_", " ") |> String.capitalize()}</td>
+                  <td style="color:var(--text-2)">{name |> to_string() |> String.replace("_", " ") |> String.capitalize()}</td>
                   <td style={"text-align:center; color:#{check_color(status)}"}>
                     <span style="font-size:1rem">{raw(check_icon(status))}</span>
                     <span style="font-size:0.75rem; margin-left:0.25rem">{status}</span>
@@ -186,21 +186,21 @@ defmodule GiTF.Dashboard.HealthLive do
             </div>
             <div class="card">
               <div class="card-label">BEAM</div>
-              <div style="color:#c9d1d9; font-size:0.85rem; margin-top:0.25rem">
+              <div style="color:var(--text-2); font-size:0.85rem; margin-top:0.25rem">
                 {@memory_mb} MB &middot; {@process_count} procs
               </div>
             </div>
           </div>
 
           <%!-- Provider circuits --%>
-          <div style="margin-top:1rem; border-top:1px solid #21262d; padding-top:0.75rem">
-            <div style="font-size:0.75rem; color:#6b7280; margin-bottom:0.5rem">Provider Circuits</div>
+          <div style="margin-top:1rem; border-top:1px solid var(--line-2); padding-top:0.75rem">
+            <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.5rem">Provider Circuits</div>
             <%= if @open_circuits == [] do %>
-              <div style="color:#3fb950; font-size:0.8rem">All circuits closed</div>
+              <div style="color:var(--ok); font-size:0.8rem">All circuits closed</div>
             <% else %>
               <%= for provider <- @open_circuits do %>
                 <div style="display:flex; justify-content:space-between; padding:0.25rem 0; font-size:0.8rem">
-                  <span style="color:#c9d1d9">{provider}</span>
+                  <span style="color:var(--text-2)">{provider}</span>
                   <span class="badge badge-red">open</span>
                 </div>
               <% end %>
@@ -213,7 +213,7 @@ defmodule GiTF.Dashboard.HealthLive do
       <div class="panel" style="margin-bottom:1.5rem">
         <div class="panel-title">Active Alerts</div>
         <%= if @alerts == [] do %>
-          <div class="empty" style="padding:1rem 0; color:#3fb950">No active alerts</div>
+          <div class="empty" style="padding:1rem 0; color:var(--ok)">No active alerts</div>
         <% else %>
           <table class="table" style="width:100%">
             <thead><tr><th>Type</th><th>Severity</th><th>Message</th></tr></thead>
@@ -221,13 +221,13 @@ defmodule GiTF.Dashboard.HealthLive do
               <%= for {type, message} <- @alerts do %>
                 <% sev = GiTF.Observability.Alerts.severity(type) %>
                 <tr>
-                  <td style="color:#c9d1d9; font-weight:500">{type}</td>
+                  <td style="color:var(--text-2); font-weight:500">{type}</td>
                   <td>
                     <span style={"color:#{severity_color(sev)}; font-weight:600; font-size:0.8rem; text-transform:uppercase"}>
                       {sev}
                     </span>
                   </td>
-                  <td style="color:#8b949e; font-size:0.85rem">{message}</td>
+                  <td style="color:var(--muted); font-size:0.85rem">{message}</td>
                 </tr>
               <% end %>
             </tbody>

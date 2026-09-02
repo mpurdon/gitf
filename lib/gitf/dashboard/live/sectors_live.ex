@@ -258,7 +258,7 @@ defmodule GiTF.Dashboard.SectorsLive do
         <div class="panel-title">Add Sector</div>
 
         <!-- Mode tabs -->
-        <div style="display:flex; gap:0.25rem; margin-bottom:1rem; border-bottom:1px solid #30363d; padding-bottom:0.5rem">
+        <div style="display:flex; gap:0.25rem; margin-bottom:1rem; border-bottom:1px solid var(--line); padding-bottom:0.5rem">
           <button
             phx-click="switch_mode" phx-value-mode="discover"
             class={"btn #{if @add_mode == "discover", do: "btn-blue", else: "btn-grey"}"}
@@ -284,7 +284,7 @@ defmodule GiTF.Dashboard.SectorsLive do
 
         <!-- Discover local repos -->
         <%= if @add_mode == "discover" do %>
-          <p style="color:#8b949e; font-size:0.8rem; margin-bottom:0.75rem">
+          <p style="color:var(--muted); font-size:0.8rem; margin-bottom:0.75rem">
             Git repositories found near the workspace. Click to add.
           </p>
           <button phx-click="discover" class="btn btn-grey" style="margin-bottom:0.75rem; font-size:0.8rem">
@@ -295,10 +295,10 @@ defmodule GiTF.Dashboard.SectorsLive do
           <% else %>
             <div style="display:flex; flex-direction:column; gap:0.35rem">
               <%= for path <- @discovered_repos do %>
-                <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0.75rem; background:#1c2128; border-radius:6px; border:1px solid #30363d">
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0.75rem; background:var(--panel-2); border-radius:6px; border:1px solid var(--line)">
                   <div>
-                    <span style="color:#f0f6fc; font-weight:500">{Path.basename(path)}</span>
-                    <span style="color:#8b949e; font-family:monospace; font-size:0.75rem; margin-left:0.5rem">{path}</span>
+                    <span style="color:var(--text); font-weight:500">{Path.basename(path)}</span>
+                    <span style="color:var(--muted); font-family:monospace; font-size:0.75rem; margin-left:0.5rem">{path}</span>
                   </div>
                   <button phx-click="add_discovered" phx-value-path={path} class="btn btn-green" style="padding:0.2rem 0.6rem; font-size:0.75rem">
                     Add
@@ -312,7 +312,7 @@ defmodule GiTF.Dashboard.SectorsLive do
         <!-- GitHub repos -->
         <%= if @add_mode == "github" do %>
           <%= if @has_github_token do %>
-            <p style="color:#8b949e; font-size:0.8rem; margin-bottom:0.75rem">
+            <p style="color:var(--muted); font-size:0.8rem; margin-bottom:0.75rem">
               Import a repository from your GitHub account. It will be cloned into the workspace.
             </p>
 
@@ -323,20 +323,20 @@ defmodule GiTF.Dashboard.SectorsLive do
             <% end %>
 
             <%= if @github_loading do %>
-              <div style="color:#8b949e; padding:1rem">Loading repositories...</div>
+              <div style="color:var(--muted); padding:1rem">Loading repositories...</div>
             <% end %>
 
             <%= if @github_error do %>
-              <div style="color:#f85149; padding:0.5rem 0; font-size:0.85rem">{@github_error}</div>
+              <div style="color:var(--crit); padding:0.5rem 0; font-size:0.85rem">{@github_error}</div>
             <% end %>
 
             <%= if @github_repos != [] do %>
               <div style="display:flex; flex-direction:column; gap:0.35rem; max-height:400px; overflow-y:auto">
                 <%= for repo <- @github_repos do %>
-                  <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0.75rem; background:#1c2128; border-radius:6px; border:1px solid #30363d">
+                  <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0.75rem; background:var(--panel-2); border-radius:6px; border:1px solid var(--line)">
                     <div style="flex:1; min-width:0">
                       <div style="display:flex; align-items:center; gap:0.5rem">
-                        <span style="color:#f0f6fc; font-weight:500">{repo.name}</span>
+                        <span style="color:var(--text); font-weight:500">{repo.name}</span>
                         <%= if repo.private do %>
                           <span class="badge badge-yellow" style="font-size:0.6rem">private</span>
                         <% end %>
@@ -345,7 +345,7 @@ defmodule GiTF.Dashboard.SectorsLive do
                         <% end %>
                       </div>
                       <%= if repo.description do %>
-                        <div style="color:#8b949e; font-size:0.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">
+                        <div style="color:var(--muted); font-size:0.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">
                           {repo.description}
                         </div>
                       <% end %>
@@ -366,9 +366,9 @@ defmodule GiTF.Dashboard.SectorsLive do
               </div>
             <% end %>
           <% else %>
-            <div style="color:#8b949e; padding:0.5rem 0; font-size:0.85rem">
-              <p>Set <code style="color:#d2a8ff; background:#1c2128; padding:0.1rem 0.3rem; border-radius:3px">GITHUB_TOKEN</code> environment variable or add it to <code style="color:#d2a8ff; background:#1c2128; padding:0.1rem 0.3rem; border-radius:3px">.gitf/config.toml</code> to enable GitHub integration.</p>
-              <pre style="margin-top:0.5rem; color:#c9d1d9; font-size:0.75rem; background:#161b22; padding:0.5rem; border-radius:4px">[github]
+            <div style="color:var(--muted); padding:0.5rem 0; font-size:0.85rem">
+              <p>Set <code style="color:var(--recon); background:var(--panel-2); padding:0.1rem 0.3rem; border-radius:3px">GITHUB_TOKEN</code> environment variable or add it to <code style="color:var(--recon); background:var(--panel-2); padding:0.1rem 0.3rem; border-radius:3px">.gitf/config.toml</code> to enable GitHub integration.</p>
+              <pre style="margin-top:0.5rem; color:var(--text-2); font-size:0.75rem; background:var(--panel); padding:0.5rem; border-radius:4px">[github]
               token = "ghp_your_token_here"</pre>
             </div>
           <% end %>
@@ -376,7 +376,7 @@ defmodule GiTF.Dashboard.SectorsLive do
 
         <!-- Manual path/URL -->
         <%= if @add_mode == "manual" do %>
-          <p style="color:#8b949e; font-size:0.8rem; margin-bottom:0.75rem">
+          <p style="color:var(--muted); font-size:0.8rem; margin-bottom:0.75rem">
             Enter a local path to a git repository or a remote git URL to clone.
           </p>
           <form phx-submit="add_manual" phx-change="update_form" style="display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap">
@@ -413,31 +413,31 @@ defmodule GiTF.Dashboard.SectorsLive do
             <tbody>
               <%= for sector <- @sectors do %>
                 <tr>
-                  <td style="font-weight:500; color:#f0f6fc">
+                  <td style="font-weight:500; color:var(--text)">
                     {Map.get(sector, :name, "-")}
                     <%= if @current_sector && Map.get(@current_sector, :id) == Map.get(sector, :id) do %>
                       <span class="badge badge-green" style="margin-left:0.5rem">current</span>
                     <% end %>
                   </td>
-                  <td style="font-family:monospace; font-size:0.8rem; color:#8b949e; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title={Map.get(sector, :path, "-")}>
+                  <td style="font-family:monospace; font-size:0.8rem; color:var(--muted); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title={Map.get(sector, :path, "-")}>
                     {Map.get(sector, :path, "-")}
                   </td>
                   <td style="text-align:center">
                     <% count = sector_mission_count(sector.id) %>
                     <%= if count > 0 do %>
-                      <span style="color:#58a6ff; font-size:0.85rem">{count}</span>
+                      <span style="color:var(--accent); font-size:0.85rem">{count}</span>
                     <% else %>
-                      <span style="color:#6b7280">0</span>
+                      <span style="color:var(--muted)">0</span>
                     <% end %>
                   </td>
                   <td>{Map.get(sector, :sync_strategy, "-")}</td>
                   <td>
                     <%= if Map.get(sector, :github_owner) do %>
-                      <a href={"https://github.com/#{sector.github_owner}/#{sector.github_repo}"} target="_blank" style="color:#58a6ff; font-size:0.8rem">
+                      <a href={"https://github.com/#{sector.github_owner}/#{sector.github_repo}"} target="_blank" style="color:var(--accent); font-size:0.8rem">
                         {sector.github_owner}/{sector.github_repo}
                       </a>
                     <% else %>
-                      <span style="color:#6e7681">—</span>
+                      <span style="color:var(--muted)">—</span>
                     <% end %>
                   </td>
                   <td style="text-align:right; white-space:nowrap">

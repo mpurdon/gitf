@@ -315,7 +315,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
             <span class={"badge #{phase_badge(Map.get(@mission, :current_phase, "pending"))}"}>
               {Map.get(@mission, :current_phase, "pending")}
             </span>
-            <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">
+            <span style="font-family:monospace; font-size:0.75rem; color:var(--muted)">
               {short_id(@mission.id)}
             </span>
           </div>
@@ -366,16 +366,16 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
                 <div class="timeline-content">
                   <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
                     <span class="badge badge-grey">{Map.get(t, :from_phase, "?")}</span>
-                    <span style="color:#8b949e">&rarr;</span>
+                    <span style="color:var(--muted)">&rarr;</span>
                     <span class={"badge #{phase_badge(Map.get(t, :to_phase, "?"))}"}>
                       {Map.get(t, :to_phase, "?")}
                     </span>
-                    <span style="font-size:0.75rem; color:#484f58">
+                    <span style="font-size:0.75rem; color:var(--line-strong)">
                       {format_timestamp(Map.get(t, :inserted_at))}
                     </span>
                   </div>
                   <%= if Map.get(t, :reason) do %>
-                    <div style="margin-top:0.35rem; font-size:0.85rem; color:#8b949e">
+                    <div style="margin-top:0.35rem; font-size:0.85rem; color:var(--muted)">
                       {Map.get(t, :reason)}
                     </div>
                   <% end %>
@@ -388,16 +388,16 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
 
       <%!-- Failure Classification --%>
       <%= if @failure_info do %>
-        <div class="panel" style="margin-bottom:1rem; border-left:3px solid #f85149">
+        <div class="panel" style="margin-bottom:1rem; border-left:3px solid var(--crit)">
           <div class="panel-title">Failure Classification</div>
           <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center">
             <span class="badge badge-red" style="font-size:0.9rem">{@failure_info[:failure_type] || "unknown"}</span>
-            <span style="color:#8b949e">during <strong>{@failure_info[:failure_phase] || "?"}</strong> phase</span>
+            <span style="color:var(--muted)">during <strong>{@failure_info[:failure_phase] || "?"}</strong> phase</span>
             <%= if length(@failure_info[:failed_op_ids] || []) > 0 do %>
-              <span style="color:#8b949e">{length(@failure_info[:failed_op_ids])} failed ops</span>
+              <span style="color:var(--muted)">{length(@failure_info[:failed_op_ids])} failed ops</span>
             <% end %>
           </div>
-          <div style="margin-top:0.5rem; font-size:0.85rem; color:#c9d1d9">{@failure_info[:failure_reason]}</div>
+          <div style="margin-top:0.5rem; font-size:0.85rem; color:var(--text-2)">{@failure_info[:failure_reason]}</div>
         </div>
       <% end %>
 
@@ -437,13 +437,13 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
           <%= if @phase_costs.by_phase_type != %{} do %>
             <div style="margin-top:0.75rem; display:flex; gap:1.5rem; font-size:0.85rem">
               <%= if prod = @phase_costs.by_phase_type["productive"] do %>
-                <span style="color:#3fb950">Productive: {format_cost(prod.cost)}</span>
+                <span style="color:var(--ok)">Productive: {format_cost(prod.cost)}</span>
               <% end %>
               <%= if ovhd = @phase_costs.by_phase_type["overhead"] do %>
-                <span style="color:#d29922">Overhead: {format_cost(ovhd.cost)}</span>
+                <span style="color:var(--warn)">Overhead: {format_cost(ovhd.cost)}</span>
               <% end %>
               <%= if rework = @phase_costs.by_phase_type["rework"] do %>
-                <span style="color:#f85149">Rework: {format_cost(rework.cost)}</span>
+                <span style="color:var(--crit)">Rework: {format_cost(rework.cost)}</span>
               <% end %>
             </div>
           <% end %>
@@ -475,14 +475,14 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
             <%!-- Identity --%>
             <div style="margin-bottom:1rem">
               <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-bottom:0.5rem">
-                <strong style="color:#f0f6fc">{Map.get(op, :title, "Untitled Op")}</strong>
+                <strong style="color:var(--text)">{Map.get(op, :title, "Untitled Op")}</strong>
                 <a href={"/dashboard/ops/#{op.id}"} style="font-family:monospace; font-size:0.8rem">{short_id(op.id)}</a>
                 <span class="badge badge-red">failed</span>
                 <%= if Map.get(op, :phase) do %>
                   <span class={"badge #{phase_badge(op.phase)}"}>{op.phase}</span>
                 <% end %>
                 <%= if Map.get(op, :ghost_id) do %>
-                  <span style="font-size:0.8rem; color:#8b949e">Ghost: {short_id(op.ghost_id)}</span>
+                  <span style="font-size:0.8rem; color:var(--muted)">Ghost: {short_id(op.ghost_id)}</span>
                 <% end %>
                 <%= if Map.get(op, :retry_count, 0) > 0 do %>
                   <span class="badge badge-orange">retry #{Map.get(op, :retry_count)}</span>
@@ -493,26 +493,26 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
             <%!-- Error Message --%>
             <%= if Map.get(op, :error_message) do %>
               <div style="margin-bottom:1rem">
-                <div style="font-size:0.85rem; font-weight:600; color:#f0f6fc; margin-bottom:0.35rem">Error</div>
-                <div class="pre-block" style="border-color:#f8514955">{op.error_message}</div>
+                <div style="font-size:0.85rem; font-weight:600; color:var(--text); margin-bottom:0.35rem">Error</div>
+                <div class="pre-block" style="border-color:var(--crit)55">{op.error_message}</div>
               </div>
             <% end %>
 
             <%!-- Failure Analysis --%>
             <div style="margin-bottom:1rem">
-              <div style="font-size:0.85rem; font-weight:600; color:#f0f6fc; margin-bottom:0.35rem">Failure Analysis</div>
+              <div style="font-size:0.85rem; font-weight:600; color:var(--text); margin-bottom:0.35rem">Failure Analysis</div>
               <%= if analysis = Map.get(@analyses, op.id) do %>
                 <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap">
                   <span class={"badge #{failure_type_badge(Map.get(analysis, :failure_type))}"}>{Map.get(analysis, :failure_type, "unknown")}</span>
                   <%= if count = Map.get(analysis, :similar_count) do %>
-                    <span style="font-size:0.8rem; color:#8b949e">{count} similar failures</span>
+                    <span style="font-size:0.8rem; color:var(--muted)">{count} similar failures</span>
                   <% end %>
                 </div>
                 <%= if Map.get(analysis, :root_cause) do %>
-                  <div style="font-size:0.85rem; color:#c9d1d9; margin-bottom:0.5rem">{analysis.root_cause}</div>
+                  <div style="font-size:0.85rem; color:var(--text-2); margin-bottom:0.5rem">{analysis.root_cause}</div>
                 <% end %>
                 <%= if suggestions = Map.get(analysis, :suggestions) do %>
-                  <ul style="margin:0; padding-left:1.25rem; font-size:0.85rem; color:#8b949e">
+                  <ul style="margin:0; padding-left:1.25rem; font-size:0.85rem; color:var(--muted)">
                     <%= for s <- List.wrap(suggestions) do %>
                       <li style="margin-bottom:0.25rem">{s}</li>
                     <% end %>
@@ -520,7 +520,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
                 <% end %>
               <% else %>
                 <%= if MapSet.member?(@analyzing, op.id) do %>
-                  <div style="display:flex; align-items:center; gap:0.5rem; color:#8b949e">
+                  <div style="display:flex; align-items:center; gap:0.5rem; color:var(--muted)">
                     <span class="loading-spinner" style="width:14px;height:14px;border-width:2px"></span>
                     Analyzing...
                   </div>
@@ -535,7 +535,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
             <%!-- Retry Chain --%>
             <%= if chain = find_retry_chain(@retry_chains, op.id) do %>
               <div style="margin-bottom:1rem">
-                <div style="font-size:0.85rem; font-weight:600; color:#f0f6fc; margin-bottom:0.35rem">Retry Chain</div>
+                <div style="font-size:0.85rem; font-weight:600; color:var(--text); margin-bottom:0.35rem">Retry Chain</div>
                 <div class="retry-chain">
                   <%= for {node_id, idx} <- Enum.with_index(chain) do %>
                     <%= if idx > 0 do %>
@@ -560,7 +560,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
             <%!-- Ghost Context --%>
             <%= if ghost_data = Map.get(@ghost_info, op.id) do %>
               <div style="margin-bottom:1rem">
-                <div style="font-size:0.85rem; font-weight:600; color:#f0f6fc; margin-bottom:0.35rem">Ghost Context</div>
+                <div style="font-size:0.85rem; font-weight:600; color:var(--text); margin-bottom:0.35rem">Ghost Context</div>
                 <dl class="metadata-grid">
                   <dt>Status</dt>
                   <dd><span class={"badge #{status_badge(Map.get(ghost_data.ghost, :status, "unknown"))}"}>{Map.get(ghost_data.ghost, :status, "unknown")}</span></dd>
@@ -586,12 +586,12 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
             <%!-- Audit Results --%>
             <%= if audit = Map.get(@audit_data, op.id) do %>
               <div style="margin-bottom:1rem">
-                <div style="font-size:0.85rem; font-weight:600; color:#f0f6fc; margin-bottom:0.35rem">Audit Results</div>
+                <div style="font-size:0.85rem; font-weight:600; color:var(--text); margin-bottom:0.35rem">Audit Results</div>
                 <div class="grid-2">
                   <%= for {label, key} <- [{"Quality", :quality_score}, {"Static", :static_score}, {"Security", :security_score}] do %>
                     <%= if score = Map.get(audit, key) do %>
                       <div>
-                        <div style="font-size:0.8rem; color:#8b949e; margin-bottom:0.25rem">{label}: {score}/100</div>
+                        <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.25rem">{label}: {score}/100</div>
                         <div class="score-bar">
                           <div class="score-bar-fill" style={"width:#{score}%; background:#{score_color(score)}"}></div>
                         </div>
@@ -600,7 +600,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
                   <% end %>
                 </div>
                 <%= if Map.get(audit, :issue_count) do %>
-                  <div style="margin-top:0.5rem; font-size:0.85rem; color:#8b949e">
+                  <div style="margin-top:0.5rem; font-size:0.85rem; color:var(--muted)">
                     Issues: {audit.issue_count} | Exit code: {Map.get(audit, :exit_code, "-")}
                   </div>
                 <% end %>
@@ -608,13 +608,13 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
             <% end %>
 
             <%!-- Recovery Actions --%>
-            <div style="border-top:1px solid #30363d; padding-top:1rem; margin-top:0.5rem">
-              <div style="font-size:0.85rem; font-weight:600; color:#f0f6fc; margin-bottom:0.5rem">Recovery Actions</div>
+            <div style="border-top:1px solid var(--line); padding-top:1rem; margin-top:0.5rem">
+              <div style="font-size:0.85rem; font-weight:600; color:var(--text); margin-bottom:0.5rem">Recovery Actions</div>
               <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-start">
                 <%!-- Smart Retry --%>
                 <%= if strategy = Map.get(@suggested_strategies, op.id) do %>
                   <div style="display:flex; flex-direction:column; gap:0.35rem">
-                    <span style="font-size:0.8rem; color:#8b949e">Strategy: <strong style="color:#d29922">{strategy_label(strategy)}</strong></span>
+                    <span style="font-size:0.8rem; color:var(--muted)">Strategy: <strong style="color:var(--warn)">{strategy_label(strategy)}</strong></span>
                     <button phx-click="retry_with_strategy" phx-value-id={op.id} class="btn btn-green" style="font-size:0.8rem">
                       Confirm Retry
                     </button>
@@ -674,7 +674,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
         <div class="grid-2">
           <div>
             <%= for {component, status} <- Map.get(@health, :checks, %{}) do %>
-              <div style="display:flex; justify-content:space-between; padding:0.35rem 0; border-bottom:1px solid #21262d; font-size:0.85rem">
+              <div style="display:flex; justify-content:space-between; padding:0.35rem 0; border-bottom:1px solid var(--line-2); font-size:0.85rem">
                 <span>{component}</span>
                 <span class={"badge #{if status == :ok, do: "badge-green", else: "badge-red"}"}>
                   {status}
@@ -685,9 +685,9 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
           <div>
             <%= if @alerts != [] do %>
               <%= for {rule, message} <- @alerts do %>
-                <div style="background:#d2992215; border:1px solid #d2992233; border-radius:6px; padding:0.5rem 0.75rem; margin-bottom:0.5rem; font-size:0.85rem">
-                  <strong style="color:#d29922">{rule}</strong>
-                  <div style="color:#8b949e; margin-top:0.15rem">{message}</div>
+                <div style="background:var(--warn)15; border:1px solid var(--warn)33; border-radius:6px; padding:0.5rem 0.75rem; margin-bottom:0.5rem; font-size:0.85rem">
+                  <strong style="color:var(--warn)">{rule}</strong>
+                  <div style="color:var(--muted); margin-top:0.15rem">{message}</div>
                 </div>
               <% end %>
             <% else %>
@@ -729,7 +729,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
     end)
   end
 
-  defp score_color(score) when score >= 80, do: "#3fb950"
-  defp score_color(score) when score >= 50, do: "#d29922"
-  defp score_color(_), do: "#f85149"
+  defp score_color(score) when score >= 80, do: "var(--ok)"
+  defp score_color(score) when score >= 50, do: "var(--warn)"
+  defp score_color(_), do: "var(--crit)"
 end

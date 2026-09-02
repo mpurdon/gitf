@@ -173,7 +173,7 @@ defmodule GiTF.Dashboard.ShellsLive do
       </div>
 
       <%= if @shells == [] do %>
-        <div class="panel"><div class="empty">No shells found. Shells (git worktrees) are created when ghosts start working. <a href="/dashboard/missions" style="color:#58a6ff">Start a mission</a> to see shells appear here.</div></div>
+        <div class="panel"><div class="empty">No shells found. Shells (git worktrees) are created when ghosts start working. <a href="/dashboard/missions" style="color:var(--accent)">Start a mission</a> to see shells appear here.</div></div>
       <% else %>
         <div class="panel">
           <table class="table" style="width:100%">
@@ -193,28 +193,28 @@ defmodule GiTF.Dashboard.ShellsLive do
               <%= for shell <- @shells do %>
                 <tr>
                   <td>
-                    <span style="color:#58a6ff; font-family:monospace; font-size:0.8rem" title={shell.id}>
+                    <span style="color:var(--accent); font-family:monospace; font-size:0.8rem" title={shell.id}>
                       {short_id(shell.id)}
                     </span>
-                    <div style="font-size:0.7rem; color:#6b7280; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title={shell[:worktree_path]}>
+                    <div style="font-size:0.7rem; color:var(--muted); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title={shell[:worktree_path]}>
                       {shell[:worktree_path] && Path.basename(shell.worktree_path)}
                     </div>
                   </td>
-                  <td style="font-size:0.8rem; color:#8b949e">{short_id(shell[:sector_id] || "-")}</td>
+                  <td style="font-size:0.8rem; color:var(--muted)">{short_id(shell[:sector_id] || "-")}</td>
                   <td>
                     <%= if shell.ghost do %>
-                      <a href={"/dashboard/ghosts"} style="color:#58a6ff; font-size:0.8rem">{short_id(shell.ghost.id)}</a>
+                      <a href={"/dashboard/ghosts"} style="color:var(--accent); font-size:0.8rem">{short_id(shell.ghost.id)}</a>
                     <% else %>
-                      <span style="color:#6b7280; font-size:0.8rem">-</span>
+                      <span style="color:var(--muted); font-size:0.8rem">-</span>
                     <% end %>
                   </td>
                   <td>
                     <%= if shell.op do %>
-                      <a href={"/dashboard/ops/#{shell.op.id}"} style="color:#58a6ff; font-size:0.8rem" title={shell.op.title}>
+                      <a href={"/dashboard/ops/#{shell.op.id}"} style="color:var(--accent); font-size:0.8rem" title={shell.op.title}>
                         {String.slice(shell.op.title || "", 0, 25)}
                       </a>
                     <% else %>
-                      <span style="color:#6b7280; font-size:0.8rem">-</span>
+                      <span style="color:var(--muted); font-size:0.8rem">-</span>
                     <% end %>
                   </td>
                   <td>
@@ -223,7 +223,7 @@ defmodule GiTF.Dashboard.ShellsLive do
                     </span>
                   </td>
                   <td>
-                    <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">
+                    <span style="font-family:monospace; font-size:0.75rem; color:var(--muted)">
                       {String.slice(shell[:base_commit_sha] || "-", 0, 7)}
                     </span>
                   </td>

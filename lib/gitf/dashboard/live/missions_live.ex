@@ -303,7 +303,7 @@ defmodule GiTF.Dashboard.MissionsLive do
         <%= if @missions_empty? do %>
           <div class="empty">
             No missions created yet.
-            <a href="/dashboard/missions/new" style="color:#58a6ff">Create your first mission</a>
+            <a href="/dashboard/missions/new" style="color:var(--accent)">Create your first mission</a>
           </div>
         <% else %>
           <table id="missions-table" phx-update="stream">
@@ -327,7 +327,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                   <td style="width:1.5rem">{if MapSet.member?(@expanded, mission.id), do: "v", else: ">"}</td>
                   <td style="font-family:monospace; font-size:0.8rem">{mission.id}</td>
                   <td>
-                    <a href={"/dashboard/missions/#{mission.id}"} style="color:#58a6ff" phx-click="navigate" phx-value-id={mission.id}>
+                    <a href={"/dashboard/missions/#{mission.id}"} style="color:var(--accent)" phx-click="navigate" phx-value-id={mission.id}>
                       {Map.get(mission, :name, mission.goal)}
                     </a>
                   </td>
@@ -346,17 +346,17 @@ defmodule GiTF.Dashboard.MissionsLive do
                   </span></td>
                   <td>
                     <div style="display:flex; align-items:center; gap:0.3rem; min-width:60px">
-                      <div style="flex:1; height:4px; background:#21262d; border-radius:2px; overflow:hidden">
+                      <div style="flex:1; height:4px; background:var(--line-2); border-radius:2px; overflow:hidden">
                         <div style={"height:100%; border-radius:2px; background:#{cond do
-                          mission.budget_pct >= 90 -> "#f85149"
-                          mission.budget_pct >= 70 -> "#d29922"
-                          true -> "#238636"
+                          mission.budget_pct >= 90 -> "var(--crit)"
+                          mission.budget_pct >= 70 -> "var(--warn)"
+                          true -> "var(--ok)"
                         end}; width:#{min(mission.budget_pct, 100)}%"}></div>
                       </div>
-                      <span style="font-size:0.65rem; color:#6b7280">{mission.budget_pct}%</span>
+                      <span style="font-size:0.65rem; color:var(--muted)">{mission.budget_pct}%</span>
                     </div>
                   </td>
-                  <td style="font-size:0.8rem; color:#8b949e">{mission.duration}</td>
+                  <td style="font-size:0.8rem; color:var(--muted)">{mission.duration}</td>
                   <td>{job_count(mission)}</td>
                   <td>
                     <%= if Map.get(mission, :status) == "pending" do %>

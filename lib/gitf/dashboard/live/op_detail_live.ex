@@ -198,7 +198,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
           <%= if Map.get(@op, :verification_status) do %>
             <span class={"badge #{verification_badge(@op.verification_status)}"}>{@op.verification_status}</span>
           <% end %>
-          <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">{@op.id}</span>
+          <span style="font-family:monospace; font-size:0.75rem; color:var(--muted)">{@op.id}</span>
         </div>
         <h1 class="page-title" style="margin-bottom:0.75rem; font-size:1.1rem; line-height:1.4; word-break:break-word">
           {Map.get(@op, :title, "Op")}
@@ -292,21 +292,21 @@ defmodule GiTF.Dashboard.OpDetailLive do
           <div style="display:flex; align-items:center; gap:0.25rem; flex-wrap:wrap">
             <%= for {entry, idx} <- Enum.with_index(@retry_chain) do %>
               <%= if idx > 0 do %>
-                <span style="color:#6b7280; font-size:0.8rem">&rarr;</span>
+                <span style="color:var(--muted); font-size:0.8rem">&rarr;</span>
               <% end %>
               <a
                 href={"/dashboard/ops/#{entry.id}"}
-                style={"padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem; text-decoration:none; border:1px solid #{if entry.id == @op.id, do: "#58a6ff", else: "#30363d"}; background:#{if entry.id == @op.id, do: "#1c2128", else: "transparent"}; color:#{case entry.status do
-                  "done" -> "#3fb950"
-                  "failed" -> "#f85149"
-                  "running" -> "#58a6ff"
-                  _ -> "#8b949e"
+                style={"padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem; text-decoration:none; border:1px solid #{if entry.id == @op.id, do: "var(--accent)", else: "var(--line)"}; background:#{if entry.id == @op.id, do: "var(--panel-2)", else: "transparent"}; color:#{case entry.status do
+                  "done" -> "var(--ok)"
+                  "failed" -> "var(--crit)"
+                  "running" -> "var(--accent)"
+                  _ -> "var(--muted)"
                 end}"}
               >
                 #{entry.retry_count}
                 <span class={"badge #{status_badge(entry.status)}"} style="font-size:0.55rem; margin-left:0.25rem">{entry.status}</span>
                 <%= if entry.retry_strategy do %>
-                  <span style="font-size:0.6rem; color:#6b7280; margin-left:0.25rem">({entry.retry_strategy})</span>
+                  <span style="font-size:0.6rem; color:var(--muted); margin-left:0.25rem">({entry.retry_strategy})</span>
                 <% end %>
               </a>
             <% end %>
@@ -316,8 +316,8 @@ defmodule GiTF.Dashboard.OpDetailLive do
 
       <%!-- Ghost Output Summary --%>
       <%= if Map.get(@op, :output_summary) do %>
-        <div class="panel" style="border-left:3px solid #3fb950">
-          <div class="panel-title" style="color:#3fb950">Ghost Output</div>
+        <div class="panel" style="border-left:3px solid var(--ok)">
+          <div class="panel-title" style="color:var(--ok)">Ghost Output</div>
           <div class="pre-block" style="white-space:pre-wrap; font-size:0.85rem">{@op.output_summary}</div>
         </div>
       <% end %>
@@ -326,34 +326,34 @@ defmodule GiTF.Dashboard.OpDetailLive do
       <%= if Map.get(@op, :description) do %>
         <div class="panel">
           <div class="panel-title">Description</div>
-          <div style="color:#c9d1d9; font-size:0.9rem; line-height:1.6">{@op.description}</div>
+          <div style="color:var(--text-2); font-size:0.9rem; line-height:1.6">{@op.description}</div>
         </div>
       <% end %>
 
       <%!-- Failure Info --%>
       <%= if @op.status == "failed" do %>
-        <div class="panel" style="border-left:3px solid #f85149">
-          <div class="panel-title" style="color:#f85149">Failure Details</div>
+        <div class="panel" style="border-left:3px solid var(--crit)">
+          <div class="panel-title" style="color:var(--crit)">Failure Details</div>
           <%= if Map.get(@op, :error_message) do %>
             <div style="margin-bottom:0.75rem">
-              <div style="font-size:0.75rem; color:#6b7280; margin-bottom:0.25rem">Error Message</div>
-              <div class="pre-block" style="border-color:#f8514933">{@op.error_message}</div>
+              <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.25rem">Error Message</div>
+              <div class="pre-block" style="border-color:var(--crit)33">{@op.error_message}</div>
             </div>
           <% end %>
           <%= if Map.get(@op, :failure_info) do %>
             <div style="margin-bottom:0.75rem">
-              <div style="font-size:0.75rem; color:#6b7280; margin-bottom:0.25rem">Failure Analysis</div>
+              <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.25rem">Failure Analysis</div>
               <div class="pre-block">{inspect(@op.failure_info, pretty: true, limit: :infinity)}</div>
             </div>
           <% end %>
           <%= if Map.get(@op, :audit_result) do %>
             <div>
-              <div style="font-size:0.75rem; color:#6b7280; margin-bottom:0.25rem">Audit Output</div>
+              <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.25rem">Audit Output</div>
               <div class="pre-block">{@op.audit_result}</div>
             </div>
           <% end %>
           <%= if is_nil(Map.get(@op, :error_message)) and is_nil(Map.get(@op, :failure_info)) and is_nil(Map.get(@op, :audit_result)) do %>
-            <div style="color:#8b949e; font-size:0.85rem">No failure details recorded. Check <a href={"/dashboard/missions/#{@op.mission_id}/diagnostics"} style="color:#58a6ff">diagnostics</a> for more info.</div>
+            <div style="color:var(--muted); font-size:0.85rem">No failure details recorded. Check <a href={"/dashboard/missions/#{@op.mission_id}/diagnostics"} style="color:var(--accent)">diagnostics</a> for more info.</div>
           <% end %>
         </div>
       <% end %>
@@ -365,14 +365,14 @@ defmodule GiTF.Dashboard.OpDetailLive do
           <%= if is_list(@op.acceptance_criteria) do %>
             <%= for criterion <- @op.acceptance_criteria do %>
               <div style="padding:0.35rem 0; display:flex; gap:0.5rem; align-items:flex-start">
-                <span style={"color:#{if Map.get(@op, :verification_status) == "passed", do: "#3fb950", else: "#8b949e"}"}>
+                <span style={"color:#{if Map.get(@op, :verification_status) == "passed", do: "var(--ok)", else: "var(--muted)"}"}>
                   {if Map.get(@op, :verification_status) == "passed", do: "✓", else: "○"}
                 </span>
                 <span style="font-size:0.9rem">{criterion}</span>
               </div>
             <% end %>
           <% else %>
-            <div style="color:#c9d1d9; font-size:0.9rem">{@op.acceptance_criteria}</div>
+            <div style="color:var(--text-2); font-size:0.9rem">{@op.acceptance_criteria}</div>
           <% end %>
         </div>
       <% end %>
@@ -390,7 +390,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
         <div class="panel">
           <div class="panel-title">Target Files</div>
           <%= for file <- List.wrap(@op.target_files) do %>
-            <div style="padding:0.25rem 0; font-family:monospace; font-size:0.85rem; color:#58a6ff">{file}</div>
+            <div style="padding:0.25rem 0; font-family:monospace; font-size:0.85rem; color:var(--accent)">{file}</div>
           <% end %>
         </div>
       <% end %>

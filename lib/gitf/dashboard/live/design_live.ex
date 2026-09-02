@@ -7,7 +7,11 @@ defmodule GiTF.Dashboard.DesignLive do
 
   @strategies ["minimal", "normal", "complex"]
   @default_strategy "normal"
-  @strategy_colors %{"minimal" => "#58a6ff", "normal" => "#3fb950", "complex" => "#a78bfa"}
+  @strategy_colors %{
+    "minimal" => "var(--accent)",
+    "normal" => "var(--ok)",
+    "complex" => "var(--recon)"
+  }
   @strategy_instructions Map.new(@strategies, fn s ->
                            {s, GiTF.Major.Planner.strategy_instruction(s, nil)}
                          end)
@@ -173,7 +177,7 @@ defmodule GiTF.Dashboard.DesignLive do
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
       <div>
         <h1 class="page-title" style="margin-bottom:0.25rem">Design: {Map.get(@mission, :name) || short_id(@mission.id)}</h1>
-        <div style="color:#8b949e; font-size:0.85rem">{@mission[:goal]}</div>
+        <div style="color:var(--muted); font-size:0.85rem">{@mission[:goal]}</div>
       </div>
       <div style="display:flex; gap:0.5rem; align-items:center">
         <span class={"badge #{phase_badge(@mission[:current_phase] || "pending")}"}>{@mission[:current_phase] || "pending"}</span>
@@ -191,7 +195,7 @@ defmodule GiTF.Dashboard.DesignLive do
         style={if @active_tab == strategy, do: "border-bottom-color: #{strategy_color(strategy)}"}
       >
         {strategy_label(strategy)}
-        <span :if={winner?(strategy, @review)} style="color:#d29922; margin-left:0.3rem">★</span>
+        <span :if={winner?(strategy, @review)} style="color:var(--warn); margin-left:0.3rem">★</span>
         <span :if={is_nil(@designs[strategy])} class="loading-spinner" style="width:12px;height:12px;border-width:2px;margin-left:0.4rem"></span>
       </div>
     </div>
@@ -200,13 +204,13 @@ defmodule GiTF.Dashboard.DesignLive do
 
     <div :if={@mode == :approval} class="panel" style="margin-top:1rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem">
       <div style="display:flex; align-items:center; gap:0.5rem">
-        <span style="color:#8b949e; font-size:0.85rem">Override selection:</span>
+        <span style="color:var(--muted); font-size:0.85rem">Override selection:</span>
         <button
           :for={s <- @strategy_list}
           class={"override-btn #{if @override_selection == s, do: "active"}"}
           phx-click="select_override"
           phx-value-strategy={s}
-          style={"border-color: #{if @override_selection == s, do: strategy_color(s), else: "#30363d"}"}
+          style={"border-color: #{if @override_selection == s, do: strategy_color(s), else: "var(--line)"}"}
         >{strategy_label(s)}</button>
       </div>
       <div style="display:flex; gap:0.5rem">
@@ -228,7 +232,7 @@ defmodule GiTF.Dashboard.DesignLive do
       <div :for={strategy <- @strategy_list} class={"strategy-card #{if winner?(strategy, @review), do: "selected"}"}>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem">
           <span class={"badge badge-#{design_strategy_badge(strategy)}"}>{strategy_label(strategy)}</span>
-          <span :if={winner?(strategy, @review)} style="background:#d29922; color:#0d1117; padding:0.15rem 0.5rem; border-radius:4px; font-size:0.7rem; font-weight:700">AI PICK</span>
+          <span :if={winner?(strategy, @review)} style="background:var(--warn); color:var(--ground); padding:0.15rem 0.5rem; border-radius:4px; font-size:0.7rem; font-weight:700">AI PICK</span>
         </div>
 
         <% design = @designs[strategy] %>
@@ -253,7 +257,7 @@ defmodule GiTF.Dashboard.DesignLive do
 
         <button :if={design} class="btn btn-grey" style="width:100%; margin-top:0.75rem; font-size:0.85rem" phx-click="switch_tab" phx-value-tab={strategy}>View Details</button>
 
-        <div :if={is_nil(design)} style="text-align:center; padding:2rem 0; color:#8b949e">
+        <div :if={is_nil(design)} style="text-align:center; padding:2rem 0; color:var(--muted)">
           <span class="loading-spinner" style="width:20px;height:20px;border-width:2px"></span>
           <div style="margin-top:0.5rem">Generating...</div>
         </div>
@@ -299,7 +303,7 @@ defmodule GiTF.Dashboard.DesignLive do
         </button>
       </div>
 
-      <div :if={is_nil(@report) && !@report_generating} style="color:#8b949e; font-size:0.85rem; margin-top:0.5rem">
+      <div :if={is_nil(@report) && !@report_generating} style="color:var(--muted); font-size:0.85rem; margin-top:0.5rem">
         Reads the competing designs and the review together, and writes up what the
         choice actually was — one model call over artifacts this mission already has.
       </div>
@@ -309,7 +313,7 @@ defmodule GiTF.Dashboard.DesignLive do
           {@report["headline"]}
         </div>
 
-        <div :if={@report["convergence"]} style="font-size:0.9rem; color:#c9d1d9; margin-bottom:0.9rem">
+        <div :if={@report["convergence"]} style="font-size:0.9rem; color:var(--text-2); margin-bottom:0.9rem">
           {@report["convergence"]}
         </div>
 
@@ -317,27 +321,27 @@ defmodule GiTF.Dashboard.DesignLive do
           <div :for={d <- get_list(@report, "designs")}>
             <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.35rem">
               <span class={"badge badge-#{design_strategy_badge(d["strategy"])}"}>{strategy_label(d["strategy"])}</span>
-              <span :if={winner?(d["strategy"], @review)} style="color:#d29922">★</span>
+              <span :if={winner?(d["strategy"], @review)} style="color:var(--warn)">★</span>
             </div>
             <div style="font-size:0.85rem; margin-bottom:0.4rem">{d["character"]}</div>
-            <div :for={n <- List.wrap(d["notable"])} style="font-size:0.82rem; color:#8b949e">
+            <div :for={n <- List.wrap(d["notable"])} style="font-size:0.82rem; color:var(--muted)">
               <span class="coverage-ok">✓</span> {n}
             </div>
-            <div :for={m <- List.wrap(d["missed"])} style="font-size:0.82rem; color:#8b949e">
-              <span style="color:#f85149">✗</span> {m}
+            <div :for={m <- List.wrap(d["missed"])} style="font-size:0.82rem; color:var(--muted)">
+              <span style="color:var(--crit)">✗</span> {m}
             </div>
           </div>
         </div>
 
-        <div :if={@report["decision"]} style="font-size:0.9rem; margin-top:0.9rem; padding-left:0.75rem; border-left:2px solid #d29922">
+        <div :if={@report["decision"]} style="font-size:0.9rem; margin-top:0.9rem; padding-left:0.75rem; border-left:2px solid var(--warn)">
           {@report["decision"]}
         </div>
 
         <div :if={get_list(@report, "watch_items") != []} style="margin-top:0.9rem">
-          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Watch Items</div>
+          <div style="color:var(--muted); font-size:0.8rem; margin-bottom:0.35rem">Watch Items</div>
           <div :for={w <- get_list(@report, "watch_items")} class="issue-item issue-medium">
             <div style="font-size:0.85rem">{w["concern"]}</div>
-            <div :if={w["why_it_matters"]} style="font-size:0.8rem; color:#8b949e; margin-top:0.2rem">
+            <div :if={w["why_it_matters"]} style="font-size:0.8rem; color:var(--muted); margin-top:0.2rem">
               → {w["why_it_matters"]}
             </div>
           </div>
@@ -367,7 +371,7 @@ defmodule GiTF.Dashboard.DesignLive do
     ~H"""
     <div :if={@total_files > 0} class="panel" style="margin-top:1rem">
       <div class="panel-title">Files Touched</div>
-      <div style="color:#8b949e; font-size:0.85rem; margin:0.5rem 0 0.75rem">
+      <div style="color:var(--muted); font-size:0.85rem; margin:0.5rem 0 0.75rem">
         {@agreed_count} of {@total_files} files are in every design — the strategies agree on those.
         <span :if={@divergent == []}>They agree on all of them: this was a choice about rigor, not architecture.</span>
         <span :if={@divergent != []}>The {length(@divergent)} below are where they diverge.</span>
@@ -386,7 +390,7 @@ defmodule GiTF.Dashboard.DesignLive do
               <td style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.82rem">{file}</td>
               <td :for={s <- @present_strategies} style="text-align:center">
                 <span :if={s in touched} class="coverage-ok">✓</span>
-                <span :if={s not in touched} style="color:#484f58">—</span>
+                <span :if={s not in touched} style="color:var(--line-strong)">—</span>
               </td>
             </tr>
           </tbody>
@@ -410,16 +414,16 @@ defmodule GiTF.Dashboard.DesignLive do
         <div :for={strategy <- @strategy_list}>
           <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.5rem">
             <span class={"badge badge-#{design_strategy_badge(strategy)}"}>{strategy_label(strategy)}</span>
-            <span :if={winner?(strategy, @review)} style="color:#d29922">★</span>
+            <span :if={winner?(strategy, @review)} style="color:var(--warn)">★</span>
           </div>
           <% design = @designs[strategy] %>
           <ol :if={design} style="margin:0; padding-left:1.1rem; display:flex; flex-direction:column; gap:0.5rem">
             <li :for={risk <- get_list(design, "risks")} style="font-size:0.83rem; line-height:1.5">{risk}</li>
           </ol>
-          <div :if={design && get_list(design, "risks") == []} style="color:#8b949e; font-size:0.85rem">
+          <div :if={design && get_list(design, "risks") == []} style="color:var(--muted); font-size:0.85rem">
             None recorded.
           </div>
-          <div :if={is_nil(design)} style="color:#8b949e; font-size:0.85rem">Generating…</div>
+          <div :if={is_nil(design)} style="color:var(--muted); font-size:0.85rem">Generating…</div>
         </div>
       </div>
     </div>
@@ -462,7 +466,7 @@ defmodule GiTF.Dashboard.DesignLive do
 
         <div :if={is_nil(@design)} class="panel" style="text-align:center; padding:3rem">
           <span class="loading-spinner" style="width:24px;height:24px;border-width:2px"></span>
-          <div style="margin-top:0.75rem; color:#8b949e">Design generation in progress...</div>
+          <div style="margin-top:0.75rem; color:var(--muted)">Design generation in progress...</div>
         </div>
       </div>
 
@@ -482,7 +486,7 @@ defmodule GiTF.Dashboard.DesignLive do
       <div class="panel-title">Review Analysis</div>
       <div :if={@review}>
         <div style="margin:0.75rem 0">
-          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Selected Design</div>
+          <div style="color:var(--muted); font-size:0.8rem; margin-bottom:0.25rem">Selected Design</div>
           <span class={"badge badge-#{design_strategy_badge(selected_strategy(@review))}"}>{strategy_label(selected_strategy(@review))}</span>
           <span :if={@review["approved"]} class="badge badge-green" style="margin-left:0.3rem">Approved</span>
           <span :if={@review["approved"] != true} class="badge badge-yellow" style="margin-left:0.3rem">Needs Review</span>
@@ -490,36 +494,36 @@ defmodule GiTF.Dashboard.DesignLive do
 
         <div class="review-split">
           <div style="margin:0.75rem 0">
-            <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Coverage</div>
+            <div style="color:var(--muted); font-size:0.8rem; margin-bottom:0.35rem">Coverage</div>
             <div :for={cov <- get_list(@review, "coverage")} class="coverage-item">
               <span :if={cov["covered"]} class="coverage-ok">✓</span>
               <span :if={cov["covered"] != true} class="coverage-gap">✗</span>
               <span style="font-weight:600; white-space:nowrap">{cov["req_id"]}</span>
-              <span :if={@requirement_index[cov["req_id"]]} style="color:#8b949e">
+              <span :if={@requirement_index[cov["req_id"]]} style="color:var(--muted)">
                 {@requirement_index[cov["req_id"]]}
               </span>
-              <span :if={cov["gap"]} style="color:#f85149; font-size:0.8rem">({cov["gap"]})</span>
+              <span :if={cov["gap"]} style="color:var(--crit); font-size:0.8rem">({cov["gap"]})</span>
             </div>
           </div>
 
           <div style="margin:0.75rem 0">
-            <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.35rem">Issues ({length(get_list(@review, "issues"))})</div>
+            <div style="color:var(--muted); font-size:0.8rem; margin-bottom:0.35rem">Issues ({length(get_list(@review, "issues"))})</div>
             <div :for={issue <- sort_issues(get_list(@review, "issues"))} class={"issue-item issue-#{issue["severity"] || "low"}"}>
               <div style="font-weight:600; font-size:0.8rem; text-transform:uppercase">{issue["severity"] || "info"}</div>
               <div style="font-size:0.85rem">{issue["description"]}</div>
-              <div :if={issue["suggestion"]} style="font-size:0.8rem; color:#8b949e; margin-top:0.2rem">→ {issue["suggestion"]}</div>
+              <div :if={issue["suggestion"]} style="font-size:0.8rem; color:var(--muted); margin-top:0.2rem">→ {issue["suggestion"]}</div>
             </div>
-            <div :if={get_list(@review, "issues") == []} style="color:#3fb950; font-size:0.85rem">No issues found.</div>
+            <div :if={get_list(@review, "issues") == []} style="color:var(--ok); font-size:0.85rem">No issues found.</div>
           </div>
         </div>
 
         <div style="margin:0.75rem 0">
-          <div style="color:#8b949e; font-size:0.8rem; margin-bottom:0.25rem">Risk Assessment</div>
+          <div style="color:var(--muted); font-size:0.8rem; margin-bottom:0.25rem">Risk Assessment</div>
           <div style="font-size:0.85rem">{@review["risk_assessment"] || "—"}</div>
         </div>
       </div>
 
-      <div :if={is_nil(@review)} style="text-align:center; padding:2rem 0; color:#8b949e">
+      <div :if={is_nil(@review)} style="text-align:center; padding:2rem 0; color:var(--muted)">
         <span class="loading-spinner" style="width:16px;height:16px;border-width:2px"></span>
         <div style="margin-top:0.5rem; font-size:0.85rem">Awaiting review...</div>
       </div>
@@ -551,20 +555,20 @@ defmodule GiTF.Dashboard.DesignLive do
 
   defp render_prompt_content(assigns) do
     ~H"""
-    <div style="padding:0.5rem 0; color:#8b949e; font-size:0.85rem; white-space:pre-wrap">{@content}</div>
+    <div style="padding:0.5rem 0; color:var(--muted); font-size:0.85rem; white-space:pre-wrap">{@content}</div>
     """
   end
 
   defp render_components(assigns) do
     ~H"""
     <div :for={comp <- get_list(@design, "components")} class="component-card">
-      <div style="font-weight:600; color:#f0f6fc; margin-bottom:0.3rem">{comp["name"] || "unnamed"}</div>
-      <div style="font-size:0.85rem; color:#8b949e; margin-bottom:0.4rem">{comp["description"]}</div>
+      <div style="font-weight:600; color:var(--text); margin-bottom:0.3rem">{comp["name"] || "unnamed"}</div>
+      <div style="font-size:0.85rem; color:var(--muted); margin-bottom:0.4rem">{comp["description"]}</div>
       <div :if={comp["files"] && comp["files"] != []} style="margin-bottom:0.3rem">
         <span :for={f <- List.wrap(comp["files"])} class="file-tag">{f}</span>
       </div>
-      <div :if={comp["interfaces"] && comp["interfaces"] != []} style="font-size:0.8rem; color:#8b949e">
-        <code :for={iface <- List.wrap(comp["interfaces"])} style="background:#21262d; padding:0.1rem 0.4rem; border-radius:3px; margin-right:0.3rem">{iface}</code>
+      <div :if={comp["interfaces"] && comp["interfaces"] != []} style="font-size:0.8rem; color:var(--muted)">
+        <code :for={iface <- List.wrap(comp["interfaces"])} style="background:var(--line-2); padding:0.1rem 0.4rem; border-radius:3px; margin-right:0.3rem">{iface}</code>
       </div>
     </div>
     """
@@ -578,7 +582,7 @@ defmodule GiTF.Dashboard.DesignLive do
         <tr :for={req <- get_list(@design, "requirement_mapping")}>
           <td style="font-family:monospace; font-size:0.8rem">{req["req_id"]}</td>
           <td>{req["component"]}</td>
-          <td style="font-size:0.85rem; color:#8b949e">{req["approach"]}</td>
+          <td style="font-size:0.85rem; color:var(--muted)">{req["approach"]}</td>
         </tr>
       </tbody>
     </table>
@@ -590,10 +594,10 @@ defmodule GiTF.Dashboard.DesignLive do
     <div style="padding:0.5rem 0">
       <div :for={dep <- get_list(@design, "dependencies")} style="font-size:0.85rem; padding:0.2rem 0">
         <code>{dep["from"]}</code>
-        <span style="color:#8b949e; margin:0 0.5rem">→</span>
+        <span style="color:var(--muted); margin:0 0.5rem">→</span>
         <code>{dep["to"]}</code>
       </div>
-      <div :if={get_list(@design, "dependencies") == []} style="color:#8b949e; font-size:0.85rem">No dependencies listed.</div>
+      <div :if={get_list(@design, "dependencies") == []} style="color:var(--muted); font-size:0.85rem">No dependencies listed.</div>
     </div>
     """
   end
@@ -601,10 +605,10 @@ defmodule GiTF.Dashboard.DesignLive do
   defp render_risks(assigns) do
     ~H"""
     <div style="padding:0.5rem 0">
-      <div :for={risk <- get_list(@design, "risks")} style="font-size:0.85rem; padding:0.2rem 0; color:#d29922">
+      <div :for={risk <- get_list(@design, "risks")} style="font-size:0.85rem; padding:0.2rem 0; color:var(--warn)">
         • {if is_binary(risk), do: risk, else: inspect(risk)}
       </div>
-      <div :if={get_list(@design, "risks") == []} style="color:#8b949e; font-size:0.85rem">No risks identified.</div>
+      <div :if={get_list(@design, "risks") == []} style="color:var(--muted); font-size:0.85rem">No risks identified.</div>
     </div>
     """
   end
@@ -669,5 +673,5 @@ defmodule GiTF.Dashboard.DesignLive do
 
   defp selected_strategy(_), do: @default_strategy
 
-  defp strategy_color(strategy), do: Map.get(@strategy_colors, strategy, "#8b949e")
+  defp strategy_color(strategy), do: Map.get(@strategy_colors, strategy, "var(--muted)")
 end

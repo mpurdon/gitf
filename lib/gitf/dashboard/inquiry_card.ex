@@ -51,7 +51,7 @@ defmodule GiTF.Dashboard.InquiryCard do
 
   def inquiry_card(assigns) do
     ~H"""
-    <div class="panel" style={"margin-bottom:0.75rem; border-left:3px solid #{if @inquiry[:status] == "open", do: "#d29922", else: "#3fb950"}"}>
+    <div class="panel" style={"margin-bottom:0.75rem; border-left:3px solid #{if @inquiry[:status] == "open", do: "var(--warn)", else: "var(--ok)"}"}>
       <div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap">
         <div style="min-width:0; flex:1">
           <div style="display:flex; gap:0.4rem; align-items:baseline; flex-wrap:wrap; margin-bottom:0.35rem">
@@ -61,7 +61,7 @@ defmodule GiTF.Dashboard.InquiryCard do
             <a
               :if={@mission_link and @inquiry[:mission_id]}
               href={"/dashboard/missions/#{@inquiry.mission_id}"}
-              style="font-family:monospace; font-size:0.75rem; color:#58a6ff; text-decoration:none"
+              style="font-family:monospace; font-size:0.75rem; color:var(--accent); text-decoration:none"
             >{@inquiry.mission_id}</a>
             <%!-- An inherited answer was never put to a human on THIS run.
                   Saying so stops it reading as attention already spent here. --%>
@@ -69,18 +69,18 @@ defmodule GiTF.Dashboard.InquiryCard do
               inherited
             </span>
           </div>
-          <div style="font-size:0.95rem; color:#f0f6fc; white-space:pre-wrap">{@inquiry[:prompt]}</div>
+          <div style="font-size:0.95rem; color:var(--text); white-space:pre-wrap">{@inquiry[:prompt]}</div>
         </div>
-        <div style="font-size:0.7rem; color:#6b7280; white-space:nowrap">
+        <div style="font-size:0.7rem; color:var(--muted); white-space:nowrap">
           asked {format_timestamp(@inquiry[:asked_at])}
         </div>
       </div>
 
       <%= if @inquiry[:status] == "answered" do %>
-        <div style="margin-top:0.7rem; font-size:0.85rem; color:#c9d1d9">
+        <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
           <span class="badge badge-green">answered</span>
           <b style="margin-left:0.4rem">{@inquiry[:answer_label] || @inquiry[:answer]}</b>
-          <span style="color:#8b949e">
+          <span style="color:var(--muted)">
             — {@inquiry[:answered_by]}{if @inquiry[:answered_at], do: ", #{format_timestamp(@inquiry[:answered_at])}"}
           </span>
         </div>
@@ -173,8 +173,8 @@ defmodule GiTF.Dashboard.InquiryCard do
         <%!-- The frame carries its own fallback text. A broken or pruned
               image hides itself and the text underneath becomes visible,
               so the tile degrades to a labelled option in place. --%>
-        <div style="position:relative; background:#0d1117; border:1px solid #30363d; border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
-          <span style="position:absolute; font-size:0.7rem; color:#6b7280; padding:0 0.5rem; text-align:center">
+        <div style="position:relative; background:var(--ground); border:1px solid var(--line); border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
+          <span style="position:absolute; font-size:0.7rem; color:var(--muted); padding:0 0.5rem; text-align:center">
             {option[:preview_error] || "no preview"}
           </span>
           <img
@@ -183,11 +183,11 @@ defmodule GiTF.Dashboard.InquiryCard do
             alt={"Mockup of #{option.label}"}
             loading="lazy"
             onerror="this.style.display='none'"
-            style="position:relative; width:100%; height:100%; object-fit:contain; background:#0d1117"
+            style="position:relative; width:100%; height:100%; object-fit:contain; background:var(--ground)"
           />
         </div>
-        <div style="font-weight:600; color:#f0f6fc; margin-top:0.45rem">{option.label}</div>
-        <div :if={option[:rationale]} style="font-size:0.78rem; color:#8b949e; margin-top:0.2rem">
+        <div style="font-weight:600; color:var(--text); margin-top:0.45rem">{option.label}</div>
+        <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
           {option.rationale}
         </div>
       </button>
@@ -209,8 +209,8 @@ defmodule GiTF.Dashboard.InquiryCard do
         class="btn btn-grey"
         style="text-align:left; display:block; width:100%; padding:0.6rem 0.75rem; white-space:normal"
       >
-        <div style="font-weight:600; color:#f0f6fc">{option.label}</div>
-        <div :if={option[:rationale]} style="font-size:0.78rem; color:#8b949e; margin-top:0.2rem">
+        <div style="font-weight:600; color:var(--text)">{option.label}</div>
+        <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
           {option.rationale}
         </div>
       </button>

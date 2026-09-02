@@ -390,7 +390,7 @@ defmodule GiTF.Dashboard.CostsLive do
               <button
                 phx-click="set_range"
                 phx-value-range={label}
-                style={"padding:0.25rem 0.6rem; font-size:0.7rem; border-radius:4px; border:1px solid #{if @trend_range == label, do: "#58a6ff", else: "#30363d"}; background:#{if @trend_range == label, do: "#1f6feb33", else: "transparent"}; color:#{if @trend_range == label, do: "#58a6ff", else: "#8b949e"}; cursor:pointer"}
+                style={"padding:0.25rem 0.6rem; font-size:0.7rem; border-radius:4px; border:1px solid #{if @trend_range == label, do: "var(--accent)", else: "var(--line)"}; background:#{if @trend_range == label, do: "var(--accent-soft)", else: "transparent"}; color:#{if @trend_range == label, do: "var(--accent)", else: "var(--muted)"}; cursor:pointer"}
               >
                 {label}
               </button>
@@ -410,7 +410,7 @@ defmodule GiTF.Dashboard.CostsLive do
           <div>
             <div class="card-label">Total Spend</div>
             <div class="card-value green" style="font-size:1.4rem">{format_cost(@total_spent, 2)}</div>
-            <div style="font-size:0.7rem; color:#8b949e">of {format_cost(@total_budget, 2)} budget</div>
+            <div style="font-size:0.7rem; color:var(--muted)">of {format_cost(@total_budget, 2)} budget</div>
           </div>
         </div>
 
@@ -426,8 +426,8 @@ defmodule GiTF.Dashboard.CostsLive do
               {format_cost(@burn_rate, 2)}
             </div>
             <% hrs = Float.round(@active_hours, 1) %>
-            <div style="font-size:0.7rem; color:#8b949e">per active hour ({hrs}h)</div>
-            <div style="font-size:0.65rem; color:#6e7681">peak: {format_cost(@peak_burn, 2)}/hr</div>
+            <div style="font-size:0.7rem; color:var(--muted)">per active hour ({hrs}h)</div>
+            <div style="font-size:0.65rem; color:var(--muted)">peak: {format_cost(@peak_burn, 2)}/hr</div>
           </div>
         </div>
 
@@ -438,8 +438,8 @@ defmodule GiTF.Dashboard.CostsLive do
           </div>
           <div>
             <div class="card-label">Cache Hit Rate</div>
-            <div class="card-value" style="font-size:1.4rem; color:#a78bfa">{@cache_hit_pct}%</div>
-            <div style="font-size:0.7rem; color:#8b949e">{format_tokens(@summary[:total_cache_read_tokens] || 0)} read</div>
+            <div class="card-value" style="font-size:1.4rem; color:var(--recon)">{@cache_hit_pct}%</div>
+            <div style="font-size:0.7rem; color:var(--muted)">{format_tokens(@summary[:total_cache_read_tokens] || 0)} read</div>
           </div>
         </div>
       </div>
@@ -456,11 +456,11 @@ defmodule GiTF.Dashboard.CostsLive do
         </div>
         <div class="card" style="padding:0.75rem">
           <div class="card-label">Cache Read</div>
-          <div class="card-value" style="font-size:1.2rem; color:#a78bfa">{format_tokens(@summary[:total_cache_read_tokens] || 0)}</div>
+          <div class="card-value" style="font-size:1.2rem; color:var(--recon)">{format_tokens(@summary[:total_cache_read_tokens] || 0)}</div>
         </div>
         <div class="card" style="padding:0.75rem">
           <div class="card-label">Cache Write</div>
-          <div class="card-value" style="font-size:1.2rem; color:#8b5cf6">{format_tokens(@summary[:total_cache_write_tokens] || 0)}</div>
+          <div class="card-value" style="font-size:1.2rem; color:var(--recon)">{format_tokens(@summary[:total_cache_write_tokens] || 0)}</div>
         </div>
       </div>
 
@@ -472,9 +472,9 @@ defmodule GiTF.Dashboard.CostsLive do
           <%= for bucket <- @trend do %>
             <div style="flex:1; display:flex; flex-direction:column; align-items:center; height:100%">
               <div style="flex:1; width:100%; display:flex; align-items:flex-end">
-                <div style={"width:100%; background:#1f6feb; border-radius:2px 2px 0 0; min-height:#{if bucket.cost > 0, do: "2px", else: "0"}; height:#{bar_height(bucket.cost, max_cost)}%"} title={"#{format_cost(bucket.cost)} | #{format_tokens(bucket.tokens)} tokens"}></div>
+                <div style={"width:100%; background:var(--accent); border-radius:2px 2px 0 0; min-height:#{if bucket.cost > 0, do: "2px", else: "0"}; height:#{bar_height(bucket.cost, max_cost)}%"} title={"#{format_cost(bucket.cost)} | #{format_tokens(bucket.tokens)} tokens"}></div>
               </div>
-              <div style="font-size:0.5rem; color:#6e7681; margin-top:2px; white-space:nowrap">{bucket.label}</div>
+              <div style="font-size:0.5rem; color:var(--muted); margin-top:2px; white-space:nowrap">{bucket.label}</div>
             </div>
           <% end %>
         </div>
@@ -491,41 +491,41 @@ defmodule GiTF.Dashboard.CostsLive do
             <%!-- Bar fills available vertical space --%>
             <div style="display:flex; flex:1; border-radius:6px; overflow:hidden; min-height:40px">
               <%= if @prod_pct > 0 do %>
-                <div style={"width:#{@prod_pct}%; background:#3fb950; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:#0d1117; min-width:#{if @prod_pct > 8, do: "0", else: "30px"}"}>
+                <div style={"width:#{@prod_pct}%; background:var(--ok); display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:var(--ground); min-width:#{if @prod_pct > 8, do: "0", else: "30px"}"}>
                   {if @prod_pct > 8, do: "#{@prod_pct}%", else: ""}
                 </div>
               <% end %>
               <%= if @overhead_pct > 0 do %>
-                <div style={"width:#{@overhead_pct}%; background:#d29922; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:#0d1117; min-width:#{if @overhead_pct > 8, do: "0", else: "30px"}"}>
+                <div style={"width:#{@overhead_pct}%; background:var(--warn); display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:var(--ground); min-width:#{if @overhead_pct > 8, do: "0", else: "30px"}"}>
                   {if @overhead_pct > 8, do: "#{@overhead_pct}%", else: ""}
                 </div>
               <% end %>
               <%= if @rework_pct > 0 do %>
-                <div style={"width:#{@rework_pct}%; background:#f85149; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:#0d1117; min-width:#{if @rework_pct > 8, do: "0", else: "30px"}"}>
+                <div style={"width:#{@rework_pct}%; background:var(--crit); display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:var(--ground); min-width:#{if @rework_pct > 8, do: "0", else: "30px"}"}>
                   {if @rework_pct > 8, do: "#{@rework_pct}%", else: ""}
                 </div>
               <% end %>
               <% unknown_pct = max(100.0 - @prod_pct - @overhead_pct - @rework_pct, 0) %>
               <%= if unknown_pct > 1 do %>
-                <div style={"width:#{unknown_pct}%; background:#30363d"}></div>
+                <div style={"width:#{unknown_pct}%; background:var(--line)"}></div>
               <% end %>
             </div>
             <%!-- Legend --%>
             <div style="display:flex; gap:1rem; font-size:0.75rem; flex-wrap:wrap; margin-top:0.5rem">
               <div style="display:flex; align-items:center; gap:0.3rem">
-                <div style="width:10px; height:10px; border-radius:2px; background:#3fb950"></div>
-                <span style="color:#3fb950; font-weight:600">Productive</span>
-                <span style="color:#8b949e">{format_cost(@prod_cost)} ({@prod_pct}%)</span>
+                <div style="width:10px; height:10px; border-radius:2px; background:var(--ok)"></div>
+                <span style="color:var(--ok); font-weight:600">Productive</span>
+                <span style="color:var(--muted)">{format_cost(@prod_cost)} ({@prod_pct}%)</span>
               </div>
               <div style="display:flex; align-items:center; gap:0.3rem">
-                <div style="width:10px; height:10px; border-radius:2px; background:#d29922"></div>
-                <span style="color:#d29922; font-weight:600">Overhead</span>
-                <span style="color:#8b949e">{format_cost(@overhead_cost)} ({@overhead_pct}%)</span>
+                <div style="width:10px; height:10px; border-radius:2px; background:var(--warn)"></div>
+                <span style="color:var(--warn); font-weight:600">Overhead</span>
+                <span style="color:var(--muted)">{format_cost(@overhead_cost)} ({@overhead_pct}%)</span>
               </div>
               <div style="display:flex; align-items:center; gap:0.3rem">
-                <div style="width:10px; height:10px; border-radius:2px; background:#f85149"></div>
-                <span style="color:#f85149; font-weight:600">Rework</span>
-                <span style="color:#8b949e">{format_cost(@rework_cost)} ({@rework_pct}%)</span>
+                <div style="width:10px; height:10px; border-radius:2px; background:var(--crit)"></div>
+                <span style="color:var(--crit); font-weight:600">Rework</span>
+                <span style="color:var(--muted)">{format_cost(@rework_cost)} ({@rework_pct}%)</span>
               </div>
             </div>
           <% end %>
@@ -581,7 +581,7 @@ defmodule GiTF.Dashboard.CostsLive do
                 <%= for m <- @mission_costs do %>
                   <tr>
                     <td style="font-size:0.8rem">
-                      <a href={"/dashboard/missions/#{m.id}"} style="color:#58a6ff">{m.name || short_id(m.id)}</a>
+                      <a href={"/dashboard/missions/#{m.id}"} style="color:var(--accent)">{m.name || short_id(m.id)}</a>
                       <span class={"badge #{status_badge(m.status)}"} style="margin-left:0.25rem; font-size:0.6rem">{m.status}</span>
                     </td>
                     <td style="text-align:right; font-family:monospace; font-size:0.8rem">{format_cost(m.spent)}</td>
@@ -590,7 +590,7 @@ defmodule GiTF.Dashboard.CostsLive do
                         <div class="cost-bar" style="flex:1">
                           <div class="cost-bar-fill" style={"width:#{min(m.pct, 100)}%; background:#{budget_color(m.pct)}"}></div>
                         </div>
-                        <span style="font-size:0.6rem; color:#8b949e; min-width:28px; text-align:right">{m.pct}%</span>
+                        <span style="font-size:0.6rem; color:var(--muted); min-width:28px; text-align:right">{m.pct}%</span>
                       </div>
                     </td>
                   </tr>
@@ -655,8 +655,8 @@ defmodule GiTF.Dashboard.CostsLive do
                 <tr>
                   <td style="font-size:0.85rem">{cat}</td>
                   <td style="text-align:right; font-family:monospace; font-size:0.8rem">{format_cost(data.cost)}</td>
-                  <td style="text-align:right; font-family:monospace; font-size:0.75rem; color:#8b949e">{format_tokens(data.input_tokens)}</td>
-                  <td style="text-align:right; font-family:monospace; font-size:0.75rem; color:#8b949e">{format_tokens(data.output_tokens)}</td>
+                  <td style="text-align:right; font-family:monospace; font-size:0.75rem; color:var(--muted)">{format_tokens(data.input_tokens)}</td>
+                  <td style="text-align:right; font-family:monospace; font-size:0.75rem; color:var(--muted)">{format_tokens(data.output_tokens)}</td>
                   <td>
                     <div class="cost-bar">
                       <div class="cost-bar-fill" style={"width:#{cost_pct(@summary.total_cost, data.cost)}%"}></div>
@@ -692,7 +692,7 @@ defmodule GiTF.Dashboard.CostsLive do
 
     ~H"""
     <svg viewBox="0 0 120 70" width="90" height="55">
-      <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="#21262d" stroke-width="8" stroke-linecap="round" />
+      <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="var(--line-2)" stroke-width="8" stroke-linecap="round" />
       <%= if @arc_pct > 0.01 do %>
         <path
           d={"M 15 60 A 45 45 0 #{@large} 1 #{@ex} #{@ey}"}
@@ -717,27 +717,27 @@ defmodule GiTF.Dashboard.CostsLive do
   defp bar_height(_cost, max) when max == 0 or max == 0.0, do: 0
   defp bar_height(cost, max), do: round(cost / max * 100)
 
-  defp budget_color(pct) when pct > 90, do: "#f85149"
-  defp budget_color(pct) when pct > 70, do: "#d29922"
-  defp budget_color(_), do: "#1f6feb"
+  defp budget_color(pct) when pct > 90, do: "var(--crit)"
+  defp budget_color(pct) when pct > 70, do: "var(--warn)"
+  defp budget_color(_), do: "var(--accent)"
 
-  defp budget_gauge_color(pct) when pct > 90, do: "#f85149"
-  defp budget_gauge_color(pct) when pct > 70, do: "#d29922"
-  defp budget_gauge_color(pct) when pct > 40, do: "#58a6ff"
-  defp budget_gauge_color(_), do: "#3fb950"
+  defp budget_gauge_color(pct) when pct > 90, do: "var(--crit)"
+  defp budget_gauge_color(pct) when pct > 70, do: "var(--warn)"
+  defp budget_gauge_color(pct) when pct > 40, do: "var(--accent)"
+  defp budget_gauge_color(_), do: "var(--ok)"
 
-  defp burn_color(rate) when rate > 2.0, do: "#f85149"
-  defp burn_color(rate) when rate > 1.0, do: "#d29922"
-  defp burn_color(_), do: "#3fb950"
+  defp burn_color(rate) when rate > 2.0, do: "var(--crit)"
+  defp burn_color(rate) when rate > 1.0, do: "var(--warn)"
+  defp burn_color(_), do: "var(--ok)"
 
-  defp cache_color(pct) when pct > 50, do: "#3fb950"
-  defp cache_color(pct) when pct > 20, do: "#a78bfa"
-  defp cache_color(_), do: "#d29922"
+  defp cache_color(pct) when pct > 50, do: "var(--ok)"
+  defp cache_color(pct) when pct > 20, do: "var(--recon)"
+  defp cache_color(_), do: "var(--warn)"
 
-  defp phase_type_color("productive"), do: "#3fb950"
-  defp phase_type_color("overhead"), do: "#d29922"
-  defp phase_type_color("rework"), do: "#f85149"
-  defp phase_type_color(_), do: "#8b949e"
+  defp phase_type_color("productive"), do: "var(--ok)"
+  defp phase_type_color("overhead"), do: "var(--warn)"
+  defp phase_type_color("rework"), do: "var(--crit)"
+  defp phase_type_color(_), do: "var(--muted)"
 
   @overhead_phases ~w(review validation simplify scoring orchestration)
   defp phase_to_type(phase) when phase in @overhead_phases, do: "overhead"

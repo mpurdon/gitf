@@ -160,7 +160,7 @@ defmodule GiTF.Dashboard.SettingsLive do
         <form phx-change="update">
           <%!-- GitHub --%>
           <div class="panel" style="margin-bottom:1rem">
-            <h3 style="color:#c9d1d9; margin:0 0 0.75rem; font-size:0.95rem">GitHub</h3>
+            <h3 style="color:var(--text-2); margin:0 0 0.75rem; font-size:0.95rem">GitHub</h3>
             <div class="form-group">
               <label class="form-label">Personal Access Token</label>
               <input
@@ -173,7 +173,7 @@ defmodule GiTF.Dashboard.SettingsLive do
                 phx-debounce="300"
                 autocomplete="off"
               />
-              <p style="color:#6b7280; font-size:0.75rem; margin:0.25rem 0 0">
+              <p style="color:var(--muted); font-size:0.75rem; margin:0.25rem 0 0">
                 Required for GitHub issue browsing and PR creation. Create at github.com/settings/tokens.
               </p>
             </div>
@@ -181,7 +181,7 @@ defmodule GiTF.Dashboard.SettingsLive do
 
           <%!-- Factory --%>
           <div class="panel" style="margin-bottom:1rem">
-            <h3 style="color:#c9d1d9; margin:0 0 0.75rem; font-size:0.95rem">Factory</h3>
+            <h3 style="color:var(--text-2); margin:0 0 0.75rem; font-size:0.95rem">Factory</h3>
             <div style="display:flex; gap:1rem; flex-wrap:wrap">
               <div class="form-group" style="flex:1; min-width:120px">
                 <label class="form-label">Max Ghosts</label>
@@ -208,7 +208,7 @@ defmodule GiTF.Dashboard.SettingsLive do
 
           <%!-- Budget --%>
           <div class="panel" style="margin-bottom:1rem">
-            <h3 style="color:#c9d1d9; margin:0 0 0.75rem; font-size:0.95rem">Budget</h3>
+            <h3 style="color:var(--text-2); margin:0 0 0.75rem; font-size:0.95rem">Budget</h3>
             <div style="display:flex; gap:1rem; flex-wrap:wrap">
               <div class="form-group" style="flex:1; min-width:120px">
                 <label class="form-label">Budget (USD)</label>
@@ -241,7 +241,7 @@ defmodule GiTF.Dashboard.SettingsLive do
 
           <%!-- Observability --%>
           <div class="panel" style="margin-bottom:1rem">
-            <h3 style="color:#c9d1d9; margin:0 0 0.75rem; font-size:0.95rem">Observability</h3>
+            <h3 style="color:var(--text-2); margin:0 0 0.75rem; font-size:0.95rem">Observability</h3>
             <div class="form-group">
               <label class="form-label">Webhook URL</label>
               <input
@@ -258,7 +258,7 @@ defmodule GiTF.Dashboard.SettingsLive do
 
           <%!-- Tachikoma --%>
           <div class="panel" style="margin-bottom:1rem">
-            <h3 style="color:#c9d1d9; margin:0 0 0.75rem; font-size:0.95rem">Tachikoma</h3>
+            <h3 style="color:var(--text-2); margin:0 0 0.75rem; font-size:0.95rem">Tachikoma</h3>
             <div style="display:flex; gap:1rem; flex-wrap:wrap">
               <div class="form-group" style="flex:1; min-width:140px">
                 <label class="form-label">Patrol Interval (ms)</label>
@@ -289,7 +289,7 @@ defmodule GiTF.Dashboard.SettingsLive do
           </div>
         </form>
 
-        <div style="text-align:center; color:#484f58; font-size:0.75rem; margin-top:1rem">
+        <div style="text-align:center; color:var(--line-strong); font-size:0.75rem; margin-top:1rem">
           Config file: <code>.gitf/config.toml</code>
         </div>
       </div>

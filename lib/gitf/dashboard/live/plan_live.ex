@@ -147,7 +147,7 @@ defmodule GiTF.Dashboard.PlanLive do
         <h1 class="page-title" style="margin-bottom:0.25rem">
           Plan: {Map.get(@mission, :name, "Mission")}
         </h1>
-        <div style="color:#8b949e; font-size:0.85rem; max-width:700px">{@mission[:goal]}</div>
+        <div style="color:var(--muted); font-size:0.85rem; max-width:700px">{@mission[:goal]}</div>
       </div>
       <div style="display:flex; gap:0.5rem; align-items:center">
         <span class={"badge #{phase_badge(@mission[:current_phase] || "pending")}"}>{@mission[:current_phase] || "pending"}</span>
@@ -193,8 +193,8 @@ defmodule GiTF.Dashboard.PlanLive do
     <%!-- Overall Progress --%>
     <div class="panel" style="margin-bottom:1.25rem; padding:0.85rem 1.25rem">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem">
-        <span style="font-size:0.85rem; color:#8b949e">Overall Progress</span>
-        <span style="font-size:0.85rem; font-weight:600; font-family:monospace; color:#f0f6fc">
+        <span style="font-size:0.85rem; color:var(--muted)">Overall Progress</span>
+        <span style="font-size:0.85rem; font-weight:600; font-family:monospace; color:var(--text)">
           {Float.round(progress_pct(@done_count, @total_count), 0) |> trunc()}%
         </span>
       </div>
@@ -209,26 +209,26 @@ defmodule GiTF.Dashboard.PlanLive do
     <div :if={length(@lanes) > 0} class="panel" style="margin-bottom:1.25rem; padding:0.85rem 1.25rem">
       <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.75rem; padding-bottom:0.4rem; display:flex; justify-content:space-between; align-items:baseline">
         Execution Lanes
-        <span style="font-size:0.68rem; font-weight:400; color:#6b7280">
+        <span style="font-size:0.68rem; font-weight:400; color:var(--muted)">
           each column starts when the one before it finishes &middot; cards in a column run in parallel
         </span>
       </div>
       <div style="display:flex; gap:0.9rem; overflow-x:auto; align-items:stretch; padding-bottom:0.25rem">
         <%= for {{depth, items}, i} <- Enum.with_index(@lanes) do %>
-          <div :if={i > 0} style="align-self:center; color:#484f58; font-size:1.1rem">&rarr;</div>
+          <div :if={i > 0} style="align-self:center; color:var(--line-strong); font-size:1.1rem">&rarr;</div>
           <div style="flex:1; min-width:14rem; display:flex; flex-direction:column; gap:0.5rem">
-            <div style="font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; color:#6b7280">
+            <div style="font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted)">
               stage {depth + 1}
-              <span :if={length(items) > 1} style="color:#58a6ff">&middot; {length(items)} in parallel</span>
+              <span :if={length(items) > 1} style="color:var(--accent)">&middot; {length(items)} in parallel</span>
             </div>
             <div
               :for={item <- items}
               phx-click="toggle_op"
               phx-value-id={Map.get(item, :id) || Map.get(item, "title", "")}
-              style={"background:#161b22; border:1px solid #30363d; border-left:3px solid #{lane_color(item)}; border-radius:6px; padding:0.55rem 0.7rem; cursor:pointer"}
+              style={"background:var(--panel); border:1px solid var(--line); border-left:3px solid #{lane_color(item)}; border-radius:6px; padding:0.55rem 0.7rem; cursor:pointer"}
             >
               <div style="display:flex; align-items:center; gap:0.4rem">
-                <span style="flex:1; font-size:0.8rem; color:#f0f6fc; line-height:1.3">
+                <span style="flex:1; font-size:0.8rem; color:var(--text); line-height:1.3">
                   {Map.get(item, :title) || Map.get(item, "title", "Untitled")}
                 </span>
                 <span :if={item[:status]} class={"badge #{status_badge(item[:status])}"} style="font-size:0.62rem">{item[:status]}</span>
@@ -236,11 +236,11 @@ defmodule GiTF.Dashboard.PlanLive do
               <div style="display:flex; flex-wrap:wrap; gap:0.3rem; margin-top:0.4rem">
                 <span
                   :for={rid <- List.wrap(item[:requirement_ids] || item["requirement_ids"] || [])}
-                  style="font-size:0.62rem; font-family:monospace; color:#58a6ff; background:#1f6feb22; border-radius:3px; padding:0.05rem 0.3rem"
+                  style="font-size:0.62rem; font-family:monospace; color:var(--accent); background:var(--accent)22; border-radius:3px; padding:0.05rem 0.3rem"
                 >{rid}</span>
                 <span
                   :if={(item[:target_files] || item["target_files"] || []) != []}
-                  style="font-size:0.62rem; color:#6b7280"
+                  style="font-size:0.62rem; color:var(--muted)"
                 >{length(List.wrap(item[:target_files] || item["target_files"]))} file(s)</span>
               </div>
             </div>
@@ -250,7 +250,7 @@ defmodule GiTF.Dashboard.PlanLive do
     </div>
 
     <%!-- Plan-only mode notice --%>
-    <div :if={@mode == :plan_only} class="panel" style="padding:1.5rem; text-align:center; margin-bottom:1rem; color:#8b949e">
+    <div :if={@mode == :plan_only} class="panel" style="padding:1.5rem; text-align:center; margin-bottom:1rem; color:var(--muted)">
       Awaiting implementation — ops will appear when the mission enters the implementation phase.
     </div>
 
@@ -294,7 +294,7 @@ defmodule GiTF.Dashboard.PlanLive do
               phx-value-id={item_id}
             >
               <span class={"status-icon status-icon-#{status_icon_class(item_status)}"}>{status_icon(item_status)}</span>
-              <span style="flex:1; color:#f0f6fc; font-size:0.9rem">{Map.get(item, :title) || Map.get(item, "title", "Untitled")}</span>
+              <span style="flex:1; color:var(--text); font-size:0.9rem">{Map.get(item, :title) || Map.get(item, "title", "Untitled")}</span>
               <span :if={ghost_info} class={"model-badge #{provider_class(g_provider)}"}>{ghost_badge_label(ghost_info[:name], ghost_info[:model])}</span>
               <span :if={item[:ghost_id] && is_nil(ghost_info)} class="ghost-tag">{short_id(item[:ghost_id])}</span>
               <span class={"badge #{status_badge(item_status)}"}>{item_status}</span>
@@ -323,7 +323,7 @@ defmodule GiTF.Dashboard.PlanLive do
                     <div :for={c <- criteria} class="criteria-item">
                       <span :if={item[:verification_status] == "passed"} class="coverage-ok">✓</span>
                       <span :if={item[:verification_status] == "failed"} class="coverage-gap">✗</span>
-                      <span :if={item[:verification_status] not in ["passed", "failed"]} style="color:#484f58">○</span>
+                      <span :if={item[:verification_status] not in ["passed", "failed"]} style="color:var(--line-strong)">○</span>
                       <span>{c}</span>
                     </div>
                   </div>
@@ -332,7 +332,7 @@ defmodule GiTF.Dashboard.PlanLive do
                     <div class="plan-detail-heading">Dependencies</div>
                     <div :for={dep <- deps} style="display:flex; align-items:center; gap:0.4rem; padding:0.2rem 0; font-size:0.85rem">
                       <span class={"status-icon status-icon-#{status_icon_class(dep.status)}"} style="font-size:0.8rem">{status_icon(dep.status)}</span>
-                      <span style="color:#c9d1d9">{dep.title}</span>
+                      <span style="color:var(--text-2)">{dep.title}</span>
                     </div>
                   </div>
                 </div>
@@ -345,8 +345,8 @@ defmodule GiTF.Dashboard.PlanLive do
                   </div>
 
                   <div :if={changed != []} class="plan-detail-section">
-                    <div class="plan-detail-heading" style="color:#3fb950">Changed Files ({length(changed)})</div>
-                    <div :for={f <- changed} class="plan-file-item" style="border-color:#3fb950">{f}</div>
+                    <div class="plan-detail-heading" style="color:var(--ok)">Changed Files ({length(changed)})</div>
+                    <div :for={f <- changed} class="plan-file-item" style="border-color:var(--ok)">{f}</div>
                   </div>
                 </div>
               </div>
@@ -356,7 +356,7 @@ defmodule GiTF.Dashboard.PlanLive do
       </div>
     </div>
 
-    <div :if={@grouped_items == []} class="panel" style="text-align:center; padding:3rem; color:#8b949e">
+    <div :if={@grouped_items == []} class="panel" style="text-align:center; padding:3rem; color:var(--muted)">
       No plan available for this mission.
     </div>
 
@@ -454,11 +454,11 @@ defmodule GiTF.Dashboard.PlanLive do
 
   defp lane_color(item) do
     case item[:status] do
-      s when s in ["running", "assigned"] -> "#58a6ff"
-      "done" -> "#3fb950"
-      "failed" -> "#f85149"
-      "blocked" -> "#d29922"
-      _ -> "#484f58"
+      s when s in ["running", "assigned"] -> "var(--accent)"
+      "done" -> "var(--ok)"
+      "failed" -> "var(--crit)"
+      "blocked" -> "var(--warn)"
+      _ -> "var(--line-strong)"
     end
   end
 

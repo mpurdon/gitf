@@ -216,14 +216,14 @@ defmodule GiTF.Dashboard.MissionNewLive do
 
   defp issue_row_style(true),
     do:
-      "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid #21262d; background:#1a2a3a"
+      "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid var(--line-2); background:var(--accent-soft)"
 
   defp issue_row_style(false),
     do:
-      "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid #21262d"
+      "display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 0.75rem; cursor:pointer; border-bottom:1px solid var(--line-2)"
 
-  defp issue_title_style(true), do: "font-size:0.85rem; color:#58a6ff; font-weight:600"
-  defp issue_title_style(false), do: "font-size:0.85rem; color:#c9d1d9"
+  defp issue_title_style(true), do: "font-size:0.85rem; color:var(--accent); font-weight:600"
+  defp issue_title_style(false), do: "font-size:0.85rem; color:var(--text-2)"
 
   defp label_style(color) do
     c = color || "6b7280"
@@ -239,18 +239,18 @@ defmodule GiTF.Dashboard.MissionNewLive do
         <h1 class="page-title">New Mission</h1>
 
         <%= if has_github?(@sectors) do %>
-          <div style="display:flex; gap:0; border-radius:6px; overflow:hidden; border:1px solid #30363d; margin-bottom:1rem">
+          <div style="display:flex; gap:0; border-radius:6px; overflow:hidden; border:1px solid var(--line); margin-bottom:1rem">
             <div
               phx-click="set_source"
               phx-value-source="manual"
-              style={"flex:1; text-align:center; cursor:pointer; padding:0.5rem 1rem; font-size:0.85rem; #{if @source == "manual", do: "background:#1c2128; color:#c9d1d9; border-bottom:2px solid #58a6ff", else: "background:#0d1117; color:#6b7280"}"}
+              style={"flex:1; text-align:center; cursor:pointer; padding:0.5rem 1rem; font-size:0.85rem; #{if @source == "manual", do: "background:var(--panel-2); color:var(--text-2); border-bottom:2px solid var(--accent)", else: "background:var(--ground); color:var(--muted)"}"}
             >
               Manual
             </div>
             <div
               phx-click="set_source"
               phx-value-source="issue"
-              style={"flex:1; text-align:center; cursor:pointer; padding:0.5rem 1rem; font-size:0.85rem; border-left:1px solid #30363d; #{if @source == "issue", do: "background:#1c2128; color:#c9d1d9; border-bottom:2px solid #58a6ff", else: "background:#0d1117; color:#6b7280"}"}
+              style={"flex:1; text-align:center; cursor:pointer; padding:0.5rem 1rem; font-size:0.85rem; border-left:1px solid var(--line); #{if @source == "issue", do: "background:var(--panel-2); color:var(--text-2); border-bottom:2px solid var(--accent)", else: "background:var(--ground); color:var(--muted)"}"}
             >
               GitHub Issue
             </div>
@@ -281,16 +281,16 @@ defmodule GiTF.Dashboard.MissionNewLive do
                 <label class="form-label">Issue</label>
                 <%= cond do %>
                   <% @form["sector"] == "" -> %>
-                    <p style="color:#6b7280; font-size:0.85rem">Select a sector with GitHub config to browse issues.</p>
+                    <p style="color:var(--muted); font-size:0.85rem">Select a sector with GitHub config to browse issues.</p>
 
                   <% @issues_loading -> %>
-                    <p style="color:#8b949e; font-size:0.85rem">Loading issues...</p>
+                    <p style="color:var(--muted); font-size:0.85rem">Loading issues...</p>
 
                   <% @issues_error -> %>
-                    <p style="color:#f85149; font-size:0.85rem">Failed to load issues: {@issues_error}</p>
+                    <p style="color:var(--crit); font-size:0.85rem">Failed to load issues: {@issues_error}</p>
 
                   <% @issues == [] -> %>
-                    <p style="color:#6b7280; font-size:0.85rem">
+                    <p style="color:var(--muted); font-size:0.85rem">
                       No open issues found.
                       <%= unless has_github?(Enum.filter(@sectors, & &1.id == @form["sector"])) do %>
                         This sector has no GitHub config — add <code>github_owner</code> and <code>github_repo</code>.
@@ -298,7 +298,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
                     </p>
 
                   <% true -> %>
-                    <div style="max-height:300px; overflow-y:auto; border:1px solid #30363d; border-radius:6px">
+                    <div style="max-height:300px; overflow-y:auto; border:1px solid var(--line); border-radius:6px">
                       <%= for issue <- @issues do %>
                         <% inum = issue["number"] %>
                         <div
@@ -306,7 +306,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
                           phx-value-number={inum}
                           style={issue_row_style(@selected_issue == inum)}
                         >
-                          <span style="color:#3fb950; font-size:0.8rem; min-width:3rem; text-align:right">
+                          <span style="color:var(--ok); font-size:0.8rem; min-width:3rem; text-align:right">
                             #{inum}
                           </span>
                           <div style="flex:1; min-width:0">
@@ -328,8 +328,8 @@ defmodule GiTF.Dashboard.MissionNewLive do
                     </div>
                     <%= if @selected_issue do %>
                       <div style="margin-top:0.5rem; display:flex; align-items:center; gap:0.5rem">
-                        <span style="color:#3fb950; font-size:0.85rem">Issue #{@selected_issue} selected</span>
-                        <button type="button" phx-click="clear_issue" style="color:#6b7280; font-size:0.75rem; background:none; border:none; cursor:pointer; text-decoration:underline">clear</button>
+                        <span style="color:var(--ok); font-size:0.85rem">Issue #{@selected_issue} selected</span>
+                        <button type="button" phx-click="clear_issue" style="color:var(--muted); font-size:0.75rem; background:none; border:none; cursor:pointer; text-decoration:underline">clear</button>
                       </div>
                     <% end %>
                 <% end %>
@@ -353,11 +353,11 @@ defmodule GiTF.Dashboard.MissionNewLive do
             <div class="form-group">
               <% is_quick = @form["quick"] == "true" %>
               <input type="hidden" name="mission[quick]" value={if is_quick, do: "true", else: "false"} />
-              <div style="display:flex; gap:0; border-radius:6px; overflow:hidden; border:1px solid #30363d">
+              <div style="display:flex; gap:0; border-radius:6px; overflow:hidden; border:1px solid var(--line)">
                 <div
                   phx-click="set_mode"
                   phx-value-mode="quick"
-                  style={"flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; padding:0.6rem 1rem; font-size:0.85rem; #{if is_quick, do: "background:#1a3a2a; color:#3fb950", else: "background:#1c2128; color:#6b7280"}"}
+                  style={"flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; padding:0.6rem 1rem; font-size:0.85rem; #{if is_quick, do: "background:var(--ok-bg); color:var(--ok)", else: "background:var(--panel-2); color:var(--muted)"}"}
                 >
                   <strong>Quick Run</strong>
                   <span style="font-size:0.75rem; opacity:0.7">single ghost, fast</span>
@@ -365,18 +365,18 @@ defmodule GiTF.Dashboard.MissionNewLive do
                 <div
                   phx-click="set_mode"
                   phx-value-mode="full"
-                  style={"flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; padding:0.6rem 1rem; font-size:0.85rem; border-left:1px solid #30363d; #{if !is_quick, do: "background:#1a2a3a; color:#58a6ff", else: "background:#1c2128; color:#6b7280"}"}
+                  style={"flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; padding:0.6rem 1rem; font-size:0.85rem; border-left:1px solid var(--line); #{if !is_quick, do: "background:var(--accent-soft); color:var(--accent)", else: "background:var(--panel-2); color:var(--muted)"}"}
                 >
                   <strong>Full Pipeline</strong>
                   <span style="font-size:0.75rem; opacity:0.7">research, plan, verify</span>
                 </div>
               </div>
               <%= unless is_quick do %>
-                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem; margin-top:0.5rem; padding:0.4rem 0.75rem; background:#1c2128; border-radius:4px; border:1px solid #30363d">
-                  <input type="checkbox" name="mission[review_plan]" value="true" checked={@form["review_plan"] == "true"} style="accent-color:#a855f7" />
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:var(--text-2); font-size:0.85rem; margin-top:0.5rem; padding:0.4rem 0.75rem; background:var(--panel-2); border-radius:4px; border:1px solid var(--line)">
+                  <input type="checkbox" name="mission[review_plan]" value="true" checked={@form["review_plan"] == "true"} style="accent-color:var(--recon)" />
                   <span>
-                    <strong style="color:#a855f7">Review plan</strong>
-                    <span style="color:#8b949e"> — pause at planning for manual review</span>
+                    <strong style="color:var(--recon)">Review plan</strong>
+                    <span style="color:var(--muted)"> — pause at planning for manual review</span>
                   </span>
                 </label>
               <% end %>
