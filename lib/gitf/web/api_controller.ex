@@ -29,6 +29,7 @@ defmodule GiTF.Web.ApiController do
         version: GiTF.version(),
         active_ghosts: activity.active_ghosts,
         active_missions: activity.active_missions,
+        held_missions: activity.held_missions,
         idle: activity.idle
       }
     })
@@ -67,13 +68,17 @@ defmodule GiTF.Web.ApiController do
     })
   end
 
-  # Idle detection for the idle-stop timer: the box may power down only when
-  # no ghost is running and no mission is in a non-terminal state (queued,
-  # active, or awaiting approval — sleeping mid-approval would still be safe,
-  # but surprising). A failed lookup must read as NOT idle: zero is the one
-  # answer that powers the box off, so it can't double as an error value.
+  # Idle detection for the idle-stop timer: the box may power down when no
+  # ghost is running and every non-terminal mission is holding for a person
+  # (awaiting_input / awaiting_approval). A held mission spends nothing and
+  # needs nothing from the box until someone answers — and answering starts
+  # with `gitf wake` anyway. Keeping the box up for one was ~$0.80/day of
+  # nobody-noticed compute (msn-629e74 held twelve hours overnight). A
+  # failed lookup must read as NOT idle: zero is the one answer that powers
+  # the box off, so it can't double as an error value.
   defp activity_snapshot do
     missions = GiTF.Observability.Health.active_missions()
+    {held, running} = Enum.split_with(missions, &GiTF.Missions.held_for_human?/1)
 
     case ghost_count() do
       {:ok, ghosts} ->
@@ -81,11 +86,18 @@ defmodule GiTF.Web.ApiController do
           missions: missions,
           active_ghosts: ghosts,
           active_missions: length(missions),
-          idle: ghosts == 0 and missions == []
+          held_missions: length(held),
+          idle: ghosts == 0 and running == []
         }
 
       :error ->
-        %{missions: missions, active_ghosts: nil, active_missions: length(missions), idle: false}
+        %{
+          missions: missions,
+          active_ghosts: nil,
+          active_missions: length(missions),
+          held_missions: length(held),
+          idle: false
+        }
     end
   end
 

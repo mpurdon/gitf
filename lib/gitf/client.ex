@@ -139,6 +139,22 @@ defmodule GiTF.Client do
     end
   end
 
+  @doc """
+  The daemon's own health report, whatever its HTTP status: `/health`
+  answers 503 with a full body when the self-check is unhappy, and "the
+  daemon is answering, and says X" is a different fact from "nothing is
+  listening". Returns `{:ok, data}` when a daemon answered, else the
+  transport error.
+  """
+  @spec health() :: {:ok, map()} | {:error, term()}
+  def health do
+    case Req.get(build_url("/api/v1/health"), headers: auth_headers()) do
+      {:ok, %Req.Response{body: %{"data" => %{"version" => _} = data}}} -> {:ok, data}
+      {:ok, %Req.Response{status: status}} -> {:error, "server returned #{status}"}
+      other -> handle_response(other)
+    end
+  end
+
   # -- Internals ---------------------------------------------------------------
 
   defp build_url(path) do

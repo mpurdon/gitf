@@ -61,10 +61,22 @@ defmodule GiTF.CLI do
     wait_for_wake(deadline)
   end
 
+  # "Up" means the daemon answers. Its self-reported status is shown, not
+  # used as the verdict: a factory holding a question for twelve hours
+  # answered 503 "unhealthy" the whole time, and wake read that as a box
+  # that never came up.
   defp wait_for_wake(deadline) do
     cond do
-      GiTF.Client.ping() == :ok ->
-        Format.success("Factory is up: #{GiTF.Client.server_url()}")
+      match?({:ok, _}, health = GiTF.Client.health()) ->
+        {:ok, data} = health
+        status = data["status"]
+
+        Format.success(
+          "Factory is up: #{GiTF.Client.server_url()} (v#{data["version"]}, status #{status})"
+        )
+
+        if status != "ok",
+          do: Format.warn("Self-check is #{status} — see `gitf status` or the health_check tool.")
 
       System.monotonic_time(:second) > deadline ->
         Format.error(

@@ -81,6 +81,13 @@ defmodule GiTF.Observability.Health do
     major_alive = GiTF.Cabinet.mode?() or Process.whereis(GiTF.Major) != nil
     store_ok = check_store() == :ok
 
+    # A mission holding for a person (awaiting_input / awaiting_approval)
+    # has no op activity BY DESIGN; it is the human who is idle, not the
+    # factory. Counting it here made every held question turn the whole
+    # factory "unhealthy" thirty minutes later (msn-629e74, 2026-09-08:
+    # /health 503 for twelve hours while waiting on a treatment choice).
+    active_quests = Enum.reject(active_quests, &GiTF.Missions.held_for_human?/1)
+
     if not major_alive or not store_ok do
       false
     else
