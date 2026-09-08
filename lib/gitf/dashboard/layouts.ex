@@ -920,6 +920,10 @@ defmodule GiTF.Dashboard.Layouts do
         <%!-- Sleep awareness. The box powers itself off when idle; an open
               page must say so instead of silently losing its socket, and
               must be able to bring it back. See the probe script above. --%>
+        <style>
+          /* Inline display:flex would beat the UA's [hidden]{display:none}. */
+          #sleep-banner[hidden], #asleep-overlay[hidden], #asleep-wake[hidden], #asleep-cli[hidden] { display: none !important; }
+        </style>
         <div id="sleep-banner" hidden style="position:fixed; bottom:1rem; right:1rem; z-index:9000; background:var(--warn-bg); border:1px solid var(--warn); border-radius:6px; padding:0.6rem 0.9rem; font-size:0.85rem; color:var(--text); box-shadow:var(--shadow); display:flex; gap:0.75rem; align-items:center">
           <span id="sleep-banner-text">The factory sleeps in — min</span>
           <button id="sleep-hold" class="btn btn-grey" style="font-size:0.8rem">Keep awake 1 h</button>
