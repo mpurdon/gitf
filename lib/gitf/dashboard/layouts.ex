@@ -875,6 +875,11 @@ defmodule GiTF.Dashboard.Layouts do
             liveSocket.socket.onOpen(() => { connected = true; misses = 0; schedule(); });
             liveSocket.socket.onClose(() => { connected = false; schedule(); });
             liveSocket.socket.onError(() => { connected = false; });
+            // A background tab runs no timers at all (Chrome freezes it), so
+            // a tab left open through a sleep/wake cycle would sit on the
+            // overlay until its next tick. Probe the moment it is looked at.
+            document.addEventListener("visibilitychange", () => { if (!document.hidden) probe(); });
+            window.addEventListener("online", probe);
             schedule();
           })();
 
