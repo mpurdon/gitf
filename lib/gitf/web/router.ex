@@ -108,6 +108,22 @@ defmodule GiTF.Web.Router do
     get("/questions/:id/preview/:option_id", InquiryPreviewController, :show)
   end
 
+  # Page actions that are not LiveView events: same session, same tailnet
+  # identity, same CSRF token the layout carries.
+  pipeline :dashboard_action do
+    plug(:accepts, ["json"])
+    plug(:fetch_session)
+    plug(GiTF.Web.TailnetAuth)
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
+  end
+
+  scope "/dashboard", GiTF.Web do
+    pipe_through(:dashboard_action)
+
+    post("/idle-stop/hold", IdleStopController, :hold)
+  end
+
   scope "/floor", GiTF.Web do
     pipe_through(:browser)
 

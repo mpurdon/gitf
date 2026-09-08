@@ -13,6 +13,11 @@ defmodule GiTF.Dashboard.Layouts do
 
   @doc "Root HTML layout wrapping every page."
   def root(assigns) do
+    # The box's own wake URL, so an open page can start the instance after
+    # it has powered itself off. Tailnet-only page, tailnet-only readers:
+    # the same people who can already run `gitf wake`.
+    assigns = assign(assigns, :wake_url, GiTF.Config.Provider.get([:server, :wake_url]))
+
     ~H"""
     <!DOCTYPE html>
     <html lang="en">
@@ -719,7 +724,7 @@ defmodule GiTF.Dashboard.Layouts do
           }
         </style>
       </head>
-      <body>
+      <body data-wake-url={@wake_url}>
         {@inner_content}
         <script src="/assets/phoenix.min.js"></script>
         <script src="/assets/phoenix_live_view.min.js"></script>
@@ -800,6 +805,79 @@ defmodule GiTF.Dashboard.Layouts do
           });
           liveSocket.connect();
 
+          // -- Sleep awareness ------------------------------------------------
+          // The socket dropping is ambiguous: a deploy restart comes back in
+          // seconds, a powered-off box does not. /health decides: it is the
+          // same probe idle-stop and `gitf wake` read. While connected it is
+          // polled once a minute for the countdown; once the socket drops,
+          // every 5 s, and three misses in a row means asleep.
+          (function () {
+            const wakeUrl = document.body.dataset.wakeUrl;
+            const overlay = document.getElementById("asleep-overlay");
+            const wakeBtn = document.getElementById("asleep-wake");
+            const cli = document.getElementById("asleep-cli");
+            const text = document.getElementById("asleep-text");
+            const banner = document.getElementById("sleep-banner");
+            const bannerText = document.getElementById("sleep-banner-text");
+            const holdBtn = document.getElementById("sleep-hold");
+            const csrf = csrfToken;
+            let connected = true, misses = 0, asleep = false, waking = false, timer = null;
+            if (wakeUrl) wakeBtn.hidden = false; else cli.hidden = false;
+
+            async function probe() {
+              try {
+                const res = await fetch("/api/v1/health", { cache: "no-store" });
+                if (!res.ok) throw new Error(res.status);
+                const data = (await res.json()).data;
+                misses = 0;
+                if (asleep) { location.reload(); return; }
+                countdown(data);
+              } catch (_e) {
+                misses += 1;
+                if (!connected && misses >= 3 && !asleep) { asleep = true; overlay.hidden = false; banner.hidden = true; }
+              }
+              schedule();
+            }
+            function schedule() {
+              clearTimeout(timer);
+              timer = setTimeout(probe, connected && !asleep ? 60000 : 5000);
+            }
+            function countdown(data) {
+              if (!data.idle_stop_at) { banner.hidden = true; return; }
+              const mins = Math.round((new Date(data.idle_stop_at) - Date.now()) / 60000);
+              if (mins > 10) { banner.hidden = true; return; }
+              bannerText.textContent = mins <= 0
+                ? "The factory is about to sleep (idle)"
+                : `The factory sleeps in ${mins} min (idle)`;
+              banner.hidden = false;
+            }
+            wakeBtn.addEventListener("click", async () => {
+              if (waking) return;
+              waking = true;
+              wakeBtn.textContent = "Waking…";
+              text.textContent = "Starting the instance. The page reloads by itself when the factory answers — usually within a minute.";
+              // Opaque by design: the Lambda's reply is not readable cross-origin
+              // and does not need to be — /health tells us when the box is back.
+              try { await fetch(wakeUrl, { mode: "no-cors", cache: "no-store" }); } catch (_e) {}
+            });
+            holdBtn.addEventListener("click", async () => {
+              holdBtn.disabled = true;
+              try {
+                const res = await fetch("/dashboard/idle-stop/hold", {
+                  method: "POST",
+                  headers: { "content-type": "application/json", "x-csrf-token": csrf },
+                  body: JSON.stringify({ minutes: 60 })
+                });
+                bannerText.textContent = res.ok ? "Awake for another hour" : "Could not hold the box";
+                setTimeout(() => { banner.hidden = true; holdBtn.disabled = false; }, 4000);
+              } catch (_e) { holdBtn.disabled = false; }
+            });
+            liveSocket.socket.onOpen(() => { connected = true; misses = 0; schedule(); });
+            liveSocket.socket.onClose(() => { connected = false; schedule(); });
+            liveSocket.socket.onError(() => { connected = false; });
+            schedule();
+          })();
+
           // Keyboard shortcuts — press ? to show help
           const shortcuts = {
             'g o': '/dashboard/',
@@ -834,6 +912,25 @@ defmodule GiTF.Dashboard.Layouts do
             }
           });
         </script>
+        <%!-- Sleep awareness. The box powers itself off when idle; an open
+              page must say so instead of silently losing its socket, and
+              must be able to bring it back. See the probe script above. --%>
+        <div id="sleep-banner" hidden style="position:fixed; bottom:1rem; right:1rem; z-index:9000; background:var(--warn-bg); border:1px solid var(--warn); border-radius:6px; padding:0.6rem 0.9rem; font-size:0.85rem; color:var(--text); box-shadow:var(--shadow); display:flex; gap:0.75rem; align-items:center">
+          <span id="sleep-banner-text">The factory sleeps in — min</span>
+          <button id="sleep-hold" class="btn btn-grey" style="font-size:0.8rem">Keep awake 1 h</button>
+        </div>
+        <div id="asleep-overlay" hidden style="position:fixed; inset:0; z-index:9500; background:rgba(13,18,24,0.88); display:flex; align-items:center; justify-content:center">
+          <div style="background:var(--panel); border:1px solid var(--line-strong); border-radius:8px; padding:1.5rem 1.75rem; max-width:420px; box-shadow:0 8px 24px rgba(0,0,0,0.5); text-align:center">
+            <div style="font-size:1.05rem; font-weight:600; color:var(--text)">The factory is asleep</div>
+            <div id="asleep-text" style="font-size:0.85rem; color:var(--muted); margin-top:0.5rem">
+              The box powered itself off while idle. Nothing is lost — missions and questions are on the data volume.
+            </div>
+            <div style="margin-top:1rem; display:flex; gap:0.5rem; justify-content:center">
+              <button id="asleep-wake" class="btn btn-green" hidden>Wake it (~60 s)</button>
+              <code id="asleep-cli" style="font-size:0.8rem; color:var(--text-2)" hidden>gitf wake</code>
+            </div>
+          </div>
+        </div>
         <div id="shortcuts-help" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:1.5rem; z-index:10000; max-width:400px; box-shadow:0 8px 24px rgba(0,0,0,0.5)">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
             <span style="color:var(--text); font-weight:600; font-size:1rem">Keyboard Shortcuts</span>

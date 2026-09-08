@@ -34,6 +34,55 @@ defmodule GiTF.IdleStop do
           set_at: DateTime.t()
         }
 
+  @doc """
+  The idle threshold in force right now — the unexpired override's, else
+  `GITF_IDLE_STOP_MINUTES`; nil when idle-stop is off (unset or 0).
+  """
+  @spec effective_idle_minutes() :: pos_integer() | nil
+  def effective_idle_minutes do
+    case active() do
+      %{idle_minutes: minutes} ->
+        minutes
+
+      nil ->
+        case Integer.parse(System.get_env("GITF_IDLE_STOP_MINUTES") || "0") do
+          {n, _} when n > 0 -> n
+          _ -> nil
+        end
+    end
+  end
+
+  @doc """
+  When the box will power itself off if nothing happens: `idle_since` plus
+  the threshold in force, never earlier than the boot grace. Nil when
+  idle-stop is off or the factory is busy — the same arithmetic
+  `rel/gitf-idle-stop.sh` does, so the page can show the countdown the
+  script is running.
+  """
+  @spec projected_stop_at(DateTime.t() | nil) :: DateTime.t() | nil
+  def projected_stop_at(nil), do: nil
+
+  def projected_stop_at(%DateTime{} = idle_since) do
+    case effective_idle_minutes() do
+      nil ->
+        nil
+
+      minutes ->
+        grace = grace_minutes()
+        boot = DateTime.from_unix!(:persistent_term.get(:gitf_boot_time, 0))
+        candidate = DateTime.add(idle_since, minutes * 60, :second)
+        earliest = DateTime.add(boot, grace * 60, :second)
+        if DateTime.compare(candidate, earliest) == :lt, do: earliest, else: candidate
+    end
+  end
+
+  defp grace_minutes do
+    case Integer.parse(System.get_env("GITF_IDLE_STOP_GRACE_MINUTES") || "15") do
+      {n, _} when n >= 0 -> n
+      _ -> 15
+    end
+  end
+
   @doc "Path of the override file the shutdown script reads."
   @spec path() :: String.t()
   def path do

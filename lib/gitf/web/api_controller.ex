@@ -26,6 +26,7 @@ defmodule GiTF.Web.ApiController do
     ghosts = ghost_count()
     probe = GiTF.Observability.Health.probe(missions)
     idle = GiTF.Observability.Health.idle?(ghosts, running)
+    idle_since = GiTF.Observability.Activity.idle_since(idle)
 
     conn
     |> put_status(if(probe == :down, do: 503, else: 200))
@@ -40,7 +41,8 @@ defmodule GiTF.Web.ApiController do
         active_missions: length(missions),
         held_missions: length(held),
         idle: idle,
-        idle_since: GiTF.Observability.Activity.idle_since(idle)
+        idle_since: idle_since,
+        idle_stop_at: GiTF.IdleStop.projected_stop_at(idle_since)
       }
     })
   end

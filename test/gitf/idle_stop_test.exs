@@ -86,4 +86,45 @@ defmodule GiTF.IdleStopTest do
     assert IdleStop.active() == nil
     assert IdleStop.remaining_minutes() == 0
   end
+
+  describe "the projected stop time the page counts down to" do
+    setup do
+      prev = System.get_env("GITF_IDLE_STOP_MINUTES")
+      System.put_env("GITF_IDLE_STOP_MINUTES", "30")
+      System.put_env("GITF_IDLE_STOP_GRACE_MINUTES", "15")
+
+      on_exit(fn ->
+        if prev,
+          do: System.put_env("GITF_IDLE_STOP_MINUTES", prev),
+          else: System.delete_env("GITF_IDLE_STOP_MINUTES")
+
+        System.delete_env("GITF_IDLE_STOP_GRACE_MINUTES")
+      end)
+
+      :ok
+    end
+
+    test "is idle_since plus the threshold in force, never before the boot grace" do
+      long_ago = DateTime.add(DateTime.utc_now(), -3600, :second)
+      # Booted long ago: the grace is behind us, the threshold decides.
+      :persistent_term.put(:gitf_boot_time, DateTime.to_unix(long_ago))
+      assert DateTime.diff(IdleStop.projected_stop_at(long_ago), long_ago, :minute) == 30
+
+      # An override raises the threshold.
+      {:ok, _} = IdleStop.set(90, 120)
+      assert DateTime.diff(IdleStop.projected_stop_at(long_ago), long_ago, :minute) == 90
+      IdleStop.clear()
+
+      # Just booted: grace wins over a countdown that would fire sooner.
+      now = DateTime.utc_now()
+      :persistent_term.put(:gitf_boot_time, DateTime.to_unix(now))
+      assert DateTime.diff(IdleStop.projected_stop_at(long_ago), now, :minute) in 14..15
+    end
+
+    test "is nil while busy or when idle-stop is off" do
+      assert IdleStop.projected_stop_at(nil) == nil
+      System.put_env("GITF_IDLE_STOP_MINUTES", "0")
+      refute IdleStop.projected_stop_at(DateTime.utc_now())
+    end
+  end
 end
