@@ -16,9 +16,18 @@ defmodule GiTF.Runtime.Claude do
 
   require Logger
 
-  # Rely on PATH via System.find_executable/1. Hardcoded fallbacks
-  # (e.g. /opt/homebrew/bin) are platform-specific and mask real problems.
-  @common_locations []
+  # PATH first. The one fallback is where the official installer
+  # (`curl -fsSL https://claude.ai/install.sh | bash`) puts the binary —
+  # the running user's ~/.local/bin — which a systemd unit's PATH never
+  # includes. The replaced factory box (2026-09-01) ran for a week with
+  # every CLI ghost dying at "Provision failed: :not_found" because the
+  # hand-made /usr/local/bin symlink from the old box was never recreated.
+  defp fallback_locations do
+    case System.get_env("HOME") || System.user_home() do
+      nil -> []
+      home -> [Path.join(home, ".local/bin/claude")]
+    end
+  end
 
   # -- Public API ------------------------------------------------------------
 
@@ -181,7 +190,7 @@ defmodule GiTF.Runtime.Claude do
   # -- Private helpers -------------------------------------------------------
 
   defp check_common_locations do
-    case Enum.find(@common_locations, &File.exists?/1) do
+    case Enum.find(fallback_locations(), &File.exists?/1) do
       nil -> {:error, :not_found}
       path -> {:ok, path}
     end

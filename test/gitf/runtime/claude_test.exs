@@ -24,6 +24,32 @@ defmodule GiTF.Runtime.ClaudeTest do
           assert true
       end
     end
+
+    # The installer's location must be found even when PATH lacks it — a
+    # systemd unit's PATH never has ~/.local/bin, and the replaced factory
+    # box lost a week of CLI ghosts to exactly that.
+    test "falls back to ~/.local/bin/claude when PATH has nothing" do
+      home =
+        Path.join(System.tmp_dir!(), "gitf-claude-home-#{System.unique_integer([:positive])}")
+
+      bin = Path.join(home, ".local/bin")
+      File.mkdir_p!(bin)
+      File.write!(Path.join(bin, "claude"), "#!/bin/sh\n")
+      File.chmod!(Path.join(bin, "claude"), 0o755)
+
+      saved = %{"HOME" => System.get_env("HOME"), "PATH" => System.get_env("PATH")}
+
+      on_exit(fn ->
+        Enum.each(saved, fn {k, v} -> System.put_env(k, v) end)
+        File.rm_rf!(home)
+      end)
+
+      System.put_env("HOME", home)
+      System.put_env("PATH", Path.join(home, "empty"))
+
+      assert {:ok, path} = Claude.find_executable()
+      assert path == Path.join(bin, "claude")
+    end
   end
 
   describe "alive?/1 and stop/1" do

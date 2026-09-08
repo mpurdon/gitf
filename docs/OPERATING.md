@@ -468,6 +468,15 @@ is a card defect, not a mission problem.
 
 ## 12. Landmines
 
+- **A replaced box has no `claude` on the daemon's PATH.** The official
+  installer puts it in `/var/lib/gitf/.local/bin`, which a systemd unit's
+  PATH never includes; `deploy-aws.md` step "CLI mode" adds a hand-made
+  `/usr/local/bin/claude` symlink that instance replacement silently
+  drops. Symptom: every CLI ghost dies in ~15 ms with `Provision failed:
+  :not_found` and the mission walks its retry backoff back to `pending`.
+  Since 0.65.278 `GiTF.Runtime.Claude.find_executable/0` falls back to
+  `~/.local/bin/claude` itself; on an older release, recreate the symlink.
+
 - **Two `gitf` binaries.** `~/.local/bin/gitf` is 0.65.175 (self-updated);
   Homebrew's `/opt/homebrew/bin/gitf` is 0.65.47. PATH order decides which you
   get. Check with `gitf version` when behaviour looks wrong.
