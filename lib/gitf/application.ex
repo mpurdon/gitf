@@ -320,7 +320,8 @@ defmodule GiTF.Application do
       {:workflow_dsl_enabled, "GITF_WORKFLOW_DSL_ENABLED", true},
       {:workflow_inference_enabled, "GITF_WORKFLOW_INFERENCE_ENABLED", false},
       {:parallel_impl_attempts, "GITF_PARALLEL_IMPL_ATTEMPTS", 1},
-      {:lsp_validation_enabled, "GITF_LSP_VALIDATION_ENABLED", false}
+      {:lsp_validation_enabled, "GITF_LSP_VALIDATION_ENABLED", false},
+      {:wire_enabled, "GITF_WIRE_ENABLED", false}
     ]
 
     lines =

@@ -1,0 +1,52 @@
+[
+  {
+    "acceptance_criteria": [
+      "GroupMode is typed as \"org\" | \"repo\" | \"reason\" | \"type\" | \"author\" and TypeScript compiles with no new errors",
+      "The group-by <select> contains <option value=\"author\">Author</option> in addition to the unchanged existing four options",
+      "Selecting Author groups PRs by pr.author as key, with the author's login as the visible group label rendered like existing author logins elsewhere in the rail",
+      "Within an author group, PR order matches the existing priority + SORTERS[sortMode] chain — no new comparator introduced",
+      "Author groups are ordered by the existing groupPull sum (descending), tying alphabetically by label via the existing default entries.sort branch — no new group-ordering scheme introduced",
+      "An author with priority \"ignored\" in authorPriorities produces no group, via the existing unignored filter (no new filter path added)",
+      "An author group header shows a priority badge via authorPrioOf using the same prio-tag markup/classes as the repo header's repoPrio badge, omitted for \"normal\" priority",
+      "Collapsing an author group and forcing a re-render (e.g. new PR data) keeps it collapsed, verified against the existing ${groupMode}:${group.key} key without modifying that logic",
+      "Switching from Author back to Org (or any other mode) reproduces prior grouping, ordering, and header/badge behavior exactly, with no regression"
+    ],
+    "depends_on_indices": [],
+    "description": "In src/windows/MainApp.tsx, add an \"author\" grouping mode to the PR rail alongside the existing org/repo/reason/type modes, reusing all existing sort/filter/collapse machinery.\n\n1. GroupMode type (line ~78): change `type GroupMode = \"org\" | \"repo\" | \"reason\" | \"type\";` to `type GroupMode = \"org\" | \"repo\" | \"reason\" | \"type\" | \"author\";`.\n\n2. Group-by <select> (~lines 2019-2024): add a new option after the existing four: `<option value=\"author\">Author</option>`. Do NOT change the casing/label style of the existing four options (\"by org\", \"by repo\", \"by type\", \"by reason\" stay exactly as-is) — per explicit review feedback, the new option's label must literally be \"Author\" (capitalized, no \"by \" prefix), matching the goal text and FR-2 verbatim, even though this is visually inconsistent with the existing siblings. Do not silently normalize it to \"by author\".\n\n3. Grouping key/label resolution inside the `grouped` useMemo (the ternary chain that currently branches on groupMode for org/repo/reason/type, near where group key/label are computed before the sorted-PR-bucketing logic): add an `author` arm producing `[pr.author, pr.author]` as `[key, label]`, consistent with the existing chain's shape. Do not touch the `sorted` array computation (priority + SORTERS[sortMode], lines ~1660-1687) — author mode must inherit it unmodified, and do not touch the `entries.sort` branching (lines ~1719-1733) — org/repo/author (and any mode not \"reason\"/\"type\") already fall into the existing default branch `entries.sort((a,b) => groupPull(b) - groupPull(a) || a.label.localeCompare(b.label))`, which already incorporates authorPrioOf via PRIORITY_WEIGHT inside `pull`/`groupPull`. Leave that formula untouched.\n\n4. Group header priority badge (~line 2143 and 2161-2162): generalize the repo-only lookup. Currently: `const repoPrio = groupMode === \"repo\" ? prioOf(group.key) : null;` followed by a badge gated on `repoPrio && repoPrio !== \"normal\"`. Add `const authorPrio = groupMode === \"author\" ? authorPrioOf(group.key) : null;` and `const groupPrio = repoPrio ?? authorPrio;`, then change the badge JSX to key off `groupPrio` instead of `repoPrio`: `{groupPrio && groupPrio !== \"normal\" && <span className={`prio-tag ${groupPrio}`}>{groupPrio}</span>}`. Leave the repo-only cycle-click flag button/context menu (the block using `repoPrio` for click-to-cycle behavior, ~lines 2169-2175) scoped to `groupMode === \"repo\"` only — do not extend the click-to-cycle affordance to author groups, only the badge display.\n\n5. Verification only, no code change expected: confirm collapse state keys (`${groupMode}:${group.key}` pattern used around toggleGroup/collapsed, ~lines 1478-1479, 2141, 2148) work correctly for author mode without modification — since groupMode is now literally \"author\" and group.key is pr.author, the composite key is automatically namespaced distinctly from org/repo/reason/type keys of the same raw string. Also confirm the `unignored` filter (~lines 1660-1666) already drops PRs where `authorPrioOf(pr.author) === \"ignored\"` before grouping runs for every mode, so no author-mode-specific ignore filter is needed.\n\n6. Manually verify (or via `tsc --noEmit`/build if available) that org/repo/reason/type modes are byte-for-byte behaviorally unchanged — all edits are additive (new ternary arm, `repoPrio` -> `groupPrio` widening that is still null unless groupMode matches).",
+    "model_recommendation": "thinking",
+    "requirement_ids": [
+      "FR-1",
+      "FR-2",
+      "FR-3",
+      "FR-4",
+      "FR-5",
+      "FR-6",
+      "FR-7",
+      "FR-8",
+      "FR-9",
+      "NFR-1"
+    ],
+    "target_files": [
+      "src/windows/MainApp.tsx"
+    ],
+    "title": "Add author group-by mode to PR rail"
+  },
+  {
+    "acceptance_criteria": [
+      "A `.prio-tag.author` rule exists and the badge renders with the same metrics as the repo badge"
+    ],
+    "depends_on_indices": [
+      0
+    ],
+    "description": "Add the author badge styling in src/windows/MainApp.css next to the existing `.prio-tag` rules.",
+    "model_recommendation": "general",
+    "requirement_ids": [
+      "FR-7"
+    ],
+    "target_files": [
+      "src/windows/MainApp.css",
+      "src/windows/MainApp.tsx"
+    ],
+    "title": "Style the author group badge"
+  }
+]

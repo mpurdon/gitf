@@ -47,7 +47,7 @@ defmodule GiTF.Togusa.FixContext do
       attempt: ctx.attempt + 1,
       op_id: op_id,
       phase: phase,
-      failures: failures,
+      failures: digest(failures),
       feedback_given: feedback,
       timestamp: DateTime.utc_now()
     }
@@ -78,7 +78,7 @@ defmodule GiTF.Togusa.FixContext do
             other -> to_string(other)
           end
 
-        failures_text = format_failures(record.failures)
+        failures_text = record.failures |> digest() |> format_failures()
 
         """
         ### Attempt #{record.attempt} (#{phase_label})
@@ -153,15 +153,45 @@ defmodule GiTF.Togusa.FixContext do
       }
   end
 
-  # -- Private ---------------------------------------------------------------
+  @doc """
+  The fix-relevant slice of a validation artifact: unmet requirements, the
+  uncovered ids, gaps, verdict and summary. Anything else — met entries,
+  `raw_output`, parse bookkeeping, factory stamps — is dropped.
+
+  Applied when an attempt is recorded, so the history persisted on the
+  mission and on every later fix op is small, and again when rendering,
+  so histories persisted before this existed shrink too. msn-ac0539's third
+  fix prompt was 77KB, 51KB of it one prior attempt's raw stream-json
+  transcript. Failures that are not validation-shaped (the quality gate's)
+  pass through untouched.
+  """
+  @spec digest(map() | term()) :: map() | term()
+  def digest(%{} = failures)
+      when is_map_key(failures, "requirements_met") or is_map_key(failures, "overall_verdict") do
+    unmet =
+      failures
+      |> Map.get("requirements_met", [])
+      |> List.wrap()
+      |> Enum.reject(&(is_map(&1) and Map.get(&1, "met") == true))
+
+    failures
+    |> Map.take(~w(uncovered_requirements gaps overall_verdict summary note))
+    |> Map.put("requirements_met", unmet)
+    |> then(fn m ->
+      if Map.get(failures, "parse_failed"),
+        do: Map.put(m, "note", "the validator's reply could not be parsed; its verdict is fail"),
+        else: m
+    end)
+    |> Map.reject(fn {_k, v} -> v in [nil, [], ""] end)
+  end
+
+  def digest(other), do: other
+
+  defp format_failures(failures) when is_map(failures) and map_size(failures) == 0,
+    do: "No specific failures recorded."
 
   defp format_failures(failures) when is_map(failures) do
-    lines =
-      Enum.map(failures, fn {key, value} ->
-        "- **#{key}**: #{format_value(value)}"
-      end)
-
-    if lines == [], do: "No specific failures recorded.", else: Enum.join(lines, "\n")
+    Enum.map_join(failures, "\n", fn {key, value} -> "- **#{key}**: #{format_value(value)}" end)
   end
 
   defp format_failures(_), do: "No specific failures recorded."

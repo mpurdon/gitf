@@ -1,0 +1,5 @@
+%wire 1 research
+F1 src/windows/MainApp.tsx
+files F1
+cx low
+why Confirmed low complexity: single file change. GroupMode type at line 78, group-by <select> at ~lines 2016-2025, grouping/sorting logic in the useMemo at lines 1650-1735 (pull/groupPull already combine prioOf and authorPrioOf), and group header rendering at lines 2140-2190 (repoPrio badge pattern to mirror for author priority via authorPrioOf). Collapse key at line 2141 is already namespaced by groupMode:group.key, so no changes needed there — just needs verification. No author-login-specific rendering style found elsewhere (login is just used as plain text/key), so pr.author can be used directly as both key and label.

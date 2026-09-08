@@ -44,7 +44,8 @@ defmodule GiTF.Flags do
     :sandbox_enabled,
     :sandbox_required,
     :log_stdout,
-    :bedrock_prompt_cache
+    :bedrock_prompt_cache,
+    :wire_enabled
   ]
 
   @doc "The whitelisted flag names."

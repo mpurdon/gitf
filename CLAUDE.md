@@ -67,3 +67,4 @@ mix escript.build # dev CLI binary → ./gitf
 | [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) | System design and schema |
 | [`specs/GLOSSARY.md`](specs/GLOSSARY.md) | Terminology (sector, ghost, op, mission) |
 | [`specs/DELEGATION.md`](specs/DELEGATION.md) | Major delegation principle |
+| [`specs/WIRE.md`](specs/WIRE.md) | Wire — the compact artifact notation phase ghosts read/write (flag `wire_enabled`) |

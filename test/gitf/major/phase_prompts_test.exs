@@ -263,7 +263,7 @@ defmodule GiTF.Major.PhasePromptsTest do
 
       assert prompt =~ "requirement_ids"
       assert prompt =~ ~r/[Ee]very\s+functional requirement must be covered by at least one op/
-      assert prompt =~ ~r/never pad requirement_ids/
+      assert prompt =~ ~r/never pad the requirement ids/
     end
 
     test "splits ops by file ownership instead of minimizing op count" do
@@ -273,11 +273,11 @@ defmodule GiTF.Major.PhasePromptsTest do
       assert prompt =~ "FILE/SURFACE OWNERSHIP"
       # Same file in two ops requires a dependency between them
       assert prompt =~
-               ~r/must NOT both list the same file in target_files unless one\s+depends_on the other/
+               ~r/must NOT both list the same target file unless one depends on\s+the other/
 
       # Disjoint files must not be artificially serialized
       assert prompt =~
-               ~r/disjoint target_files and no data dependency must NOT depend\s+on each other/
+               ~r/disjoint target files and no data dependency must NOT depend\s+on each other/
 
       assert prompt =~ "merge conflicts"
       # The pre-2026-08-25 anti-parallelism doctrine is gone

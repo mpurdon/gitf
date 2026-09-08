@@ -1,0 +1,64 @@
+{
+  "approved": true,
+  "coverage": [
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-1"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-2"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-3"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-4"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-5"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-6"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-7"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-8"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "FR-9"
+    },
+    {
+      "covered": true,
+      "gap": null,
+      "req_id": "NFR-1"
+    }
+  ],
+  "issues": [
+    {
+      "description": "The goal text explicitly says the new option should be 'labelled \"Author\"' and FR-2's acceptance criteria literally specify `<option value=\"author\">Author</option>` — a hard requirement, not a style suggestion. The MINIMAL design's actual proposed interface deviates from this, specifying `<option value=\"author\">by author</option>` to match the existing lowercase 'by X' convention used by org/repo/type/reason. The NORMAL and COMPLEX designs' interfaces correctly use the literal 'Author' label but then muddy this in their risks sections by suggesting 'by author' might be preferable pending confirmation, which is inconsistent with their own stated interface and with the explicit spec wording.",
+      "severity": "medium",
+      "suggestion": "Implement the option literally as `<option value=\"author\">Author</option>`, matching the explicit goal text and FR-2 acceptance criteria verbatim. The stylistic inconsistency with sibling options (all lowercase 'by X') is real but the requirement is unambiguous here, so don't silently 'fix' it to 'by author' — implement as specified. If the resulting visual inconsistency bothers reviewers, that's worth a one-line callout in the PR, not a silent deviation from the spec."
+    }
+  ],
+  "risk_assessment": "Verified against the actual source (src/windows/MainApp.tsx): GroupMode declared at line 78, the key/label ternary at lines 1690-1698, the entries.sort dispatch at lines 1719-1733 (default branch already does groupPull-desc + label.localeCompare tiebreak and will naturally catch 'author' since it only special-cases 'reason' and 'type'), groupPull/pull at lines 1678-1718 (already sums prioOf(pr.repo) and authorPrioOf(pr.author) via PRIORITY_WEIGHT), the ignored-author filter at lines 1660-1667 (already upstream of grouping, mode-independent), collapse keying `${groupMode}:${group.key}` at lines 1699-1702/2141/2148 (already generic over groupMode, no change needed), and the repoPrio badge pattern at lines 2143/2161-2163 (cleanly generalizable to authorPrioOf via a groupPrio/activePrio-style variable). setAuthorPriority already exists (line 1473) and authorPrioOf is already read elsewhere (line 2388), confirming no new settings plumbing is needed. All three designs are technically feasible and low-risk; the change is genuinely additive and isolated to one file. NORMAL is selected as it matches the codebase's actual low complexity without COMPLEX's extra no-op 'verification component' scaffolding, while correctly stating the literal 'Author' label (unlike MINIMAL's interface, which deviates from the explicit spec text). The one real risk across all designs is the option-label wording, addressed in the issues list — implementers should use 'Author' literally per FR-2, not the existing lowercase convention. Scope creep risk (adding a click-to-cycle author-priority button or context menu on group headers) is correctly called out and excluded by all three designs, matching out_of_scope.",
+  "selected_design": "normal"
+}

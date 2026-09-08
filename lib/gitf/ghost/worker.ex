@@ -1825,7 +1825,7 @@ defmodule GiTF.Ghost.Worker do
     # Single-strategy planning or other phases use the phase name directly.
     artifact_key = planning_artifact_key(op)
 
-    case GiTF.Major.PhaseCollector.collect(op.phase, raw_output, events) do
+    case GiTF.Major.PhaseCollector.collect(op.phase, raw_output, events, prompt: op.description) do
       {:ok, artifact} ->
         GiTF.Missions.store_artifact(op.mission_id, artifact_key, artifact)
 
@@ -1834,8 +1834,12 @@ defmodule GiTF.Ghost.Worker do
           "Phase output parse failed for #{op.phase}: #{inspect(reason)}, storing raw output as fallback"
         )
 
-        # Extract a useful summary from the raw output so fix ops get context
-        summary = extract_fallback_summary(raw_output)
+        # A summary for fix ops: the tail of the assistant's reply, never of
+        # the stream-json transcript around it.
+        summary =
+          events
+          |> GiTF.Major.PhaseCollector.extract_assistant_text(raw_output)
+          |> extract_fallback_summary()
 
         fallback_artifact = %{
           "raw_output" => String.slice(raw_output, 0, 50_000) |> :binary.copy(),
@@ -1889,14 +1893,18 @@ defmodule GiTF.Ghost.Worker do
     |> String.split("\n")
     |> Enum.reject(fn line ->
       trimmed = String.trim(line)
-      trimmed == "" or String.starts_with?(trimmed, "```") or trimmed == "---"
+
+      # When no assistant text exists at all, extract_assistant_text falls
+      # back to the raw transcript; its event lines are not a summary.
+      trimmed == "" or String.starts_with?(trimmed, "```") or trimmed == "---" or
+        String.starts_with?(trimmed, "{\"type\"")
     end)
     |> Enum.take(-10)
     |> Enum.join("\n")
     |> String.slice(0, 1000)
     |> :binary.copy()
     |> case do
-      "" -> "Ghost output contained no parseable JSON"
+      "" -> "Ghost output contained no parseable reply"
       summary -> summary
     end
   end

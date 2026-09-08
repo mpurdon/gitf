@@ -3,10 +3,13 @@ defmodule GiTF.Major.PhaseCollector do
   Parses raw ghost output into structured phase artifacts.
 
   The ghost's stdout contains Claude's stream-json events. The collector
-  extracts the assistant's response text, finds the JSON block, validates
-  required keys per phase, and returns a structured artifact map.
+  extracts the assistant's response text, finds the structured reply —
+  a ```wire fence (`GiTF.Wire`) or a JSON block — validates required keys
+  per phase, and returns a structured artifact map.
 
-  Reuses common JSON extraction patterns.
+  Wire is decoded whenever it is present, whatever the `:wire_enabled`
+  flag says; the flag only governs how prompts are *built*. A reply with
+  both is read as Wire. Both paths land in the same artifact shape.
   """
 
   require Logger
@@ -28,19 +31,41 @@ defmodule GiTF.Major.PhaseCollector do
 
   Returns `{:ok, artifact_map}` or `{:error, reason}`.
   """
-  @spec collect(String.t(), String.t(), [map()]) :: {:ok, map() | list()} | {:error, term()}
-  def collect(phase, raw_output, parsed_events) do
+  @spec collect(String.t(), String.t(), [map()], keyword()) ::
+          {:ok, map() | list()} | {:error, term()}
+  def collect(phase, raw_output, parsed_events, opts \\ []) do
     text = extract_assistant_text(parsed_events, raw_output)
 
-    case extract_json(text) do
+    case extract_structured(phase, text, opts) do
       {:ok, data} ->
         validate_artifact(phase, data)
 
       {:error, reason} ->
-        Logger.warning("Phase #{phase} JSON extraction failed: #{inspect(reason)}")
+        Logger.warning("Phase #{phase} structured-output extraction failed: #{inspect(reason)}")
         {:error, :parse_failed}
     end
   end
+
+  @doc """
+  Extracts the structured reply from assistant text: Wire when the reply
+  carries a Wire document and the phase has a Wire kind, else JSON.
+
+  `opts[:prompt]` is the prompt the ghost answered (the phase op's
+  description); the file table it declared is recovered from it so a reply
+  may cite `F<n>` without redeclaring.
+  """
+  @spec extract_structured(String.t(), String.t(), keyword()) ::
+          {:ok, map() | list()} | {:error, term()}
+  def extract_structured(phase, text, opts \\ []) do
+    case GiTF.Wire.decode(text, phase, files: GiTF.Wire.files_in(opts[:prompt])) do
+      {:ok, data} -> {:ok, data}
+      {:error, _} -> extract_json(text)
+    end
+  end
+
+  @doc "The keys a phase artifact must carry to count as complete."
+  @spec required_keys(String.t()) :: [String.t()] | nil
+  def required_keys(phase), do: Map.get(@phase_required_keys, phase)
 
   @doc """
   Extracts the last assistant message text from parsed events.

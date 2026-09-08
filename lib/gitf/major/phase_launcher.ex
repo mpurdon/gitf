@@ -965,10 +965,13 @@ defmodule GiTF.Major.PhaseLauncher do
         {PhasePrompts.design_prompt(mission, requirements, research, "", ctx), "thinking"}
 
       "review" ->
-        design = GiTF.Missions.get_artifact(mission.id, "design") || %{}
+        # The same name → design map start_review passes, so a retry sees
+        # the tournament variants too (it used to hand over a bare artifact,
+        # whose top-level keys then read as four "designs").
+        designs = DesignBoard.collect_design_variants(mission.id)
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
-        {PhasePrompts.review_prompt(mission, design, requirements, research, ctx), "thinking"}
+        {PhasePrompts.review_prompt(mission, designs, requirements, research, ctx), "thinking"}
 
       "planning" ->
         design = GiTF.Missions.get_artifact(mission.id, "design") || %{}

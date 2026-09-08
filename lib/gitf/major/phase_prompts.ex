@@ -39,7 +39,7 @@ defmodule GiTF.Major.PhasePrompts do
          architecture, no cross-cutting concerns
        - `complex`: architectural work, schema changes, cross-cutting
          concerns, new subsystem, or unclear requirements
-    4. **You MUST find `target_files` before emitting the JSON.** For
+    4. **You MUST find the target files before emitting your reply.** For
        `trivial` or `simple` missions, this is your single most important
        task in this phase — do it before anything else after step 1.
        How to do it:
@@ -51,18 +51,18 @@ defmodule GiTF.Major.PhasePrompts do
          b. Follow any path hints in screenshots, stack traces, or issue
             bodies.
          c. Emit sector-relative paths (e.g. `src/components/Foo.tsx`)
-            in `target_files`.
-       `target_files` MUST be a non-empty list for `trivial`/`simple`
+            as #{fld("target_files", "F lines")}.
+       The target files MUST be non-empty for `trivial`/`simple`
        classifications. If you cannot find any file, downgrade the
        classification to `moderate` so research runs — do NOT emit an
-       empty `target_files` with a trivial/simple classification.
-       For `moderate`/`complex`, `target_files` may be empty or partial —
+       an empty target-file list with a trivial/simple classification.
+       For `moderate`/`complex`, the target files may be empty or partial —
        research will fill it in.
     5. **Preflight — evidence first, then flag.** Do these steps IN
        ORDER. Do NOT set `bug_reproducible` before you have written
        `bug_evidence`.
 
-         a. Read the identified `target_files`.
+         a. Read the identified target files.
 
          b. Write `bug_evidence` — ONE sentence describing WHAT YOU SAW
             in the file, in literal terms. Required for every mission,
@@ -98,28 +98,7 @@ defmodule GiTF.Major.PhasePrompts do
     research, `complex` at the full pipeline. Deviate only with explicit
     reasoning. **Validation always runs** regardless of skip flags.
 
-    ## Output Format
-
-    Output ONLY a JSON object in a ```json fence:
-
-    ```json
-    {
-      "complexity": "trivial" | "simple" | "moderate" | "complex",
-      "goal_restatement": "One-sentence canonical restatement of the goal",
-      "external_context": "Summary of any fetched external resources, or empty string",
-      "target_files": ["list of 1-3 sector-relative paths for trivial/simple"],
-      "bug_reproducible": true | false,
-      "bug_evidence": "Brief observation of the file's current state relative to the goal — required when bug_reproducible is false",
-      "skip_flags": {
-        "skip_research": true | false,
-        "skip_requirements": true | false,
-        "skip_design": true | false,
-        "skip_review": true | false,
-        "skip_planning": true | false
-      },
-      "reasoning": "Brief explanation of the complexity and skip decisions"
-    }
-    ```
+    #{reply_format("triage")}
     """
   end
 
@@ -171,18 +150,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     Budget: spend no more than 60 seconds on this phase.
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
-    ## Output Format
-
-    Output ONLY a JSON object in a ```json fence:
-
-    ```json
-    {
-      "key_files": ["list of 2-5 relevant files"],
-      "external_context": "Summary of external resources, or empty string",
-      "complexity": "low",
-      "triage_reasoning": "Brief note confirming or revising triage's classification"
-    }
-    ```
+    #{reply_format("research", lightweight: true)}
     """
   end
 
@@ -211,25 +179,7 @@ defmodule GiTF.Major.PhasePrompts do
        completed by a single ghost agent in a single session (low) or if it requires
        coordinated steps across multiple components (high).
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
-    ## Output Format
-
-    Output ONLY a JSON object in a ```json fence with this structure:
-
-    ```json
-    {
-      "architecture": "Brief description of the project architecture",
-      "key_files": ["list", "of", "important", "files"],
-      "patterns": ["coding patterns and conventions observed"],
-      "tech_stack": ["list of technologies and frameworks"],
-      "test_setup": "Description of test framework and conventions",
-      "dependencies": ["key dependencies relevant to the goal"],
-      "risks": ["potential risks or challenges for this goal"],
-      "external_context": "Summary of any external resources (issues, PRs, docs) referenced in the goal",
-      "complexity": "low" | "high",
-      "triage_reasoning": "Brief explanation of why you chose this complexity level"
-    }
-    ```
-
+    #{reply_format("research")}
     Be thorough but concise. Focus on information relevant to achieving the goal.
     """
   end
@@ -268,8 +218,6 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec requirements_prompt(map(), map(), String.t()) :: String.t()
   def requirements_prompt(mission, research_artifact, historical_context \\ "") do
-    research_json = encode_or(research_artifact, "{}")
-
     # The EARS fields (ears_pattern/trigger/response) are strictly additive:
     # every downstream consumer — the design and validation prompts, the
     # DesignDeck question slides, Helpers.requirement_index, the design
@@ -285,12 +233,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     **Goal**: #{mission.goal}
 
-    ## Codebase Research
-
-    ```json
-    #{research_json}
-    ```
-
+    #{artifacts_block([{"Codebase Research", "research", research_artifact}])}
     ## Instructions
 
     1. Break the goal into specific functional requirements, each written as
@@ -322,46 +265,8 @@ defmodule GiTF.Major.PhasePrompts do
     requirement, no "and" chains — split compound behavior into separate
     requirements.
 
-    For each requirement, alongside "id" emit:
-    - "description": the full assembled EARS sentence (the complete
-      human-readable statement, trigger included)
-    - "ears_pattern": one of "ubiquitous" | "event" | "state" | "unwanted" | "optional"
-    - "trigger": the WHEN/WHILE/IF/WHERE clause text (null for ubiquitous)
-    - "response": the "the <system> SHALL <response>" clause text
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
-    ## Output Format
-
-    Output ONLY a JSON object in a ```json fence:
-
-    ```json
-    {
-      "title": "Configurable PR approve messages",
-      "functional_requirements": [
-        {
-          "id": "FR-1",
-          "description": "WHEN a reviewer approves a PR, the system SHALL post the configured approval message.",
-          "ears_pattern": "event",
-          "trigger": "WHEN a reviewer approves a PR",
-          "response": "the system SHALL post the configured approval message",
-          "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
-          "priority": "must-have"
-        }
-      ],
-      "non_functional": [
-        {
-          "id": "NFR-1",
-          "description": "The system SHALL render the approval settings page within 200ms.",
-          "ears_pattern": "ubiquitous",
-          "trigger": null,
-          "response": "the system SHALL render the approval settings page within 200ms",
-          "acceptance_criteria": ["Testable criterion"]
-        }
-      ],
-      "constraints": ["Constraints from the existing codebase"],
-      "out_of_scope": ["Things explicitly not included"]
-    }
-    ```
-
+    #{reply_format("requirements")}
     Keep requirements minimal and focused. Do not add unnecessary scope.
     """
   end
@@ -379,9 +284,6 @@ defmodule GiTF.Major.PhasePrompts do
         extra_instructions \\ "",
         historical_context \\ ""
       ) do
-    requirements_json = encode_or(requirements, "{}")
-    research_json = encode_or(research, "{}")
-
     instructions = """
     1. Map each requirement to a specific implementation approach
     2. List exact files to create or modify
@@ -403,51 +305,11 @@ defmodule GiTF.Major.PhasePrompts do
 
     **Goal**: #{mission.goal}
 
-    ## Codebase Research
-
-    ```json
-    #{research_json}
-    ```
-
-    ## Requirements
-
-    ```json
-    #{requirements_json}
-    ```
-
+    #{artifacts_block([{"Codebase Research", "research", research}, {"Requirements", "requirements", requirements}])}
     ## Instructions
 
     #{final_instructions}
-    #{if historical_context != "", do: historical_context <> "\n\n", else: ""}## Output Format
-
-    Output ONLY a JSON object in a ```json fence:
-
-    ```json
-    {
-      "components": [
-        {
-          "name": "Component name",
-          "description": "What this component does",
-          "files": ["lib/path/to/file.ex"],
-          "interfaces": ["public function signatures or API endpoints"]
-        }
-      ],
-      "requirement_mapping": [
-        {
-          "req_id": "FR-1",
-          "component": "Component name",
-          "approach": "How this requirement will be implemented"
-        }
-      ],
-      "dependencies": [
-        {
-          "from": "Component A",
-          "to": "Component B"
-        }
-      ],
-      "risks": ["Implementation risks and mitigations"]
-    }
-    ```
+    #{if historical_context != "", do: historical_context <> "\n\n", else: ""}#{reply_format("design")}
     """
   end
 
@@ -465,7 +327,6 @@ defmodule GiTF.Major.PhasePrompts do
         historical_context \\ ""
       ) do
     base = design_prompt(mission, requirements, research, extra_instructions, historical_context)
-    review_json = encode_or(review, "{}")
 
     base <>
       """
@@ -475,10 +336,7 @@ defmodule GiTF.Major.PhasePrompts do
       Your previous design was reviewed and issues were found. Address ALL of
       the following feedback in your revised design:
 
-      ```json
-      #{review_json}
-      ```
-
+      #{artifacts_block([{"Review", "review", review}])}
       Pay special attention to any coverage gaps or high-severity issues.
       """
   end
@@ -490,42 +348,22 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec review_prompt(map(), map(), map(), map(), String.t()) :: String.t()
   def review_prompt(mission, designs, requirements, research, historical_context \\ "") do
-    requirements_json = encode_or(requirements, "{}")
-    research_json = encode_or(research, "{}")
+    # `designs` is a name → design map (DesignBoard.collect_design_variants/1).
+    multi_design? = map_size(designs) > 1
 
-    designs_section =
-      if is_map(designs) and map_size(designs) > 1 do
+    design_sections =
+      if multi_design? do
         # Multiple design variants — pass only structural keys to reduce token load
         designs
         |> Enum.sort_by(fn {name, _} -> name end)
         |> Enum.map(fn {name, design} ->
-          condensed = condense_design(design)
-          design_json = Jason.encode!(condensed)
-
-          """
-          ### Design: #{String.upcase(name)}
-
-          ```json
-          #{design_json}
-          ```
-          """
+          {"Design: #{String.upcase(name)}", "design", design, view: :brief}
         end)
-        |> Enum.join("\n")
       else
         # Single design — pass in full since there's no comparison overhead
-        {_name, design} = designs |> Enum.at(0) || {"normal", designs}
-        design_json = Jason.encode!(design)
-
-        """
-        ### Technical Design
-
-        ```json
-        #{design_json}
-        ```
-        """
+        design = designs |> Map.values() |> List.first()
+        [{"Technical Design", "design", design}]
       end
-
-    multi_design? = is_map(designs) and map_size(designs) > 1
 
     selection_instruction =
       if multi_design? do
@@ -539,13 +377,6 @@ defmodule GiTF.Major.PhasePrompts do
         ""
       end
 
-    selected_field =
-      if multi_design? do
-        ~s(  "selected_design": "normal",\n)
-      else
-        ""
-      end
-
     """
     # Design Review Phase
 
@@ -553,21 +384,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     **Goal**: #{mission.goal}
 
-    ## Codebase Research
-
-    ```json
-    #{research_json}
-    ```
-
-    ## Requirements
-
-    ```json
-    #{requirements_json}
-    ```
-
-    ## Designs
-
-    #{designs_section}
+    #{artifacts_block([{"Codebase Research", "research", research}, {"Requirements", "requirements", requirements}] ++ design_sections)}
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Instructions
 
@@ -582,32 +399,8 @@ defmodule GiTF.Major.PhasePrompts do
        the operator has already made, and never demand the question be
        asked again.
     #{selection_instruction}
-    ## Output Format
-
-    Output ONLY a JSON object in a ```json fence:
-
-    ```json
-    {
-      "approved": true,
-    #{selected_field}  "coverage": [
-        {
-          "req_id": "FR-1",
-          "covered": true,
-          "gap": null
-        }
-      ],
-      "issues": [
-        {
-          "severity": "high",
-          "description": "Description of the issue",
-          "suggestion": "How to fix it"
-        }
-      ],
-      "risk_assessment": "Overall risk assessment summary"
-    }
-    ```
-
-    Set `approved` to false if there are any high-severity issues or
+    #{reply_format("review", multi_design: multi_design?)}
+    Set #{fld("approved", "ok")} to #{fld("false", "n")} if there are any high-severity issues or
     uncovered requirements. Be rigorous but practical.
     """
   end
@@ -639,8 +432,8 @@ defmodule GiTF.Major.PhasePrompts do
     else
       """
       1. Split ops along FILE/SURFACE OWNERSHIP boundaries: one op per
-         independent deliverable whose target_files no other op touches.
-         Two ops naming the same file MUST be linked by depends_on_indices;
+         independent deliverable whose target files no other op touches.
+         Two ops naming the same file MUST be linked by a dependency;
          ops with disjoint files and no data dependency MUST NOT depend on
          each other — they will execute as parallel ghosts.
       2. Never split what one agent can complete in a session; each op must
@@ -669,11 +462,8 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec planning_prompt(map(), map(), map(), map(), String.t()) :: String.t()
   def planning_prompt(mission, design, requirements, review, historical_context \\ "") do
-    design_json = encode_or(design, "{}")
-    requirements_json = encode_or(requirements, "{}")
-
     # Extract only actionable review feedback, not the full artifact
-    review_section =
+    review_sections =
       if is_map(review) do
         issues = Map.get(review, "issues", [])
         selected = Map.get(review, "selected_design")
@@ -682,17 +472,9 @@ defmodule GiTF.Major.PhasePrompts do
           %{"selected_design" => selected, "issues" => issues}
           |> Map.reject(fn {_, v} -> is_nil(v) end)
 
-        review_json = Jason.encode!(condensed)
-
-        """
-        ## Review Feedback
-
-        ```json
-        #{review_json}
-        ```
-        """
+        [{"Review Feedback", "review", condensed}]
       else
-        ""
+        []
       end
 
     """
@@ -706,20 +488,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     **Goal**: #{mission.goal}
 
-    ## Requirements
-
-    ```json
-    #{requirements_json}
-    ```
-
-    ## Technical Design
-
-    ```json
-    #{design_json}
-    ```
-
-    #{review_section}
-
+    #{artifacts_block([{"Requirements", "requirements", requirements}, {"Technical Design", "design", design}] ++ review_sections)}
     ## Instructions
 
     #{decomposition_instructions(mission)}
@@ -732,30 +501,54 @@ defmodule GiTF.Major.PhasePrompts do
       question is answered they are spent. Plan the chosen option, nothing
       that documents the choosing
     - Set up dependencies (op indices, 0-based)
-    - Tag each op with "requirement_ids": the requirement ids THIS op delivers,
+    - Tag each op with #{fld("requirement_ids", "r")}: the requirement ids THIS op delivers,
       drawn ONLY from the ids in the Requirements artifact above. Every
       functional requirement must be covered by at least one op. State coverage
-      honestly — never pad requirement_ids to make coverage look complete
+      honestly — never pad the requirement ids to make coverage look complete
     - Recommend model complexity: "general" for straightforward changes, "thinking" for complex logic
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
-    ## Output Format
+    #{reply_format("plan")}
+    #{ownership_split_guidance()}
+    """
+  end
 
-    Output ONLY a JSON array in a ```json fence:
+  @doc """
+  The planning prompt for a mission that lacks some upstream artifacts —
+  the studio/plan-on-demand path in `GiTF.Major.Planner`. `artifacts` is a
+  list of `{heading, kind, artifact_or_nil}`; absent ones are skipped.
+  """
+  @spec partial_planning_prompt(map(), [tuple()], keyword()) :: String.t()
+  def partial_planning_prompt(mission, artifacts, opts) do
+    present = Enum.reject(artifacts, fn {_h, _k, a} -> is_nil(a) end)
 
-    ```json
-    [
-      {
-        "title": "Short descriptive title",
-        "description": "Detailed implementation instructions referencing specific files and functions",
-        "target_files": ["path/to/actual/file.ext"],
-        "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
-        "requirement_ids": ["FR-1"],
-        "depends_on_indices": [],
-        "model_recommendation": "general"
-      }
-    ]
-    ```
+    feedback_section =
+      case Keyword.get(opts, :feedback) do
+        nil -> ""
+        feedback -> "\n## Revision Feedback\n#{feedback}\n"
+      end
 
+    """
+    # Planning Phase
+
+    You are a project planner. Produce an ordered list of implementation ops.
+
+    **Goal**: #{mission.goal}
+    **Project path**: #{Keyword.get(opts, :sector_path, "unknown")}
+
+    #{artifacts_block(present)}
+    #{feedback_section}
+    #{Keyword.get(opts, :strategy_section, "")}
+
+    ## Instructions
+
+    1. Break the work into discrete, parallelizable ops
+    2. Each op should be completable by a single developer in one session
+    3. Define clear acceptance criteria
+    4. Specify target files where possible
+    5. Set up dependencies between ops
+    6. Recommend model complexity (general for simple, thinking for complex)
+
+    #{reply_format("plan")}
     #{ownership_split_guidance()}
     """
   end
@@ -772,14 +565,14 @@ defmodule GiTF.Major.PhasePrompts do
     """
     Split ops by FILE/SURFACE OWNERSHIP, not by size:
 
-    - Two ops must NOT both list the same file in target_files unless one
-      depends_on the other. Parallel ghosts editing the same file produce
+    - Two ops must NOT both list the same target file unless one depends on
+      the other. Parallel ghosts editing the same file produce
       merge conflicts — this has killed real mission runs.
-    - Ops with disjoint target_files and no data dependency must NOT depend
+    - Ops with disjoint target files and no data dependency must NOT depend
       on each other: they will run as parallel ghosts, and artificial
       serialization of disjoint files wastes wall-clock time.
     - Size each op so a single ghost can complete it in one session.
-    - Keep genuinely sequential work sequential via depends_on_indices
+    - Keep genuinely sequential work sequential via explicit dependencies
       (e.g. an op that consumes an interface another op creates).
     """
   end
@@ -791,8 +584,6 @@ defmodule GiTF.Major.PhasePrompts do
   """
   @spec validation_prompt(map(), map() | nil, map() | nil, String.t()) :: String.t()
   def validation_prompt(mission, requirements, planning, historical_context \\ "", opts \\ []) do
-    requirements_json = encode_or(requirements, "{}")
-    planning_json = encode_or(planning, "[]")
     diff_base = Keyword.get(opts, :diff_base, "main")
     changed_files = Keyword.get(opts, :changed_files, [])
     lsp_diagnostics = Keyword.get(opts, :lsp_diagnostics, [])
@@ -827,35 +618,7 @@ defmodule GiTF.Major.PhasePrompts do
     contested_block =
       render_contested_requirements_block(Keyword.get(opts, :contested_requirements, []))
 
-    # The rebuttal must also appear in the Output Format's canonical
-    # example, not only in the contested block's prose: msn-ac0539 round 2
-    # read the contested block (its evidence opened "re-verified with
-    # rebuttal"), then followed the schema example — which had no such
-    # field — and folded the argument into `evidence`. The gate downgraded
-    # every entry and a fix attempt burned on prompt compliance. A model
-    # anchors on the example schema; the contract's field has to live there.
     contested? = contested_block != ""
-
-    rebuttal_example =
-      if contested?,
-        do:
-          ",\n      \"rebuttal\": \"ONLY for ids under PREVIOUSLY JUDGED UNMET: " <>
-            "what in the current tree answers the quoted prior verdict\"",
-        else: ""
-
-    rebuttal_schema_note =
-      if contested? do
-        """
-
-        `rebuttal` is a SEPARATE field from `evidence` and is read mechanically:
-        for a requirement listed under PREVIOUSLY JUDGED UNMET below, a
-        `met: true` whose entry has no `rebuttal` field is downgraded to unmet
-        by the factory even when the evidence contains the same argument.
-        Omit the field entirely for requirements that were never contested.
-        """
-      else
-        ""
-      end
 
     # An overruled design review is a live lead for validation: the
     # reviewer's unresolved concern is exactly where the implementation is
@@ -957,18 +720,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     **Goal**: #{mission.goal}
 
-    ## Requirements
-
-    ```json
-    #{requirements_json}
-    ```
-
-    ## Planned Ops
-
-    ```json
-    #{planning_json}
-    ```
-    #{changed_files_block}#{accepted_block}#{contested_block}#{lsp_diagnostics_block}#{exec_validation_block}#{infra_notes_block}#{base_moved_block}#{merge_conflicts_block}#{unresolved_review_block}
+    #{artifacts_block([{"Requirements", "requirements", requirements}, {"Planned Ops", "plan", planning}])}#{changed_files_block}#{accepted_block}#{contested_block}#{lsp_diagnostics_block}#{exec_validation_block}#{infra_notes_block}#{base_moved_block}#{merge_conflicts_block}#{unresolved_review_block}
     ## Instructions
 
     Your worktree is on the implementation branch. The implementation's
@@ -982,7 +734,7 @@ defmodule GiTF.Major.PhasePrompts do
 
     1. Run `git_diff(ref: "#{diff_base}")` to inspect the implementation's changes.
     2. Check each functional requirement was implemented.
-    3. Verify per-requirement coverage: each planned op's `requirement_ids`
+    3. Verify per-requirement coverage: each planned op's #{fld("requirement_ids", "r")}
        declares which requirements that op delivers — use them as the map of
        intent, then confirm the diff actually delivers each one.
     4. Review the code changes for correctness.
@@ -991,33 +743,14 @@ defmodule GiTF.Major.PhasePrompts do
     7. Identify any gaps between requirements and implementation.
 
     **You are NOT here to modify code.** If a requirement is missing, report
-    it in `gaps`; a fix ghost will handle the repair in a later step.
+    it in #{fld("gaps", "gap")}; a fix ghost will handle the repair in a later step.
     #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
-    ## Output Format
+    #{reply_format("validation", contested: contested?)}
+    #{fld("uncovered_requirements", "unc")} lists requirement ids that NO op claimed in its
+    #{fld("requirement_ids", "r")} AND for which no evidence shows the work was delivered
+    anyway. Use #{fld("[]", "-")} when every requirement is covered.
 
-    Output ONLY a JSON object in a ```json fence:
-
-    ```json
-    {
-      "requirements_met": [
-        {
-          "req_id": "FR-1",
-          "met": true,
-          "evidence": "How this was verified"#{rebuttal_example}
-        }
-      ],
-      "uncovered_requirements": ["FR-2"],
-      "gaps": ["Any unmet requirements or issues found"],
-      "overall_verdict": "pass",
-      "summary": "Brief summary of validation results"
-    }
-    ```
-    #{rebuttal_schema_note}
-    `uncovered_requirements` lists requirement ids that NO op claimed in its
-    `requirement_ids` AND for which no evidence shows the work was delivered
-    anyway. Use `[]` when every requirement is covered.
-
-    Set `overall_verdict` to "fail" if any must-have requirements are not met.
+    Set #{fld("overall_verdict", "verdict")} to #{fld("\"fail\"", "fail")} if any must-have requirements are not met.
     """
   end
 
@@ -1345,15 +1078,7 @@ defmodule GiTF.Major.PhasePrompts do
 
   @doc "Scoring prompt: assess final result across 4 eval dimensions."
   def scoring_prompt(mission, requirements, validation, historical_context \\ "") do
-    requirements_json = encode_or(requirements, "{}")
-
-    validation_json =
-      try do
-        encode_or(validation, "{}")
-      rescue
-        _ -> "{}"
-      end
-
+    validation = if is_map(validation), do: validation, else: nil
     op_count = length(Map.get(mission, :ops, []))
     pipeline_mode = Map.get(mission, :pipeline_mode, "full")
 
@@ -1366,18 +1091,7 @@ defmodule GiTF.Major.PhasePrompts do
     **Goal**: #{mission.goal}
     **Pipeline**: #{pipeline_mode} | **Ops**: #{op_count}
 
-    ## Requirements
-
-    ```json
-    #{requirements_json}
-    ```
-
-    ## Validation Result
-
-    ```json
-    #{validation_json}
-    ```
-
+    #{artifacts_block([{"Requirements", "requirements", requirements, view: :brief}, {"Validation Result", "validation", validation}])}
     ## Evaluation Dimensions
 
     Score each dimension 0-100:
@@ -1406,6 +1120,329 @@ defmodule GiTF.Major.PhasePrompts do
     - Were there any security issues introduced (injection, hardcoded secrets, etc.)?
     - Did the agent respect file boundaries and not modify unrelated code?
 
+    #{reply_format("scoring")}
+    Overall score = weighted average:
+    final_output * 0.40 + trajectory * 0.25 + tool_usage * 0.20 + safety_alignment * 0.15
+
+    #{if historical_context != "", do: historical_context <> "\n\n", else: ""}Grade: A (90+), B (80+), C (70+), D (60+), F (<60).
+    """
+  end
+
+  # -- Artifact embedding and reply format ---------------------------------------
+  #
+  # Every phase prompt embeds upstream artifacts and asks for a structured
+  # reply. With `:wire_enabled` both go through `GiTF.Wire` — artifacts as
+  # Wire blocks sharing one file table, the reply as a Wire card; otherwise
+  # JSON. These two functions and `fld/2` are the only places the mode is
+  # consulted. The collector reads either, so flipping the flag mid-mission
+  # is safe.
+
+  @absent "_(not produced — phase skipped)_"
+
+  defp artifacts_block(sections) when is_list(sections) do
+    if GiTF.Wire.enabled?() do
+      {doc, _files, absent} = GiTF.Wire.document(sections)
+      doc <> Enum.map_join(absent, "", &"## #{&1}\n\n#{@absent}\n\n")
+    else
+      Enum.map_join(sections, "\n", fn
+        {heading, kind, artifact} -> json_section(heading, kind, artifact, [])
+        {heading, kind, artifact, opts} -> json_section(heading, kind, artifact, opts)
+      end)
+    end
+  end
+
+  defp json_section(heading, kind, artifact, opts) do
+    fallback = if kind == "plan", do: "[]", else: "{}"
+    artifact = json_view(kind, Keyword.get(opts, :view), artifact)
+    "## #{heading}\n\n```json\n#{encode_or(artifact, fallback)}\n```\n"
+  end
+
+  # JSON-mode views, the map-level twin of GiTF.Wire.Kinds' record-level
+  # projections, so a phase that asks for a brief artifact gets one in
+  # either notation.
+  defp json_view(_kind, nil, artifact), do: artifact
+
+  defp json_view("design", :brief, design) when is_map(design),
+    do: Map.take(design, ~w(components requirement_mapping dependencies risks))
+
+  defp json_view("requirements", :brief, reqs) when is_map(reqs) do
+    strip = &Enum.map(&1 || [], fn r -> Map.delete(r, "acceptance_criteria") end)
+
+    reqs
+    |> Map.drop(~w(constraints out_of_scope))
+    |> Map.update("functional_requirements", [], strip)
+    |> Map.update("non_functional", [], strip)
+  end
+
+  defp json_view(_kind, _view, artifact), do: artifact
+
+  defp reply_format(kind, opts \\ []) do
+    if GiTF.Wire.enabled?(),
+      do: GiTF.Wire.output_format(kind, opts),
+      else: "## Output Format\n\n" <> json_card(kind, opts)
+  end
+
+  # A field named in body prose, in whichever notation the reply is asked for.
+  defp fld(json_name, wire_name),
+    do: if(GiTF.Wire.enabled?(), do: "`#{wire_name}`", else: "`#{json_name}`")
+
+  # -- JSON reply cards, the twin of GiTF.Wire.Cards.card/2 -----------------------
+
+  defp json_card("triage", _opts) do
+    """
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "complexity": "trivial" | "simple" | "moderate" | "complex",
+      "goal_restatement": "One-sentence canonical restatement of the goal",
+      "external_context": "Summary of any fetched external resources, or empty string",
+      "target_files": ["list of 1-3 sector-relative paths for trivial/simple"],
+      "bug_reproducible": true | false,
+      "bug_evidence": "Brief observation of the file's current state relative to the goal — required when bug_reproducible is false",
+      "skip_flags": {
+        "skip_research": true | false,
+        "skip_requirements": true | false,
+        "skip_design": true | false,
+        "skip_review": true | false,
+        "skip_planning": true | false
+      },
+      "reasoning": "Brief explanation of the complexity and skip decisions"
+    }
+    ```
+    """
+  end
+
+  defp json_card("research", lightweight: true) do
+    """
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "key_files": ["list of 2-5 relevant files"],
+      "external_context": "Summary of external resources, or empty string",
+      "complexity": "low",
+      "triage_reasoning": "Brief note confirming or revising triage's classification"
+    }
+    ```
+    """
+  end
+
+  defp json_card("research", _opts) do
+    """
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence with this structure:
+
+    ```json
+    {
+      "architecture": "Brief description of the project architecture",
+      "key_files": ["list", "of", "important", "files"],
+      "patterns": ["coding patterns and conventions observed"],
+      "tech_stack": ["list of technologies and frameworks"],
+      "test_setup": "Description of test framework and conventions",
+      "dependencies": ["key dependencies relevant to the goal"],
+      "risks": ["potential risks or challenges for this goal"],
+      "external_context": "Summary of any external resources (issues, PRs, docs) referenced in the goal",
+      "complexity": "low" | "high",
+      "triage_reasoning": "Brief explanation of why you chose this complexity level"
+    }
+    ```
+    """
+  end
+
+  defp json_card("requirements", _opts) do
+    """
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "title": "Configurable PR approve messages",
+      "functional_requirements": [
+        {
+          "id": "FR-1",
+          "description": "WHEN a reviewer approves a PR, the system SHALL post the configured approval message.",
+          "ears_pattern": "event",
+          "trigger": "WHEN a reviewer approves a PR",
+          "response": "the system SHALL post the configured approval message",
+          "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
+          "priority": "must-have"
+        }
+      ],
+      "non_functional": [
+        {
+          "id": "NFR-1",
+          "description": "The system SHALL render the approval settings page within 200ms.",
+          "ears_pattern": "ubiquitous",
+          "trigger": null,
+          "response": "the system SHALL render the approval settings page within 200ms",
+          "acceptance_criteria": ["Testable criterion"]
+        }
+      ],
+      "constraints": ["Constraints from the existing codebase"],
+      "out_of_scope": ["Things explicitly not included"]
+    }
+    ```
+
+    For each requirement, alongside "id" emit:
+    - "description": the full assembled EARS sentence (the complete
+      human-readable statement, trigger included)
+    - "ears_pattern": one of "ubiquitous" | "event" | "state" | "unwanted" | "optional"
+    - "trigger": the WHEN/WHILE/IF/WHERE clause text (null for ubiquitous)
+    - "response": the "the <system> SHALL <response>" clause text
+    """
+  end
+
+  defp json_card("design", _opts) do
+    """
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "components": [
+        {
+          "name": "Component name",
+          "description": "What this component does",
+          "files": ["lib/path/to/file.ex"],
+          "interfaces": ["public function signatures or API endpoints"]
+        }
+      ],
+      "requirement_mapping": [
+        {
+          "req_id": "FR-1",
+          "component": "Component name",
+          "approach": "How this requirement will be implemented"
+        }
+      ],
+      "dependencies": [
+        {
+          "from": "Component A",
+          "to": "Component B"
+        }
+      ],
+      "risks": ["Implementation risks and mitigations"]
+    }
+    ```
+    """
+  end
+
+  defp json_card("review", opts) do
+    selected_field =
+      if Keyword.get(opts, :multi_design), do: ~s(  "selected_design": "normal",\n), else: ""
+
+    """
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "approved": true,
+    #{selected_field}  "coverage": [
+        {
+          "req_id": "FR-1",
+          "covered": true,
+          "gap": null
+        }
+      ],
+      "issues": [
+        {
+          "severity": "high",
+          "description": "Description of the issue",
+          "suggestion": "How to fix it"
+        }
+      ],
+      "risk_assessment": "Overall risk assessment summary"
+    }
+    ```
+    """
+  end
+
+  defp json_card("plan", _opts) do
+    """
+    ## Output Format
+
+    Output ONLY a JSON array in a ```json fence:
+
+    ```json
+    [
+      {
+        "title": "Short descriptive title",
+        "description": "Detailed implementation instructions referencing specific files and functions",
+        "target_files": ["path/to/actual/file.ext"],
+        "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
+        "requirement_ids": ["FR-1"],
+        "depends_on_indices": [],
+        "model_recommendation": "general"
+      }
+    ]
+    ```
+    """
+  end
+
+  defp json_card("validation", opts) do
+    # The rebuttal must also appear in the canonical example, not only in the
+    # contested block's prose: msn-ac0539 round 2 read the contested block
+    # (its evidence opened "re-verified with rebuttal"), then followed the
+    # schema example — which had no such field — and folded the argument into
+    # `evidence`. The gate downgraded every entry and a fix attempt burned on
+    # prompt compliance. A model anchors on the example schema; the
+    # contract's field has to live there, and so does the note that names it.
+    contested? = Keyword.get(opts, :contested, false)
+
+    rebuttal_example =
+      if contested?,
+        do:
+          ",\n      \"rebuttal\": \"ONLY for ids under PREVIOUSLY JUDGED UNMET: " <>
+            "what in the current tree answers the quoted prior verdict\"",
+        else: ""
+
+    contract =
+      if contested?,
+        do: """
+
+        `rebuttal` is a SEPARATE field from `evidence` and is read mechanically:
+        for a requirement listed under PREVIOUSLY JUDGED UNMET below, a
+        `met: true` whose entry has no `rebuttal` field is downgraded to unmet
+        by the factory even when the evidence contains the same argument.
+        Omit the field entirely for requirements that were never contested.
+        """,
+        else: ""
+
+    """
+    ## Output Format
+
+    Output ONLY a JSON object in a ```json fence:
+
+    ```json
+    {
+      "requirements_met": [
+        {
+          "req_id": "FR-1",
+          "met": true,
+          "evidence": "How this was verified"#{rebuttal_example}
+        }
+      ],
+      "uncovered_requirements": ["FR-2"],
+      "gaps": ["Any unmet requirements or issues found"],
+      "overall_verdict": "pass",
+      "summary": "Brief summary of validation results"
+    }
+    ```
+    #{contract}
+    """
+  end
+
+  defp json_card("scoring", _opts) do
+    """
     ## Output Format
 
     Output ONLY a JSON object in a ```json fence:
@@ -1434,25 +1471,8 @@ defmodule GiTF.Major.PhasePrompts do
     }
     ```
 
-    Overall score = weighted average:
-    final_output * 0.40 + trajectory * 0.25 + tool_usage * 0.20 + safety_alignment * 0.15
-
-    #{if historical_context != "", do: historical_context <> "\n\n", else: ""}Grade: A (90+), B (80+), C (70+), D (60+), F (<60).
     """
   end
-
-  # Keep only the structural keys that matter for design comparison.
-  # Drops verbose descriptions and detailed approaches to reduce token count.
-  defp condense_design(design) when is_map(design) do
-    Map.take(design, [
-      "components",
-      "requirement_mapping",
-      "dependencies",
-      "risks"
-    ])
-  end
-
-  defp condense_design(other), do: other
 
   defp encode_or(nil, fallback), do: fallback
   defp encode_or(data, _fallback), do: Jason.encode!(data)

@@ -1,0 +1,18 @@
+{
+  "bug_evidence": "MainApp.tsx:78 declares `type GroupMode = \"org\" | \"repo\" | \"reason\" | \"type\"` and the group-by `<select>` at lines 2021-2024 only offers org/repo/type/reason options — no author mode exists; the grouping key/label switch at lines 1692-1698 has no author branch either.",
+  "bug_reproducible": true,
+  "complexity": "simple",
+  "external_context": "",
+  "goal_restatement": "Add an \"author\" GroupMode to the PR rail so PRs can be grouped by author login, reusing existing sort/priority weighting and collapse-state logic.",
+  "reasoning": "This is a single-file, well-localized addition to an existing enum-driven grouping mechanism. All the pieces to reuse (authorPrioOf, PRIORITY_WEIGHT, groupPull, SORTERS, collapse-key namespacing) already exist and were confirmed by reading MainApp.tsx lines 1650-1735 and 2140-2192 — no new architecture, IPC, or settings needed. Classified simple: skip research/requirements/design but keep planning (to sequence the 4 small edits: type union, select option, key/label branch, header badge) and review (to verify sort/collapse behavior matches spec) since correctness of tie-breaking and priority badge placement matters.",
+  "skip_flags": {
+    "skip_design": true,
+    "skip_planning": false,
+    "skip_requirements": true,
+    "skip_research": true,
+    "skip_review": false
+  },
+  "target_files": [
+    "src/windows/MainApp.tsx"
+  ]
+}

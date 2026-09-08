@@ -1,0 +1,18 @@
+[
+  {
+    "acceptance_criteria": [
+      "priority.ts exports the table"
+    ],
+    "depends_on_indices": [],
+    "description": "Move the table out of F1 into F3.",
+    "model_recommendation": "general",
+    "requirement_ids": [
+      "FR-1"
+    ],
+    "target_files": [
+      "src/windows/MainApp.tsx",
+      "src/lib/priority.ts"
+    ],
+    "title": "Extract the priority table"
+  }
+]

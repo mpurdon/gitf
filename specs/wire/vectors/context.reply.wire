@@ -1,0 +1,7 @@
+%wire 1 plan
+F3 src/lib/priority.ts
+O1 general | Extract the priority table
+  f F1,F3
+  r R1
+  ac priority.ts exports the table
+  do Move the table out of F1 into F3.

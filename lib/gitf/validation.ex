@@ -487,6 +487,10 @@ defmodule GiTF.Validation do
 
     fix_description = build_fix_description(mission, validation, impl_files)
 
+    # Prior attempts only — this validation is already the feedback section
+    # above; recording first rendered it a second time as "Attempt N".
+    history_prompt = FixContext.format_for_prompt(fix_ctx)
+
     fix_ctx =
       FixContext.record_attempt(
         fix_ctx,
@@ -501,7 +505,6 @@ defmodule GiTF.Validation do
 
     shell = find_implementation_shell(mission)
 
-    history_prompt = FixContext.format_for_prompt(fix_ctx)
     full_description = fix_description <> "\n" <> history_prompt
 
     fix_title = "Fix validation issues (attempt #{fix_ctx.attempt})"

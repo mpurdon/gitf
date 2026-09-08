@@ -446,6 +446,13 @@ is the ground truth for what is actually on.
 Confirmed off *(2026-08-24)*: outcome autonomy tiers — `autonomy_tier` for cora
 returns `reason: "feature_disabled"`, effective tier `normal`.
 
+`wire_enabled` *(added 2026-09-06, default off)*: phase prompts embed prior
+artifacts as Wire and ask for Wire replies instead of JSON (`specs/WIRE.md`).
+Prompt side only — the collector always reads both, so flipping it mid-mission
+is safe. The acceptance test is the A/B protocol in `specs/WIRE.md` §8; a
+`structured-output extraction failed` line in the journal after enabling it
+is a card defect, not a mission problem.
+
 ## 11. Guards you should not route around
 
 - **Daily spend ceiling** — factory-wide, rolling 24h, **fail-closed**. Breach

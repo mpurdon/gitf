@@ -209,8 +209,8 @@ defmodule GiTF.Major.Planner do
         {:ok, response} ->
           text = extract_text(response)
 
-          case parse_plan_json(text) do
-            {:ok, tasks} ->
+          case GiTF.Major.PhaseCollector.extract_structured("planning", text, prompt: prompt) do
+            {:ok, tasks} when is_list(tasks) ->
               plan = %{
                 mission_id: mission_id,
                 goal: mission.goal,
@@ -229,7 +229,7 @@ defmodule GiTF.Major.Planner do
 
               {:ok, plan}
 
-            {:error, :parse_failed} ->
+            _not_a_task_list ->
               # Fallback: return raw text as a single-task plan
               {:ok,
                %{
@@ -267,7 +267,7 @@ defmodule GiTF.Major.Planner do
         base = GiTF.Major.PhasePrompts.planning_prompt(mission, design, requirements, review)
         if strategy_section == "", do: base, else: base <> "\n" <> strategy_section <> "\n"
 
-      # Some artifacts — build a simpler prompt with what we have
+      # Some artifacts — a simpler prompt with what we have
       true ->
         sector_path =
           if mission[:sector_id] do
@@ -279,66 +279,18 @@ defmodule GiTF.Major.Planner do
             "unknown"
           end
 
-        artifacts_section =
-          [
-            if(research,
-              do: "## Research\n```json\n#{Jason.encode!(research, pretty: true)}\n```"
-            ),
-            if(requirements,
-              do: "## Requirements\n```json\n#{Jason.encode!(requirements, pretty: true)}\n```"
-            ),
-            if(design, do: "## Design\n```json\n#{Jason.encode!(design, pretty: true)}\n```"),
-            if(review, do: "## Review\n```json\n#{Jason.encode!(review, pretty: true)}\n```")
-          ]
-          |> Enum.reject(&is_nil/1)
-          |> Enum.join("\n\n")
-
-        feedback_section = if feedback, do: "\n## Revision Feedback\n#{feedback}\n", else: ""
-
-        """
-        # Planning Phase
-
-        You are a project planner. Produce an ordered list of implementation ops.
-
-        **Goal**: #{mission.goal}
-        **Project path**: #{sector_path}
-
-        #{artifacts_section}
-        #{feedback_section}
-        #{strategy_section}
-
-        ## Instructions
-
-        1. Break the work into discrete, parallelizable ops
-        2. Each op should be completable by a single developer in one session
-        3. Define clear acceptance criteria
-        4. Specify target files where possible
-        5. Set up dependencies (op indices, 0-based)
-        6. Recommend model complexity (general for simple, thinking for complex)
-
-        ## Output Format
-
-        Output ONLY a JSON array in a ```json fence:
-
-        ```json
-        [
-          {
-            "title": "Short descriptive title",
-            "description": "Detailed implementation instructions",
-            "target_files": ["path/to/file"],
-            "acceptance_criteria": ["Testable criterion 1"],
-            "depends_on_indices": [],
-            "model_recommendation": "general"
-          }
+        artifacts = [
+          {"Research", "research", research},
+          {"Requirements", "requirements", requirements},
+          {"Design", "design", design},
+          {"Review", "review", review}
         ]
-        ```
 
-        Split ops by file ownership: two ops must NOT both list the same file in
-        target_files unless one depends_on the other (parallel ghosts editing the
-        same file produce merge conflicts), and ops with disjoint target_files and
-        no data dependency must NOT depend on each other (artificial serialization
-        wastes wall-clock). Size each op for one ghost in one session.
-        """
+        GiTF.Major.PhasePrompts.partial_planning_prompt(mission, artifacts,
+          sector_path: sector_path,
+          feedback: feedback,
+          strategy_section: strategy_section
+        )
     end
   end
 
@@ -381,20 +333,6 @@ defmodule GiTF.Major.Planner do
   defp extract_text(%{text: text}), do: text
   defp extract_text(text) when is_binary(text), do: text
   defp extract_text(other), do: inspect(other)
-
-  defp parse_plan_json(text) do
-    # Try to extract JSON from ```json ... ``` fence first
-    json_str =
-      case Regex.run(~r/```json\s*\n(.*?)\n\s*```/s, text) do
-        [_, json] -> json
-        _ -> text
-      end
-
-    case Jason.decode(json_str) do
-      {:ok, tasks} when is_list(tasks) -> {:ok, tasks}
-      _ -> {:error, :parse_failed}
-    end
-  end
 
   defp estimate_duration(tasks) do
     count = length(tasks)

@@ -1,0 +1,82 @@
+%wire 1 requirements
+title Expand priority scale to six levels
+R1 ubiq must | The system SHALL support six repo/author priority levels, ordered from least to most attention-worthy: ignored, unimportant, if-I-have-time, the everyday default, important, critical.
+  ac RepoPriority enum in models.rs has exactly six variants matching this ordering
+  ac ts-rs binding for the repo/author priority type lists all six variants
+  ac Repo and author context menus each expose all six levels
+R2 ubiq must | The system SHALL support five PR priority levels, ordered unimportant, if-I-have-time, the everyday default, important, critical, with no ignored level for PRs.
+  ac PrPriority enum in models.rs has exactly five variants, no Ignored variant
+  ac PR context menus expose exactly five levels
+  ac Attempting to set a PR priority to 'ignored' is not possible via any UI surface or command
+R3 event must | WHEN a settings store written by the prior four-level release is loaded, the system SHALL map each legacy value (high, normal, low, ignored) to its corresponding new level (important, default, if-I-have-time, ignored respectively) without crashing or discarding other settings.
+  ac A settings file containing serialized 'high'/'normal'/'low'/'ignored' strings deserializes successfully with no panic or error
+  ac After load, repos/authors previously 'high' report the new important-equivalent level, 'normal' report the new default-equivalent level, 'low' report the new if-I-have-time-equivalent level, and 'ignored' remain ignored
+  ac No other settings fields are altered or reset by this migration path
+  ac undo_audit correctly parses both legacy and current wire strings back into the enum
+R4 ubiq must | The system SHALL omit the default priority level from persisted settings, treating its absence as the default, consistent with existing behavior for the prior 'normal' level.
+  ac Setting a repo, author, or PR priority to the default level removes any existing entry for it from the settings map rather than writing the value
+  ac A repo/author/PR with no entry in the priority map is treated as the default level everywhere it is read
+R5 ubiq must | The system SHALL order groups and PRs, both within a group and between groups, strictly by priority weight: critical outranks important, important outranks the everyday default, the everyday default outranks if-I-have-time, and if-I-have-time outranks unimportant.
+  ac With tracked PRs spread across all levels, the rail displays groups top-to-bottom in strict priority order
+  ac Within a single group, PRs are ordered top-to-bottom in strict priority order
+  ac PRIORITY_WEIGHT and PR_PRIORITY_WEIGHT (or their replacements) in the frontend assign monotonically increasing weights matching this order
+  ac Group 'pull' aggregation (summed/best weight) is re-derived to remain correct for six levels rather than reusing the old four-level arithmetic unchanged
+R6 unwanted must | IF a repo, author, or PR is at the unimportant priority level, THEN the system SHALL suppress all notifications and alerts for it.
+  ac An unimportant repo's PRs produce zero native OS notifications and zero CalloutApp entries under conditions that would otherwise trigger one (new comment, CI failure)
+  ac An unimportant repo's PRs remain visible in the rail, only sorted to the bottom
+  ac poller.rs's notification gating checks priority level before emitting any alert for unimportant
+R7 event must | WHEN a PR at the critical priority level belongs to a repo at the critical priority level, the system SHALL trigger a persistent attention mechanism that re-asserts itself rather than firing once and going silent.
+  ac A critical PR in a critical repo produces an initial alert (native notification and/or CalloutApp entry) as today's high-priority PRs do
+  ac Dismissing or closing that single alert does not prevent a subsequent re-assertion while the condition remains unaddressed
+  ac The re-assertion recurs on an observable cadence until one of the stop conditions in FR-8 is met
+  ac Notification gating never suppresses critical-level alerts (critical is exempt from any suppression logic)
+R8 event must | WHEN the user opens a PR under persistent critical re-assertion or lowers the priority of that PR or its repo below critical, the system SHALL stop re-asserting for that PR.
+  ac Opening the PR (e.g. via the callout or rail) records an acknowledgment that halts further re-assertions for that PR's current critical condition
+  ac Lowering the PR's priority below critical, or lowering the repo's priority below critical, halts further re-assertions
+  ac A later state change (e.g. new commit) that re-triggers critical+critical for that PR can start persistent re-assertion again, i.e. acknowledgment is per-condition, not permanent for the PR's lifetime
+R9 ubiq must | The system SHALL make the frontend priority cycle (used for cycling priority via context menu or shortcut) advance through all six repo/author levels or all five PR levels in ascending order.
+  ac Repeated cycling on a repo/author traverses all six levels before repeating
+  ac Repeated cycling on a PR traverses all five levels before repeating
+  ac PRIORITY_CYCLE (or its replacement) is derived from a single source of truth shared with the weight maps, not a separately hand-maintained list
+R10 ubiq must | The system SHALL display a distinct label, badge, and tooltip for each priority level in every surface that currently shows priority (rail badges, group-header badges, context menus, SettingsView, RepoSettingsDrawer).
+  ac Each of the six repo/author levels and five PR levels has a unique, non-'normal'-flavored UI label
+  ac SettingsView's repo and author priority tables show all six levels as selectable options
+  ac RepoSettingsDrawer shows all six levels as selectable options
+  ac No leftover UI copy still reads 'normal', 'high', or 'low' for the renamed levels
+R11 event must | WHEN a developer runs npm run bindings after the enum changes, the system SHALL regenerate TypeScript bindings that reflect the new enum variants, and both npm run typecheck and the Rust build SHALL pass.
+  ac cargo test export (bindings regeneration) completes without compile errors
+  ac src/bindings/RepoPriority.ts, PrPriority.ts, TrackedPr.ts, and Settings.ts are regenerated and reflect the six/five-level unions
+  ac npm run typecheck passes with zero errors
+  ac cargo build passes with zero errors
+  ac Regenerated bindings are committed alongside the source changes
+R12 ubiq must | The system SHALL support round-tripping any current or legacy priority value through as_str/parse for use by undo_audit, including values produced by the migration in FR-3.
+  ac undo_audit successfully restores a priority change made before the migration (old wire string) as well as one made after (new wire string)
+  ac as_str() output for every new variant is parseable back into the same variant via parse()
+R13 ubiq must | The system SHALL update the chat tool-calling schemas for set_pr_priority, set_repo_priority, and set_author_priority to enumerate the current six/five wire values instead of the old four-level set.
+  ac set_repo_priority and set_author_priority JSON-schema enums list all six wire keys
+  ac set_pr_priority JSON-schema enum lists all five wire keys, no 'ignored'
+  ac No schema references a stale 'high'/'normal'/'low' wire key
+N1 ubiq | The system SHALL implement the six/five-level priority migration and its consumers without changing PR tracking or polling cadence logic.
+  ac poller.rs diff is limited to priority-gating logic (notification suppression/exemption and critical re-assertion), with no changes to polling interval or PR-tracking-set logic
+  ac Ignored-level filtering behavior for repos/authors is unchanged from today
+N2 ubiq | The system SHALL persist critical-condition acknowledgment state durably (e.g. in the SQLite store) so persistent re-assertion survives app restarts.
+  ac Restarting the app while an unacknowledged critical PR condition exists resumes persistent re-assertion rather than silently dropping it
+  ac The new state is added via an additive migration (e.g. ALTER TABLE), consistent with the existing store.rs migration pattern
+N3 ubiq | The system SHALL keep the enum, serde wire format, and ts-rs bindings in lockstep so no manual TypeScript type ever diverges from the Rust source of truth.
+  ac No hand-written TypeScript union duplicates the priority variant list outside of generated bindings
+  ac Frontend weight/cycle/label maps are keyed off the generated binding type so a missing variant is a type error, not a silent gap
+con RepoPriority is reused as the type for both repo_priorities and author_priorities in Settings; no separate AuthorPriority enum exists today.
+con PrPriority has no Ignored variant; this asymmetry with RepoPriority is intentional and must be preserved.
+con as_str()/parse() are hand-written, table-driven free functions parallel to serde attributes, not derived — every variant change must update both.
+con 'Default priority is never persisted' is an existing convention (removed from the HashMap on set); the new default-level variant must preserve this, including in commands.rs's set_repo_priority/set_author_priority and any equivalent comparisons in SettingsView.
+con Priority mutations flow through commands.rs functions that write settings, call store.add_audit for the undo/History drawer, and emit events::PRS_SNAPSHOT — new levels must not bypass this path.
+con SQLite store.rs persists priority as TEXT via as_str()/parse(); an existing ALTER TABLE pattern is available for any new critical-acknowledgment column.
+con ts-rs export (`npm run bindings` / `cargo test export`) compiles the whole crate, so any inconsistent enum reference anywhere in src-tauri breaks bindings generation, not just the frontend.
+con The frontend currently hardcodes the priority scale (PRIORITY_WEIGHT, PR_PRIORITY_WEIGHT, PRIORITY_CYCLE) in MainApp.tsx rather than deriving it from bindings; this task should consolidate that into a shared source of truth used by weight maps, cycle, menus, and badges.
+con The app already has a CalloutApp always-on-top window and tauri-plugin-notification native OS notification access, plus macOSPrivateApi enabled — these are the intended building blocks for persistent critical attention, not a new IPC/window mechanism.
+out Any new settings surfaces beyond the priority levels themselves (e.g. no new configurability of notification cadence, snooze durations, or custom thresholds).
+out Changes to tracking or polling cadence/logic unrelated to priority gating.
+out Introducing a separate AuthorPriority enum distinct from RepoPriority, unless strictly required to express the six levels (reuse remains the default assumption).
+out Redesigning the CalloutApp UI or native notification presentation beyond what's needed for persistent critical re-assertion.
+out Any non-priority-related refactor of MainApp.tsx, SettingsView.tsx, or RepoSettingsDrawer.tsx.
+out Retroactively re-triaging or re-scoring existing tracked PRs beyond the mandated old-value-to-new-value migration mapping.

@@ -844,7 +844,9 @@ defmodule GiTF.Web.ApiController do
             end)
             |> Enum.reverse()
 
-          case GiTF.Major.PhaseCollector.collect(phase, log_content, events) do
+          collect_opts = [prompt: Map.get(op, :description)]
+
+          case GiTF.Major.PhaseCollector.collect(phase, log_content, events, collect_opts) do
             {:ok, artifact} ->
               # Tournament-mode phase ghosts carry a variant tag (`"v1"`,
               # `"v2"`, ...); their artifacts go into per-variant slots
