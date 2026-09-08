@@ -1995,6 +1995,10 @@ defmodule GiTF.Missions do
           })
         end
 
+        # Any phase transition is factory activity — including the one
+        # into a hold, which is where the idle countdown legitimately begins.
+        GiTF.Observability.Activity.touch()
+
         Archive.update(:missions, mission_id, fn m ->
           # Read status/phase fresh inside the lock
           status =

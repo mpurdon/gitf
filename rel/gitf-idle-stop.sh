@@ -2,9 +2,13 @@
 # Powers the machine off after sustained factory idleness.
 #
 # Run by gitf-idle-stop.timer (as root). Polls the daemon's liveness endpoint;
-# when it has reported idle (no active ghosts, no RUNNING missions — a
-# mission holding for a person does not count) continuously for
-# GITF_IDLE_STOP_MINUTES, issues `systemctl poweroff`.
+# when it reports idle (no active ghosts, no RUNNING missions — a mission
+# holding for a person does not count) and has been idle for
+# GITF_IDLE_STOP_MINUTES by the daemon's own clock (`idle_since`), issues
+# `systemctl poweroff`. The daemon's clock, not a sampled streak: this
+# timer ticks every five minutes, and a whole mission once ran and held
+# between two ticks, so a streak begun for an earlier hold carried
+# straight through it.
 # On EC2 with instance_initiated_shutdown_behavior=stop this stops the
 # instance, so billing drops to the EBS volume until something starts it
 # again (wake Lambda, EventBridge schedule, or the console).
@@ -25,7 +29,6 @@ set -euo pipefail
 IDLE_MINUTES="${GITF_IDLE_STOP_MINUTES:-0}"
 GRACE_MINUTES="${GITF_IDLE_STOP_GRACE_MINUTES:-15}"
 PORT="${GITF_PORT:-4000}"
-STATE=/run/gitf-idle-since
 OVERRIDE="${GITF_HOME:-/var/lib/gitf}/idle-stop-override.json"
 
 # An unexpired override raises the idle threshold. Every failure mode here
@@ -57,7 +60,7 @@ apply_override() {
 # Disabled?
 [[ "$IDLE_MINUTES" =~ ^[0-9]+$ ]] || exit 0
 [[ "$IDLE_MINUTES" -gt 0 ]] || exit 0
-[[ -e /etc/gitf/idle-stop-disabled ]] && { rm -f "$STATE"; exit 0; }
+[[ -e /etc/gitf/idle-stop-disabled ]] && exit 0
 
 # Applied after the disabled checks so an override cannot resurrect a
 # deliberately disabled timer, and before the countdown so it changes the
@@ -76,28 +79,19 @@ body=$(curl -fsS --max-time 10 "http://127.0.0.1:${PORT}/api/v1/health" 2>/dev/n
 # Idle AND status ok: a stalled (zombie) factory answers 200 with
 # status "stalled" and idle false, but the rule is stated here anyway so
 # the countdown never depends on how the daemon happens to combine them.
-if command -v jq >/dev/null 2>&1; then
-  idle=$(jq -r 'if .data.idle == true and .data.status == "ok" then "true" else "false" end' <<<"$body" 2>/dev/null || echo "false")
-  held=$(jq -r '.data.held_missions // 0' <<<"$body" 2>/dev/null || echo "?")
-else
-  idle=$(grep -q '"idle":true' <<<"$body" && grep -q '"status":"ok"' <<<"$body" && echo "true" || echo "false")
-  held="?"
-fi
+# idle_since is the daemon's own record of when the quiet began; without
+# jq the grep fallback cannot read it and this script never powers off.
+command -v jq >/dev/null 2>&1 || exit 0
 
-if [[ "$idle" != "true" ]]; then
-  # Busy, unreachable, down or stalled: reset the countdown.
-  rm -f "$STATE"
-  exit 0
-fi
+idle=$(jq -r 'if .data.idle == true and .data.status == "ok" then "true" else "false" end' <<<"$body" 2>/dev/null || echo "false")
+[[ "$idle" == "true" ]] || exit 0
 
-now=$(date +%s)
-if [[ ! -f $STATE ]]; then
-  echo "$now" >"$STATE"
-  exit 0
-fi
+idle_since=$(jq -r '.data.idle_since // empty' <<<"$body" 2>/dev/null) || exit 0
+[[ -n "$idle_since" ]] || exit 0
+idle_since_epoch=$(date -d "$idle_since" +%s 2>/dev/null) || exit 0
+held=$(jq -r '.data.held_missions // 0' <<<"$body" 2>/dev/null || echo "?")
 
-idle_since=$(cat "$STATE")
-elapsed=$((now - idle_since))
+elapsed=$(( $(date +%s) - idle_since_epoch ))
 
 if [[ $elapsed -ge $((IDLE_MINUTES * 60)) ]]; then
   logger -t gitf-idle-stop "factory idle for $((elapsed / 60))m (held missions: $held) — powering off"

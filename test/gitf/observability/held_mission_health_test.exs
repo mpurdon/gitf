@@ -64,19 +64,36 @@ defmodule GiTF.Observability.HeldMissionHealthTest do
     body
   end
 
-  test "/health counts a held mission as held, and idle if it is the only one" do
+  test "/health counts a held mission as held, and idle (since the last activity) if it is the only one" do
     mission!("awaiting_approval")
     body = health_body(get(build_conn(), "/api/v1/health"))
 
     assert body["active_missions"] == 1 and body["held_missions"] == 1
-    if body["status"] == "ok", do: assert(body["idle"] == true)
+    assert body["idle"] == true
+    assert {:ok, _, _} = DateTime.from_iso8601(body["idle_since"])
   end
 
-  test "/health reports a zombie as 'stalled' with a 200 — up, not down" do
+  test "/health reports a zombie as 'stalled' with a 200 — up, not down — and busy" do
     mission!("implementation")
     body = health_body(get(build_conn(), "/api/v1/health"))
 
     assert body["status"] in ["stalled", "unhealthy"]
-    assert body["idle"] == false
+    assert body["idle"] == false and body["idle_since"] == nil
+  end
+
+  # The idle countdown runs on the daemon's clock, not the timer's samples:
+  # a mission that starts, runs and holds between two five-minute ticks
+  # must still reset it (2026-09-08: it did not, and the box powered off
+  # fifteen seconds after a fresh question was raised).
+  test "a phase transition moves idle_since forward" do
+    alias GiTF.Observability.Activity
+    before = Activity.last_activity_at()
+    Process.sleep(5)
+
+    m = mission!("awaiting_input")
+    {:ok, _} = Missions.transition_phase(m.id, "research", "test")
+
+    assert DateTime.compare(Activity.last_activity_at(), before) == :gt
+    assert Activity.idle_since(false) == nil
   end
 end

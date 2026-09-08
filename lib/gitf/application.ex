@@ -116,6 +116,7 @@ defmodule GiTF.Application do
     GiTF.Observability.Metrics.init()
     # Telemetry handlers must be attached before children that emit events start
     GiTF.Telemetry.attach_default_handlers()
+    GiTF.Observability.Activity.attach()
     GiTF.Observability.Metrics.attach_handlers()
 
     # -----------------------------------------------------------------------

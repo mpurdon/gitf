@@ -25,6 +25,7 @@ defmodule GiTF.Web.ApiController do
     {held, running} = Enum.split_with(missions, &GiTF.Missions.held_for_human?/1)
     ghosts = ghost_count()
     probe = GiTF.Observability.Health.probe(missions)
+    idle = GiTF.Observability.Health.idle?(ghosts, running)
 
     conn
     |> put_status(if(probe == :down, do: 503, else: 200))
@@ -38,7 +39,8 @@ defmodule GiTF.Web.ApiController do
         active_ghosts: ghosts,
         active_missions: length(missions),
         held_missions: length(held),
-        idle: GiTF.Observability.Health.idle?(ghosts, running)
+        idle: idle,
+        idle_since: GiTF.Observability.Activity.idle_since(idle)
       }
     })
   end
@@ -76,12 +78,15 @@ defmodule GiTF.Web.ApiController do
     })
   end
 
-  # A failed lookup is nil, which idle?/2 reads as NOT idle: zero is the one
-  # answer that powers the box off, so it can't double as an error value.
+  # Every live ghost record, phase ghosts included — Major.active_ghosts
+  # holds only the implementation ghosts it spawned itself, and read
+  # "0 ghosts" through a whole triage/research/requirements run. A failed
+  # lookup is nil, which idle?/2 reads as NOT idle: zero is the one answer
+  # that powers the box off, so it can't double as an error value.
   defp ghost_count do
-    GiTF.Major.active_ghost_count()
-  catch
-    _, _ -> nil
+    GiTF.Ghosts.list() |> Enum.count(&GhostStatus.active?(&1.status))
+  rescue
+    _ -> nil
   end
 
   # -- Readiness ---------------------------------------------------------------
