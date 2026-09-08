@@ -1539,6 +1539,9 @@ defmodule GiTF.Missions do
         # `kill` is the more destructive of the two — it deletes the record.
         preserve_canonical_branch(mission_id)
 
+        # A question nobody can act on must not keep holding the queue.
+        GiTF.Inquiry.withdraw(mission_id, "mission killed")
+
         # Rollback sector if applicable
         rollback_sector(quest)
 

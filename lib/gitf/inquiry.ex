@@ -689,13 +689,63 @@ defmodule GiTF.Inquiry do
   @doc """
   `:open`, `:answered`, or `:unknown` for an id that names nothing.
   """
-  @spec status(String.t()) :: :open | :answered | :unknown
+  @spec status(String.t()) :: :open | :answered | :withdrawn | :unknown
   def status(id) do
     case get(id) do
       %{status: "open"} -> :open
       %{status: "answered"} -> :answered
+      %{status: "withdrawn"} -> :withdrawn
       _ -> :unknown
     end
+  end
+
+  @doc """
+  Closes a mission's open questions because the mission is going away —
+  killed, deleted — so they stop holding the queue. A withdrawn question
+  keeps its record (the register of what was asked survives) but is never
+  listed as open again. Returns the number withdrawn.
+
+  Called from `GiTF.Missions.kill/1`. Before it existed, a killed mission
+  left its question open forever: inq-7de1ef held the Catwalk's queue for
+  eight days on behalf of msn-f48ae9, a mission that no longer existed.
+  """
+  @spec withdraw(String.t(), String.t()) :: non_neg_integer()
+  def withdraw(mission_id, reason) when is_binary(mission_id) do
+    mission_id
+    |> list_open()
+    |> Enum.map(fn inq ->
+      Archive.update(:inquiries, inq.id, fn
+        %{status: "open"} = q ->
+          Map.merge(q, %{
+            status: "withdrawn",
+            withdrawn_at: DateTime.utc_now(),
+            withdrawn_reason: reason
+          })
+
+        q ->
+          q
+      end)
+    end)
+    |> length()
+  end
+
+  @doc """
+  Withdraws every open question whose mission no longer exists — the
+  residue of kills that predate `withdraw/2`. Run by the Janitor; cheap
+  (one pass over open inquiries). Returns the number withdrawn.
+  """
+  @spec withdraw_orphans() :: non_neg_integer()
+  def withdraw_orphans do
+    list_open()
+    |> Enum.reject(&Archive.get(:missions, &1.mission_id))
+    |> Enum.map(fn inq ->
+      Logger.warning(
+        "Withdrawing orphaned question #{inq.id}: mission #{inq.mission_id} no longer exists"
+      )
+
+      withdraw(inq.mission_id, "mission no longer exists")
+    end)
+    |> Enum.sum()
   end
 
   @doc """

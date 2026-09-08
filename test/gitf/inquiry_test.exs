@@ -425,6 +425,49 @@ defmodule GiTF.InquiryTest do
     end
   end
 
+  describe "withdrawing" do
+    setup do
+      m = mission!()
+      {:ok, inquiry, :asked} = Inquiry.ask(m.id, choice())
+      %{mission: m, inquiry: inquiry}
+    end
+
+    test "a killed mission's open question stops holding the queue", %{mission: m, inquiry: inq} do
+      assert [%{id: id}] = Inquiry.list_open()
+      assert id == inq.id
+
+      assert Inquiry.withdraw(m.id, "mission killed") == 1
+      assert Inquiry.list_open() == []
+      assert Inquiry.status(inq.id) == :withdrawn
+      assert Inquiry.get(inq.id).withdrawn_reason == "mission killed"
+      # Idempotent: nothing left to withdraw.
+      assert Inquiry.withdraw(m.id, "again") == 0
+    end
+
+    test "an answered question is not withdrawn", %{mission: m, inquiry: inq} do
+      {:ok, _, :answered} = Inquiry.answer(inq.id, "list", answered_by: "operator")
+      assert Inquiry.withdraw(m.id, "mission killed") == 0
+      assert Inquiry.status(inq.id) == :answered
+    end
+
+    test "the orphan sweep withdraws questions whose mission is gone", %{mission: m, inquiry: inq} do
+      # A kill that predates withdraw/2: the record vanished, the question stayed.
+      Archive.delete(:missions, m.id)
+      assert [_] = Inquiry.list_open()
+
+      assert Inquiry.withdraw_orphans() == 1
+      assert Inquiry.list_open() == []
+      assert Inquiry.status(inq.id) == :withdrawn
+      assert Inquiry.withdraw_orphans() == 0
+    end
+
+    test "Missions.kill/1 withdraws the mission's questions", %{mission: m, inquiry: inq} do
+      assert :ok = GiTF.Missions.kill(m.id)
+      assert Inquiry.list_open() == []
+      assert Inquiry.status(inq.id) == :withdrawn
+    end
+  end
+
   describe "answering" do
     setup do
       m = mission!()

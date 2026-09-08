@@ -146,6 +146,7 @@ defmodule GiTF.Major.Janitor do
 
   def handle_info(:janitor_run, state) do
     safe(&GiTF.Major.IdleSweeper.run_if_idle/0, "idle sweeper")
+    safe(&GiTF.Inquiry.withdraw_orphans/0, "orphaned question sweep")
     schedule(:janitor_run, :janitor_interval_ms, 15 * 60 * 1_000)
     {:noreply, state}
   end
