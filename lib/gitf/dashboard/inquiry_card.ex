@@ -198,8 +198,22 @@ defmodule GiTF.Dashboard.InquiryCard do
   # The rationale is not decoration. It is the whole reason a choice can
   # be answered in ten seconds from a phone: the operator has to be able
   # to judge between the options without opening the code.
+  # A list arm reached because every mockup failed to render must say so:
+  # "no mockup was attempted" and "three were made and the renderer broke"
+  # are different facts, and only the second is a factory defect to fix.
+  # msn-629e74 asked its design question with all three previews dead
+  # (Playwright's browser missing on a replaced box) and the page showed a
+  # plain list with no hint anything had gone wrong.
   defp text_choice(assigns) do
+    assigns = assign(assigns, :preview_failures, preview_failures(assigns.inquiry))
+
     ~H"""
+    <div :if={@preview_failures != []} class="triage-warn" style="font-size:0.78rem">
+      Mockups were produced for these options but failed to render:
+      <span :for={reason <- @preview_failures} style="display:block; font-family:monospace; margin-top:0.2rem">
+        {reason}
+      </span>
+    </div>
     <div style="display:flex; flex-direction:column; gap:0.5rem">
       <button
         :for={option <- @inquiry[:options] || []}
@@ -216,5 +230,14 @@ defmodule GiTF.Dashboard.InquiryCard do
       </button>
     </div>
     """
+  end
+
+  # Distinct failure reasons across the options, first line of each.
+  defp preview_failures(inquiry) do
+    (inquiry[:options] || [])
+    |> Enum.map(& &1[:preview_error])
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&(&1 |> String.split("\n") |> hd()))
+    |> Enum.uniq()
   end
 end

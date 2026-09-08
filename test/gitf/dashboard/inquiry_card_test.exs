@@ -88,6 +88,15 @@ defmodule GiTF.Dashboard.InquiryCardTest do
       refute html =~ "<img"
       assert html =~ "Bars"
       assert html =~ "Dots"
+      # …but it says so: a failed render is a factory defect, not a question
+      # that never asked for pictures, and the operator can tell the two apart.
+      assert html =~ "failed to render"
+      assert length(Regex.scan(~r/the renderer timed out/, html)) == 1
+    end
+
+    test "a choice that never asked for mockups carries no render warning" do
+      html = card(choice([option("bars", "Bars"), option("dots", "Dots")]))
+      refute html =~ "failed to render"
     end
 
     test "a mixed choice still grids, and the option with no image says why" do

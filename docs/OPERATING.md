@@ -481,6 +481,12 @@ is a card defect, not a mission problem.
   Since 0.65.282 the unit's `PATH` includes `%h/.local/bin` (the fix for
   everything ghosts exec) and `GiTF.Runtime.Claude.find_executable/0` falls
   back to it with a warning; on an older release, recreate the symlink.
+- **A replaced box has no Playwright browser either** — design questions
+  arrive with rationale text and no mockups, and the Catwalk now says
+  "Mockups were produced … but failed to render" above the list. Fix:
+  `sudo -u gitf -H bash -lc 'npx playwright install chromium'` (see
+  `deploy-aws.md`). Both of these are root-volume state that instance
+  replacement drops; check them before the first mission on a new box.
 
 - **Two `gitf` binaries.** `~/.local/bin/gitf` is 0.65.175 (self-updated);
   Homebrew's `/opt/homebrew/bin/gitf` is 0.65.47. PATH order decides which you

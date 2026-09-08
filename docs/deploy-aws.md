@@ -218,6 +218,12 @@ API-equivalent `cost_usd`, so spend guards keep functioning as a brake).
 sudo -u gitf bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
 sudo ln -sf /var/lib/gitf/.local/bin/claude /usr/local/bin/claude   # ≤0.65.281 only; later units put ~/.local/bin on PATH
 
+# Mockup previews for design questions (GiTF.Visual.Capture): Playwright's
+# browser lives in the gitf user's cache and is NOT part of the release, so
+# a replaced instance loses it — every choice question then ships without
+# pictures ("the renderer failed: … chrome-headless-shell doesn't exist").
+sudo -u gitf -H bash -lc 'npx playwright install chromium'
+
 # /etc/gitf/gitf.env — token from `claude setup-token` run by the account
 # owner on their own machine (OAuth against the subscription)
 GITF_EXECUTION_MODE=cli
