@@ -81,31 +81,10 @@ defmodule GiTF.Observability.Health do
     major_alive = GiTF.Cabinet.mode?() or Process.whereis(GiTF.Major) != nil
     store_ok = check_store() == :ok
 
-    # A mission holding for a person (awaiting_input / awaiting_approval)
-    # has no op activity BY DESIGN; it is the human who is idle, not the
-    # factory. Counting it here made every held question turn the whole
-    # factory "unhealthy" thirty minutes later (msn-629e74, 2026-09-08:
-    # /health 503 for twelve hours while waiting on a treatment choice).
-    active_quests = Enum.reject(active_quests, &GiTF.Missions.held_for_human?/1)
-
     if not major_alive or not store_ok do
       false
     else
-      # Check for zombie: active missions exist but no op activity for 30+ minutes
-      if active_quests == [] do
-        true
-      else
-        # Any op activity in last 30 minutes?
-        thirty_min_ago = DateTime.shift(DateTime.utc_now(), minute: -30)
-
-        recent_activity =
-          Archive.filter(:ops, fn j ->
-            updated = j[:updated_at] || j[:created_at]
-            updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
-          end)
-
-        recent_activity != []
-      end
+      not zombie?(active_quests)
     end
   rescue
     # Fail CLOSED: "the liveness probe crashed" must not read as "alive" —
@@ -114,6 +93,33 @@ defmodule GiTF.Observability.Health do
     e ->
       Logger.error("Liveness probe raised: #{Exception.message(e)}")
       false
+  end
+
+  @doc """
+  True when missions are active but nothing has moved in 30 minutes — the
+  factory is up and not working.
+
+  A mission holding for a person (awaiting_input / awaiting_approval) has
+  no op activity BY DESIGN; it is the human who is idle, not the factory,
+  so held missions are excluded. Counting them made every held question
+  turn the whole factory "unhealthy" thirty minutes later (msn-629e74,
+  2026-09-08: /health 503 for twelve hours while waiting on a treatment
+  choice).
+  """
+  @spec zombie?([map()]) :: boolean()
+  def zombie?(active_quests) do
+    case Enum.reject(active_quests, &GiTF.Missions.held_for_human?/1) do
+      [] ->
+        false
+
+      _running ->
+        thirty_min_ago = DateTime.shift(DateTime.utc_now(), minute: -30)
+
+        Archive.filter(:ops, fn j ->
+          updated = j[:updated_at] || j[:created_at]
+          updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
+        end) == []
+    end
   end
 
   defp check_store do
