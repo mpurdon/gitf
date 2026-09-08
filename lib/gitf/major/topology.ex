@@ -237,6 +237,11 @@ defmodule GiTF.Major.Topology do
         |> Enum.reject(&(&1[:conflict_resolution] != nil))
         |> Enum.map(&{&1.id, &1[:ghost_id]})
         |> Enum.filter(fn {_id, g} -> is_binary(g) end)
+        # Fix ghosts anchored to the canonical worktree commit straight
+        # onto its branch; a ghost/<id> ref for one never exists, and
+        # looking for it produced "UNMERGED BRANCH … not something we can
+        # merge" gaps that sent the next fix ghost after phantom work.
+        |> Enum.reject(fn {_id, g} -> works_in?(g, wt) end)
         |> Enum.map(fn {id, g} -> {id, "ghost/" <> g} end)
         |> Enum.uniq_by(&elem(&1, 1))
         |> Enum.reject(fn {_id, b} -> b == target_branch end)
@@ -289,6 +294,13 @@ defmodule GiTF.Major.Topology do
       )
 
       {:ok, []}
+  end
+
+  defp works_in?(ghost_id, worktree_path) do
+    case Archive.get(:ghosts, ghost_id) do
+      %{shell_path: path} when is_binary(path) -> Path.expand(path) == Path.expand(worktree_path)
+      _ -> false
+    end
   end
 
   # Op status re-read at the moment of merge — the phase snapshot can be

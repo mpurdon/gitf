@@ -197,7 +197,8 @@ defmodule GiTF.Ghost.Worker do
       first_error: nil,
       same_model_retries: 0,
       last_activity_at: System.monotonic_time(:second),
-      call_tracker: nil
+      call_tracker: nil,
+      op_start_sha: nil
     }
 
     {:ok, state, {:continue, :provision}}
@@ -1148,7 +1149,20 @@ defmodule GiTF.Ghost.Worker do
         call_tracker: build_call_tracker(state, handle),
         started_at: System.monotonic_time(:second)
     }
+    # Where the tree stood when this ghost began: an adopted worktree
+    # already carries earlier ghosts' commits, and the scope gate must
+    # judge only what THIS ghost changed.
+    |> Map.put(:op_start_sha, head_sha(shell))
   end
+
+  defp head_sha(%{worktree_path: path}) when is_binary(path) do
+    case safe_git_cmd(["rev-parse", "HEAD"], path, 10_000) do
+      {sha, 0} -> String.trim(sha)
+      _ -> nil
+    end
+  end
+
+  defp head_sha(_), do: nil
 
   # -- Private: per-call LLM latency (CLI subprocess path) ----------------------
   #
@@ -1712,8 +1726,52 @@ defmodule GiTF.Ghost.Worker do
 
         do_complete_success(state, op, is_phase_job)
 
+      :diff_optional ->
+        # The scope gate for fix ghosts: a manifest the task never targeted
+        # is a rewrite of the build, not a fix. The whole attempt is
+        # reverted — a fix that broke the fence is not partially right —
+        # and the reason lands in the fix history the next ghost reads.
+        case fix_scope_violations(state, op) do
+          [] ->
+            do_complete_success(state, op, is_phase_job)
+
+          manifests ->
+            revert_fix_attempt(state)
+
+            mark_failed(
+              state,
+              "fix ghost rewrote dependency manifest(s) #{Enum.join(manifests, ", ")} — " <>
+                "out of scope, reverted; the build must not be 'fixed' by editing manifests"
+            )
+        end
+
       _ ->
         do_complete_success(state, op, is_phase_job)
+    end
+  end
+
+  # Manifests this fix ghost changed since it started that its op never
+  # targeted. Nil start sha (adoption failed to read HEAD) means no gate:
+  # never fail a fix for a fact we could not measure.
+  defp fix_scope_violations(%{op_start_sha: sha} = state, op) when is_binary(sha) do
+    with %{worktree_path: path} when is_binary(path) <- Archive.get(:shells, state.shell_id),
+         {out, 0} <- safe_git_cmd(["diff", "--name-only", "#{sha}..HEAD"], path, 30_000) do
+      GiTF.Ops.manifest_violations(op, String.split(out, "\n", trim: true))
+    else
+      _ -> []
+    end
+  end
+
+  defp fix_scope_violations(_state, _op), do: []
+
+  defp revert_fix_attempt(%{op_start_sha: sha} = state) do
+    case Archive.get(:shells, state.shell_id) do
+      %{worktree_path: path} when is_binary(path) ->
+        safe_git_cmd(["reset", "--hard", sha], path, 30_000)
+        Logger.warning("Op #{state.op_id}: reverted fix attempt to #{String.slice(sha, 0, 7)}")
+
+      _ ->
+        :ok
     end
   end
 

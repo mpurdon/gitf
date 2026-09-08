@@ -36,8 +36,8 @@ defmodule GiTF.Major.GroundTruth do
 
   # Runs the sector's validation_command in the implementation ghost's
   # worktree and returns ground truth for the validation prompt:
-  # {:pass, cmd} | {:fail, cmd, output} | nil (not configured / no
-  # worktree to run in).
+  # {:pass, cmd} | {:fail, cmd, output} | {:pre_existing, cmd, output,
+  # baseline_output} | nil (not configured / no worktree to run in).
   @doc false
   def run_exec_validation(mission, variant_id) do
     with %{validation_command: cmd} = sector when is_binary(cmd) and cmd != "" <-
@@ -62,13 +62,20 @@ defmodule GiTF.Major.GroundTruth do
 
         # Sector lock: the op-level audit runs this same command; two npm ci
         # racing in one tree corrupted node_modules on run 7 (msn-4fda11).
+        timeout = GiTF.Validator.validation_timeout_ms(sector)
+
+        # The baseline runs under the same lock, immediately after a
+        # failure, so the two verdicts describe the same moment and the
+        # same toolchain.
         result =
           GiTF.WorktreeLock.with_lock({:sector, mission.sector_id}, fn ->
-            GiTF.Validator.run_custom_validation(
-              shell,
-              cmd,
-              GiTF.Validator.validation_timeout_ms(sector)
-            )
+            case GiTF.Validator.run_custom_validation(shell, cmd, timeout) do
+              {:error, kind, output} when kind != :tool_missing ->
+                {:error, kind, output, baseline(mission, sector, wt, cmd, timeout)}
+
+              other ->
+                other
+            end
           end)
 
         # Fingerprint AFTER the run — the command itself mutates the tree
@@ -82,25 +89,43 @@ defmodule GiTF.Major.GroundTruth do
             store_exec_verdict(mission, %{"status" => "pass", "tree" => post_fingerprint})
             {:pass, cmd}
 
-          {:error, kind, output} ->
+          {:error, kind, output, {:fail, baseline_output}} ->
+            # The command fails on the base commit too: the sector is
+            # broken independently of this mission, and no fix ghost can
+            # mend it inside the scope fence. msn-f24c5f: cora's main had
+            # reqwest under a macOS-only dependency table; the CSS-only
+            # mission "failed" its build and three fix ghosts rewrote
+            # Cargo.toml chasing it.
             Logger.warning(
-              "Validation command FAILED for #{mission.id} (#{kind}): #{String.slice(to_string(output), 0, 300)}"
+              "Validation command FAILED for #{mission.id} (#{kind}) and ALSO fails on the " <>
+                "base commit — pre-existing, not attributable to this mission"
             )
 
-            # Record the FACTORY's own classification out-of-band. The fix
-            # loop's infra guard previously depended on the LLM validator
-            # echoing sentinel strings into its artifact — run 7's validator
-            # paraphrased ("host toolchain error") and the guard missed,
-            # spending 4 fix attempts on a corrupted node_modules.
+            GiTF.Observability.Alerts.dispatch_webhook(
+              :sector_baseline_broken,
+              "Sector #{sector.name}: the validation command fails on the base commit " <>
+                "(#{String.slice(to_string(baseline_output), 0, 200)}) — missions cannot " <>
+                "pass their build until main is fixed",
+              dedup_key: "sector_baseline_broken:#{sector.id}"
+            )
+
             store_exec_verdict(mission, %{
               "status" => "fail",
-              "infra_failure" => kind == :tool_missing,
+              "infra_failure" => false,
+              "pre_existing" => true,
               "kind" => to_string(kind),
               "output" => String.slice(to_string(output), 0, 500),
+              "baseline_output" => String.slice(to_string(baseline_output), 0, 500),
               "tree" => post_fingerprint
             })
 
-            {:fail, cmd, to_string(output)}
+            {:pre_existing, cmd, to_string(output), to_string(baseline_output)}
+
+          {:error, kind, output, _baseline_passes_or_unknown} ->
+            fail_verdict(mission, kind, output, post_fingerprint, cmd)
+
+          {:error, kind, output} ->
+            fail_verdict(mission, kind, output, post_fingerprint, cmd)
         end
       end
     else
@@ -110,6 +135,118 @@ defmodule GiTF.Major.GroundTruth do
     e ->
       Logger.warning("run_exec_validation crashed for #{mission.id}: #{Exception.message(e)}")
       nil
+  end
+
+  defp fail_verdict(mission, kind, output, post_fingerprint, cmd) do
+    Logger.warning(
+      "Validation command FAILED for #{mission.id} (#{kind}): #{String.slice(to_string(output), 0, 300)}"
+    )
+
+    # Record the FACTORY's own classification out-of-band. The fix
+    # loop's infra guard previously depended on the LLM validator
+    # echoing sentinel strings into its artifact — run 7's validator
+    # paraphrased ("host toolchain error") and the guard missed,
+    # spending 4 fix attempts on a corrupted node_modules.
+    store_exec_verdict(mission, %{
+      "status" => "fail",
+      "infra_failure" => kind == :tool_missing,
+      "kind" => to_string(kind),
+      "output" => String.slice(to_string(output), 0, 500),
+      "tree" => post_fingerprint
+    })
+
+    {:fail, cmd, to_string(output)}
+  end
+
+  # -- Baseline ------------------------------------------------------------------
+  #
+  # Does the validation command pass on the commit this work branched
+  # from? Asked only after a failure, answered once per base commit and
+  # command (the answer cannot change while the commit is the same), and
+  # measured in a scratch worktree so the mission's tree is untouched.
+  # Returns {:pass, ""} | {:fail, output} | :unknown.
+
+  @baselines :validation_baselines
+
+  defp baseline(mission, sector, wt, cmd, timeout),
+    do: baseline_verdict(sector, wt, Topology.detect_diff_base(mission), cmd, timeout, mission.id)
+
+  @doc false
+  def baseline_verdict(sector, wt, base_ref, cmd, timeout, mission_id \\ "n/a") do
+    with {:ok, sha} <- GiTF.Git.merge_base(wt, "HEAD", base_ref) do
+      key = "#{sector.id}:#{sha}:#{:erlang.phash2(cmd)}"
+
+      case Archive.get(@baselines, key) do
+        %{status: "pass"} ->
+          {:pass, ""}
+
+        %{status: "fail", output: output} ->
+          {:fail, output}
+
+        nil ->
+          verdict = measure_baseline(mission_id, sector, sha, cmd, timeout)
+
+          case verdict do
+            {:pass, _} ->
+              Archive.put(@baselines, %{
+                id: key,
+                status: "pass",
+                output: "",
+                at: DateTime.utc_now()
+              })
+
+            {:fail, out} ->
+              Archive.put(@baselines, %{
+                id: key,
+                status: "fail",
+                output: out,
+                at: DateTime.utc_now()
+              })
+
+            :unknown ->
+              :ok
+          end
+
+          verdict
+      end
+    else
+      _ -> :unknown
+    end
+  rescue
+    e ->
+      Logger.warning("Baseline validation crashed for #{mission_id}: #{Exception.message(e)}")
+      :unknown
+  end
+
+  defp measure_baseline(mission_id, sector, sha, cmd, timeout) do
+    short = String.slice(sha, 0, 12)
+    path = Path.join([sector.path, "ghosts", "baseline-#{short}"])
+    branch = "gitf/baseline-#{short}"
+
+    Logger.info("Quest #{mission_id}: measuring validation baseline at #{short}")
+
+    if File.dir?(path) do
+      GiTF.Git.worktree_remove(sector.path, path, force: true)
+      File.rm_rf(path)
+    end
+
+    case GiTF.Git.worktree_add(sector.path, path, branch, sha) do
+      {:ok, _} ->
+        try do
+          case GiTF.Validator.run_custom_validation(%{worktree_path: path}, cmd, timeout) do
+            :ok -> {:pass, ""}
+            {:error, :tool_missing, _} -> :unknown
+            {:error, _kind, output} -> {:fail, String.slice(to_string(output), 0, 500)}
+          end
+        after
+          GiTF.Git.worktree_remove(sector.path, path, force: true)
+          File.rm_rf(path)
+          GiTF.Git.safe_cmd(["branch", "-D", branch], cd: sector.path, stderr_to_stdout: true)
+        end
+
+      _ ->
+        :unknown
+    end
   end
 
   @doc """
@@ -145,6 +282,10 @@ defmodule GiTF.Major.GroundTruth do
   # One owner for the verdict-map ↔ return-tuple mapping, used by both the
   # cache-hit arm and the fresh-run arms.
   defp verdict_result(%{"status" => "pass"}, cmd), do: {:pass, cmd}
+
+  defp verdict_result(%{"pre_existing" => true} = v, cmd),
+    do: {:pre_existing, cmd, to_string(v["output"] || ""), to_string(v["baseline_output"] || "")}
+
   defp verdict_result(verdict, cmd), do: {:fail, cmd, to_string(verdict["output"] || "")}
 
   # Overwritten every round so a stale infra flag can never suppress fix

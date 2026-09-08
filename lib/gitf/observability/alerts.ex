@@ -54,6 +54,7 @@ defmodule GiTF.Observability.Alerts do
     factory_paused: :critical,
     approval_escalation_failed: :critical,
     quest_failed: :high,
+    sector_baseline_broken: :high,
     approval_timed_out: :high,
     approval_timeout_critical: :high,
     # Validation and re-validation disagreed — auto-approve is withheld and

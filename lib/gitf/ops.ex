@@ -650,6 +650,33 @@ defmodule GiTF.Ops do
   # edges point at the ORIGINAL id and nothing walked the chain.
   @max_retry_chain_depth 10
 
+  # Dependency manifests: the files a fix ghost must never rewrite to make
+  # a build pass. msn-f24c5f's fix ghosts, told "cargo build fails:
+  # reqwest unresolved", moved crates between Cargo.toml tables three
+  # rounds running — each round breaking something new — to chase a
+  # failure that was already on main.
+  @manifest_names ~w(
+    Cargo.toml Cargo.lock package.json package-lock.json pnpm-lock.yaml yarn.lock
+    mix.exs mix.lock go.mod go.sum pyproject.toml poetry.lock requirements.txt
+    Gemfile Gemfile.lock build.gradle pom.xml
+  )
+
+  @doc "True for a dependency manifest or lockfile, at any depth."
+  @spec manifest?(String.t()) :: boolean()
+  def manifest?(path) when is_binary(path), do: Path.basename(path) in @manifest_names
+
+  @doc """
+  The dependency manifests a fix op touched that its task never targeted.
+  A fix ghost may edit a manifest only when the work it is fixing already
+  did (the manifest is in the op's target files); anything else is an
+  out-of-scope rewrite of the build, whatever the validator's complaint.
+  """
+  @spec manifest_violations(map(), [String.t()]) :: [String.t()]
+  def manifest_violations(op, changed_paths) do
+    allowed = MapSet.new(op[:target_files] || [])
+    Enum.filter(changed_paths, &(manifest?(&1) and not MapSet.member?(allowed, &1)))
+  end
+
   @doc """
   The proof obligation an op's completion must satisfy — declared HERE,
   beside where each op kind is minted, and evaluated by `Ghost.Worker`

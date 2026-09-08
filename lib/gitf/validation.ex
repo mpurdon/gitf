@@ -635,7 +635,7 @@ defmodule GiTF.Validation do
   end
 
   # Build a comprehensive fix description from validation findings.
-  defp build_fix_description(_mission, validation, impl_files) do
+  defp build_fix_description(mission, validation, impl_files) do
     gaps = Map.get(validation, "gaps", [])
 
     unmet =
@@ -692,6 +692,25 @@ defmodule GiTF.Validation do
         sections
       end
 
+    # The build is broken on main independently of this work: say so, or
+    # the ghost reads "cargo build fails" as its own problem and rewrites
+    # the manifests to chase it (msn-f24c5f, three rounds).
+    sections =
+      if GiTF.Phases.Validation.exec_pre_existing?(mission) do
+        sections ++
+          [
+            "### The sector's build fails on the base commit too\n",
+            "The validation command fails on the commit this work branched from, " <>
+              "in a clean worktree. That breakage is NOT yours to fix and is out of " <>
+              "scope: do not touch dependency manifests, build configuration or " <>
+              "unrelated modules to make the build pass. Fix only the gaps that " <>
+              "concern the implementation's own changes.",
+            ""
+          ]
+      else
+        sections
+      end
+
     instructions = """
     ## Instructions
 
@@ -708,9 +727,13 @@ defmodule GiTF.Validation do
        missions. Before adding ANY field, function, or component, grep for
        its concept first.
     4. Make the minimal fixes needed to address each issue
-    5. Verify your fixes are correct — if a build/test command is available,
+    5. NEVER modify dependency manifests (package.json, package-lock.json,
+       Cargo.toml, Cargo.lock, mix.exs deps) unless the task explicitly
+       requires it — a fix that rewrites the build's dependencies is
+       reverted by the factory and counts as a failed attempt
+    6. Verify your fixes are correct — if a build/test command is available,
        RUN it; a fix that does not compile is not a fix
-    6. Commit your changes
+    7. Commit your changes
     """
 
     Enum.join(sections, "\n") <> "\n" <> instructions

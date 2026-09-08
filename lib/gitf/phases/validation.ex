@@ -830,6 +830,18 @@ defmodule GiTF.Phases.Validation do
 
   def exec_infra_failure?(_), do: false
 
+  @doc "True when the factory measured the validation command failing on the base commit too."
+  @spec exec_pre_existing?(map()) :: boolean()
+  def exec_pre_existing?(%{id: id}) when is_binary(id) do
+    # Read live: the mission handed around the fix loop can be a snapshot
+    # older than the verdict GroundTruth just stored.
+    match?(%{"pre_existing" => true}, GiTF.Missions.get_artifact(id, "exec_validation"))
+  rescue
+    _ -> false
+  end
+
+  def exec_pre_existing?(_), do: false
+
   @impl true
   def terminal(mission, :retries_exhausted, artifact) do
     if is_map(artifact),

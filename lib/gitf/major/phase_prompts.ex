@@ -872,6 +872,48 @@ defmodule GiTF.Major.PhasePrompts do
     """
   end
 
+  defp render_exec_validation_block({:pre_existing, command, output, baseline_output}) do
+    tail = fn text ->
+      if String.length(text) > 1500,
+        do: "…(truncated)…\n" <> String.slice(text, -1500, 1500),
+        else: text
+    end
+
+    """
+
+    ## Execution validation: FAILS — and ALSO FAILS ON THE BASE COMMIT (pre-existing)
+
+    The sector's validation command was executed in the implementation
+    worktree and failed. The factory then ran the SAME command on the
+    commit this work branched from, in a clean scratch worktree, and it
+    failed there too. The breakage predates this mission and is NOT
+    attributable to the implementation; the operator has been alerted to
+    fix the sector.
+
+    Consequences for your verdict:
+    - Do NOT mark any requirement unmet on account of this failure, and do
+      NOT report it as a gap. A requirement that the build or tests pass
+      is judged on the implementation's OWN changes only: cite the
+      pre-existing failure in its evidence and mark it met unless the diff
+      itself introduces a further failure.
+    - Judge everything else from the diff as usual.
+
+        #{command}
+
+    Implementation worktree:
+
+    ```
+    #{tail.(output)}
+    ```
+
+    Base commit (clean scratch worktree):
+
+    ```
+    #{tail.(baseline_output)}
+    ```
+    """
+  end
+
   defp render_exec_validation_block({:fail, command, output}) do
     tail =
       if String.length(output) > 4000,

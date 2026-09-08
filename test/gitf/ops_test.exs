@@ -33,6 +33,25 @@ defmodule GiTF.OpsTest do
     ghost
   end
 
+  describe "manifest_violations/2 — the fix ghost's scope fence" do
+    test "a manifest the task never targeted is a violation; targeted ones and source files are not" do
+      op = %{target_files: ["src/styles.css", "src-tauri/Cargo.toml"]}
+
+      assert GiTF.Ops.manifest_violations(op, ["src/styles.css", "src-tauri/Cargo.toml"]) == []
+
+      assert GiTF.Ops.manifest_violations(op, [
+               "src/styles.css",
+               "package.json",
+               "src-tauri/Cargo.lock"
+             ]) ==
+               ["package.json", "src-tauri/Cargo.lock"]
+
+      assert GiTF.Ops.manifest_violations(%{}, ["Cargo.toml"]) == ["Cargo.toml"]
+      assert GiTF.Ops.manifest?("deep/nested/mix.exs")
+      refute GiTF.Ops.manifest?("src/error.rs")
+    end
+  end
+
   describe "create/1" do
     test "creates a op with valid attributes", %{mission: mission, sector: sector} do
       assert {:ok, op} = create_job(mission, sector, %{title: "Build feature"})
