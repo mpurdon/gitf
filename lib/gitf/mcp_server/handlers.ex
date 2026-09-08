@@ -906,6 +906,49 @@ defmodule GiTF.MCPServer.Handlers do
     end
   end
 
+  def call("reject_question", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      safe_handler("reject_question", %{"id" => id}, fn ->
+        feedback = %{votes: args["votes"] || %{}, direction: args["direction"]}
+
+        case GiTF.Inquiry.reject(id, feedback, answered_by: @mcp_actor) do
+          {:ok, inquiry, :answered} ->
+            audit_write("inquiry.reject", inquiry.mission_id, %{
+              inquiry_id: id,
+              key: inquiry[:key],
+              votes: inquiry[:votes],
+              direction: inquiry[:direction]
+            })
+
+            {:ok,
+             json_text(%{
+               id: id,
+               mission_id: inquiry[:mission_id],
+               rejected: true,
+               votes: inquiry[:votes],
+               direction: inquiry[:direction],
+               resumes_phase: inquiry[:phase],
+               note:
+                 "Recorded. The mission transitions back to #{inquiry[:phase]} and RE-RUNS it " <>
+                   "with the rejection, votes and direction in the prompt; the phase will ask " <>
+                   "again with new options — poll list_questions."
+             })}
+
+          {:ok, inquiry, :already_answered} ->
+            {:ok, json_text(already_answered(inquiry))}
+
+          {:error, :not_found} ->
+            {:error, "Question not found: #{id}"}
+
+          {:error, {:invalid, reason}} ->
+            {:error, "Cannot reject: #{reason}"}
+        end
+      end)
+    end
+  end
+
+  def call("reject_question", _), do: {:error, "Missing required parameters: id, confirm"}
+
   def call("answer_question", %{"id" => _} = args) when not is_map_key(args, "answer"),
     do: {:error, "Missing required parameter: answer"}
 

@@ -179,6 +179,37 @@ defmodule GiTF.MCPServer.QuestionToolsTest do
     end
   end
 
+  describe "reject_question" do
+    test "refuses without confirm; then records votes and direction and re-runs the phase" do
+      m = mission!()
+      inquiry = ask!(m.id)
+
+      assert {:error, message} = Handlers.call("reject_question", %{"id" => inquiry.id})
+      assert message =~ "confirm: true"
+
+      body =
+        decode(
+          Handlers.call("reject_question", %{
+            "id" => inquiry.id,
+            "votes" => %{"grid" => "down"},
+            "direction" => "denser",
+            "confirm" => true
+          })
+        )
+
+      assert body["rejected"] == true
+      assert body["votes"] == %{"grid" => "down"}
+      assert body["direction"] == "denser"
+      assert body["resumes_phase"] == "design"
+      assert body["note"] =~ "ask again"
+      assert Inquiry.status(inquiry.id) == :rejected
+    end
+
+    test "is in the tool list" do
+      assert Enum.any?(GiTF.MCPServer.Tools.all(), &(&1.name == "reject_question"))
+    end
+  end
+
   describe "answer_question" do
     test "refuses without confirm" do
       m = mission!()

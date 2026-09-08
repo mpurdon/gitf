@@ -147,6 +147,47 @@ defmodule GiTF.Dashboard.InquiryCardTest do
     end
   end
 
+  describe "none of these — the redesign controls" do
+    test "a choice carries a vote row per option and a rejection form with a direction box" do
+      html = card(choice([option("bars", "Bars"), option("dots", "Dots")]))
+
+      assert html =~ ~s(phx-click="vote_inquiry")
+      assert html =~ ~s(phx-value-option="bars") and html =~ ~s(phx-value-option="dots")
+      assert html =~ ~s(phx-submit="reject_inquiry")
+      assert html =~ ~s(name="direction")
+      assert html =~ "None of these"
+    end
+
+    test "a collected vote renders pressed" do
+      inquiry = choice([option("bars", "Bars"), option("dots", "Dots")])
+
+      html =
+        render_component(&InquiryCard.inquiry_card/1,
+          inquiry: inquiry,
+          votes: %{"bars" => "down"}
+        )
+
+      assert html =~
+               ~r/phx-value-option="bars"[^>]*phx-value-vote="down"[^>]*aria-pressed="true"/s
+    end
+
+    test "a rejected question shows as rejected with its direction" do
+      inquiry =
+        choice([option("bars", "Bars")])
+        |> Map.merge(%{
+          status: "answered",
+          outcome: "rejected",
+          answer_label: "none of these — redesign",
+          direction: "airier",
+          answered_by: "m"
+        })
+
+      html = card(inquiry)
+      assert html =~ "rejected" and html =~ "airier"
+      refute html =~ ~s(phx-submit="reject_inquiry")
+    end
+  end
+
   describe "the other kinds are untouched" do
     test "an answered previewed choice shows the decision, not the grid" do
       html =

@@ -425,6 +425,96 @@ defmodule GiTF.InquiryTest do
     end
   end
 
+  describe "rejecting every option — the redesign round" do
+    setup do
+      m = mission!()
+      {:ok, inquiry, :asked} = Inquiry.ask(m.id, choice())
+      %{mission: m, inquiry: inquiry}
+    end
+
+    test "records votes and direction as an answer with outcome rejected", %{inquiry: inq} do
+      assert {:ok, rejected, :answered} =
+               Inquiry.reject(
+                 inq.id,
+                 %{
+                   votes: %{"grid" => "down", "list" => "up"},
+                   direction: "  lighter than both  "
+                 },
+                 answered_by: "matthew"
+               )
+
+      assert rejected.status == "answered"
+      assert Inquiry.rejected?(rejected)
+      assert rejected.answer == nil and rejected.answer_label =~ "redesign"
+      assert rejected.votes == %{"grid" => "down", "list" => "up"}
+      assert rejected.direction == "lighter than both"
+      assert rejected.answered_by == "matthew"
+      assert Inquiry.status(inq.id) == :rejected
+      # It is an answer: nothing is open, so the gate resumes the phase.
+      assert Inquiry.list_open() == []
+    end
+
+    test "neutral votes are dropped, unknown options and vote values are refused", %{inquiry: inq} do
+      assert {:error, {:invalid, msg}} = Inquiry.reject(inq.id, %{votes: %{"nope" => "up"}})
+      assert msg =~ "unknown options"
+      assert {:error, {:invalid, _}} = Inquiry.reject(inq.id, %{votes: %{"grid" => "meh"}})
+
+      assert {:ok, r, :answered} =
+               Inquiry.reject(inq.id, %{votes: %{"grid" => "neutral", "list" => "down"}})
+
+      assert r.votes == %{"list" => "down"}
+      assert r.direction == nil
+    end
+
+    test "first answer wins, in either direction", %{inquiry: inq} do
+      {:ok, _, :answered} = Inquiry.answer(inq.id, "grid", answered_by: "a")
+      assert {:ok, decided, :already_answered} = Inquiry.reject(inq.id, %{})
+      assert decided.answer == "grid"
+    end
+
+    test "only a choice can be rejected", %{mission: m} do
+      {:ok, text, :asked} =
+        Inquiry.ask(m.id, %{key: "name", phase: "design", kind: :text, prompt: "What name?"})
+
+      assert {:error, {:invalid, msg}} = Inquiry.reject(text.id, %{})
+      assert msg =~ "only a :choice"
+    end
+
+    test "the phase can ask again under the same key, and the re-run prompt carries the steering",
+         %{mission: m, inquiry: inq} do
+      {:ok, _, :answered} =
+        Inquiry.reject(inq.id, %{votes: %{"grid" => "down", "list" => "up"}, direction: "airier"})
+
+      # Same key, new options: a fresh question, not "already answered".
+      {:ok, again, :asked} =
+        Inquiry.ask(
+          m.id,
+          choice(%{
+            options: [
+              %{id: "cards", label: "Cards", rationale: "x"},
+              %{id: "list-v2", label: "List, lighter", rationale: "y"}
+            ]
+          })
+        )
+
+      assert again.id != inq.id and again.status == "open"
+
+      block = Inquiry.prompt_block(m.id)
+      assert block =~ "REJECTED PROPOSALS"
+      assert block =~ "Grid — DO NOT RE-OFFER"
+      assert block =~ "List — KEEP THIS DIRECTION"
+      assert block =~ "DIRECTION FROM THE OPERATOR: airier"
+      refute block =~ "OPERATOR DECISIONS"
+
+      # Once the new round is chosen, both sections appear: the decision
+      # and the standing "do not re-offer".
+      {:ok, _, :answered} = Inquiry.answer(again.id, "cards", answered_by: "a")
+      block = Inquiry.prompt_block(m.id)
+      assert block =~ "OPERATOR DECISIONS" and block =~ "ANSWER: Cards"
+      assert block =~ "REJECTED PROPOSALS"
+    end
+  end
+
   describe "withdrawing" do
     setup do
       m = mission!()

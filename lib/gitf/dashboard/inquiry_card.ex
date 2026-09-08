@@ -48,6 +48,9 @@ defmodule GiTF.Dashboard.InquiryCard do
   attr(:inquiry, :map, required: true)
   attr(:draft, :string, default: nil)
   attr(:mission_link, :boolean, default: false)
+  # Per-option votes the operator has clicked so far (option id → vote),
+  # held by the hosting LiveView until the rejection is submitted.
+  attr(:votes, :map, default: %{})
 
   def inquiry_card(assigns) do
     ~H"""
@@ -78,16 +81,22 @@ defmodule GiTF.Dashboard.InquiryCard do
 
       <%= if @inquiry[:status] == "answered" do %>
         <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
-          <span class="badge badge-green">answered</span>
+          <span class={"badge #{if @inquiry[:outcome] == "rejected", do: "badge-orange", else: "badge-green"}"}>
+            {if @inquiry[:outcome] == "rejected", do: "rejected", else: "answered"}
+          </span>
           <b style="margin-left:0.4rem">{@inquiry[:answer_label] || @inquiry[:answer]}</b>
           <span style="color:var(--muted)">
             — {@inquiry[:answered_by]}{if @inquiry[:answered_at], do: ", #{format_timestamp(@inquiry[:answered_at])}"}
           </span>
+          <div :if={@inquiry[:direction]} style="margin-top:0.3rem; color:var(--muted); font-style:italic">
+            direction: {@inquiry[:direction]}
+          </div>
         </div>
       <% else %>
         <div style="margin-top:0.8rem">
-          <.answer_controls inquiry={@inquiry} draft={@draft} />
+          <.answer_controls inquiry={@inquiry} draft={@draft} votes={@votes} />
         </div>
+        <.redesign_controls :if={@inquiry[:kind] == :choice} inquiry={@inquiry} votes={@votes} />
       <% end %>
     </div>
     """
@@ -95,6 +104,7 @@ defmodule GiTF.Dashboard.InquiryCard do
 
   attr(:inquiry, :map, required: true)
   attr(:draft, :string, default: nil)
+  attr(:votes, :map, default: %{})
 
   # The grid arm is chosen on whether any option ACTUALLY has an image,
   # not on whether one was asked for. A question whose mockups all failed
@@ -192,6 +202,60 @@ defmodule GiTF.Dashboard.InquiryCard do
         </div>
       </button>
     </div>
+    <.vote_row inquiry={@inquiry} votes={@votes} />
+    """
+  end
+
+  # One thumbs-up / thumbs-down / neutral toggle per option. Votes are not
+  # an answer: they steer the NEXT round when the operator rejects all of
+  # these, so they sit outside the option buttons and only mean something
+  # once "none of these" is submitted.
+  attr(:inquiry, :map, required: true)
+  attr(:votes, :map, default: %{})
+
+  defp vote_row(assigns) do
+    ~H"""
+    <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:0.5rem; font-size:0.78rem; color:var(--muted)">
+      <div :for={option <- @inquiry[:options] || []} style="display:flex; align-items:center; gap:0.3rem">
+        <span style="max-width:14rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{option.label}</span>
+        <button
+          :for={{vote, glyph, title} <- [{"up", "👍", "keep this direction"}, {"neutral", "○", "no signal"}, {"down", "👎", "do not re-offer"}]}
+          phx-click="vote_inquiry"
+          phx-value-id={@inquiry.id}
+          phx-value-option={option.id}
+          phx-value-vote={vote}
+          title={title}
+          aria-pressed={to_string(Map.get(@votes, option.id, "neutral") == vote)}
+          class="btn btn-grey"
+          style={"padding:0.1rem 0.45rem; font-size:0.85rem; #{if Map.get(@votes, option.id, "neutral") == vote, do: "border-color:var(--accent); color:var(--text)", else: "opacity:0.6"}"}
+        >{glyph}</button>
+      </div>
+    </div>
+    """
+  end
+
+  # "None of these." A rejection is an answer that sends the phase back to
+  # propose again, carrying the votes above and the direction typed here.
+  attr(:inquiry, :map, required: true)
+  attr(:votes, :map, default: %{})
+
+  defp redesign_controls(assigns) do
+    ~H"""
+    <form phx-submit="reject_inquiry" style="margin-top:0.9rem; border-top:1px dashed var(--line); padding-top:0.7rem">
+      <input type="hidden" name="inquiry_id" value={@inquiry.id} />
+      <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.35rem">
+        None of these? Vote on each above, say where to go instead, and send the phase back for another round.
+      </div>
+      <div style="display:flex; gap:0.5rem; align-items:flex-start; flex-wrap:wrap">
+        <textarea
+          name="direction"
+          rows="2"
+          placeholder="Optional direction — e.g. lighter than the band, but a clearer boundary than the hairline"
+          style="flex:1; min-width:16rem; background:var(--ground); border:1px solid var(--line); border-radius:4px; color:var(--text); font-size:0.82rem; padding:0.4rem 0.5rem"
+        ></textarea>
+        <button type="submit" class="btn btn-red" style="white-space:nowrap">None of these — redesign</button>
+      </div>
+    </form>
     """
   end
 
@@ -229,7 +293,42 @@ defmodule GiTF.Dashboard.InquiryCard do
         </div>
       </button>
     </div>
+    <.vote_row inquiry={@inquiry} votes={@votes} />
     """
+  end
+
+  @doc """
+  The rejection, for a hosting LiveView's `reject_inquiry` event: records
+  it with the votes the page collected and returns the flash to show.
+  Shared by the Questions queue and the mission page so the two cannot
+  drift on what a rejection means.
+  """
+  @spec reject(String.t(), map(), String.t() | nil, String.t()) :: {:info | :error, String.t()}
+  def reject(id, votes, direction, actor) do
+    case GiTF.Inquiry.reject(id, %{votes: votes, direction: direction}, answered_by: actor) do
+      {:ok, inquiry, :answered} ->
+        GiTF.AuditLog.record(actor, "inquiry.reject", inquiry.mission_id, %{
+          inquiry_id: id,
+          key: inquiry[:key],
+          votes: votes,
+          direction: direction
+        })
+
+        {:info,
+         "Rejected. #{inquiry.mission_id} re-runs #{inquiry[:phase]} with your votes and direction " <>
+           "on the next sweep."}
+
+      {:ok, inquiry, :already_answered} ->
+        {:info,
+         "Already answered (#{inquiry[:answer_label] || inquiry[:answer]}) by " <>
+           "#{inquiry[:answered_by]}. The first answer stands."}
+
+      {:error, {:invalid, reason}} ->
+        {:error, "Cannot reject: #{reason}"}
+
+      {:error, :not_found} ->
+        {:error, "That question no longer exists."}
+    end
   end
 
   # Distinct failure reasons across the options, first line of each.

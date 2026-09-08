@@ -727,6 +727,31 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "reject_question",
+        description:
+          "[WRITE] Reject EVERY option of an open :choice question and send the asking phase " <>
+            "back to propose again. Pass per-option votes (option id → \"up\" | \"down\" | " <>
+            "\"neutral\": up = keep and refine this direction, down = never re-offer it) and an " <>
+            "optional free-text direction; both go into the re-run prompt as steering. A " <>
+            "rejection counts against the mission's inquiry budget like any question put to a " <>
+            "human, which bounds the number of redesign rounds. First answer wins, as with " <>
+            "answer_question. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Question ID (inq-…)"},
+            votes: %{
+              type: "object",
+              description: "Option id → \"up\" | \"down\" | \"neutral\" (unlisted = neutral)",
+              additionalProperties: %{type: "string"}
+            },
+            direction: %{type: "string", description: "Where the next round should go instead"},
+            confirm: %{type: "boolean", description: "Must be true to execute"}
+          },
+          required: ["id", "confirm"]
+        }
+      },
+      %{
         name: "set_approval_timeout",
         description:
           "[WRITE] Set the auto-approve timeout (hours) for pending approvals — config " <>

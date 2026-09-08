@@ -631,6 +631,112 @@ defmodule GiTF.Inquiry do
     end
   end
 
+  @votes ~w(up down neutral)
+
+  @doc "The vote values an option may carry on a rejection."
+  def votes, do: @votes
+
+  @doc """
+  Rejects every option of a `:choice` question and sends the phase back to
+  propose again. The operator's per-option votes (`"up" | "down" |
+  "neutral"`, keyed by option id) and free-text `direction` travel into
+  the re-run prompt as steering: an up-voted option is a direction to
+  keep and refine, a down-voted one is not to be re-offered.
+
+  A rejection is an ANSWER — status "answered", `outcome: "rejected"` — so
+  the gate resumes the asking phase exactly as it does for a choice, and
+  the same first-answer-wins rule applies. It counts against the mission's
+  inquiry budget like any question that was put to a human, which bounds
+  how many redesign rounds a picky operator can demand.
+
+  `opts[:answered_by]` names the surface, as `answer/3` does.
+  """
+  @spec reject(String.t(), map(), keyword()) ::
+          {:ok, map(), :answered | :already_answered} | {:error, term()}
+  def reject(id, feedback \\ %{}, opts \\ []) when is_binary(id) and is_map(feedback) do
+    case Archive.get(:inquiries, id) do
+      nil ->
+        {:error, :not_found}
+
+      %{status: "answered"} = decided ->
+        {:ok, decided, :already_answered}
+
+      %{kind: kind} when kind != :choice ->
+        {:error, {:invalid, "only a :choice question can be rejected — answer a #{kind} instead"}}
+
+      inquiry ->
+        with {:ok, votes} <- validate_votes(inquiry, feedback[:votes] || feedback["votes"] || %{}) do
+          direction = feedback[:direction] || feedback["direction"]
+
+          direction =
+            if is_binary(direction) and String.trim(direction) != "",
+              do: String.trim(direction),
+              else: nil
+
+          answered_by = Keyword.get(opts, :answered_by, "human")
+          now = DateTime.utc_now()
+
+          {:ok, updated} =
+            Archive.update(:inquiries, id, fn record ->
+              case record[:status] do
+                "answered" ->
+                  record
+
+                _ ->
+                  Map.merge(record, %{
+                    status: "answered",
+                    outcome: "rejected",
+                    answer: nil,
+                    answer_label: "none of these — redesign",
+                    votes: votes,
+                    direction: direction,
+                    answered_by: answered_by,
+                    answered_at: now
+                  })
+              end
+            end)
+
+          Logger.info(
+            "Quest #{updated.mission_id}: inquiry #{id} (#{updated.phase}/#{updated.key}) " <>
+              "REJECTED by #{updated[:answered_by]} — #{updated.phase} will propose again"
+          )
+
+          {:ok, updated, if(updated[:answered_at] == now, do: :answered, else: :already_answered)}
+        end
+    end
+  end
+
+  @doc "True when the operator rejected every option and asked for another round."
+  @spec rejected?(map()) :: boolean()
+  def rejected?(inquiry), do: inquiry[:outcome] == "rejected"
+
+  defp validate_votes(inquiry, votes) when is_map(votes) do
+    ids = MapSet.new(inquiry[:options] || [], & &1.id)
+
+    votes =
+      votes
+      |> Enum.map(fn {k, v} -> {to_string(k), to_string(v)} end)
+      |> Enum.reject(fn {_k, v} -> v in ["", "neutral"] end)
+      |> Map.new()
+
+    bad_ids = votes |> Map.keys() |> Enum.reject(&MapSet.member?(ids, &1))
+    bad_votes = votes |> Map.values() |> Enum.reject(&(&1 in @votes))
+
+    cond do
+      bad_ids != [] ->
+        {:error, {:invalid, "votes name unknown options: #{Enum.join(bad_ids, ", ")}"}}
+
+      bad_votes != [] ->
+        {:error, {:invalid, "a vote is up, down or neutral"}}
+
+      true ->
+        {:ok, votes}
+    end
+  end
+
+  defp validate_votes(_inquiry, _),
+    do: {:error, {:invalid, "votes must be a map of option id → vote"}}
+
   @doc """
   Checks a proposed answer against the question's kind, returning the
   stored value and the label to show for it.
@@ -687,12 +793,14 @@ defmodule GiTF.Inquiry do
   def get(_), do: nil
 
   @doc """
-  `:open`, `:answered`, or `:unknown` for an id that names nothing.
+  `:open`, `:answered`, `:rejected` (answered by turning every option
+  down), `:withdrawn`, or `:unknown` for an id that names nothing.
   """
-  @spec status(String.t()) :: :open | :answered | :withdrawn | :unknown
+  @spec status(String.t()) :: :open | :answered | :rejected | :withdrawn | :unknown
   def status(id) do
     case get(id) do
       %{status: "open"} -> :open
+      %{status: "answered", outcome: "rejected"} -> :rejected
       %{status: "answered"} -> :answered
       %{status: "withdrawn"} -> :withdrawn
       _ -> :unknown
@@ -784,9 +892,12 @@ defmodule GiTF.Inquiry do
     Enum.sort_by(records, &(&1[:asked_at] || &1[:inserted_at]), {:asc, DateTime})
   end
 
+  # A rejected question is an answer, but not one that settles its key:
+  # the phase is expected to ask again, under the same key if it likes.
   defp existing(mission_id, phase, key) do
     mission_id
     |> for_mission()
+    |> Enum.reject(&rejected?/1)
     |> Enum.find(&(&1[:phase] == phase and &1[:key] == key))
   end
 
@@ -828,7 +939,14 @@ defmodule GiTF.Inquiry do
       "answer" => inquiry[:answer],
       "answer_label" => inquiry[:answer_label],
       "answered_by" => inquiry[:answered_by],
-      "answered_at" => inquiry[:answered_at] && to_string(inquiry[:answered_at])
+      "answered_at" => inquiry[:answered_at] && to_string(inquiry[:answered_at]),
+      "outcome" => inquiry[:outcome] || "chosen",
+      "direction" => inquiry[:direction],
+      "votes" => inquiry[:votes] || %{},
+      "options" =>
+        Enum.map(inquiry[:options] || [], fn o ->
+          %{"id" => o[:id], "label" => o[:label], "rationale" => o[:rationale]}
+        end)
     }
   end
 
@@ -943,38 +1061,87 @@ defmodule GiTF.Inquiry do
   """
   @spec prompt_block(String.t()) :: String.t()
   def prompt_block(mission_id) when is_binary(mission_id) do
-    case answered_register(mission_id) do
-      [] ->
-        ""
+    {rejected, decided} =
+      mission_id |> answered_register() |> Enum.split_with(&(&1["outcome"] == "rejected"))
 
-      entries ->
-        lines =
-          Enum.map_join(entries, "\n", fn entry ->
-            "- (#{entry["phase"]}/#{entry["key"]}) #{entry["prompt"]}\n" <>
-              "  ANSWER: #{entry["answer_label"] || entry["answer"]}" <>
-              decided_suffix(entry)
-          end)
-
-        """
-        ## OPERATOR DECISIONS
-
-        The operator was asked these questions and answered them. These are
-        DECISIONS, not suggestions — build to them, do not re-litigate them,
-        and do not ask them again. Where a requirement or the goal says to
-        ask the operator, that requirement is MET by the answer below; the
-        answer, with who decided it and when, is the auditable record.
-
-        Any mockups, prototypes or previews drawn to ask them were evidence
-        for a decision that is now made. They are not deliverables: do not
-        recreate them, do not plan work for them, do not commit them, and do
-        not list them as target files. Implement the chosen option only.
-
-        #{lines}
-        """
-    end
+    decisions_block(decided) <> rejections_block(rejected)
   end
 
   def prompt_block(_), do: ""
+
+  defp decisions_block([]), do: ""
+
+  defp decisions_block(entries) do
+    lines =
+      Enum.map_join(entries, "\n", fn entry ->
+        "- (#{entry["phase"]}/#{entry["key"]}) #{entry["prompt"]}\n" <>
+          "  ANSWER: #{entry["answer_label"] || entry["answer"]}" <>
+          decided_suffix(entry)
+      end)
+
+    """
+    ## OPERATOR DECISIONS
+
+    The operator was asked these questions and answered them. These are
+    DECISIONS, not suggestions — build to them, do not re-litigate them,
+    and do not ask them again. Where a requirement or the goal says to
+    ask the operator, that requirement is MET by the answer below; the
+    answer, with who decided it and when, is the auditable record.
+
+    Any mockups, prototypes or previews drawn to ask them were evidence
+    for a decision that is now made. They are not deliverables: do not
+    recreate them, do not plan work for them, do not commit them, and do
+    not list them as target files. Implement the chosen option only.
+
+    #{lines}
+    """
+  end
+
+  defp rejections_block([]), do: ""
+
+  # The operator turned down every option and asked for another round.
+  # This is the opposite of a decision: the question is still OPEN and
+  # must be asked again, with different proposals, steered by the votes.
+  defp rejections_block(entries) do
+    blocks =
+      Enum.map_join(entries, "\n", fn entry ->
+        options =
+          Enum.map_join(entry["options"] || [], "\n", fn o ->
+            vote =
+              case get_in(entry, ["votes", o["id"]]) do
+                "up" -> "KEEP THIS DIRECTION (thumbs up)"
+                "down" -> "DO NOT RE-OFFER (thumbs down)"
+                _ -> "no signal"
+              end
+
+            "    - #{o["label"]} — #{vote}"
+          end)
+
+        direction =
+          case entry["direction"] do
+            d when is_binary(d) -> "\n  DIRECTION FROM THE OPERATOR: #{d}"
+            _ -> ""
+          end
+
+        "- (#{entry["phase"]}/#{entry["key"]}) #{entry["prompt"]}\n" <>
+          "  REJECTED#{decided_suffix(entry)} — none of these was acceptable:\n" <>
+          options <> direction
+      end)
+
+    """
+    ## REJECTED PROPOSALS — ask again with NEW options
+
+    The operator rejected every option of the questions below. They are
+    NOT decided: you must ask again, under the same key, with materially
+    different proposals. Read the votes as steering — a thumbs-up option
+    is a direction to keep and refine (evolve it, do not re-offer it
+    unchanged); a thumbs-down option must not reappear in any form; and
+    the operator's direction, where given, overrides your own taste.
+    Render fresh mockups for the new options as before.
+
+    #{blocks}
+    """
+  end
 
   # "(decided by matthew@… at 2026-08-31T01:44:17Z)" — the reviewer that
   # bounced msn-0434e9 twice asked for exactly this: a timestamp and an

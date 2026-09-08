@@ -42,6 +42,7 @@ defmodule GiTF.Dashboard.QuestionsLive do
      |> assign(:current_path, "/questions")
      |> assign(:open, open)
      |> assign(:draft, %{})
+     |> assign(:votes, %{})
      |> assign(:refresh_scheduled, false)
      |> init_toasts()}
   end
@@ -82,6 +83,24 @@ defmodule GiTF.Dashboard.QuestionsLive do
 
   def handle_event("draft_answer", %{"id" => id, "value" => value}, socket) do
     {:noreply, assign(socket, :draft, Map.put(socket.assigns.draft, id, value))}
+  end
+
+  def handle_event("vote_inquiry", %{"id" => id, "option" => option, "vote" => vote}, socket) do
+    votes = socket.assigns[:votes] || %{}
+    for_inquiry = votes |> Map.get(id, %{}) |> Map.put(option, vote)
+    {:noreply, assign(socket, :votes, Map.put(votes, id, for_inquiry))}
+  end
+
+  def handle_event("reject_inquiry", %{"inquiry_id" => id} = params, socket) do
+    votes = get_in(socket.assigns, [:votes, id]) || %{}
+    actor = GiTF.Web.TailnetAuth.actor(socket.assigns)
+    {kind, message} = GiTF.Dashboard.InquiryCard.reject(id, votes, params["direction"], actor)
+
+    {:noreply,
+     socket
+     |> assign(:votes, Map.delete(socket.assigns[:votes] || %{}, id))
+     |> put_flash(kind, message)
+     |> assign(:open, load_open())}
   end
 
   def handle_event("answer_inquiry", %{"id" => id} = params, socket) do
@@ -178,7 +197,12 @@ defmodule GiTF.Dashboard.QuestionsLive do
           <div :if={inquiry[:mission_goal]} style="font-size:0.78rem; color:var(--muted); margin:0 0 0.25rem 0.2rem">
             {String.slice(inquiry.mission_goal, 0, 160)}
           </div>
-          <.inquiry_card inquiry={inquiry} draft={@draft[inquiry.id]} mission_link={true} />
+          <.inquiry_card
+            inquiry={inquiry}
+            draft={@draft[inquiry.id]}
+            votes={Map.get(@votes, inquiry.id, %{})}
+            mission_link={true}
+          />
         </div>
       <% end %>
     </.live_component>
