@@ -25,9 +25,7 @@ defmodule GiTF.Runtime.ClaudeTest do
       end
     end
 
-    # The installer's location must be found even when PATH lacks it — a
-    # systemd unit's PATH never has ~/.local/bin, and the replaced factory
-    # box lost a week of CLI ghosts to exactly that.
+    # The installer's location must be found even when PATH lacks it (msn-629e74).
     test "falls back to ~/.local/bin/claude when PATH has nothing" do
       home =
         Path.join(System.tmp_dir!(), "gitf-claude-home-#{System.unique_integer([:positive])}")

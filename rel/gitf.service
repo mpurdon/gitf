@@ -23,6 +23,11 @@ Group=gitf
 
 Environment=MIX_ENV=prod
 Environment=GITF_HOME=/var/lib/gitf
+# The official installers (claude, copilot, …) put binaries in the service
+# user's ~/.local/bin, which systemd's default PATH never includes. %h is
+# the home of User=. The runtime also falls back to it for claude, but the
+# unit is the fix for everything the ghosts exec.
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=GITF_PORT=4000
 # Bind loopback by default; front with a reverse proxy or set GITF_HOST in the
 # env file to expose. Never expose the dashboard directly to the internet.

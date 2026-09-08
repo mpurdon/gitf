@@ -75,9 +75,9 @@ defmodule GiTF.Observability do
 
     alerts = Alerts.check_alerts()
 
-    # Check for zombie state (active missions but no progress)
+    # Check for zombie state (running missions but no progress)
     alerts =
-      if Health.alive?() do
+      if Health.probe(Health.active_missions()) == :ok do
         alerts
       else
         GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{type: :zombie_detected})

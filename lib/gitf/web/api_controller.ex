@@ -7,6 +7,12 @@ defmodule GiTF.Web.ApiController do
 
   # -- Health ------------------------------------------------------------------
 
+  # The liveness probe. 503 means the daemon's critical processes are gone
+  # — the one fact every remote reader (idle-stop, `gitf wake`, the Cabinet
+  # fleet) acts on. Anything else is a 200 whose body says what is going on:
+  # `status` is "ok" or "stalled" (see Health.probe/1), `idle` is what the
+  # idle-stop timer reads, and `held_missions` explains an idle factory that
+  # still lists active missions.
   def health(conn, _params) do
     boot_time =
       try do
@@ -15,22 +21,24 @@ defmodule GiTF.Web.ApiController do
         _ -> 0
       end
 
-    activity = activity_snapshot()
-    alive = GiTF.Observability.Health.alive?(activity.missions)
+    missions = GiTF.Observability.Health.active_missions()
+    {held, running} = Enum.split_with(missions, &GiTF.Missions.held_for_human?/1)
+    ghosts = ghost_count()
+    probe = GiTF.Observability.Health.probe(missions)
 
     conn
-    |> put_status(if(alive, do: 200, else: 503))
+    |> put_status(if(probe == :down, do: 503, else: 200))
     |> json(%{
       data: %{
-        status: if(alive, do: "ok", else: "unhealthy"),
+        status: if(probe == :down, do: "unhealthy", else: Atom.to_string(probe)),
         node: to_string(node()),
         uptime_seconds: GiTF.Observability.Metrics.uptime_seconds(),
         boot_time: DateTime.from_unix!(boot_time) |> to_string(),
         version: GiTF.version(),
-        active_ghosts: activity.active_ghosts,
-        active_missions: activity.active_missions,
-        held_missions: activity.held_missions,
-        idle: activity.idle
+        active_ghosts: ghosts,
+        active_missions: length(missions),
+        held_missions: length(held),
+        idle: GiTF.Observability.Health.idle?(ghosts, running)
       }
     })
   end
@@ -68,43 +76,12 @@ defmodule GiTF.Web.ApiController do
     })
   end
 
-  # Idle detection for the idle-stop timer: the box may power down when no
-  # ghost is running and every non-terminal mission is holding for a person
-  # (awaiting_input / awaiting_approval). A held mission spends nothing and
-  # needs nothing from the box until someone answers — and answering starts
-  # with `gitf wake` anyway. Keeping the box up for one was ~$0.80/day of
-  # nobody-noticed compute (msn-629e74 held twelve hours overnight). A
-  # failed lookup must read as NOT idle: zero is the one answer that powers
-  # the box off, so it can't double as an error value.
-  defp activity_snapshot do
-    missions = GiTF.Observability.Health.active_missions()
-    {held, running} = Enum.split_with(missions, &GiTF.Missions.held_for_human?/1)
-
-    case ghost_count() do
-      {:ok, ghosts} ->
-        %{
-          missions: missions,
-          active_ghosts: ghosts,
-          active_missions: length(missions),
-          held_missions: length(held),
-          idle: ghosts == 0 and running == []
-        }
-
-      :error ->
-        %{
-          missions: missions,
-          active_ghosts: nil,
-          active_missions: length(missions),
-          held_missions: length(held),
-          idle: false
-        }
-    end
-  end
-
+  # A failed lookup is nil, which idle?/2 reads as NOT idle: zero is the one
+  # answer that powers the box off, so it can't double as an error value.
   defp ghost_count do
-    {:ok, GiTF.Major.active_ghost_count()}
+    GiTF.Major.active_ghost_count()
   catch
-    _, _ -> :error
+    _, _ -> nil
   end
 
   # -- Readiness ---------------------------------------------------------------

@@ -2,16 +2,17 @@
 # Powers the machine off after sustained factory idleness.
 #
 # Run by gitf-idle-stop.timer (as root). Polls the daemon's liveness endpoint;
-# when it has reported idle (no active ghosts, no non-terminal missions)
-# continuously for GITF_IDLE_STOP_MINUTES, issues `systemctl poweroff`.
+# when it has reported idle (no active ghosts, no RUNNING missions — a
+# mission holding for a person does not count) continuously for
+# GITF_IDLE_STOP_MINUTES, issues `systemctl poweroff`.
 # On EC2 with instance_initiated_shutdown_behavior=stop this stops the
 # instance, so billing drops to the EBS volume until something starts it
 # again (wake Lambda, EventBridge schedule, or the console).
 #
 # Safety properties:
 # - Never fires within GITF_IDLE_STOP_GRACE_MINUTES of boot.
-# - An unreachable or unhealthy daemon RESETS the countdown (a crashed
-#   factory is a thing to debug, not to power off and hide).
+# - An unreachable, down or stalled daemon RESETS the countdown (a crashed
+#   or zombie factory is a thing to debug, not to power off and hide).
 # - Touch /etc/gitf/idle-stop-disabled to suspend without config edits.
 # - $GITF_HOME/idle-stop-override.json (written by GiTF.IdleStop, via MCP)
 #   raises the idle threshold until its expiry. Expired or malformed
@@ -72,14 +73,19 @@ body=$(curl -fsS --max-time 10 "http://127.0.0.1:${PORT}/api/v1/health" 2>/dev/n
 # Parse the idle flag properly with jq (installed by provisioning); the grep
 # fallback keeps hand-installed boxes working but is coupled to the exact
 # JSON serialization.
+# Idle AND status ok: a stalled (zombie) factory answers 200 with
+# status "stalled" and idle false, but the rule is stated here anyway so
+# the countdown never depends on how the daemon happens to combine them.
 if command -v jq >/dev/null 2>&1; then
-  idle=$(jq -r '.data.idle' <<<"$body" 2>/dev/null || echo "false")
+  idle=$(jq -r 'if .data.idle == true and .data.status == "ok" then "true" else "false" end' <<<"$body" 2>/dev/null || echo "false")
+  held=$(jq -r '.data.held_missions // 0' <<<"$body" 2>/dev/null || echo "?")
 else
-  idle=$(grep -q '"idle":true' <<<"$body" && echo "true" || echo "false")
+  idle=$(grep -q '"idle":true' <<<"$body" && grep -q '"status":"ok"' <<<"$body" && echo "true" || echo "false")
+  held="?"
 fi
 
 if [[ "$idle" != "true" ]]; then
-  # Busy, unreachable, or unhealthy: reset the countdown.
+  # Busy, unreachable, down or stalled: reset the countdown.
   rm -f "$STATE"
   exit 0
 fi
@@ -94,6 +100,6 @@ idle_since=$(cat "$STATE")
 elapsed=$((now - idle_since))
 
 if [[ $elapsed -ge $((IDLE_MINUTES * 60)) ]]; then
-  logger -t gitf-idle-stop "factory idle for $((elapsed / 60))m — powering off"
+  logger -t gitf-idle-stop "factory idle for $((elapsed / 60))m (held missions: $held) — powering off"
   systemctl poweroff
 fi

@@ -132,28 +132,20 @@ defmodule GiTF.Client do
     do: post("/api/v1/costs/record", Map.put(attrs, :ghost_id, ghost_id)) |> unwrap_data()
 
   # Health check
+  @doc "True when a daemon answers `/health` at all — its verdict on the work is in `health/0`."
   def ping do
-    case get("/api/v1/health") do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
+    with {:ok, _} <- health(), do: :ok
   end
 
   @doc """
-  The daemon's own health report, whatever its HTTP status: `/health`
-  answers 503 with a full body when the self-check is unhappy, and "the
-  daemon is answering, and says X" is a different fact from "nothing is
-  listening". Returns `{:ok, data}` when a daemon answered, else the
-  transport error.
+  The daemon's health report: `status` ("ok" | "stalled"), `version`,
+  `idle`, mission and ghost counts. `{:error, _}` only when nothing
+  answers or the daemon is down (503). A status poll never auto-retries —
+  Req would otherwise retry a 503 three times with backoff, and the caller
+  (`gitf wake`) already owns the polling loop.
   """
   @spec health() :: {:ok, map()} | {:error, term()}
-  def health do
-    case Req.get(build_url("/api/v1/health"), headers: auth_headers()) do
-      {:ok, %Req.Response{body: %{"data" => %{"version" => _} = data}}} -> {:ok, data}
-      {:ok, %Req.Response{status: status}} -> {:error, "server returned #{status}"}
-      other -> handle_response(other)
-    end
-  end
+  def health, do: request(:get, "/api/v1/health", retry: false) |> unwrap_data()
 
   # -- Internals ---------------------------------------------------------------
 

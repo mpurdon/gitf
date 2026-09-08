@@ -57,34 +57,53 @@ defmodule GiTF.Observability.Health do
     Archive.filter(:missions, &GiTF.Missions.non_terminal?/1)
   end
 
+  @doc """
+  Missions that want the factory right now — `active_missions/0` minus the
+  ones holding for a person. See `GiTF.Missions.running?/1`.
+  """
+  @spec running_missions() :: [map()]
+  def running_missions, do: Enum.filter(active_missions(), &GiTF.Missions.running?/1)
+
   @doc "Get liveness status — detects zombie state (alive but unproductive)"
   @spec alive?() :: boolean()
   def alive? do
-    alive?(active_missions())
+    probe(active_missions()) != :down
   rescue
     # Fail CLOSED at the gate, covering the input scan too: a raise in
     # active_missions used to collapse to [] and alive?([]) == true —
     # the hardened probe fed by an unguarded input.
     e ->
-      Logger.error("Liveness input scan raised: #{Exception.message(e)}")
+      Logger.error("Liveness probe raised: #{Exception.message(e)}")
       false
   end
 
-  @doc """
-  Liveness with a precomputed non-terminal mission list, so callers that
-  already scanned (the health endpoint) don't scan twice.
-  """
+  @doc "True unless the daemon's critical processes are gone. Accepts the active missions."
   @spec alive?([map()]) :: boolean()
-  def alive?(active_quests) do
-    # Check critical processes exist. A Cabinet runs no Major by design —
-    # its liveness is the store and the endpoint answering.
-    major_alive = GiTF.Cabinet.mode?() or Process.whereis(GiTF.Major) != nil
-    store_ok = check_store() == :ok
+  def alive?(active_quests), do: probe(active_quests) != :down
 
-    if not major_alive or not store_ok do
-      false
-    else
-      not zombie?(active_quests)
+  @doc """
+  The daemon's liveness, separated from its verdict on the work:
+
+    * `:down` — the Major or the store is gone; nothing else can be trusted
+    * `:stalled` — up, but running missions have shown no op activity for
+      the stuck threshold (a zombie: alive and unproductive)
+    * `:ok`
+
+  Liveness readers (`/health`, idle-stop, `gitf wake`, the Cabinet fleet)
+  act on `:down`; only the zombie alert acts on `:stalled`. One 503 for
+  both made remote clients read a stalled or held factory as a box that
+  never came up (msn-629e74).
+  """
+  @spec probe([map()]) :: :ok | :stalled | :down
+  def probe(active_quests) do
+    # A Cabinet runs no Major by design — its liveness is the store and
+    # the endpoint answering.
+    major_alive = GiTF.Cabinet.mode?() or Process.whereis(GiTF.Major) != nil
+
+    cond do
+      not major_alive or check_store() != :ok -> :down
+      zombie?(active_quests) -> :stalled
+      true -> :ok
     end
   rescue
     # Fail CLOSED: "the liveness probe crashed" must not read as "alive" —
@@ -92,34 +111,52 @@ defmodule GiTF.Observability.Health do
     # spurious zombie alert, which is the survivable direction.
     e ->
       Logger.error("Liveness probe raised: #{Exception.message(e)}")
-      false
+      :down
   end
 
   @doc """
-  True when missions are active but nothing has moved in 30 minutes — the
-  factory is up and not working.
-
-  A mission holding for a person (awaiting_input / awaiting_approval) has
-  no op activity BY DESIGN; it is the human who is idle, not the factory,
-  so held missions are excluded. Counting them made every held question
-  turn the whole factory "unhealthy" thirty minutes later (msn-629e74,
-  2026-09-08: /health 503 for twelve hours while waiting on a treatment
-  choice).
+  True when missions are running but no op has moved within the stuck
+  threshold — the factory is up and not working. Held missions are not
+  running (`GiTF.Missions.running?/1`).
   """
   @spec zombie?([map()]) :: boolean()
   def zombie?(active_quests) do
-    case Enum.reject(active_quests, &GiTF.Missions.held_for_human?/1) do
-      [] ->
-        false
-
-      _running ->
-        thirty_min_ago = DateTime.shift(DateTime.utc_now(), minute: -30)
-
-        Archive.filter(:ops, fn j ->
-          updated = j[:updated_at] || j[:created_at]
-          updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
-        end) == []
+    case Enum.filter(active_quests, &GiTF.Missions.running?/1) do
+      [] -> false
+      running -> not Enum.any?(running, &recent_op_activity?/1)
     end
+  end
+
+  @doc """
+  The idle-stop verdict: no ghost running, no mission running. A held
+  mission needs nothing from the box until someone answers, and answering
+  starts with `gitf wake` (msn-629e74). An unknown ghost count is never idle.
+  """
+  @spec idle?(non_neg_integer() | nil, [map()]) :: boolean()
+  def idle?(ghosts, running_missions), do: ghosts == 0 and running_missions == []
+
+  @doc """
+  True when a running mission's own record has not moved within the stuck
+  threshold, by awake time. The one rule behind `check_quests/0`, the
+  `quest_stuck` alert and the dashboard.
+  """
+  @spec stuck?(map()) :: boolean()
+  def stuck?(mission) do
+    GiTF.Missions.running?(mission) and
+      GiTF.Clock.awake_elapsed(mission[:updated_at]) > stuck_threshold_seconds()
+  end
+
+  defp stuck_threshold_seconds, do: GiTF.Config.Thresholds.get(:alert_quest_stuck_seconds)
+
+  # Any op of this mission touched within the stuck threshold, by awake
+  # time — a box that slept mid-mission must not wake up as a zombie.
+  defp recent_op_activity?(mission) do
+    threshold = stuck_threshold_seconds()
+
+    Archive.by_index(:ops, :mission_id, mission.id)
+    |> Enum.any?(fn op ->
+      GiTF.Clock.awake_elapsed(op[:updated_at] || op[:created_at]) <= threshold
+    end)
   end
 
   defp check_store do
@@ -189,15 +226,7 @@ defmodule GiTF.Observability.Health do
   end
 
   defp check_quests do
-    missions = Archive.all(:missions)
-
-    stuck =
-      Enum.count(missions, fn q ->
-        q.status == "active" &&
-          GiTF.Clock.awake_elapsed(q.updated_at) > 1800
-      end)
-
-    if stuck == 0, do: :ok, else: :warning
+    if Enum.any?(Archive.all(:missions), &stuck?/1), do: :warning, else: :ok
   end
 
   defp check_model_api do

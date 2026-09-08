@@ -16,33 +16,25 @@ defmodule GiTF.Runtime.Claude do
 
   require Logger
 
-  # PATH first. The one fallback is where the official installer
-  # (`curl -fsSL https://claude.ai/install.sh | bash`) puts the binary —
-  # the running user's ~/.local/bin — which a systemd unit's PATH never
-  # includes. The replaced factory box (2026-09-01) ran for a week with
-  # every CLI ghost dying at "Provision failed: :not_found" because the
-  # hand-made /usr/local/bin symlink from the old box was never recreated.
-  defp fallback_locations do
-    case System.get_env("HOME") || System.user_home() do
-      nil -> []
-      home -> [Path.join(home, ".local/bin/claude")]
-    end
-  end
+  # PATH first; the one fallback is where the official installer puts the
+  # binary (the running user's ~/.local/bin), which a systemd unit's PATH
+  # omits unless rel/gitf.service says otherwise (msn-629e74).
 
   # -- Public API ------------------------------------------------------------
 
   @doc """
   Locates the `claude` executable on the system.
 
-  Checks the PATH first via `System.find_executable/1`, then falls back to
-  a list of common installation locations.
+  Checks the PATH first via `System.find_executable/1`, then the official
+  installer's location (`~/.local/bin/claude`), warning when only the
+  latter finds it.
 
   Returns `{:ok, path}` or `{:error, :not_found}`.
   """
   @spec find_executable() :: {:ok, String.t()} | {:error, :not_found}
   def find_executable do
     case System.find_executable("claude") do
-      nil -> check_common_locations()
+      nil -> installer_location()
       path -> {:ok, path}
     end
   end
@@ -189,10 +181,18 @@ defmodule GiTF.Runtime.Claude do
 
   # -- Private helpers -------------------------------------------------------
 
-  defp check_common_locations do
-    case Enum.find(fallback_locations(), &File.exists?/1) do
-      nil -> {:error, :not_found}
-      path -> {:ok, path}
+  defp installer_location do
+    home = System.get_env("HOME") || System.user_home()
+    path = home && Path.join(home, ".local/bin/claude")
+
+    if path && File.exists?(path) do
+      Logger.warning(
+        "claude found at #{path} but not on PATH — fix the unit's PATH (rel/gitf.service)"
+      )
+
+      {:ok, path}
+    else
+      {:error, :not_found}
     end
   end
 

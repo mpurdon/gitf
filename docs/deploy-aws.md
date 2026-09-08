@@ -216,7 +216,7 @@ API-equivalent `cost_usd`, so spend guards keep functioning as a brake).
 ```sh
 # install the CLI as the gitf user, then expose it on the daemon's PATH
 sudo -u gitf bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
-sudo ln -sf /var/lib/gitf/.local/bin/claude /usr/local/bin/claude   # ≤0.65.277 only; later releases find ~/.local/bin themselves
+sudo ln -sf /var/lib/gitf/.local/bin/claude /usr/local/bin/claude   # ≤0.65.281 only; later units put ~/.local/bin on PATH
 
 # /etc/gitf/gitf.env — token from `claude setup-token` run by the account
 # owner on their own machine (OAuth against the subscription)

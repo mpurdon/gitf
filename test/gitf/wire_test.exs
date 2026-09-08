@@ -1,5 +1,7 @@
 defmodule GiTF.WireTest do
-  use ExUnit.Case, async: true
+  # Not async: the PhasePrompts describes flip the global :wire_enabled flag,
+  # which other prompt tests read.
+  use ExUnit.Case, async: false
 
   alias GiTF.Major.{PhaseCollector, PhasePrompts}
   alias GiTF.Wire

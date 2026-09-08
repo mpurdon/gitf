@@ -61,36 +61,33 @@ defmodule GiTF.CLI do
     wait_for_wake(deadline)
   end
 
-  # "Up" means the daemon answers. Its self-reported status is shown, not
-  # used as the verdict: a factory holding a question for twelve hours
-  # answered 503 "unhealthy" the whole time, and wake read that as a box
-  # that never came up.
+  # Up = a daemon answered. Its verdict on the work is shown, not judged.
   defp wait_for_wake(deadline) do
-    cond do
-      match?({:ok, _}, health = GiTF.Client.health()) ->
-        {:ok, data} = health
-        status = data["status"]
-
-        Format.success(
-          "Factory is up: #{GiTF.Client.server_url()} (v#{data["version"]}, status #{status})"
-        )
+    case GiTF.Client.health() do
+      {:ok, %{status: status, version: version}} ->
+        Format.success("Factory is up: #{GiTF.Client.server_url()} (v#{version}, #{status})")
 
         if status != "ok",
-          do: Format.warn("Self-check is #{status} — see `gitf status` or the health_check tool.")
+          do: Format.warn("Self-check is #{status} — see the dashboard or the health_check tool.")
 
-      System.monotonic_time(:second) > deadline ->
-        Format.error(
-          "Factory did not come up within 3 minutes — check `aws ec2 describe-instances` " <>
-            "or the box's journal."
-        )
-
-        System.halt(1)
-
-      true ->
-        IO.write(".")
-        Process.sleep(5_000)
-        wait_for_wake(deadline)
+      {:error, _} ->
+        if System.monotonic_time(:second) < deadline do
+          IO.write(".")
+          Process.sleep(5_000)
+          wait_for_wake(deadline)
+        else
+          give_up_waking()
+        end
     end
+  end
+
+  defp give_up_waking do
+    Format.error(
+      "Factory did not come up within 3 minutes — check `aws ec2 describe-instances` " <>
+        "or the box's journal."
+    )
+
+    System.halt(1)
   end
 
   defp run_mcp_server do

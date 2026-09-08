@@ -110,20 +110,23 @@ defmodule GiTF.Missions do
   defp present_url(_), do: nil
 
   # The phases whose meaning is "the factory has stopped and a PERSON is
-  # the blocker". Four separate mechanisms have to know this list, and
-  # every one of them is wrong in a way that costs something real if it
-  # drifts:
+  # the blocker". Every mechanism that asks "is the factory doing
+  # something?" must exclude them, and each is wrong in a way that costs
+  # something real if it forgets:
   #
-  #   * Tachikoma's stall detector — a held mission has no live ghost BY
-  #     DESIGN, which is the exact shape it calls a stall. Without the
-  #     exclusion every human gate pages the operator as an orchestration
-  #     failure ten minutes in.
+  #   * Stall / zombie / stuck detectors (Tachikoma, Health, Alerts) — a
+  #     held mission has no live ghost and no op activity BY DESIGN, which
+  #     is the exact shape they call a failure. msn-629e74 read as
+  #     "unhealthy" for twelve hours while holding a design question.
+  #   * Idle-stop — a held mission spends nothing and needs nothing from
+  #     the box; keeping it awake for one is a silent bill.
   #   * The mission age cap — force-completing a mission because a human
   #     was asleep is the cap punishing the wrong party.
   #   * The budget cap — a held mission spends nothing while it waits.
   #   * The vault kanban — both gates belong in Review, not Doing.
   #
-  # One list, so adding a third gate cannot silently miss one of them.
+  # One list and one predicate (`running?/1`), so adding a gate or a
+  # detector cannot silently miss the rule.
   @human_gate_phases ~w(awaiting_approval awaiting_input)
 
   @doc "Phases where the mission is stopped and a human is the blocker."
@@ -136,6 +139,15 @@ defmodule GiTF.Missions do
     do: Map.get(mission, :current_phase) in @human_gate_phases
 
   def held_for_human?(_), do: false
+
+  @doc """
+  True when the mission wants the factory right now: non-terminal and not
+  held for a person. This is the question every liveness, stall, stuck and
+  idle check must ask — `non_terminal?/1` alone counts a mission that is
+  waiting on a human as work in progress.
+  """
+  @spec running?(map()) :: boolean()
+  def running?(mission), do: non_terminal?(mission) and not held_for_human?(mission)
 
   @doc """
   When the mission actually ENDED: the timestamp of its transition into a

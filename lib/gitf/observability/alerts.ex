@@ -247,11 +247,7 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:quest_stuck, threshold_seconds, data) do
-    stuck =
-      Enum.filter(data.missions, fn q ->
-        q.status == "active" &&
-          GiTF.Clock.awake_elapsed(q.updated_at) > threshold_seconds
-      end)
+    stuck = Enum.filter(data.missions, &GiTF.Observability.Health.stuck?/1)
 
     if length(stuck) > 0 do
       {:alert, "#{length(stuck)} mission(s) stuck for > #{threshold_seconds}s"}

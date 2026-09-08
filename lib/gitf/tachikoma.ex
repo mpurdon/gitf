@@ -261,7 +261,7 @@ defmodule GiTF.Tachikoma do
     now = DateTime.utc_now()
 
     GiTF.Archive.filter(:missions, &(&1[:status] in GiTF.Missions.active_statuses()))
-    |> Enum.reject(&GiTF.Missions.held_for_human?/1)
+    |> Enum.filter(&GiTF.Missions.running?/1)
     |> Enum.each(&check_one_mission_stall(&1, now))
   end
 

@@ -116,11 +116,15 @@ before waking. You *do* need to ask before anything that raises a real bill in
 a way that does not undo itself (instance resize, EBS growth — EBS cannot
 shrink).
 
-**A running mission keeps the box awake by itself.** `rel/gitf-idle-stop.sh`
-polls `/api/v1/health` and only counts the box idle when there are *no active
-ghosts and no non-terminal missions*. You do not need an override to protect a
-mission that is actually running — only to survive long gaps *between* work
-(waiting on a human approval, a slow external job).
+**A running mission keeps the box awake by itself; a held one does not.**
+`rel/gitf-idle-stop.sh` polls `/api/v1/health` and counts the box idle when
+there are *no active ghosts and no running missions* — a mission holding at
+`awaiting_input` / `awaiting_approval` is the human idling, not the factory
+(since 0.65.281; before that a held question kept the box up all night). You
+do not need an override to protect a mission that is actually running, and
+you do not get one for free while a question waits: answering starts with
+`gitf wake`. An override is for long gaps *between* work you want the box
+awake through (a slow external job, a debugging session).
 
 For that case, use the `idle_stop_override` MCP tool — it requires both a new threshold and a duration
 (e.g. `idle_minutes: 60, duration_minutes: 240`) and always expires. There is
@@ -474,8 +478,9 @@ is a card defect, not a mission problem.
   `/usr/local/bin/claude` symlink that instance replacement silently
   drops. Symptom: every CLI ghost dies in ~15 ms with `Provision failed:
   :not_found` and the mission walks its retry backoff back to `pending`.
-  Since 0.65.278 `GiTF.Runtime.Claude.find_executable/0` falls back to
-  `~/.local/bin/claude` itself; on an older release, recreate the symlink.
+  Since 0.65.282 the unit's `PATH` includes `%h/.local/bin` (the fix for
+  everything ghosts exec) and `GiTF.Runtime.Claude.find_executable/0` falls
+  back to it with a warning; on an older release, recreate the symlink.
 
 - **Two `gitf` binaries.** `~/.local/bin/gitf` is 0.65.175 (self-updated);
   Homebrew's `/opt/homebrew/bin/gitf` is 0.65.47. PATH order decides which you
