@@ -570,7 +570,7 @@ defmodule GiTF.Major do
           state
 
         [op | rest] ->
-          active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+          active_count = GiTF.Ghosts.count(GhostStatus.working())
           available_slots = max(state.effective_max_ghosts - active_count, 0)
 
           if available_slots <= 0 do
@@ -606,7 +606,7 @@ defmodule GiTF.Major do
           state
 
         [{op, mission} | rest] ->
-          active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+          active_count = GiTF.Ghosts.count(GhostStatus.working())
           available_slots = max(state.effective_max_ghosts - active_count, 0)
 
           if available_slots <= 0 do
@@ -1316,7 +1316,7 @@ defmodule GiTF.Major do
               GiTF.Ops.ready?(op.id),
               do: op
 
-        active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+        active_count = GiTF.Ghosts.count(GhostStatus.working())
         available_slots = max(state.effective_max_ghosts - active_count, 0)
         stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 
@@ -2004,7 +2004,7 @@ defmodule GiTF.Major do
       end
 
       # Compute available slots
-      active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+      active_count = GiTF.Ghosts.count(GhostStatus.working())
       available_slots = max(state.effective_max_ghosts - active_count, 0)
       stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 

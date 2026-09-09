@@ -139,6 +139,8 @@ config :gitf, :github_webhook_secret, nil
 # ingests labeled GitHub issues, admits them within capacity, and reports back
 # on the issue. `trigger_label` is the untrusted-input safety gate; `bot_login`
 # lets Aramaki ignore its own GitHub activity (loop prevention).
+config :gitf, :aramaki_enabled, false
+
 config :gitf, :aramaki,
   enabled: false,
   trigger_label: "gitf:build",

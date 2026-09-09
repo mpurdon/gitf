@@ -55,8 +55,8 @@ end
 # Aramaki (PM/admission layer + project advancement) — nested under :aramaki,
 # so it can't ride the flat boolean_flags list above.
 case System.get_env("GITF_ARAMAKI_ENABLED") do
-  v when v in ["true", "1"] -> config :gitf, :aramaki, enabled: true
-  v when v in ["false", "0"] -> config :gitf, :aramaki, enabled: false
+  v when v in ["true", "1"] -> config :gitf, :aramaki_enabled, true
+  v when v in ["false", "0"] -> config :gitf, :aramaki_enabled, false
   _ -> :ok
 end
 

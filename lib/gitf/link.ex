@@ -28,6 +28,7 @@ defmodule GiTF.Link do
       subject: subject,
       body: body,
       read: false,
+      unread_to: to,
       metadata: metadata
     }
 
@@ -57,7 +58,14 @@ defmodule GiTF.Link do
   def list(opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
 
-    links = Archive.all(:links)
+    # The unread-for-recipient read (the Major's 30s recovery sweep, every
+    # ghost's inbox check) is served by the `unread_to` index; anything
+    # else folds the collection.
+    links =
+      case {Keyword.get(opts, :to), Keyword.get(opts, :read)} do
+        {to, false} when is_binary(to) -> Archive.by_index(:links, :unread_to, to)
+        _ -> Archive.all(:links)
+      end
 
     links =
       case Keyword.get(opts, :to) do
@@ -117,7 +125,7 @@ defmodule GiTF.Link do
         {:error, :not_found}
 
       link_msg ->
-        updated = %{link_msg | read: true}
+        updated = link_msg |> Map.put(:read, true) |> Map.put(:unread_to, nil)
         Archive.put(:links, updated)
     end
   end

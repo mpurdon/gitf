@@ -97,7 +97,7 @@ defmodule GiTF.Dashboard.AppLayout do
 
     active_ghosts =
       try do
-        GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+        GiTF.Ghosts.count(GhostStatus.working())
       rescue
         _ -> 0
       end

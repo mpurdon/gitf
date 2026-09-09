@@ -116,12 +116,9 @@ defmodule GiTF.Costs do
       |> Enum.reject(&is_nil/1)
       |> MapSet.new()
 
-    if MapSet.size(ghost_ids) == 0 do
-      0.0
-    else
-      Archive.filter(:costs, &MapSet.member?(ghost_ids, &1.ghost_id))
-      |> total()
-    end
+    ghost_ids
+    |> Enum.flat_map(&Archive.by_index(:costs, :ghost_id, &1))
+    |> total()
   end
 
   @doc """

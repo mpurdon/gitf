@@ -1005,6 +1005,7 @@ defmodule GiTF.Tachikoma do
     pruned_costs = prune_collection(:costs, cost_cutoff, completed_mission_ids)
     pruned_audits = prune_collection(:audit_results, cost_cutoff, completed_mission_ids)
     pruned_llm_calls = prune_collection(:llm_calls, cost_cutoff, completed_mission_ids)
+    pruned_ghosts = prune_ghosts(cost_cutoff, completed_mission_ids)
 
     # Prune old debriefs (>30 days)
     thirty_day_cutoff = DateTime.shift(DateTime.utc_now(), day: -30)
@@ -1058,13 +1059,14 @@ defmodule GiTF.Tachikoma do
 
     total =
       length(pruned_links) + length(pruned_runs) + pruned_costs + pruned_audits + pruned_llm_calls +
-        pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_backups +
+        pruned_ghosts + pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_backups +
         pruned_patterns + compacted
 
     if total > 0 do
       Logger.info(
         "Archive pruned: #{length(pruned_links)} links, #{length(pruned_runs)} runs, " <>
-          "#{pruned_costs} costs, #{pruned_audits} audits, #{pruned_debriefs} debriefs, " <>
+          "#{pruned_costs} costs, #{pruned_audits} audits, #{pruned_ghosts} ghosts, " <>
+          "#{pruned_debriefs} debriefs, " <>
           "#{pruned_transitions} transitions, #{pruned_snapshots} snapshots, " <>
           "#{pruned_backups} backups, #{pruned_patterns} patterns, #{compacted} artifacts compacted"
       )
@@ -1124,6 +1126,33 @@ defmodule GiTF.Tachikoma do
   end
 
   # Prune records older than cutoff that belong to completed missions
+  # Ghosts carry no mission_id — their mission is whichever op names
+  # them — and the collection grew forever (execution-efficiency B2).
+  # A ghost goes once it is terminal, older than the cost retention, and
+  # no op of a live mission still names it: worktree chaining
+  # (`predecessor_shell`) and cost attribution read ghost records for
+  # live missions, never for finished ones.
+  defp prune_ghosts(cutoff, completed_ids) do
+    still_named =
+      GiTF.Archive.filter(:ops, fn op ->
+        is_binary(op[:ghost_id]) and op[:mission_id] != nil and
+          not MapSet.member?(completed_ids, op.mission_id)
+      end)
+      |> MapSet.new(& &1.ghost_id)
+
+    to_delete =
+      GiTF.Archive.filter(:ghosts, fn g ->
+        GiTF.Ghost.Status.terminal?(g[:status]) and
+          not MapSet.member?(still_named, g.id) and
+          g[:inserted_at] != nil and DateTime.compare(g.inserted_at, cutoff) == :lt
+      end)
+
+    Enum.each(to_delete, &GiTF.Archive.delete(:ghosts, &1.id))
+    length(to_delete)
+  rescue
+    _ -> 0
+  end
+
   defp prune_collection(collection, cutoff, completed_ids) do
     to_delete =
       GiTF.Archive.filter(collection, fn r ->

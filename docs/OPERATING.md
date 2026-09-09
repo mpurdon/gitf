@@ -492,6 +492,17 @@ is safe. The acceptance test is the A/B protocol in `specs/WIRE.md` §8; a
 `structured-output extraction failed` line in the journal after enabling it
 is a card defect, not a mission problem.
 
+`aramaki_enabled` *(a live flag since 0.65.320; before that boot-env only)*:
+the admission layer that turns a GitHub issue into a mission. **The full
+vacation path is: issue labelled `gitf:build` (the trigger label — an
+untrusted-input gate, not decoration) → GitHub webhook → Cabinet ingress
+classifies it (label `bug` or a bug-ish title = bug) → ruleset says wake →
+box starts → delivery forwarded → factory verifies the same signature →
+Aramaki admits it within `max_concurrent` → mission starts.** With the flag
+off the chain ends at "forwarded" and the factory's journal says `issues
+event ignored (Aramaki disabled)`. Loop prevention: set `bot_login` so the
+factory ignores issues it opened itself.
+
 ## 11. Guards you should not route around
 
 - **Daily spend ceiling** — factory-wide, rolling 24h, **fail-closed**. Breach

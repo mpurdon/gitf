@@ -47,7 +47,9 @@ defmodule GiTF.Flags do
     sandbox_required: "Refuse to validate without a working sandbox",
     log_stdout: "Log to stdout as well as the journal",
     bedrock_prompt_cache: "Bedrock prompt caching",
-    wire_enabled: "Wire notation in phase prompts (specs/WIRE.md)"
+    wire_enabled: "Wire notation in phase prompts (specs/WIRE.md)",
+    aramaki_enabled:
+      "Admit GitHub issues labelled with the trigger label (gitf:build) as missions"
   ]
 
   @known Keyword.keys(@flags)

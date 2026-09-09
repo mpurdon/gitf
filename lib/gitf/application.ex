@@ -457,8 +457,10 @@ defmodule GiTF.Application do
         ]
       end
 
-    # Aramaki (PM/admission layer) is opt-in — only supervise it when enabled.
-    aramaki = if GiTF.Aramaki.enabled?(), do: [{GiTF.Aramaki, []}], else: []
+    # Aramaki (PM/admission layer) always runs; the `aramaki_enabled` flag
+    # decides whether its ticks admit anything, so it can be switched on
+    # from the Settings page without a restart.
+    aramaki = [{GiTF.Aramaki, []}]
 
     bg_children = bg ++ optional ++ aramaki
 

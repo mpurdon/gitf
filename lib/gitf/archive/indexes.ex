@@ -11,7 +11,17 @@ defmodule GiTF.Archive.Indexes do
     # would be a per-tick cost paid by every mission for a feature almost
     # none of them use.
     inquiries: [:mission_id, :status],
-    mission_outcomes: [:mission_id, :sector_id, :outcome_category, :tracking_stopped, :pr_url]
+    mission_outcomes: [:mission_id, :sector_id, :outcome_category, :tracking_stopped, :pr_url],
+    # Execution-efficiency B2 — the folds that ran every few seconds:
+    # the budget watchdog summed every mission's spend from a full costs
+    # scan every 10s; the spawn gate counted working ghosts by listing
+    # and SORTING all of them per op; the Major's 30s waggle recovery
+    # scanned every link ever sent for the unread ones addressed to it.
+    costs: [:ghost_id],
+    ghosts: [:status],
+    # Derived: `to` while unread, nil once read (GiTF.Link maintains it),
+    # because the index machinery keys on single fields.
+    links: [:unread_to]
   }
 
   @doc "Returns the index specification map."

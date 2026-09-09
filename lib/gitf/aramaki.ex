@@ -50,10 +50,17 @@ defmodule GiTF.Aramaki do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @doc "Whether Aramaki is enabled (config `[:aramaki, :enabled]`, default false)."
+  @doc """
+  Whether Aramaki admits work. The `aramaki_enabled` feature flag (Settings
+  → Features, or `GITF_ARAMAKI_ENABLED` at boot) — live, like every other
+  flag; the nested `[:aramaki, :enabled]` form is honoured for older
+  configs. The server always runs; disabled, its ticks do nothing, so
+  flipping the flag needs no restart.
+  """
   @spec enabled?() :: boolean()
   def enabled? do
-    Application.get_env(:gitf, :aramaki, []) |> Keyword.get(:enabled, false) == true
+    Application.get_env(:gitf, :aramaki_enabled) == true or
+      Application.get_env(:gitf, :aramaki, []) |> Keyword.get(:enabled, false) == true
   end
 
   @doc """
@@ -78,8 +85,11 @@ defmodule GiTF.Aramaki do
 
   @impl true
   def handle_info(:tick, state) do
-    advance_projects()
-    admit_pending()
+    if enabled?() do
+      advance_projects()
+      admit_pending()
+    end
+
     schedule_tick()
     {:noreply, state}
   end
@@ -87,8 +97,11 @@ defmodule GiTF.Aramaki do
   def handle_info({:consider, _mission_id}, state) do
     # An intake just created a pending mission (or a project mission finished,
     # possibly unblocking dependents) — act now rather than on the next tick.
-    advance_projects()
-    admit_pending()
+    if enabled?() do
+      advance_projects()
+      admit_pending()
+    end
+
     {:noreply, state}
   end
 

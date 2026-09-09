@@ -245,16 +245,18 @@ defmodule GiTF.Ghosts do
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    ghosts = Archive.all(:ghosts)
-
     ghosts =
       case Keyword.get(opts, :status) do
-        nil -> ghosts
-        status -> Enum.filter(ghosts, &(&1.status == status))
+        nil -> Archive.all(:ghosts)
+        status -> Archive.by_index(:ghosts, :status, status)
       end
 
     Enum.sort_by(ghosts, & &1.inserted_at, {:desc, DateTime})
   end
+
+  @doc "How many ghosts are in `status` — the spawn gate's read, no listing, no sort."
+  @spec count(String.t()) :: non_neg_integer()
+  def count(status), do: Archive.count_by_index(:ghosts, :status, status)
 
   @doc """
   Gets a ghost by ID.
