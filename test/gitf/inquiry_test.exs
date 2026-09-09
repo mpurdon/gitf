@@ -768,6 +768,18 @@ defmodule GiTF.InquiryTest do
       assert block =~ "List"
       assert block =~ "do not ask them again"
     end
+
+    test "the chosen option's rationale travels with the answer — it is the spec" do
+      m = mission!()
+      {:ok, inquiry, :asked} = Inquiry.ask(m.id, choice())
+      {:ok, _, :answered} = Inquiry.answer(inquiry.id, "list")
+
+      block = Inquiry.prompt_block(m.id)
+
+      assert block =~ "AS IT WAS DESCRIBED TO THE OPERATOR"
+      assert block =~ "Scannable, more scrolling"
+      refute block =~ "Denser, harder to scan"
+    end
   end
 
   describe "the invitation" do

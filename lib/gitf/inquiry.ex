@@ -1083,7 +1083,7 @@ defmodule GiTF.Inquiry do
       Enum.map_join(entries, "\n", fn entry ->
         "- (#{entry["phase"]}/#{entry["key"]}) #{entry["prompt"]}\n" <>
           "  ANSWER: #{entry["answer_label"] || entry["answer"]}" <>
-          decided_suffix(entry)
+          decided_suffix(entry) <> chosen_option_spec(entry)
       end)
 
     """
@@ -1102,6 +1102,25 @@ defmodule GiTF.Inquiry do
 
     #{lines}
     """
+  end
+
+  # The label is the headline; the rationale is the spec. msn-fdc50b: the
+  # operator chose "Refined tinted band (no hatch)", whose rationale said
+  # collapsed groups close on all four sides like a sealed drawer. The
+  # re-run saw only the label, wrote a dim-on-collapse requirement, and
+  # the drawer geometry the operator had picked was never built.
+  defp chosen_option_spec(entry) do
+    chosen = Enum.find(entry["options"] || [], &(&1["id"] == entry["answer"]))
+
+    case chosen do
+      %{"rationale" => rationale} when is_binary(rationale) and rationale != "" ->
+        "\n  THE CHOSEN OPTION AS IT WAS DESCRIBED TO THE OPERATOR — this description " <>
+          "is part of the decision; every concrete behaviour in it is a requirement:\n" <>
+          "  #{rationale}"
+
+      _ ->
+        ""
+    end
   end
 
   defp rejections_block([]), do: ""
