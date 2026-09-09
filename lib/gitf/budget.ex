@@ -409,9 +409,14 @@ defmodule GiTF.Budget do
   @doc "Returns total USD spent for all ghosts in a mission."
   @spec spent_for(String.t()) :: float()
   def spent_for(mission_id) do
-    mission_id
-    |> GiTF.Costs.for_quest()
-    |> GiTF.Costs.total()
+    # A resumed child is the same piece of work: its spend is the
+    # lineage's. (A parent that burned $39 of $40 and failed was once
+    # resumed with a fresh $40.) Every gate reads through here, so the
+    # advance-loop meter and the watchdog agree.
+    case GiTF.Archive.get(:missions, mission_id) do
+      %{} = mission -> mission |> GiTF.Missions.lineage_ids() |> GiTF.Costs.total_for_missions()
+      _ -> GiTF.Costs.total_for_missions([mission_id])
+    end
   end
 
   @doc "Returns remaining budget for a mission."

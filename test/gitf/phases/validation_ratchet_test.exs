@@ -69,8 +69,9 @@ defmodule GiTF.Phases.ValidationRatchetTest do
         })
 
       updated = Validation.record_accepted_requirements(m)
-      assert (updated[:accepted_requirements] || []) == []
-      assert (accepted(m.id) || []) == []
+      # Nothing banked: the ratchet wrote an empty set or never wrote at all.
+      assert updated[:accepted_requirements] in [nil, []]
+      assert accepted(m.id) in [nil, []]
     end
 
     test "accumulates across rounds and never un-accepts" do

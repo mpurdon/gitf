@@ -185,6 +185,23 @@ defmodule GiTF.Override do
     _ -> :ok
   end
 
+  @doc "The rejection recorded on a mission record's approval artifact, or nil."
+  @spec rejection(map()) :: map() | nil
+  def rejection(record) do
+    case get_in(record, [:artifacts, "approval"]) do
+      %{"approved" => false, "reason" => reason} = a when is_binary(reason) ->
+        %{
+          "mission_id" => record[:id],
+          "reason" => reason,
+          "rejected_by" => a["rejected_by"],
+          "rejected_at" => a["rejected_at"]
+        }
+
+      _ ->
+        nil
+    end
+  end
+
   @doc """
   Rejects a mission.
 

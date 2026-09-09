@@ -54,36 +54,65 @@ defmodule GiTF.Ops do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  The op's acceptance criteria as prompt text — one bullet per criterion.
-  The field is a list (the planner writes one; the Wire decoder writes
-  one); both instruction renderers guarded on `is_binary` and rendered
-  nothing, so no implementation ghost was ever told what "done" meant.
+  The op's acceptance criteria as a prompt section under `heading`, or ""
+  when it has none. The field is a list (the planner writes one; the Wire
+  decoder writes one); the two instruction renderers once guarded on
+  `is_binary` and rendered nothing, so no implementation ghost was ever
+  told what "done" meant.
   """
-  @spec acceptance_criteria_text(map()) :: String.t()
-  def acceptance_criteria_text(op) do
+  @spec acceptance_criteria_section(map(), String.t()) :: String.t()
+  def acceptance_criteria_section(op, heading \\ "## Acceptance criteria") do
     case Map.get(op, :acceptance_criteria) do
       list when is_list(list) and list != [] ->
-        Enum.map_join(list, "\n", &"- #{&1}")
+        heading <> "\n\n" <> Enum.map_join(list, "\n", &"- #{&1}")
 
-      text when is_binary(text) ->
-        String.trim(text)
+      text when is_binary(text) and text != "" ->
+        heading <> "\n\n" <> String.trim(text)
 
       _ ->
         ""
     end
   end
 
-  @doc "The op's target files as a prompt section, or \"\" when it has none."
-  @spec target_files_text(map()) :: String.t()
-  def target_files_text(op) do
+  @doc "The op's target files as a prompt section under `heading`, or \"\" when it has none."
+  @spec target_files_section(map(), String.t()) :: String.t()
+  def target_files_section(op, heading \\ "## Target files") do
     case Map.get(op, :target_files) do
       files when is_list(files) and files != [] ->
-        "## Target files\n\n" <> Enum.map_join(files, "\n", &"- `#{&1}`")
+        heading <> "\n\n" <> Enum.map_join(files, "\n", &"- `#{&1}`")
 
       _ ->
         ""
     end
   end
+
+  @doc """
+  The `.claude/instructions.md` a ghost finds in its worktree before it
+  starts: title, description, recon findings, acceptance criteria, target
+  files. One renderer — it lived byte-identical in two modules and an edit
+  to the criteria arm had to be made twice.
+  """
+  @spec instructions_content(map()) :: String.t()
+  def instructions_content(op) do
+    findings = Map.get(op, :scout_findings)
+
+    [
+      "# Job Instructions\n",
+      "## #{op.title}\n",
+      if(op.description not in [nil, ""], do: "### Description\n\n#{op.description}\n", else: ""),
+      if(is_binary(findings) and findings != "",
+        do: "### Recon Findings\n\n#{findings}\n",
+        else: ""
+      ),
+      acceptance_criteria_section(op, "### Acceptance Criteria") |> section_line(),
+      target_files_section(op, "### Target Files") |> section_line()
+    ]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+  end
+
+  defp section_line(""), do: ""
+  defp section_line(section), do: section <> "\n"
 
   @doc """
   Creates a new op.
@@ -423,19 +452,48 @@ defmodule GiTF.Ops do
     active_non_phase_op?(mission_id, fn _ -> true end)
   end
 
-  defp active_non_phase_op?(mission_id, extra_filter) do
-    Archive.by_index(:ops, :mission_id, mission_id)
-    |> Enum.any?(fn op ->
-      op[:phase_job] not in [true] and
-        op.status in ["pending", "assigned", "running"] and
-        extra_filter.(op)
+  # Queued or working. `pending` counts: an op waiting for a ghost slot is
+  # as much in flight as one running — a sweep that reads it as "nobody is
+  # coming" re-spawns.
+  @in_flight_statuses ["pending", "assigned", "running"]
+
+  @doc "The statuses that mean an op is queued or working."
+  @spec in_flight_statuses() :: [String.t()]
+  def in_flight_statuses, do: @in_flight_statuses
+
+  @doc "The op record of a phase ghost queued or working on `phase`, or nil."
+  @spec phase_op_in_flight(String.t(), String.t()) :: map() | nil
+  def phase_op_in_flight(mission_id, phase) do
+    for_mission(mission_id)
+    |> Enum.find(fn op ->
+      op[:phase_job] == true and op[:phase] == phase and op.status in @in_flight_statuses
     end)
+  end
+
+  @doc "Whether a phase ghost is queued or working on `phase` for `mission_id`."
+  @spec phase_in_flight?(String.t(), String.t()) :: boolean()
+  def phase_in_flight?(mission_id, phase), do: phase_op_in_flight(mission_id, phase) != nil
+
+  @doc "Every phase op for `phase` on `mission_id`, any status."
+  @spec phase_ops(String.t(), String.t()) :: [map()]
+  def phase_ops(mission_id, phase) do
+    for_mission(mission_id)
+    |> Enum.filter(&(&1[:phase_job] == true and &1[:phase] == phase))
+  end
+
+  defp active_non_phase_op?(mission_id, extra_filter) do
+    for_mission(mission_id)
+    |> Enum.any?(fn op ->
+      op[:phase_job] not in [true] and op.status in @in_flight_statuses and extra_filter.(op)
+    end)
+  end
+
+  # Indexed, unsorted; the full-scan fallback is for a store whose index
+  # is not up yet.
+  defp for_mission(mission_id) do
+    Archive.by_index(:ops, :mission_id, mission_id)
   rescue
-    _ ->
-      GiTF.Archive.filter(:ops, fn op ->
-        op[:mission_id] == mission_id and op[:phase_job] not in [true] and
-          op.status in ["pending", "assigned", "running"] and extra_filter.(op)
-      end) != []
+    _ -> GiTF.Archive.filter(:ops, &(&1[:mission_id] == mission_id))
   end
 
   @doc """

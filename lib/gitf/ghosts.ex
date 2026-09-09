@@ -821,7 +821,7 @@ defmodule GiTF.Ghosts do
   defp write_pre_dispatch(worktree_path, op_id) do
     case GiTF.Ops.get(op_id) do
       {:ok, op} ->
-        content = build_instructions_content(op)
+        content = GiTF.Ops.instructions_content(op)
         instructions_path = Path.join([worktree_path, ".claude", "instructions.md"])
         File.mkdir_p(Path.dirname(instructions_path))
         File.write(instructions_path, content)
@@ -832,46 +832,5 @@ defmodule GiTF.Ghosts do
     end
   rescue
     _ -> :ok
-  end
-
-  defp build_instructions_content(op) do
-    sections = [
-      "# Job Instructions\n",
-      "## #{op.title}\n"
-    ]
-
-    sections =
-      if op.description && op.description != "" do
-        sections ++ ["### Description\n\n#{op.description}\n"]
-      else
-        sections
-      end
-
-    sections =
-      case Map.get(op, :scout_findings) do
-        findings when is_binary(findings) and findings != "" ->
-          sections ++ ["### Recon Findings\n\n#{findings}\n"]
-
-        _ ->
-          sections
-      end
-
-    sections =
-      case GiTF.Ops.acceptance_criteria_text(op) do
-        "" -> sections
-        criteria -> sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
-      end
-
-    sections =
-      case Map.get(op, :target_files) do
-        files when is_list(files) and files != [] ->
-          file_list = Enum.map_join(files, "\n", &"- `#{&1}`")
-          sections ++ ["### Target Files\n\n#{file_list}\n"]
-
-        _ ->
-          sections
-      end
-
-    Enum.join(sections, "\n")
   end
 end

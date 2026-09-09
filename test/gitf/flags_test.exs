@@ -53,10 +53,13 @@ defmodule GiTF.FlagsTest do
     Application.put_env(:gitf, :skills_enabled, true)
     rows = Flags.effective(%{"features" => %{"skills_enabled" => true}})
 
-    assert {:skills_enabled, true, :config} in rows
+    assert {:skills_enabled, true, true} in rows
 
-    assert {:lsp_validation_enabled, nil, :boot} in rows or
-             {:lsp_validation_enabled, false, :boot} in rows
+    assert {:lsp_validation_enabled, nil, nil} in rows or
+             {:lsp_validation_enabled, false, nil} in rows
+
+    # The same table, atom-keyed (the provider's shape), reads the same.
+    assert Flags.effective(%{features: %{skills_enabled: true}}) == rows
 
     assert length(rows) == length(Flags.known())
   end

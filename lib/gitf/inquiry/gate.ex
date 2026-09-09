@@ -99,20 +99,18 @@ defmodule GiTF.Inquiry.Gate do
   rescue
     e ->
       id = Map.get(mission, :id)
+      reason = Exception.message(e)
 
-      Logger.error(
-        "Quest #{id}: input-gate interception failed " <>
-          "(#{Exception.message(e)}) — holding the mission in place"
-      )
+      Logger.error("Quest #{id}: input-gate interception failed (#{reason}) — holding in place")
 
       Observability.Alerts.dispatch_webhook(
         :input_gate_failed,
-        "Quest #{id}: the input gate failed (#{Exception.message(e)}); the mission is " <>
-          "stalled at #{Map.get(mission, :current_phase)} until the phase's questions are fixed",
+        "Quest #{id}: the input gate failed (#{reason}); the mission is stalled at " <>
+          "#{Map.get(mission, :current_phase)} until the phase's questions are fixed",
         dedup_key: "input_gate_failed:#{id}"
       )
 
-      {:failed, Exception.message(e)}
+      {:failed, reason}
   end
 
   def intercept(_), do: :clear
@@ -122,29 +120,13 @@ defmodule GiTF.Inquiry.Gate do
   # phase cannot be invited to ask something the interception would ignore.
   defp holdable_phase?(phase), do: Inquiry.askable_phase?(phase)
 
-  # Parallel phases write suffixed keys ("design_minimal", "validation_v2").
-  # Same prefix rule as `Missions.inheritable?/2`, so a tournament variant
-  # can ask as readily as a single-strategy phase.
-  #
-  # A moved-aside `<key>_asked` artifact is in the family by spelling but
-  # is history, never a question. While its key was answered that fell out
-  # naturally (already answered — not held); once a rejected key became
-  # askable again, a periodic advance that ran mid-re-run found nothing
-  # but the old copy and re-asked the three treatments the operator had
-  # just thrown out (msn-fdc50b, 2026-09-09). The fresh artifact landed
-  # eighteen seconds later, unasked.
+  # Live artifacts only — a moved-aside copy is history, never a question
+  # (the rule and its story live on `Missions.history_key?/1`).
   defp questioning_artifacts(mission, phase) do
-    (Map.get(mission, :artifacts) || %{})
-    |> Enum.filter(fn {key, artifact} ->
-      is_binary(key) and family?(key, phase) and not history?(key) and is_map(artifact) and
-        questions_of(artifact) != []
-    end)
-    |> Enum.sort_by(fn {key, _} -> key end)
+    mission
+    |> Missions.live_artifacts(phase)
+    |> Enum.filter(fn {_key, artifact} -> questions_of(artifact) != [] end)
   end
-
-  defp family?(key, phase), do: key == phase or String.starts_with?(key, phase <> "_")
-
-  defp history?(key), do: Missions.history_key?(key)
 
   defp questions_of(artifact) do
     case Map.get(artifact, "questions") || Map.get(artifact, :questions) do
@@ -159,7 +141,7 @@ defmodule GiTF.Inquiry.Gate do
   # next has its questions silently never raised, and the operator's answer
   # re-spawns every variant, the finished one included. Wait for the field.
   defp raise_all(mission, phase, pairs) do
-    if GiTF.Major.PhaseLauncher.phase_in_flight?(mission.id, phase) do
+    if GiTF.Ops.phase_in_flight?(mission.id, phase) do
       Logger.info(
         "Quest #{mission.id}: #{phase} raised questions while a #{phase} ghost is still " <>
           "running — asking once the field lands"
@@ -167,11 +149,11 @@ defmodule GiTF.Inquiry.Gate do
 
       :clear
     else
-      do_raise_all(mission, phase, pairs)
+      ask_and_hold(mission, phase, pairs)
     end
   end
 
-  defp do_raise_all(mission, phase, pairs) do
+  defp ask_and_hold(mission, phase, pairs) do
     results =
       for {key, artifact} <- pairs,
           question <- questions_of(artifact),

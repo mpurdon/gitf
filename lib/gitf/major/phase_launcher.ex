@@ -462,21 +462,7 @@ defmodule GiTF.Major.PhaseLauncher do
   would either double-spawn or wait forever.
   """
   @spec validation_in_flight?(String.t()) :: boolean()
-  def validation_in_flight?(mission_id), do: phase_in_flight?(mission_id, "validation")
-
-  @doc """
-  Whether a phase ghost for `phase` is queued or working on `mission_id`.
-  `pending` counts: an op waiting for a ghost slot is as much in flight
-  as one running — a sweep that reads it as "nobody is coming" re-spawns.
-  """
-  @spec phase_in_flight?(String.t(), String.t()) :: boolean()
-  def phase_in_flight?(mission_id, phase) do
-    Archive.by_index(:ops, :mission_id, mission_id)
-    |> Enum.any?(fn op ->
-      op[:phase_job] == true and op[:phase] == phase and
-        op.status in ["pending", "assigned", "running"]
-    end)
-  end
+  def validation_in_flight?(mission_id), do: GiTF.Ops.phase_in_flight?(mission_id, "validation")
 
   @doc """
   The phase ops of the CURRENT generation of `phase`: those inserted at or
@@ -485,26 +471,14 @@ defmodule GiTF.Major.PhaseLauncher do
   previous generation's ops behind as done/failed; counting them makes
   "all variants finished" true before the new ones have even spawned.
   """
-  @spec current_phase_ops(map(), String.t()) :: [map()]
-  def current_phase_ops(mission, phase) do
-    ops =
-      Archive.by_index(:ops, :mission_id, mission.id)
-      |> Enum.filter(&(&1[:phase_job] == true and &1[:phase] == phase))
+  @spec current_phase_ops(String.t(), String.t()) :: [map()]
+  def current_phase_ops(mission_id, phase) do
+    ops = GiTF.Ops.phase_ops(mission_id, phase)
 
-    case latest_entry_into(mission.id, phase) do
+    case GiTF.Missions.entered_phase_at(mission_id, phase) do
       nil -> ops
       since -> Enum.filter(ops, &(DateTime.compare(&1.inserted_at, since) != :lt))
     end
-  end
-
-  defp latest_entry_into(mission_id, phase) do
-    mission_id
-    |> GiTF.Missions.get_phase_transitions()
-    |> Enum.filter(&(Map.get(&1, :to_phase) == phase))
-    |> Enum.map(& &1.inserted_at)
-    |> Enum.max(DateTime, fn -> nil end)
-  rescue
-    _ -> nil
   end
 
   defp do_start_validation(mission, requirements, planning) do

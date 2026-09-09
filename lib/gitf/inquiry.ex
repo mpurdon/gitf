@@ -723,6 +723,19 @@ defmodule GiTF.Inquiry do
   @spec rejected?(map()) :: boolean()
   def rejected?(inquiry), do: inquiry[:outcome] == "rejected"
 
+  @doc """
+  A decision that closes its key: answered, and not sent back for new
+  options. Works on a store record (atom keys) and a register entry
+  (string keys) alike — every "does this count as answered?" question in
+  the module asks this.
+  """
+  @spec standing?(map()) :: boolean()
+  def standing?(%{status: status} = record), do: status == "answered" and not rejected?(record)
+  # A register entry (string keys); an entry with no outcome predates
+  # rejections and was a choice.
+  def standing?(%{"phase" => _} = entry), do: entry["outcome"] != "rejected"
+  def standing?(_), do: false
+
   defp validate_votes(inquiry, votes) when is_map(votes) do
     ids = MapSet.new(inquiry[:options] || [], & &1.id)
 
@@ -913,8 +926,9 @@ defmodule GiTF.Inquiry do
   defp existing(mission_id, phase, key) do
     mission_id
     |> for_mission()
-    |> Enum.filter(&(&1[:status] in ["open", "answered"] and not rejected?(&1)))
-    |> Enum.find(&(&1[:phase] == phase and &1[:key] == key))
+    |> Enum.find(fn r ->
+      r[:phase] == phase and r[:key] == key and (r[:status] == "open" or standing?(r))
+    end)
   end
 
   # Only questions this run actually put to a human count against the
@@ -994,7 +1008,7 @@ defmodule GiTF.Inquiry do
   defp standing_answer(mission_id, %{phase: phase} = question) do
     mission_id
     |> for_mission()
-    |> Enum.filter(&(&1[:status] == "answered" and &1[:phase] == phase))
+    |> Enum.filter(&(standing?(&1) and &1[:phase] == phase))
     |> oldest_first()
     |> Enum.find(&same_question?(&1, question))
   rescue
@@ -1056,12 +1070,11 @@ defmodule GiTF.Inquiry do
   defp inherited_answer(mission_id, phase, key) do
     case Archive.get(:missions, mission_id) do
       %{} = mission ->
-        # A rejection is not an answer — same rule as existing/3. Inheriting
-        # one as "already answered" would let the child walk past a
-        # question the operator sent back for new options.
+        # A rejection is not an answer: inheriting one as "already
+        # answered" would let the child walk past a question the operator
+        # sent back for new options.
         Enum.find(mission[:answered_inquiries] || [], fn entry ->
-          is_map(entry) and entry["phase"] == phase and entry["key"] == key and
-            entry["outcome"] != "rejected"
+          is_map(entry) and entry["phase"] == phase and entry["key"] == key and standing?(entry)
         end)
 
       _ ->
@@ -1107,27 +1120,32 @@ defmodule GiTF.Inquiry do
   # again and be told "already answered" only after the phase had gone its
   # own way.
   defp lineage_register(mission_id) do
-    inherited =
-      case Archive.get(:missions, mission_id) do
-        %{} = mission ->
-          for entry <- mission[:answered_inquiries] || [],
-              is_map(entry),
-              is_binary(entry["phase"]),
-              is_binary(entry["key"]),
-              do: entry
-
-        _ ->
-          []
-      end
+    own = answered_register(mission_id)
 
     # An inherited answer the child re-asked is materialized as the
     # child's own record too; the same decision must not read twice.
     # Only exact repeats fold — two rejected rounds under one key each
     # keep their own do-not-re-offer list.
-    (inherited ++ answered_register(mission_id))
+    (inherited_entries(mission_id) ++ own)
     |> Enum.uniq_by(&{&1["phase"], &1["key"], &1["answer"], &1["outcome"]})
+  end
+
+  # `answered_inquiries` on the mission record: answers carried across a
+  # resume. Unreadable → none; the child asks once more at worst.
+  defp inherited_entries(mission_id) do
+    case Archive.get(:missions, mission_id) do
+      %{} = mission ->
+        for entry <- mission[:answered_inquiries] || [],
+            is_map(entry),
+            is_binary(entry["phase"]),
+            is_binary(entry["key"]),
+            do: entry
+
+      _ ->
+        []
+    end
   rescue
-    _ -> answered_register(mission_id)
+    _ -> []
   end
 
   defp decisions_block([]), do: ""
@@ -1173,9 +1191,11 @@ defmodule GiTF.Inquiry do
 
     # By id, then by label: a duplicate matched on label carries the new
     # question's options with the old question's option id.
+    label = comparable_text(entry["answer_label"])
+
     chosen =
       Enum.find(options, &(&1["id"] == entry["answer"])) ||
-        Enum.find(options, &(&1["label"] == entry["answer_label"]))
+        Enum.find(options, &(comparable_text(&1["label"]) == label))
 
     case chosen do
       %{"rationale" => rationale} when is_binary(rationale) and rationale != "" ->

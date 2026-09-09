@@ -102,6 +102,29 @@ defmodule GiTF.Costs do
   end
 
   @doc """
+  Total spend across several missions in ONE pass over the costs table —
+  the budget meter's read, which runs on every advance. Same basis as
+  `for_quest/1` (a mission's spend is its ghosts' spend), without the
+  per-mission table scan and the sort a sum does not need.
+  """
+  @spec total_for_missions([String.t()]) :: float()
+  def total_for_missions(mission_ids) when is_list(mission_ids) do
+    ghost_ids =
+      mission_ids
+      |> Enum.flat_map(&Archive.by_index(:ops, :mission_id, &1))
+      |> Enum.map(& &1[:ghost_id])
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    if MapSet.size(ghost_ids) == 0 do
+      0.0
+    else
+      Archive.filter(:costs, &MapSet.member?(ghost_ids, &1.ghost_id))
+      |> total()
+    end
+  end
+
+  @doc """
   Returns a per-phase cost breakdown for a mission.
 
   Groups costs by phase and phase_type (productive vs overhead).

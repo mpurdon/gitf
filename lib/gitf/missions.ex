@@ -72,6 +72,21 @@ defmodule GiTF.Missions do
   @spec terminal_phases() :: [String.t()]
   def terminal_phases, do: @terminal_phases
 
+  @doc """
+  When the mission most recently entered `phase`, or nil if it never has.
+  The phase-timeout clock and the current-generation cutoff both read it;
+  one fold over the transitions, no sort.
+  """
+  @spec entered_phase_at(String.t(), String.t()) :: DateTime.t() | nil
+  def entered_phase_at(mission_id, phase) do
+    Archive.filter(:mission_phase_transitions, fn t ->
+      t[:mission_id] == mission_id and
+        (Map.get(t, :to_phase) == phase or Map.get(t, :phase) == phase)
+    end)
+    |> Enum.map(& &1.inserted_at)
+    |> Enum.max(DateTime, fn -> nil end)
+  end
+
   # When a phase holds for the operator, its artifact is renamed
   # `<key>_asked` (GiTF.Inquiry.Gate.move_aside/3). The copy is the record
   # of what the phase was thinking when it asked — history, never a live
@@ -89,6 +104,29 @@ defmodule GiTF.Missions do
   @spec history_key?(term()) :: boolean()
   def history_key?(key) when is_binary(key), do: String.ends_with?(key, @asked_suffix)
   def history_key?(_), do: false
+
+  @doc """
+  The live artifacts of `phase`'s family on a mission record or map, as
+  `{key, artifact}` pairs sorted by key: the canonical key and the
+  suffixed variants a parallel phase writes ("design_minimal",
+  "validation_v2"), never a moved-aside copy. Every scanner over the
+  artifact map goes through here so none can forget the history rule.
+  """
+  @spec live_artifacts(map(), String.t()) :: [{String.t(), map()}]
+  def live_artifacts(mission, phase) when is_map(mission) and is_binary(phase) do
+    (Map.get(mission, :artifacts) || %{})
+    |> Enum.filter(fn {key, value} ->
+      is_binary(key) and in_family?(key, phase) and not history_key?(key) and is_map(value)
+    end)
+    |> Enum.sort_by(fn {key, _} -> key end)
+  end
+
+  @doc "Whether `key` is `phase` or one of its suffixed variants (history included)."
+  @spec in_family?(String.t(), String.t()) :: boolean()
+  def in_family?(key, phase) when is_binary(key) and is_binary(phase),
+    do: key == phase or String.starts_with?(key, phase <> "_")
+
+  def in_family?(_, _), do: false
 
   @doc """
   Whether the mission is over. A plain store read — no ops list — because
@@ -195,12 +233,20 @@ defmodule GiTF.Missions do
   # liveness and idle-stop decisions need.
   @doc "True when the mission is not in a terminal or paused state."
   @spec non_terminal?(map()) :: boolean()
-  def non_terminal?(mission),
-    do: not finished?(mission) and Map.get(mission, :status) not in @paused_statuses
+  def non_terminal?(mission), do: not finished?(mission) and not paused?(mission)
 
   @doc "Paused by the operator or the budget watchdog — waits, and must not be advanced."
   @spec paused?(map()) :: boolean()
   def paused?(mission), do: Map.get(mission, :status) in @paused_statuses
+
+  @doc """
+  Whether the ladder may move this mission. Finished missions are done
+  and paused ones are waiting; "completed" alone stays advanceable for
+  its async post-processing (scoring has its own failure path).
+  """
+  @spec advanceable?(map()) :: boolean()
+  def advanceable?(mission),
+    do: Map.get(mission, :status) == "completed" or non_terminal?(mission)
 
   # -- Public API --------------------------------------------------------------
 
@@ -331,24 +377,38 @@ defmodule GiTF.Missions do
   #
   # Anything between the two would have to re-derive a tree from artifacts,
   # which is a different (and much less certain) operation.
-  @resumable_phases ["validation", "requirements"]
-
-  # Phases whose artifacts are inherited when resuming AT the key. Ordered:
-  # the replayed transitions are written in this order so the timeline reads
-  # as the journey it stands in for.
-  @inherited_phases %{
-    "validation" => ~w(triage research requirements design review planning),
-    "requirements" => ~w(triage research)
+  #
+  # One table describes a resume point:
+  #   inherits  — phases whose artifacts come along, in timeline order (the
+  #               replayed transitions are written in this order);
+  #   tree      — :archive_branch checks out the parent's preserved tree;
+  #               :none seeds nothing;
+  #   stand     — the phase a treeless child stands at before its first
+  #               advance (the last inherited one, so the ladder's own "is
+  #               this leg done?" check carries it forward);
+  #   registers — :carry keeps the parent's accepted/contested requirement
+  #               verdicts (same spec); :reset drops them (a new spec reuses
+  #               FR-n ids for different text).
+  @resume_shapes %{
+    "validation" => %{
+      inherits: ~w(triage research requirements design review planning),
+      tree: :archive_branch,
+      stand: nil,
+      registers: :carry
+    },
+    "requirements" => %{
+      inherits: ~w(triage research),
+      tree: :none,
+      stand: "research",
+      registers: :reset
+    }
   }
-
-  # The phase a treeless resume stands at before its first advance: the last
-  # inherited one, so the ladder's own "is this leg done?" check carries it
-  # forward on the inherited artifact.
-  @treeless_resume_stand %{"requirements" => "research"}
 
   @doc "Phases `resume/2` can restart a mission at."
   @spec resumable_phases() :: [String.t()]
-  def resumable_phases, do: @resumable_phases
+  def resumable_phases, do: Map.keys(@resume_shapes)
+
+  defp resume_shape(from_phase), do: Map.fetch!(@resume_shapes, from_phase)
 
   @doc """
   Starts a NEW mission on a failed mission's preserved tree, re-entering
@@ -471,7 +531,7 @@ defmodule GiTF.Missions do
   end
 
   defp validate_from_phase(phase) do
-    if phase in @resumable_phases, do: :ok, else: {:error, :unsupported_from_phase}
+    if Map.has_key?(@resume_shapes, phase), do: :ok, else: {:error, :unsupported_from_phase}
   end
 
   defp fetch_resumable_parent(parent_id) do
@@ -491,13 +551,22 @@ defmodule GiTF.Missions do
     end
   end
 
-  # A treeless resume needs the sector, not the parent's archived tree — a
-  # parent that died before it ever had one is still re-specifiable.
+  # What the resume point needs on disk: the parent's archived tree, or —
+  # for a treeless resume — only a usable sector (a parent that died before
+  # it ever had a tree is still re-specifiable).
   defp fetch_tree(parent, from_phase) do
-    if Map.has_key?(@treeless_resume_stand, from_phase) do
-      with {:ok, _path} <- fetch_sector_path(parent), do: {:ok, nil}
-    else
-      fetch_archive_branch(parent)
+    with {:ok, path} <- fetch_sector_path(parent) do
+      case resume_shape(from_phase).tree do
+        :none ->
+          {:ok, nil}
+
+        :archive_branch ->
+          branch = GiTF.Major.Topology.archive_branch(parent.id)
+
+          if GiTF.Git.branch_exists?(path, branch),
+            do: {:ok, branch},
+            else: {:error, :archive_branch_missing}
+      end
     end
   end
 
@@ -511,54 +580,38 @@ defmodule GiTF.Missions do
     end
   end
 
-  defp fetch_archive_branch(parent) do
-    branch = GiTF.Major.Topology.archive_branch(parent.id)
-
-    with sector_id when is_binary(sector_id) <- Map.get(parent, :sector_id),
-         %{path: path} when is_binary(path) <- Archive.get(:sectors, sector_id),
-         true <- File.dir?(path) do
-      if GiTF.Git.branch_exists?(path, branch) do
-        {:ok, branch}
-      else
-        {:error, :archive_branch_missing}
-      end
-    else
-      _ -> {:error, :sector_unavailable}
-    end
-  end
-
-  defp build_resumed_mission(parent, from_phase, nil = _archive_branch, opts) do
-    stand = Map.fetch!(@treeless_resume_stand, from_phase)
-
-    # Nothing slow here — no worktree is cut — so the child is active from
-    # the start and the caller gets it back already advancing.
-    with {:ok, child} <- create_resumed_record(parent, from_phase, false),
-         :ok <- inherit_artifacts(child, parent, from_phase),
-         :ok <- replay_transitions(child, parent, from_phase) do
-      transition_phase(child.id, stand, "resumed from #{parent.id} at #{from_phase}")
-
-      if Keyword.get(opts, :advance, true) do
-        GiTF.Major.Orchestrator.advance_quest(child.id)
-      end
-
-      with {:ok, mission} <- get(child.id), do: {:ok, mission, :created}
-    end
-  end
-
   defp build_resumed_mission(parent, from_phase, archive_branch, opts) do
-    async? = Keyword.get(opts, :async, false)
+    shape = resume_shape(from_phase)
+    # Only a seeded tree is slow enough to need the async path.
+    async? = shape.tree != :none and Keyword.get(opts, :async, false)
 
     with {:ok, child} <- create_resumed_record(parent, from_phase, async?),
          :ok <- inherit_artifacts(child, parent, from_phase),
-         :ok <- replay_transitions(child, parent, from_phase) do
-      if async? do
-        seed_async(child, parent, archive_branch, from_phase, opts)
-        with {:ok, mission} <- get(child.id), do: {:ok, mission, :created}
-      else
-        with :ok <- seed_and_launch(child, parent, archive_branch, from_phase, opts),
-             {:ok, mission} <- get(child.id),
-             do: {:ok, mission, :created}
-      end
+         :ok <- replay_transitions(child, parent, from_phase),
+         :ok <- launch_resumed(shape, child, parent, archive_branch, from_phase, opts),
+         {:ok, mission} <- get(child.id) do
+      {:ok, mission, :created}
+    end
+  end
+
+  # A treeless child stands at the shape's phase and advances at once; a
+  # seeded one waits for its worktree, in the background when asked.
+  defp launch_resumed(%{tree: :none, stand: stand}, child, parent, _branch, from_phase, opts) do
+    transition_phase(child.id, stand, "resumed from #{parent.id} at #{from_phase}")
+
+    if Keyword.get(opts, :advance, true) do
+      GiTF.Major.Orchestrator.advance_quest(child.id)
+    end
+
+    :ok
+  end
+
+  defp launch_resumed(_shape, child, parent, archive_branch, from_phase, opts) do
+    if Keyword.get(opts, :async, false) do
+      seed_async(child, parent, archive_branch, from_phase, opts)
+      :ok
+    else
+      seed_and_launch(child, parent, archive_branch, from_phase, opts)
     end
   end
 
@@ -618,14 +671,11 @@ defmodule GiTF.Missions do
   end
 
   defp create_resumed_record(parent, from_phase, async?) do
-    # The requirement registers are about the parent's SPEC. A validation
-    # resume keeps that spec, so verdicts on it carry. A requirements
-    # resume writes a new one, reusing the same ids for different text —
-    # a carried "accepted FR-2" would tell the child's validator to
-    # rubber-stamp exactly the requirement the re-specification exists to
-    # get right.
-    respecifies? = Map.has_key?(@treeless_resume_stand, from_phase)
-    contested = if respecifies?, do: [], else: inherited_contested(parent)
+    # Whether the requirement registers cross: see `@resume_shapes`.
+    carry? = resume_shape(from_phase).registers == :carry
+    # Walked once; three registers read it.
+    lineage = resume_lineage(parent)
+    contested = if carry?, do: inherited_contested(parent, lineage), else: []
     contested_ids = Enum.map(contested, & &1["req_id"])
 
     with {:ok, child} <-
@@ -654,7 +704,7 @@ defmodule GiTF.Missions do
         # Why the parent was sent back at approval: the child re-specifies
         # or re-validates against it. Recorded on the parent's approval
         # artifact and, until now, read by nobody.
-        rejection_notes: inherited_rejection_notes(parent),
+        rejection_notes: inherited_rejection_notes(lineage),
         # Visible in `show_mission` so an operator watching an async resume
         # can tell "worktree still being cut" from "nothing is happening".
         resume_seeding: async?,
@@ -671,14 +721,14 @@ defmodule GiTF.Missions do
         # the only safe one.
         contested_requirements: contested,
         accepted_requirements:
-          if(respecifies?, do: [], else: inherited_accepted(parent, contested_ids)),
+          if(carry?, do: inherited_accepted(parent, contested_ids), else: []),
         # A question the operator has already answered is a decision, not
         # state the child gets to re-derive. Re-asking it spends their
         # attention a second time on a matter that was settled, and the
         # second answer can differ from the first — which would make the
         # resumed run's provenance unreadable in exactly the way the
         # requirement registers exist to prevent.
-        answered_inquiries: inherited_answers(parent)
+        answered_inquiries: inherited_answers(parent, lineage)
       })
     end
   end
@@ -707,9 +757,11 @@ defmodule GiTF.Missions do
   of the alternative is a shipped gap nobody can see in the artifact.
   """
   @spec inherited_contested(map()) :: [map()]
-  def inherited_contested(parent) do
-    from_artifacts =
-      parent |> resume_lineage() |> Enum.flat_map(&lineage_requirement_entries/1)
+  def inherited_contested(parent), do: inherited_contested(parent, resume_lineage(parent))
+
+  @doc false
+  def inherited_contested(parent, lineage) do
+    from_artifacts = Enum.flat_map(lineage, &lineage_requirement_entries/1)
 
     entries = from_artifacts ++ contested_field_entries(parent)
 
@@ -752,9 +804,11 @@ defmodule GiTF.Missions do
   answer given at the top of it.
   """
   @spec inherited_answers(map()) :: [map()]
-  def inherited_answers(parent) do
-    parent
-    |> resume_lineage()
+  def inherited_answers(parent), do: inherited_answers(parent, resume_lineage(parent))
+
+  @doc false
+  def inherited_answers(_parent, lineage) do
+    lineage
     |> Enum.flat_map(&lineage_answer_entries/1)
     |> Enum.reduce(%{}, fn entry, acc ->
       Map.put(acc, {entry["phase"], entry["key"]}, entry)
@@ -791,36 +845,11 @@ defmodule GiTF.Missions do
   @spec lineage_ids(map()) :: [String.t()]
   def lineage_ids(mission) do
     mission |> resume_lineage() |> Enum.map(& &1[:id]) |> Enum.filter(&is_binary/1)
-  rescue
-    _ -> [mission[:id]]
   end
 
   # The operator's approval rejections along the lineage, oldest first.
-  defp inherited_rejection_notes(parent) do
-    parent
-    |> resume_lineage()
-    |> Enum.flat_map(fn record ->
-      own =
-        case get_in(record, [:artifacts, "approval"]) do
-          %{"approved" => false, "reason" => reason} = a when is_binary(reason) ->
-            [
-              %{
-                "mission_id" => record[:id],
-                "reason" => reason,
-                "rejected_by" => a["rejected_by"],
-                "rejected_at" => a["rejected_at"]
-              }
-            ]
-
-          _ ->
-            []
-        end
-
-      own
-    end)
-    |> Enum.uniq_by(&{&1["mission_id"], &1["reason"]})
-  rescue
-    _ -> []
+  defp inherited_rejection_notes(lineage) do
+    lineage |> Enum.map(&GiTF.Override.rejection/1) |> Enum.reject(&is_nil/1)
   end
 
   defp walk_resume_lineage(nil, _hops, acc), do: acc
@@ -842,12 +871,8 @@ defmodule GiTF.Missions do
   defp lineage_requirement_entries(record) do
     mission_id = record[:id]
 
-    (Map.get(record, :artifacts) || %{})
-    |> Enum.filter(fn {key, value} ->
-      is_binary(key) and String.starts_with?(key, "validation") and not history_key?(key) and
-        is_map(value)
-    end)
-    |> Enum.sort_by(fn {key, _artifact} -> key end)
+    record
+    |> live_artifacts("validation")
     |> Enum.flat_map(fn {_key, artifact} -> requirement_entries(artifact, mission_id) end)
   end
 
@@ -916,7 +941,7 @@ defmodule GiTF.Missions do
   # and the dashboard, and an unstamped copy is indistinguishable from work
   # this run actually did.
   defp inherit_artifacts(child, parent, from_phase) do
-    phases = Map.get(@inherited_phases, from_phase, [])
+    phases = resume_shape(from_phase).inherits
     parent_artifacts = Map.get(parent, :artifacts, %{}) || %{}
 
     inherited =
@@ -935,8 +960,7 @@ defmodule GiTF.Missions do
   # "validation_v2"). Prefix-matching carries the whole family, so a resumed
   # design tournament arrives with its full field rather than one variant.
   defp inheritable?(key, phases) when is_binary(key) do
-    not history_key?(key) and
-      Enum.any?(phases, fn phase -> key == phase or String.starts_with?(key, phase <> "_") end)
+    not history_key?(key) and Enum.any?(phases, &in_family?(key, &1))
   end
 
   defp inheritable?(_key, _phases), do: false
@@ -944,7 +968,7 @@ defmodule GiTF.Missions do
   defp replay_transitions(child, parent, from_phase) do
     inherited_artifacts = Map.get(parent, :artifacts, %{}) || %{}
 
-    Map.get(@inherited_phases, from_phase, [])
+    resume_shape(from_phase).inherits
     |> Enum.filter(fn phase ->
       Enum.any?(Map.keys(inherited_artifacts), &inheritable?(&1, [phase]))
     end)
@@ -1670,13 +1694,13 @@ defmodule GiTF.Missions do
   """
   @spec stop_live_ghosts(String.t()) :: non_neg_integer()
   def stop_live_ghosts(mission_id) do
-    GiTF.Ops.list(mission_id: mission_id)
+    Archive.by_index(:ops, :mission_id, mission_id)
     |> Enum.filter(&(&1[:status] in ["running", "assigned"] and is_binary(&1[:ghost_id])))
-    |> Enum.map(fn op ->
+    |> Enum.reduce(0, fn op, n ->
       Logger.warning("Quest #{mission_id}: stopping ghost #{op.ghost_id} (op #{op.id}) for halt")
       GiTF.Ghosts.stop(op.ghost_id)
+      n + 1
     end)
-    |> length()
   rescue
     e ->
       Logger.warning("Quest #{mission_id}: stopping live ghosts failed: #{Exception.message(e)}")

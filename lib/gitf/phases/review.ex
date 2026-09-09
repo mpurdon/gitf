@@ -102,26 +102,27 @@ defmodule GiTF.Phases.Review do
   # none of which the card carries — the dissent was always empty and
   # every rejection fingerprinted the same, so the second rejection always
   # read as a repeat and the redesign budget was cut to zero.)
+  @doc "The coverage entries the reviewer marked uncovered (`GiTF.Wire.Kinds` review card)."
+  @spec uncovered(map()) :: [map()]
+  def uncovered(artifact) when is_map(artifact),
+    do: for(c <- List.wrap(artifact["coverage"]), is_map(c), c["covered"] == false, do: c)
+
+  def uncovered(_), do: []
+
   @doc false
   @spec objection_text(map()) :: String.t()
   def objection_text(artifact) when is_map(artifact) do
     issues =
       for i <- List.wrap(artifact["issues"]), is_map(i) do
-        [i["description"], i["suggestion"]]
-        |> Enum.filter(&is_binary/1)
-        |> Enum.join(" — ")
+        [i["description"], i["suggestion"]] |> Enum.filter(&is_binary/1) |> Enum.join(" — ")
       end
 
-    gaps =
-      for c <- List.wrap(artifact["coverage"]),
-          is_map(c),
-          c["covered"] == false,
-          do: "#{c["req_id"] || c["requirement_id"]}: #{c["gap"] || "not covered"}"
+    gaps = for c <- uncovered(artifact), do: "#{c["req_id"]}: #{c["gap"] || "not covered"}"
 
     # `summary`/`gaps` are not on the card; honoured when present so a
     # hand-written artifact still says what it meant.
     ([artifact["risk_assessment"], artifact["summary"]] ++
-       issues ++ gaps ++ Enum.filter(List.wrap(artifact["gaps"]), &is_binary/1))
+       issues ++ gaps ++ List.wrap(artifact["gaps"]))
     |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
     |> Enum.join("\n")
   end

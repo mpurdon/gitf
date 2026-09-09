@@ -112,6 +112,36 @@ defmodule GiTF.Test.StoreHelper do
   Ensures essential infrastructure (PubSub, Registry) is running.
   Call this in test setup if tests may have crashed these processes.
   """
+  @doc """
+  Starts the web endpoint (server off) if it is not up and usable —
+  what a LiveView test needs before `live/2`. Idempotent.
+  """
+  def ensure_endpoint do
+    alive? =
+      case Process.whereis(GiTF.Web.Endpoint) do
+        nil -> false
+        pid -> Process.alive?(pid)
+      end
+
+    usable? =
+      try do
+        GiTF.Web.Endpoint.config(:pubsub_server)
+        true
+      rescue
+        ArgumentError -> false
+      end
+
+    unless alive? and usable? do
+      safe_stop(GiTF.Web.Endpoint)
+      Process.sleep(50)
+      current = Application.get_env(:gitf, GiTF.Web.Endpoint, [])
+      Application.put_env(:gitf, GiTF.Web.Endpoint, Keyword.put(current, :server, false))
+      {:ok, _} = GiTF.Web.Endpoint.start_link([])
+    end
+
+    :ok
+  end
+
   def ensure_infrastructure do
     # Ensure PubSub is running and functional
     pubsub_ok? =

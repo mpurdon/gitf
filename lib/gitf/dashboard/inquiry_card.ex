@@ -79,41 +79,43 @@ defmodule GiTF.Dashboard.InquiryCard do
         </div>
       </div>
 
-      <%= if @inquiry[:status] == "answered" do %>
-        <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
-          <span class={"badge #{if @inquiry[:outcome] == "rejected", do: "badge-orange", else: "badge-green"}"}>
-            {if @inquiry[:outcome] == "rejected", do: "rejected", else: "answered"}
-          </span>
-          <b style="margin-left:0.4rem">{@inquiry[:answer_label] || @inquiry[:answer]}</b>
-          <span style="color:var(--muted)">
-            — {@inquiry[:answered_by]}{if @inquiry[:answered_at], do: ", #{format_timestamp(@inquiry[:answered_at])}"}
-          </span>
-          <div :if={@inquiry[:direction]} style="margin-top:0.3rem; color:var(--muted); font-style:italic">
-            direction: {@inquiry[:direction]}
+      <%= case @inquiry[:status] do %>
+        <% "answered" -> %>
+          <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
+            <span class={"badge #{if @inquiry[:outcome] == "rejected", do: "badge-orange", else: "badge-green"}"}>
+              {if @inquiry[:outcome] == "rejected", do: "rejected", else: "answered"}
+            </span>
+            <b style="margin-left:0.4rem">{@inquiry[:answer_label] || @inquiry[:answer]}</b>
+            <span style="color:var(--muted)">
+              — {@inquiry[:answered_by]}{if @inquiry[:answered_at], do: ", #{format_timestamp(@inquiry[:answered_at])}"}
+            </span>
+            <div :if={@inquiry[:direction]} style="margin-top:0.3rem; color:var(--muted); font-style:italic">
+              direction: {@inquiry[:direction]}
+            </div>
           </div>
-        </div>
-      <% else %>
-        <%!-- A withdrawn question was taken back before anyone answered it
-              (a kill, an orphan sweep, an operator reset). It is history:
-              no controls, or the page invites a vote on a question the
-              factory no longer holds for. --%>
-        <%= if @inquiry[:status] == "withdrawn" do %>
+        <% "withdrawn" -> %>
+          <%!-- Taken back before anyone answered it (a kill, an orphan sweep,
+                an operator reset). History: no controls, or the page invites
+                a vote on a question the factory no longer holds for. --%>
           <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
             <span class="badge badge-grey">withdrawn</span>
             <span style="color:var(--muted); margin-left:0.4rem">
               {@inquiry[:withdrawn_reason]}{if @inquiry[:withdrawn_at], do: " — #{format_timestamp(@inquiry[:withdrawn_at])}"}
             </span>
           </div>
-        <% else %>
+        <% _open -> %>
           <div style="margin-top:0.8rem">
             <.answer_controls inquiry={@inquiry} draft={@draft} votes={@votes} />
           </div>
           <.redesign_controls :if={@inquiry[:kind] == :choice} inquiry={@inquiry} votes={@votes} />
-        <% end %>
       <% end %>
     </div>
     """
   end
+
+  defp edge_colour(%{status: "open"}), do: "var(--warn)"
+  defp edge_colour(%{status: "withdrawn"}), do: "var(--muted)"
+  defp edge_colour(_), do: "var(--ok)"
 
   attr(:inquiry, :map, required: true)
   attr(:draft, :string, default: nil)
@@ -124,10 +126,6 @@ defmodule GiTF.Dashboard.InquiryCard do
   # to render must fall back to the plain list rather than draw a grid of
   # empty frames — the operator loses the pictures either way, and a list
   # of labelled options is the better thing to be left with.
-  defp edge_colour(%{status: "open"}), do: "var(--warn)"
-  defp edge_colour(%{status: "withdrawn"}), do: "var(--muted)"
-  defp edge_colour(_), do: "var(--ok)"
-
   defp answer_controls(%{inquiry: %{kind: :choice, options: options}} = assigns)
        when is_list(options) do
     if Enum.any?(options, &(&1[:preview] != nil)) do

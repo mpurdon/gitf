@@ -888,6 +888,11 @@ defmodule GiTF.Ghost.Worker do
       # Pre-dispatch: write op instructions so Claude Code has context at boot
       write_pre_dispatch(shell.worktree_path, state.op_id)
 
+      # Built once and kept on the state: the task skill, the spawn, and
+      # every retry, backoff and model fallback read the same prompt
+      # instead of re-reading the op, the mission and the inquiry store.
+      state = %{state | opts: Keyword.put_new(state.opts, :prompt, build_prompt(state))}
+
       # Build task-specific skill for non-phase ops (works for both API and CLI)
       if !is_phase_job do
         maybe_build_task_skill(build_prompt(state), shell.worktree_path, state.op_id)
@@ -1559,7 +1564,7 @@ defmodule GiTF.Ghost.Worker do
     title = Map.get(job_info, :title, "")
     description = Map.get(job_info, :description, "")
     target_files = Map.get(job_info, :target_files, []) |> List.wrap() |> Enum.join(", ")
-    acceptance = Map.get(job_info, :acceptance_criteria, "")
+    acceptance = GiTF.Ops.acceptance_criteria_section(job_info, "Acceptance criteria:")
 
     research_prompt = """
     You are a senior software engineer preparing to implement a task.
@@ -1568,7 +1573,7 @@ defmodule GiTF.Ghost.Worker do
     Task: #{title}
     Description: #{description}
     #{if target_files != "", do: "Target files: #{target_files}", else: ""}
-    #{if acceptance != "", do: "Acceptance criteria: #{acceptance}", else: ""}
+    #{acceptance}
 
     Provide:
     1. Key patterns and best practices for this type of change
@@ -1631,9 +1636,9 @@ defmodule GiTF.Ghost.Worker do
             [
               op.title,
               op.description,
-              acceptance_section(op),
-              GiTF.Ops.target_files_text(op),
-              operator_decisions(op)
+              GiTF.Ops.acceptance_criteria_section(op),
+              GiTF.Ops.target_files_section(op),
+              operator_context(op)
             ]
             |> Enum.reject(&(&1 in [nil, ""]))
             |> Enum.join("\n\n")
@@ -1647,15 +1652,16 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  defp acceptance_section(op) do
-    case GiTF.Ops.acceptance_criteria_text(op) do
-      "" -> ""
-      text -> "## Acceptance criteria\n\n#{text}"
+  # Decisions and approval rejections — the same block every phase prompt
+  # carries, so an op ghost is bound by the operator's word too.
+  defp operator_context(%{mission_id: id}) when is_binary(id) do
+    case GiTF.Missions.get(id) do
+      {:ok, mission} -> GiTF.Intel.operator_context(mission)
+      _ -> ""
     end
   end
 
-  defp operator_decisions(%{mission_id: id}) when is_binary(id), do: GiTF.Inquiry.prompt_block(id)
-  defp operator_decisions(_), do: ""
+  defp operator_context(_), do: ""
 
   # -- Private: completion handling --------------------------------------------
 
@@ -2584,7 +2590,7 @@ defmodule GiTF.Ghost.Worker do
   defp write_pre_dispatch(worktree_path, op_id) do
     case GiTF.Ops.get(op_id) do
       {:ok, op} ->
-        content = build_instructions_content(op)
+        content = GiTF.Ops.instructions_content(op)
         instructions_path = Path.join([worktree_path, ".claude", "instructions.md"])
         File.mkdir_p!(Path.dirname(instructions_path))
         File.write!(instructions_path, content)
@@ -2597,47 +2603,6 @@ defmodule GiTF.Ghost.Worker do
     e ->
       Logger.debug("Pre-dispatch write failed (non-fatal): #{inspect(e)}")
       :ok
-  end
-
-  defp build_instructions_content(op) do
-    sections = [
-      "# Job Instructions\n",
-      "## #{op.title}\n"
-    ]
-
-    sections =
-      if op.description && op.description != "" do
-        sections ++ ["### Description\n\n#{op.description}\n"]
-      else
-        sections
-      end
-
-    sections =
-      case Map.get(op, :scout_findings) do
-        findings when is_binary(findings) and findings != "" ->
-          sections ++ ["### Recon Findings\n\n#{findings}\n"]
-
-        _ ->
-          sections
-      end
-
-    sections =
-      case GiTF.Ops.acceptance_criteria_text(op) do
-        "" -> sections
-        criteria -> sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
-      end
-
-    sections =
-      case Map.get(op, :target_files) do
-        files when is_list(files) and files != [] ->
-          file_list = Enum.map_join(files, "\n", &"- `#{&1}`")
-          sections ++ ["### Target Files\n\n#{file_list}\n"]
-
-        _ ->
-          sections
-      end
-
-    Enum.join(sections, "\n")
   end
 
   # -- Private: spawn rollback ------------------------------------------------

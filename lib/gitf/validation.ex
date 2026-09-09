@@ -672,92 +672,60 @@ defmodule GiTF.Validation do
     raw = Map.get(validation, "raw_output", "")
     summary = Map.get(validation, "summary", "")
 
-    sections = ["## Validation Feedback\n"]
-    spec = requirement_index(mission)
+    uncovered = List.wrap(Map.get(validation, "uncovered_requirements"))
+    spec = if unmet != [] or uncovered != [], do: requirement_index(mission), else: %{}
 
     # The validator's evidence says what is wrong; the requirement says
     # what right is. A fix ghost handed only "FR-3: <evidence>" repaired
     # the symptom against its own reading of the goal.
-    sections =
-      if unmet != [] do
-        req_lines =
-          Enum.map(unmet, fn req ->
-            id = Map.get(req, "req_id", "?")
-            evidence = Map.get(req, "evidence", "No details")
-            files = extract_file_paths(evidence)
-            file_hint = if files != [], do: " (#{Enum.join(files, ", ")})", else: ""
-            "- **#{id}**: #{evidence}#{file_hint}" <> requirement_lines(spec, id)
-          end)
+    unmet_lines =
+      Enum.map(unmet, fn req ->
+        id = Map.get(req, "req_id", "?")
+        evidence = Map.get(req, "evidence", "No details")
+        files = extract_file_paths(evidence)
+        file_hint = if files != [], do: " (#{Enum.join(files, ", ")})", else: ""
+        "- **#{id}**: #{evidence}#{file_hint}" <> requirement_lines(spec, id)
+      end)
 
-        sections ++ ["### Unmet Requirements\n"] ++ req_lines ++ [""]
-      else
-        sections
-      end
-
-    uncovered = List.wrap(Map.get(validation, "uncovered_requirements"))
-
-    sections =
-      if uncovered != [] do
-        lines = Enum.map(uncovered, fn id -> "- **#{id}**" <> requirement_lines(spec, id) end)
-        sections ++ ["### Requirements with no evidence at all\n"] ++ lines ++ [""]
-      else
-        sections
-      end
-
-    sections =
-      if gaps != [] do
-        gap_lines = Enum.map(gaps, fn gap -> "- #{gap}" end)
-        sections ++ ["### Gaps\n"] ++ gap_lines ++ [""]
-      else
-        sections
-      end
-
-    sections =
-      if summary != "" do
-        sections ++ ["### Summary\n", summary, ""]
-      else
-        sections
-      end
-
-    sections =
-      if unmet == [] and gaps == [] and raw != "" do
-        sections ++ ["### Raw Validator Output\n", String.slice(raw, 0, 2000), ""]
-      else
-        sections
-      end
-
-    sections =
-      if impl_files != [] do
-        sections ++ ["### Files Changed\n", Enum.join(impl_files, ", "), ""]
-      else
-        sections
-      end
+    uncovered_lines = Enum.map(uncovered, &("- **#{&1}**" <> requirement_lines(spec, &1)))
 
     # The build is broken on main independently of this work: say so, or
     # the ghost reads "cargo build fails" as its own problem and rewrites
     # the manifests to chase it (msn-f24c5f, three rounds).
-    sections =
+    pre_existing =
       if GiTF.Phases.Validation.exec_pre_existing?(mission) do
-        sections ++
-          [
-            "### The sector's build fails on the base commit too\n",
-            "The validation command fails on the commit this work branched from, " <>
-              "in a clean worktree. That breakage is NOT yours to fix and is out of " <>
-              "scope: do not touch dependency manifests, build configuration or " <>
-              "unrelated modules to make the build pass. Fix only the gaps that " <>
-              "concern the implementation's own changes.",
-            ""
-          ]
+        [
+          "### The sector's build fails on the base commit too\n",
+          "The validation command fails on the commit this work branched from, " <>
+            "in a clean worktree. That breakage is NOT yours to fix and is out of " <>
+            "scope: do not touch dependency manifests, build configuration or " <>
+            "unrelated modules to make the build pass. Fix only the gaps that " <>
+            "concern the implementation's own changes.",
+          ""
+        ]
       else
-        sections
+        []
       end
 
-    # The operator's decisions bind the fix as much as the first attempt.
+    # Each section is a list of lines, or [] when it has nothing to say.
     sections =
-      case GiTF.Inquiry.prompt_block(mission.id) do
-        "" -> sections
-        block -> sections ++ [block, ""]
-      end
+      [
+        ["## Validation Feedback\n"],
+        section("### Unmet Requirements\n", unmet_lines),
+        section("### Requirements with no evidence at all\n", uncovered_lines),
+        section("### Gaps\n", Enum.map(gaps, &"- #{&1}")),
+        section("### Summary\n", if(summary != "", do: [summary], else: [])),
+        section(
+          "### Raw Validator Output\n",
+          if(unmet == [] and gaps == [] and raw != "", do: [String.slice(raw, 0, 2000)], else: [])
+        ),
+        section(
+          "### Files Changed\n",
+          if(impl_files != [], do: [Enum.join(impl_files, ", ")], else: [])
+        ),
+        pre_existing
+      ]
+      |> List.flatten()
 
     instructions = """
     ## Instructions
@@ -789,6 +757,9 @@ defmodule GiTF.Validation do
 
   # Extract file paths from text (looks for common patterns like
   # path/to/file.ext) so the fix description can hint at the right files.
+  defp section(_heading, []), do: []
+  defp section(heading, lines), do: [heading | lines] ++ [""]
+
   defp extract_file_paths(text) when is_binary(text) do
     regex = ~r/(?:^|[\s`'"])([a-zA-Z][\w.\/-]*\.\w{1,6})(?:[\s`'",:\]]|$)/
 

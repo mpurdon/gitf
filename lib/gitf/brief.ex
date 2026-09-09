@@ -326,13 +326,9 @@ defmodule GiTF.Brief do
 
         # Add this op's acceptance criteria
         sections =
-          case Map.get(op, :acceptance_criteria, []) do
-            [] ->
-              sections
-
-            criteria ->
-              formatted = Enum.map_join(criteria, "\n", &"- [ ] #{&1}")
-              sections ++ ["## Acceptance Criteria (Your Job)\n", formatted, ""]
+          case GiTF.Ops.acceptance_criteria_section(op, "## Acceptance Criteria (Your Job)") do
+            "" -> sections
+            criteria -> sections ++ [criteria, ""]
           end
 
         Enum.join(sections, "\n")

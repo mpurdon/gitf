@@ -470,8 +470,7 @@ defmodule GiTF.Major.PhasePrompts do
 
         # The reviewer's statement of which requirement no component
         # delivers is the one thing the planner must not lose.
-        uncovered =
-          for c <- List.wrap(Map.get(review, "coverage")), is_map(c), c["covered"] == false, do: c
+        uncovered = GiTF.Phases.Review.uncovered(review)
 
         condensed =
           %{
@@ -799,6 +798,36 @@ defmodule GiTF.Major.PhasePrompts do
   # The floor is quoted from `GiTF.Phases.Validation` rather than repeated
   # here: a prompt that advertises a threshold the gate does not enforce
   # is worse than no prompt at all.
+  @doc """
+  Why an earlier run of this work was sent back at approval, from the
+  mission's `rejection_notes` (inherited across a resume). Empty when
+  there are none.
+  """
+  @spec render_rejection_notes_block(map()) :: String.t()
+  def render_rejection_notes_block(mission) do
+    case Map.get(mission, :rejection_notes) do
+      [_ | _] = notes ->
+        lines =
+          Enum.map_join(notes, "\n", fn n ->
+            meta = Enum.filter([n["rejected_by"], n["rejected_at"]], &is_binary/1)
+            "- #{n["reason"]}" <> if(meta == [], do: "", else: " (#{Enum.join(meta, ", ")})")
+          end)
+
+        """
+        ## REJECTED AT APPROVAL — an earlier run of this work
+
+        The operator reviewed an earlier run's result and sent it back for
+        these reasons. They are requirements now: whatever you produce must
+        answer every one of them, and a validator must check that it does.
+
+        #{lines}
+        """
+
+      _ ->
+        ""
+    end
+  end
+
   defp render_contested_requirements_block([]), do: ""
 
   defp render_contested_requirements_block(entries) when is_list(entries) do

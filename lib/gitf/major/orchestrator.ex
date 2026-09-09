@@ -319,8 +319,7 @@ defmodule GiTF.Major.Orchestrator do
         # advanced either: the Janitor sweep selects by phase, so a
         # budget-paused mission at "implementation" reached this gate every
         # three minutes and re-spawned the ghosts the watchdog had killed.
-        mission.status in ["failed", "closed", "killed", "cancelled"] or
-            GiTF.Missions.paused?(mission) ->
+        not GiTF.Missions.advanceable?(mission) ->
           {:ok, :terminal}
 
         # GATE 2 — the clock.
@@ -328,8 +327,8 @@ defmodule GiTF.Major.Orchestrator do
           halt_on_timeout(mission_id)
 
         # GATE 3 — the meter.
-        Lifecycle.over_budget?(mission) ->
-          halt_on_budget(mission_id, mission)
+        (budget = Lifecycle.budget_verdict(mission)) != :ok ->
+          halt_on_budget(mission_id, budget)
 
         # All gates clear: walk one more leg of the journey.
         true ->
@@ -352,9 +351,9 @@ defmodule GiTF.Major.Orchestrator do
     fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
   end
 
-  defp halt_on_budget(mission_id, mission) do
-    case Lifecycle.mission_budget_snapshot(mission) do
-      {:ok, {cap, spent}} ->
+  defp halt_on_budget(mission_id, verdict) do
+    case verdict do
+      {:over, cap, spent} ->
         Logger.warning(
           "Quest #{mission_id} exceeded budget cap ($#{Float.round(cap, 2)}): spent $#{Float.round(spent, 4)} — failing"
         )
@@ -372,7 +371,7 @@ defmodule GiTF.Major.Orchestrator do
           "Budget exceeded: spent $#{Float.round(spent, 4)} of $#{Float.round(cap, 2)} cap"
         )
 
-      {:error, reason} ->
+      {:unverifiable, reason} ->
         # The budget could not be COMPUTED. Failing the quest would
         # destroy work over a bookkeeping glitch; advancing would
         # spend uncapped. Hold in place and page the operator.
@@ -408,23 +407,24 @@ defmodule GiTF.Major.Orchestrator do
       "Orchestrator: advancing #{mission.id} from phase=#{phase} status=#{mission.status}"
     )
 
-    cond do
-      phase == GiTF.Inquiry.gate_phase() ->
-        GiTF.Inquiry.Gate.handle_result(mission)
+    if phase == GiTF.Inquiry.gate_phase() do
+      GiTF.Inquiry.Gate.handle_result(mission)
+    else
+      case GiTF.Inquiry.Gate.intercept(mission) do
+        {:held, _} ->
+          {:ok, GiTF.Inquiry.gate_phase()}
 
-      (gate = GiTF.Inquiry.Gate.intercept(mission)) != :clear ->
-        case gate do
-          {:held, _} -> {:ok, GiTF.Inquiry.gate_phase()}
-          # A broken gate stalls the mission where it stands (alerted by the
-          # gate); the ladder does not get to walk past a raised question.
-          {:failed, _} -> {:ok, phase}
-        end
+        # A broken gate stalls the mission where it stands (alerted by the
+        # gate); the ladder does not get to walk past a raised question,
+        # and the caller must not log it as a step.
+        {:failed, _} ->
+          {:ok, :stalled}
 
-      WorkflowBridge.workflow_dispatch_active?(mission) ->
-        WorkflowBridge.advance_via_workflow(mission, phase)
-
-      true ->
-        advance_via_legacy(mission, phase)
+        :clear ->
+          if WorkflowBridge.workflow_dispatch_active?(mission),
+            do: WorkflowBridge.advance_via_workflow(mission, phase),
+            else: advance_via_legacy(mission, phase)
+      end
     end
   end
 
@@ -644,27 +644,15 @@ defmodule GiTF.Major.Orchestrator do
       next_fn.(mission)
     else
       # Check if phase has been stuck too long (no artifact produced)
-      transitions = GiTF.Missions.get_phase_transitions(mission.id)
-
-      phase_start =
-        transitions
-        |> Enum.filter(&(Map.get(&1, :to_phase) == phase || Map.get(&1, :phase) == phase))
-        |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
-        |> List.first()
+      phase_start = GiTF.Missions.entered_phase_at(mission.id, phase)
 
       if phase_start do
-        age = GiTF.Clock.awake_elapsed(phase_start.inserted_at)
+        age = GiTF.Clock.awake_elapsed(phase_start)
         timeout = PhaseLauncher.phase_timeout_for(mission.sector_id, phase)
 
         if age > timeout do
           # Check if there's already a running phase ghost to avoid duplicate spawning
-          running_phase_job =
-            Archive.find_one(:ops, fn j ->
-              j.mission_id == mission.id and
-                j[:op_type] == "phase" and
-                j[:phase] == phase and
-                j.status in ["pending", "running", "assigned"]
-            end)
+          running_phase_job = GiTF.Ops.phase_op_in_flight(mission.id, phase)
 
           running_worker =
             with %{} <- running_phase_job,

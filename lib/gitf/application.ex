@@ -308,31 +308,14 @@ defmodule GiTF.Application do
   # be replaced by GiTF.Flags.Registry once the flag registry lands (see
   # plans/flag-registry.md).
   defp log_feature_flags do
-    flags = [
-      {:triage_enabled, "GITF_TRIAGE_ENABLED", false},
-      {:skills_enabled, "GITF_SKILLS_ENABLED", false},
-      {:skill_refinement_enabled, "GITF_SKILL_REFINEMENT_ENABLED", false},
-      {:skill_auto_commit_enabled, "GITF_SKILL_AUTO_COMMIT_ENABLED", false},
-      {:outcomes_enabled, "GITF_OUTCOMES_ENABLED", false},
-      {:outcome_refinement_enabled, "GITF_OUTCOME_REFINEMENT_ENABLED", false},
-      {:vault_writer_enabled, "GITF_VAULT_WRITER_ENABLED", false},
-      {:knowledge_context_enabled, "GITF_KNOWLEDGE_CONTEXT_ENABLED", false},
-      {:knowledge_compile_enabled, "GITF_KNOWLEDGE_COMPILE_ENABLED", false},
-      {:workflow_dsl_enabled, "GITF_WORKFLOW_DSL_ENABLED", true},
-      {:workflow_inference_enabled, "GITF_WORKFLOW_INFERENCE_ENABLED", false},
-      {:parallel_impl_attempts, "GITF_PARALLEL_IMPL_ATTEMPTS", 1},
-      {:lsp_validation_enabled, "GITF_LSP_VALIDATION_ENABLED", false},
-      {:wire_enabled, "GITF_WIRE_ENABLED", false}
-    ]
-
     lines =
-      Enum.map(flags, fn {key, env_var, default} ->
-        value = Application.get_env(:gitf, key, default)
+      Enum.map(GiTF.Flags.effective(GiTF.Config.Provider.all()), fn {key, value, pin} ->
+        env_var = "GITF_" <> String.upcase(to_string(key))
 
         source =
           cond do
-            env_var && System.get_env(env_var) not in [nil, ""] -> "env #{env_var}"
-            value != default -> "config"
+            is_boolean(pin) -> "config [features]"
+            System.get_env(env_var) not in [nil, ""] -> "env #{env_var}"
             true -> "default"
           end
 

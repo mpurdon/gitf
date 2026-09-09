@@ -110,7 +110,7 @@ defmodule GiTF.Major.DesignBoard do
     # re-dispatches design; the previous round's done/failed ops made
     # "every variant finished" true in the window before the new ones
     # spawned, and mixed two rounds' variants in the review afterwards.
-    design_ops = PhaseLauncher.current_phase_ops(mission, "design")
+    design_ops = PhaseLauncher.current_phase_ops(mission.id, "design")
 
     if design_ops == [] do
       {:ok, "design"}

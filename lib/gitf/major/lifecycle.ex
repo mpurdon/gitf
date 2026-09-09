@@ -48,7 +48,15 @@ defmodule GiTF.Major.Lifecycle do
   # -- The meter ---------------------------------------------------------------
 
   @doc false
-  def over_budget?(mission) do
+  def over_budget?(mission), do: budget_verdict(mission) != :ok
+
+  @doc """
+  The meter's verdict, with the numbers the halt needs so the read is
+  done once per advance: `:ok`, `{:over, cap, spent}`, or
+  `{:unverifiable, reason}`.
+  """
+  @spec budget_verdict(map()) :: :ok | {:over, float(), float()} | {:unverifiable, term()}
+  def budget_verdict(mission) do
     status = Map.get(mission, :status, "pending")
     phase = Map.get(mission, :current_phase, "pending")
 
@@ -57,15 +65,16 @@ defmodule GiTF.Major.Lifecycle do
     # A mission held at a human gate spends nothing while it waits, so the
     # meter has nothing to say about it either.
     if status == "completed" or phase in unmetered_phases() do
-      false
+      :ok
     else
       # Fail CLOSED: an unverifiable budget blocks advancement (the arm
       # above distinguishes held-vs-exceeded). The old rescue returned
       # spent=0.0, which meant one malformed cost record permanently
       # disarmed the cap for every mission.
       case mission_budget_snapshot(mission) do
-        {:ok, {cap, spent}} -> spent > cap
-        {:error, _reason} -> true
+        {:ok, {cap, spent}} when spent > cap -> {:over, cap, spent}
+        {:ok, _} -> :ok
+        {:error, reason} -> {:unverifiable, reason}
       end
     end
   end
@@ -85,15 +94,7 @@ defmodule GiTF.Major.Lifecycle do
         Config.get([:major, :mission_cost_cap_usd]) ||
         GiTF.Budget.config_budget()
 
-    # A resumed child is the same piece of work: its spend is the
-    # lineage's. A parent that burned $39 of $40 and failed was resumed
-    # with a fresh $40, ten hops deep if it kept failing.
-    spent =
-      mission
-      |> GiTF.Missions.lineage_ids()
-      |> Enum.map(&(GiTF.Costs.for_quest(&1) |> GiTF.Costs.total()))
-      |> Enum.sum()
-
+    spent = GiTF.Budget.spent_for(mission.id)
     {:ok, {cap * 1.0, spent}}
   rescue
     e ->

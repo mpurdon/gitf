@@ -12,15 +12,28 @@ defmodule GiTF.Dashboard.SettingsLive do
      socket
      |> assign(:page_title, "Settings")
      |> assign(:current_path, "/dashboard/settings")
-     |> assign(:config, config)
-     |> assign(:dirty, false)
+     |> assign_config(config)
      |> init_toasts()}
+  end
+
+  # `flags` is assigned explicitly because the badge reads Application
+  # env, which LiveView's change tracking cannot see — after a save it
+  # stayed stale until the page was reloaded.
+  defp assign_config(socket, config) do
+    socket
+    |> assign(:config, config)
+    |> assign(:flags, GiTF.Flags.effective(config))
+    |> assign(:dirty, false)
   end
 
   @impl true
   def handle_event("update", %{"config" => params}, socket) do
     config = merge_params(socket.assigns.config, params)
-    {:noreply, assign(socket, config: config, dirty: true)}
+
+    {:noreply,
+     socket
+     |> assign(config: config, dirty: true)
+     |> assign(:flags, GiTF.Flags.effective(config))}
   end
 
   def handle_event("save", _params, socket) do
@@ -39,7 +52,7 @@ defmodule GiTF.Dashboard.SettingsLive do
 
         {:noreply,
          socket
-         |> assign(:dirty, false)
+         |> assign_config(config)
          |> put_flash(:info, "Settings saved and reloaded.")}
 
       {:error, reason} ->
@@ -52,8 +65,7 @@ defmodule GiTF.Dashboard.SettingsLive do
 
     {:noreply,
      socket
-     |> assign(:config, config)
-     |> assign(:dirty, false)
+     |> assign_config(config)
      |> put_flash(:info, "Config reloaded from disk.")}
   end
 
@@ -125,17 +137,6 @@ defmodule GiTF.Dashboard.SettingsLive do
   defp coerce("features", _key, "false"), do: false
   defp coerce(_section, _key, v), do: v
 
-  # The [features] table as written: "" (inherit) unless the file pins it.
-  defp flag_setting(config, flag) do
-    case config |> Map.get("features", %{}) |> Map.get(to_string(flag)) do
-      true -> "true"
-      false -> "false"
-      _ -> ""
-    end
-  end
-
-  defp flag_rows(config), do: GiTF.Flags.effective(config)
-
   defp parse_float(v) when is_binary(v) do
     case Float.parse(v) do
       {f, _} -> f
@@ -190,8 +191,8 @@ defmodule GiTF.Dashboard.SettingsLive do
               env. "Inherit" removes the pin so the boot value decides again.
             </div>
             <div style="display:grid; grid-template-columns:auto 1fr auto; gap:0.4rem 0.75rem; align-items:center">
-              <%= for {flag, value, source} <- flag_rows(@config) do %>
-                <span class={"badge #{if value == true, do: "badge-green", else: "badge-grey"}"} title={"effective value (#{source})"}>
+              <%= for {flag, value, pin} <- @flags do %>
+                <span class={"badge #{if value == true, do: "badge-green", else: "badge-grey"}"} title={if is_boolean(pin), do: "pinned by config", else: "boot value"}>
                   {if value == true, do: "on", else: "off"}
                 </span>
                 <div style="min-width:0">
@@ -199,9 +200,9 @@ defmodule GiTF.Dashboard.SettingsLive do
                   <div style="color:var(--muted); font-size:0.72rem">{GiTF.Flags.describe(flag)}</div>
                 </div>
                 <select name={"config[features][#{flag}]"} class="form-select" style="font-size:0.8rem">
-                  <option value="" selected={flag_setting(@config, flag) == ""}>inherit ({source})</option>
-                  <option value="true" selected={flag_setting(@config, flag) == "true"}>on</option>
-                  <option value="false" selected={flag_setting(@config, flag) == "false"}>off</option>
+                  <option value="" selected={is_nil(pin)}>inherit ({if is_nil(pin), do: "boot", else: "config"})</option>
+                  <option value="true" selected={pin == true}>on</option>
+                  <option value="false" selected={pin == false}>off</option>
                 </select>
               <% end %>
             </div>

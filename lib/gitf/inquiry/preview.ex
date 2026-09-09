@@ -250,8 +250,10 @@ defmodule GiTF.Inquiry.Preview do
   def attach(mission, phase, %{kind: :choice, options: options} = question, artifact_key)
       when is_list(options) do
     if enabled?() and Enum.any?(options, &previewable?/1) do
-      # One worktree per question, resolved once, not once per option.
+      # One worktree and one round per question, resolved once, not once
+      # per option.
       root = source_root(mission, phase, artifact_key)
+      question = Map.put(question, :round, round_of(mission, question))
       render = &render_option(mission, phase, root, question, &1)
       %{question | options: Enum.map(options, render)}
     else
@@ -310,7 +312,7 @@ defmodule GiTF.Inquiry.Preview do
   end
 
   defp build(mission, root, question, option) do
-    png = png_path(mission.id, question.key, option.id, round_of(mission, question))
+    png = png_path(mission.id, question.key, option.id, Map.get(question, :round, 0))
 
     # The same question re-asked on a later advance sweep, or re-emitted by
     # a phase that was re-dispatched, must not pay for the browser twice.
@@ -382,7 +384,7 @@ defmodule GiTF.Inquiry.Preview do
   # the gate moves the artifact aside) → "minimal"; "design" → nil.
   defp strategy_of(key, phase) when is_binary(key) and is_binary(phase) do
     case String.split(key, phase <> "_", parts: 2) do
-      ["", rest] when rest != "" -> String.replace_suffix(rest, "_asked", "")
+      ["", rest] when rest != "" -> String.replace_suffix(rest, GiTF.Missions.asked_suffix(), "")
       _ -> nil
     end
   end
@@ -774,6 +776,7 @@ defmodule GiTF.Inquiry.Preview do
   def png_path(mission_id, key, option_id, round \\ 0) do
     case root() do
       {:ok, root} ->
+        # Round 0 keeps the original path: images already on disk stay valid.
         Path.join([
           root,
           @subdir,

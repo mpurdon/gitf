@@ -24,35 +24,9 @@ defmodule GiTF.Flags do
 
   require Logger
 
-  @known [
-    :triage_enabled,
-    :skills_enabled,
-    :skill_refinement_enabled,
-    :skill_auto_commit_enabled,
-    :outcomes_enabled,
-    :outcome_refinement_enabled,
-    :outcome_autonomy_tiers_enabled,
-    :vault_writer_enabled,
-    :knowledge_context_enabled,
-    :knowledge_compile_enabled,
-    :workflow_dsl_enabled,
-    :workflow_inference_enabled,
-    :lsp_enabled,
-    :lsp_validation_enabled,
-    :webhooks_enabled,
-    :visual_capture_enabled,
-    :sandbox_enabled,
-    :sandbox_required,
-    :log_stdout,
-    :bedrock_prompt_cache,
-    :wire_enabled
-  ]
-
-  @doc "The whitelisted flag names."
-  @spec known() :: [atom()]
-  def known, do: @known
-
-  @descriptions %{
+  # Name and one line on what it does; `known/0` derives from this so a
+  # flag cannot be added without saying what it is for.
+  @flags [
     triage_enabled: "Triage phase before research (skip flags for trivial goals)",
     skills_enabled: "Skill library injected into phase prompts",
     skill_refinement_enabled: "Refine skills from mission outcomes",
@@ -74,31 +48,50 @@ defmodule GiTF.Flags do
     log_stdout: "Log to stdout as well as the journal",
     bedrock_prompt_cache: "Bedrock prompt caching",
     wire_enabled: "Wire notation in phase prompts (specs/WIRE.md)"
-  }
+  ]
+
+  @known Keyword.keys(@flags)
+
+  @doc "The whitelisted flag names."
+  @spec known() :: [atom()]
+  def known, do: @known
 
   @doc "One line on what a flag does."
   @spec describe(atom()) :: String.t()
-  def describe(flag), do: Map.get(@descriptions, flag, to_string(flag))
+  def describe(flag), do: Keyword.get(@flags, flag, to_string(flag))
 
   @doc """
-  What each flag is right now and where that came from: `{flag, value,
-  source}` with source `:config` (the [features] table), `:boot` (env var
-  or compile-time default). The settings page renders this; the boot log
-  prints the same table.
+  The `[features]` table of a config map, atom-keyed, whatever shape the
+  map arrived in: the provider atomizes keys, the settings page reads the
+  TOML raw. One reader, so `apply_from_config/1` and `effective/1` cannot
+  disagree about whether a flag is pinned.
   """
-  @spec effective(map()) :: [{atom(), boolean() | nil, :config | :boot}]
+  @spec features_table(map()) :: %{atom() => term()}
+  def features_table(config) when is_map(config) do
+    (Map.get(config, :features) || Map.get(config, "features") || %{})
+    |> Map.new(fn
+      {k, v} when is_binary(k) -> {String.to_atom(k), v}
+      {k, v} -> {k, v}
+    end)
+  end
+
+  @doc """
+  What each flag is right now and what the config pins it to: `{flag,
+  value, pin}` with `pin` `true`/`false` from the [features] table or
+  `nil` when the boot value (env var or default) decides.
+  """
+  @spec effective(map()) :: [{atom(), boolean() | nil, boolean() | nil}]
   def effective(config) when is_map(config) do
-    features = Map.get(config, :features) || Map.get(config, "features") || %{}
+    features = features_table(config)
 
     Enum.map(@known, fn flag ->
-      value = Application.get_env(:gitf, flag)
+      pin =
+        case Map.get(features, flag) do
+          v when is_boolean(v) -> v
+          _ -> nil
+        end
 
-      source =
-        if Map.has_key?(features, flag) or Map.has_key?(features, to_string(flag)),
-          do: :config,
-          else: :boot
-
-      {flag, value, source}
+      {flag, Application.get_env(:gitf, flag), pin}
     end)
   end
 
@@ -110,7 +103,7 @@ defmodule GiTF.Flags do
   """
   @spec apply_from_config(map()) :: [atom()]
   def apply_from_config(config) when is_map(config) do
-    features = Map.get(config, :features) || %{}
+    features = features_table(config)
 
     Enum.reduce(features, [], fn
       {key, value}, acc when key in @known and is_boolean(value) ->

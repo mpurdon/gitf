@@ -209,6 +209,23 @@ defmodule GiTF.MissionResumeTest do
       assert {:error, :archive_branch_missing} = Missions.resume(mid)
     end
 
+    test "no archive branch is no obstacle to a requirements resume — it seeds no tree", %{
+      repo: repo,
+      sector: sector,
+      git: git
+    } do
+      %{mission_id: mid} = mission_with_work(sector, repo, git)
+      {:ok, _} = Missions.fail_quest(mid, "gone")
+
+      System.cmd(@git, ["branch", "-D", Topology.archive_branch(mid)],
+        cd: repo,
+        stderr_to_stdout: true
+      )
+
+      assert {:ok, %{current_phase: "research"}} =
+               Missions.resume(mid, "requirements", advance: false)
+    end
+
     test "sector clone is gone" do
       {:ok, sector} =
         Archive.insert(:sectors, %{name: "vanished", path: "/tmp/gitf-no-such-repo"})
@@ -505,23 +522,6 @@ defmodule GiTF.MissionResumeTest do
       # Materialized on the child AND inherited on the record: one decision.
       block = GiTF.Inquiry.prompt_block(child.id)
       assert length(Regex.scan(~r/ANSWER: Band/, block)) == 1
-    end
-
-    test "a parent with no archive branch is still re-specifiable", %{
-      repo: repo,
-      sector: sector,
-      git: git
-    } do
-      %{mission_id: mid} = mission_with_work(sector, repo, git)
-      {:ok, _} = Missions.fail_quest(mid, "gone")
-
-      System.cmd(@git, ["branch", "-D", Topology.archive_branch(mid)],
-        cd: repo,
-        stderr_to_stdout: true
-      )
-
-      assert {:ok, %{current_phase: "research"}} =
-               Missions.resume(mid, "requirements", advance: false)
     end
   end
 

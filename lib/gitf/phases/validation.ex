@@ -373,14 +373,7 @@ defmodule GiTF.Phases.Validation do
   # write an artifact back rather than only read it. Sorted so a
   # tournament's variants are visited in a stable order — the contested
   # merge is last-writer-wins, and "last" must not depend on map layout.
-  defp validation_artifact_pairs(mission) do
-    (Map.get(mission, :artifacts) || %{})
-    |> Enum.filter(fn {key, value} ->
-      is_binary(key) and String.starts_with?(key, "validation") and
-        not GiTF.Missions.history_key?(key) and is_map(value)
-    end)
-    |> Enum.sort_by(fn {key, _artifact} -> key end)
-  end
+  defp validation_artifact_pairs(mission), do: GiTF.Missions.live_artifacts(mission, "validation")
 
   # A validator DID report on this mission, so the "nobody is coming"
   # budget is spent and starts fresh for any later stall.
