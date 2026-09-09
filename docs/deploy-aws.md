@@ -93,10 +93,12 @@ Caddy.
    The **DNS-01** Let's Encrypt challenge is signed by the instance role
    (the `Dns01Challenge*` IAM statements) — real certificate, zero inbound
    ports, no resident API token anywhere.
-4. Set `GITF_CHECK_ORIGIN=https://factory.ghostinthefactory.com` in
-   `/etc/gitf/gitf.env` and restart — LiveView rejects websocket
-   connections from unlisted origins (comma-separate multiple origins to
-   also allow the ts.net name).
+4. The dashboard's own URL (`[server] url` in the box's config.toml) is
+   an allowed websocket origin by construction (`GiTF.Web.Origin`). Set
+   `GITF_CHECK_ORIGIN=<origin>,<origin>` in `/etc/gitf/gitf.env` only to
+   allow MORE names (e.g. the ts.net one) — LiveView rejects websocket
+   connections from anything unlisted, silently: the page renders and
+   nothing on it works (that is how the Cabinet shipped, 2026-09-01→09).
 5. Re-run `gitf login` with the new URL on client machines. Known issue:
    `gitf login` pings the previously-configured server before storing the
    new URL, so if the old endpoint is dead, edit `[server] url` in

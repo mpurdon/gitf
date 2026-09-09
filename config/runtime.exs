@@ -160,12 +160,13 @@ if config_env() == :prod do
     config :gitf, :local_ip_bypass, true
   end
 
+  # Allowed websocket origins: the GITF_CHECK_ORIGIN list plus the
+  # configured `[server] url` (GiTF.Web.Origin) — a box whose env file
+  # lost the variable still serves a working dashboard at its own URL.
   check_origin =
     case System.get_env("GITF_CHECK_ORIGIN") do
-      nil -> true
-      "true" -> true
       "false" -> false
-      list -> String.split(list, ",", trim: true)
+      configured -> {GiTF.Web.Origin, :allowed?, [configured]}
     end
 
   # Person-level identity on the tailnet-only dashboard. "required" makes
