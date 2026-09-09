@@ -60,13 +60,7 @@ defmodule GiTF.Audit do
           GiTF.WorktreeLock.with_lock({:sector, op.sector_id}, fn ->
             validation_result =
               if not skip_validation and Map.get(sector, :validation_command) do
-                case run_validation_command(shell, sector.validation_command, sector) do
-                  {:ok, output} ->
-                    %{result | status: "passed", output: output, exit_code: 0}
-
-                  {:error, {output, exit_code}} ->
-                    %{result | status: "failed", output: output, exit_code: exit_code}
-                end
+                validation_verdict(shell, sector, result)
               else
                 %{result | status: "passed", output: "No validation command configured"}
               end
@@ -237,6 +231,37 @@ defmodule GiTF.Audit do
   # every op came back "timed out after 120s", including the implementation
   # that was correct, so the orchestrator spawned fix ghost after fix ghost
   # for a defect that did not exist.
+  # The validation command, with the tree-keyed verdict cache in front
+  # (execution-efficiency B4, audit lane). The fingerprint is taken AFTER
+  # a fresh run, because the run itself (installs) moves the tree; the
+  # next audit of the same tree then matches it.
+  defp validation_verdict(shell, %{validation_command: command} = sector, result) do
+    alias GiTF.Audit.VerdictCache
+    wt = shell.worktree_path
+
+    case VerdictCache.lookup(sector.id, command, GiTF.Git.tree_fingerprint(wt)) do
+      %{status: status, output: output, exit_code: code} ->
+        Logger.info("Audit: tree unchanged since a #{status} verdict — reusing it (B4)")
+        %{result | status: status, output: output, exit_code: code}
+
+      nil ->
+        verdict =
+          case run_validation_command(shell, command, sector) do
+            {:ok, output} ->
+              %{result | status: "passed", output: output, exit_code: 0}
+
+            {:error, {output, exit_code}} ->
+              %{result | status: "failed", output: output, exit_code: exit_code}
+          end
+
+        unless infra_exit?(verdict.exit_code) do
+          VerdictCache.store(sector.id, command, GiTF.Git.tree_fingerprint(wt), verdict)
+        end
+
+        verdict
+    end
+  end
+
   defp run_validation_command(shell, command, sector) do
     case GiTF.Validator.run_validation(shell.worktree_path, command, sector) do
       {:ok, output} -> {:ok, output}
