@@ -306,6 +306,23 @@ defmodule GiTF.Outcomes.Tracker do
     mission = GiTF.Archive.get(:missions, outcome.mission_id)
 
     if mission do
+      # The issue that prompted this mission learns its real fate here —
+      # merged, or closed unmerged — not at mission completion, which only
+      # ever meant "a PR exists".
+      case outcome.outcome_category do
+        c when c in [:merged_clean, :merged_reverted, :merged_broke_main] ->
+          safe_run(fn -> GiTF.Aramaki.Lifecycle.on_merged(mission) end, "Lifecycle.on_merged")
+
+        :closed_unmerged ->
+          safe_run(
+            fn -> GiTF.Aramaki.Lifecycle.on_closed_unmerged(mission) end,
+            "Lifecycle.on_closed_unmerged"
+          )
+
+        _ ->
+          :ok
+      end
+
       # Refiner is LLM-backed; run off the poll stream slot so a slow
       # refiner call does not stall the Task.async_stream worker.
       Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->

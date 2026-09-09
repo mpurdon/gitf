@@ -1467,10 +1467,21 @@ defmodule GiTF.Missions do
       Archive.update(:missions, mission.id, &Map.put(&1, :aramaki_notified, true))
 
       case source do
+        # A completed mission has usually OPENED a pull request, not merged
+        # one: "Merged — closing this issue" was posted on cora#23 while PR
+        # #24 sat open (2026-09-09), and the issue was closed under it. The
+        # issue is told about the PR here; the merge — or the close without
+        # one — is reported by the outcome tracker when it actually happens.
         "github_issue" ->
           case outcome do
-            :completed -> GiTF.Aramaki.Lifecycle.on_merged(mission)
-            {:failed, reason} -> GiTF.Aramaki.Lifecycle.on_failed(mission, reason || "unknown")
+            :completed ->
+              case pr_url(mission) do
+                url when is_binary(url) -> GiTF.Aramaki.Lifecycle.on_published(mission, url)
+                _ -> GiTF.Aramaki.Lifecycle.on_merged(mission)
+              end
+
+            {:failed, reason} ->
+              GiTF.Aramaki.Lifecycle.on_failed(mission, reason || "unknown")
           end
 
         # A review asked for changes; the reviewer is owed an answer either

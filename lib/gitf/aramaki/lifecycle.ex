@@ -34,11 +34,25 @@ defmodule GiTF.Aramaki.Lifecycle do
     end)
   end
 
-  @doc "Mission published a PR → link it on the issue."
+  @doc "Mission published a PR → link it on the issue; the issue stays open until it merges."
   @spec on_published(map(), String.t()) :: :ok
   def on_published(mission, pr_url) do
     with_issue(mission, fn sector, num ->
+      GiTF.GitHub.add_label(sector, num, "gitf:in-review")
       comment(sector, num, "Opened a pull request for this: #{pr_url}" <> @signature)
+    end)
+  end
+
+  @doc "The PR was closed without merging → say so; the issue stays open for a human."
+  @spec on_closed_unmerged(map()) :: :ok
+  def on_closed_unmerged(mission) do
+    with_issue(mission, fn sector, num ->
+      comment(
+        sector,
+        num,
+        "The pull request for this was closed without merging. Leaving the issue open for a human." <>
+          @signature
+      )
     end)
   end
 
