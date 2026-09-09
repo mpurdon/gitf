@@ -48,6 +48,21 @@ defmodule GiTF.Cabinet.GateTest do
     assert Enum.any?(Gate.inbox(m.slug), &(&1.id == entry.id))
   end
 
+  test "a queued entry can be dismissed — the operator's no — and only once" do
+    m = ministry!()
+
+    payload = %{
+      "action" => "opened",
+      "issue" => %{"number" => 9, "title" => "Add a rail", "labels" => []}
+    }
+
+    assert {:queue, entry} = Gate.handle(m, "issues", payload, %{})
+    assert :ok = Gate.dismiss_queued(entry.id)
+    assert %{status: "dismissed"} = Enum.find(Gate.inbox(m.slug), &(&1.id == entry.id))
+    assert {:error, :not_queued} = Gate.dismiss_queued(entry.id)
+    assert {:error, :not_found} = Gate.dismiss_queued("nope")
+  end
+
   test "off mode queues even bugs" do
     m = ministry!(%{mode: "off"})
     assert {:queue, _} = Gate.handle(m, "issues", bug_payload(), %{})

@@ -154,6 +154,21 @@ defmodule GiTF.Costs do
   @spec summary() :: map()
   def summary, do: summary_from(Archive.all(:costs))
 
+  @doc """
+  The calendar month's summary (UTC) — what the Catwalk's "cost this
+  month" and the Cabinet's cost cap read. Bounded by the ledger's own
+  retention: records the prune sweep has taken are gone from here too.
+  """
+  @spec month_to_date() :: map()
+  def month_to_date do
+    cutoff =
+      Date.utc_today() |> Date.beginning_of_month() |> DateTime.new!(~T[00:00:00], "Etc/UTC")
+
+    Archive.all(:costs)
+    |> Enum.filter(fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, cutoff) != :lt end)
+    |> summary_from()
+  end
+
   @doc "Computes a summary from a pre-filtered list of cost records."
   @spec summary_from(list()) :: map()
   def summary_from(raw_costs) do

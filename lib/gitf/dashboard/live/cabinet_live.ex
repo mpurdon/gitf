@@ -162,6 +162,25 @@ defmodule GiTF.Dashboard.CabinetLive do
     end
   end
 
+  def handle_event("dismiss_entry", %{"id" => id}, socket) do
+    case Gate.dismiss_queued(id) do
+      :ok ->
+        entry = Enum.find(socket.assigns.inbox, &(&1.id == id))
+
+        Activity.record(
+          socket.assigns.actor,
+          "dismiss",
+          (entry && entry.summary) || id,
+          "dismissed"
+        )
+
+        {:noreply, socket |> put_flash(:info, "Dismissed — nothing woken.") |> load()}
+
+      other ->
+        {:noreply, put_flash(socket, :error, "Dismiss failed: #{inspect(other)}")}
+    end
+  end
+
   def handle_event("snapshot", %{"id" => id}, socket) do
     with %{} = ministry <- Registry.get(id) do
       case Snapshot.refresh(ministry) do
@@ -387,7 +406,9 @@ defmodule GiTF.Dashboard.CabinetLive do
   defp filtered_inbox(inbox, "woke"),
     do: Enum.filter(inbox, &(&1.status in ["waking", "forwarded", "forward_failed"]))
 
-  defp filtered_inbox(inbox, "dropped"), do: Enum.filter(inbox, &(&1.status == "dropped"))
+  defp filtered_inbox(inbox, "dropped"),
+    do: Enum.filter(inbox, &(&1.status in ["dropped", "dismissed"]))
+
   defp filtered_inbox(inbox, _all), do: inbox
 
   defp initials(name) do
@@ -876,6 +897,7 @@ defmodule GiTF.Dashboard.CabinetLive do
               </div>
               <div class="insp-actions">
                 <button :if={e.status == "queued"} class="btn pri sm" phx-click="start_entry" phx-value-id={e.id}>Start this</button>
+                <button :if={e.status == "queued"} class="btn sm" phx-click="dismiss_entry" phx-value-id={e.id}>Dismiss</button>
               </div>
             </div>
             <.itab_bar itab={@itab} why_label="Why" />
@@ -925,6 +947,7 @@ defmodule GiTF.Dashboard.CabinetLive do
         "waking" -> "recon"
         "forwarded" -> "ok"
         "forward_failed" -> "crit"
+        "dismissed" -> "off"
         _ -> "off"
       end
 
@@ -948,7 +971,10 @@ defmodule GiTF.Dashboard.CabinetLive do
         </div>
       </span>
       <span class="when">{hhmm(@entry.inserted_at)}</span>
-      <span :if={@show_start} class="btn pri sm" phx-click="start_entry" phx-value-id={@entry.id}>Start this</span>
+      <span :if={@show_start} style="display:inline-flex;gap:6px">
+        <span class="btn pri sm" phx-click="start_entry" phx-value-id={@entry.id}>Start this</span>
+        <span class="btn sm" phx-click="dismiss_entry" phx-value-id={@entry.id}>Dismiss</span>
+      </span>
       <span :if={!@show_start}><.status_pill status={@entry.status} /></span>
     </button>
     """

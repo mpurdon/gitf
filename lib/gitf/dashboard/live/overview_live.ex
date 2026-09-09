@@ -343,14 +343,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     end)
   end
 
-  defp billing_cycle_summary do
-    month_start = Date.utc_today() |> Date.beginning_of_month()
-    cutoff = DateTime.new!(month_start, ~T[00:00:00], "Etc/UTC")
-
-    GiTF.Archive.all(:costs)
-    |> Enum.filter(fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, cutoff) != :lt end)
-    |> GiTF.Costs.summary_from()
-  end
+  defp billing_cycle_summary, do: GiTF.Costs.month_to_date()
 
   defp safe_health_check do
     GiTF.Observability.Health.check().status

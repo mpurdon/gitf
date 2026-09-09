@@ -2,7 +2,7 @@ defmodule GiTF.MCPServer.Tools do
   @moduledoc "MCP tool definitions with JSON Schema input specs."
 
   @cabinet_tools ~w(health_check cabinet_status register_ministry set_ministry_mode
-                    wake_ministry stop_ministry cabinet_inbox start_inbox_entry ministry_call)
+                    wake_ministry stop_ministry cabinet_inbox start_inbox_entry dismiss_inbox_entry ministry_call)
 
   @doc """
   The Cabinet's tool surface — fleet tools plus health, nothing of the
@@ -311,6 +311,17 @@ defmodule GiTF.MCPServer.Tools do
           "[WRITE] Start a queued inbox entry: wakes the ministry's Section and forwards the " <>
             "original event so the Section handles it exactly as if it had been awake. " <>
             "Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{id: %{type: "string"}, confirm: %{type: "boolean"}},
+          required: ["id", "confirm"]
+        }
+      },
+      %{
+        name: "dismiss_inbox_entry",
+        description:
+          "[WRITE] Dismiss a queued inbox entry — the operator's no. It stays as history; " <>
+            "nothing is woken or forwarded. Requires confirm: true.",
         inputSchema: %{
           type: "object",
           properties: %{id: %{type: "string"}, confirm: %{type: "boolean"}},

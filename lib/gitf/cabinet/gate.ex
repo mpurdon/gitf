@@ -75,6 +75,25 @@ defmodule GiTF.Cabinet.Gate do
     end
   end
 
+  @doc """
+  Dismisses a queued entry — the operator's "no". It stays in the inbox
+  as history (status `dismissed`); the Section's own events poller can
+  still pick the event up later if it wants it.
+  """
+  def dismiss_queued(entry_id) do
+    case Archive.get(@inbox, entry_id) do
+      %{status: "queued"} ->
+        Archive.update(@inbox, entry_id, &Map.put(&1, :status, "dismissed"))
+        :ok
+
+      %{} ->
+        {:error, :not_queued}
+
+      nil ->
+        {:error, :not_found}
+    end
+  end
+
   @doc "The inbox, newest first; `status: \"queued\"` is what the operator owes an answer."
   def inbox(slug \\ nil) do
     @inbox
@@ -143,6 +162,8 @@ defmodule GiTF.Cabinet.Gate do
 
   defp forward(_, _, _), do: {:error, :nothing_to_forward}
 
+  # `spend_month_usd` is the Snapshot's month-to-date (refreshed by the
+  # fleet watcher whenever the factory is awake); no snapshot yet = under.
   defp over_cap?(%{cost_cap_usd: cap} = ministry) when is_number(cap) and cap > 0 do
     spend = ministry[:spend_month_usd] || 0.0
     spend >= cap

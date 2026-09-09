@@ -660,6 +660,7 @@ defmodule GiTF.Web.ApiController do
     json(conn, %{
       data: %{
         total_cost: summary.total_cost,
+        month_to_date_cost: GiTF.Costs.month_to_date().total_cost,
         total_input_tokens: summary.total_input_tokens,
         total_output_tokens: summary.total_output_tokens,
         by_model: summary.by_model,

@@ -448,11 +448,17 @@ What the Cabinet does:
   3h" is since the Cabinet noticed, and a box first seen asleep says so.
 - **The inbox** — queued events with "start this": wakes the Section and
   forwards the ORIGINAL body + signature verbatim; the Section verifies
-  with the same secret and handles it as if it had been awake. The
-  Section's events poller stays the backstop regardless.
+  with the same secret and handles it as if it had been awake. "Dismiss"
+  is the operator's no (kept as history, nothing woken). The Section's
+  events poller stays the backstop regardless.
+- **The cost cap** reads `spend_month_usd`, the factory's month-to-date
+  from `/api/v1/costs/summary` (`month_to_date_cost`, 0.65.319+), refreshed
+  by the fleet watcher whenever the factory is awake. It only ratchets up
+  within a month on the Cabinet — the factory's prune sweep can lower its
+  own figure, and a cap that un-trips on pruning is no cap.
 - **MCP tools** — `cabinet_status`, `register_ministry`,
   `set_ministry_mode`, `wake_ministry`, `stop_ministry`, `cabinet_inbox`,
-  `start_inbox_entry`, and `ministry_call` (forward any gitf tool to a
+  `start_inbox_entry`, `dismiss_inbox_entry`, and `ministry_call` (forward any gitf tool to a
   ministry's Section, `wake: true` to start it first).
 - **Per-box ministry config** (identity, PAT, Bedrock) is just that box's
   ordinary config — see the plan. Git identity: `[git] author_name /

@@ -533,6 +533,17 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("start_inbox_entry", _), do: {:error, "Missing required parameter: id"}
 
+  def call("dismiss_inbox_entry", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Cabinet.Gate.dismiss_queued(id) do
+        :ok -> {:ok, json_text(%{id: id, status: "dismissed"})}
+        {:error, reason} -> {:error, "dismiss failed: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  def call("dismiss_inbox_entry", _), do: {:error, "Missing required parameter: id"}
+
   def call("ministry_call", %{"slug" => slug, "tool" => tool} = args) do
     case GiTF.Cabinet.Proxy.call(slug, tool, args["arguments"] || %{}, wake: args["wake"] == true) do
       {:ok, text} -> {:ok, text}

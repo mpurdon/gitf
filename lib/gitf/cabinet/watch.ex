@@ -2,16 +2,19 @@ defmodule GiTF.Cabinet.Watch do
   @moduledoc """
   The fleet watcher — keeps `Fleet.observe/1` running while nobody has
   the Console open, so a box that idle-stops at 3am still gets its
-  "stopped since" recorded. One EC2 describe per ministry per minute;
-  the Console's own refresh reads the remembered box between ticks.
-  Cabinet mode only.
+  "stopped since" recorded, and refreshes the spend snapshot of every
+  factory that is awake, so the cost cap the Gate reads is current
+  without anyone pressing "Refresh snapshot". One EC2 describe per
+  ministry per minute (plus two HTTP calls for a running one); the
+  Console's own refresh reads the remembered box between ticks. Cabinet
+  mode only.
   """
 
   use GenServer
 
   require Logger
 
-  alias GiTF.Cabinet.{Fleet, Registry}
+  alias GiTF.Cabinet.{Fleet, Registry, Snapshot}
 
   @tick :timer.minutes(1)
 
@@ -31,7 +34,10 @@ defmodule GiTF.Cabinet.Watch do
   end
 
   defp observe(ministry) do
-    Fleet.observe(ministry)
+    case Fleet.observe(ministry) do
+      %{box: %{state: "running"}} = m -> Snapshot.refresh(m)
+      _ -> :ok
+    end
   rescue
     err -> Logger.warning("Cabinet watch: #{ministry.slug} — #{Exception.message(err)}")
   end
