@@ -614,16 +614,21 @@ defmodule GiTF.MCPServer.Handlers do
             from_phase: from_phase
           })
 
+          seeding? = mission[:resume_seeding] == true
+
+          note =
+            if seeding? do
+              "Mission created. Its worktree is being cut from archive/#{id} in the " <>
+                "background — poll show_mission until status is \"active\"."
+            else
+              "Mission created and advancing from #{from_phase} with #{id}'s answers " <>
+                "and artifacts inherited — no tree to seed."
+            end
+
           {:ok,
            mission
            |> serialize_mission()
-           |> Map.merge(%{
-             already_resumed: false,
-             seeding: true,
-             note:
-               "Mission created. Its worktree is being cut from archive/#{id} in the " <>
-                 "background — poll show_mission until status is \"active\"."
-           })
+           |> Map.merge(%{already_resumed: false, seeding: seeding?, note: note})
            |> json_text()}
 
         {:ok, mission, :already_resumed} ->

@@ -1069,12 +1069,49 @@ defmodule GiTF.Inquiry do
   @spec prompt_block(String.t()) :: String.t()
   def prompt_block(mission_id) when is_binary(mission_id) do
     {rejected, decided} =
-      mission_id |> answered_register() |> Enum.split_with(&(&1["outcome"] == "rejected"))
+      mission_id
+      |> lineage_register()
+      |> Enum.split_with(&(&1["outcome"] == "rejected"))
 
-    decisions_block(decided) <> rejections_block(rejected)
+    # A rejection the operator later resolved by choosing is history: the
+    # round it asked for has been held, and leaving it in would tell the
+    # phase to ask again in the same breath as "decided, do not ask".
+    decided_keys = MapSet.new(decided, &{&1["phase"], &1["key"]})
+    standing = Enum.reject(rejected, &MapSet.member?(decided_keys, {&1["phase"], &1["key"]}))
+
+    decisions_block(decided) <> rejections_block(standing)
   end
 
   def prompt_block(_), do: ""
+
+  # Answers inherited across a resume (`answered_inquiries` on the mission
+  # record) followed by this run's own, oldest first. A resumed child must
+  # see its parent's decisions BEFORE its phases run, or it would ask them
+  # again and be told "already answered" only after the phase had gone its
+  # own way.
+  defp lineage_register(mission_id) do
+    inherited =
+      case Archive.get(:missions, mission_id) do
+        %{} = mission ->
+          for entry <- mission[:answered_inquiries] || [],
+              is_map(entry),
+              is_binary(entry["phase"]),
+              is_binary(entry["key"]),
+              do: entry
+
+        _ ->
+          []
+      end
+
+    # An inherited answer the child re-asked is materialized as the
+    # child's own record too; the same decision must not read twice.
+    # Only exact repeats fold — two rejected rounds under one key each
+    # keep their own do-not-re-offer list.
+    (inherited ++ answered_register(mission_id))
+    |> Enum.uniq_by(&{&1["phase"], &1["key"], &1["answer"], &1["outcome"]})
+  rescue
+    _ -> answered_register(mission_id)
+  end
 
   defp decisions_block([]), do: ""
 

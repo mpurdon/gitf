@@ -259,6 +259,20 @@ the defect.
 Postmortems live in [`docs/audits/`](audits/). Read the relevant one before
 re-diagnosing something already understood.
 
+**Re-running without re-asking.** `resume_mission` starts a child of a
+failed (or rejected) mission with two entry points:
+
+- `from_phase: "validation"` — the endgame loop: the parent's tree is
+  checked out, everything before implementation is inherited.
+- `from_phase: "requirements"` — the re-specification loop: triage,
+  research and **every operator answer** are inherited; no tree is seeded.
+  Use it when the spec was wrong but the decisions were right — the
+  child's requirements prompt carries the answers (with the chosen
+  option's full description) before any phase runs, so nothing is asked
+  twice.
+
+Anything else is a fresh mission, which will ask its questions again.
+
 ### Reading the box's memory *(the shape to expect)*
 
 `host_stats` returns a `beam` breakdown; the field that matters is

@@ -365,13 +365,17 @@ defmodule GiTF.MCPServer.Tools do
           "[WRITE] Start a NEW mission on a failed mission's preserved tree, re-entering at " <>
             "from_phase instead of running the pipeline from the top. Phases before from_phase " <>
             "are inherited from the parent (artifacts stamped inherited_from) and their " <>
-            "transitions are replayed in the timeline. Requires an archive/<parent_id> branch " <>
-            "in the sector clone. Resume IMPLIES start — do not call start_mission after. " <>
+            "transitions are replayed in the timeline. from_phase \"validation\" checks out the " <>
+            "parent's archive/<parent_id> branch (the endgame-iteration loop); from_phase " <>
+            "\"requirements\" seeds no tree at all — it inherits triage, research and every " <>
+            "operator answer, and re-specifies from there without asking the answered questions " <>
+            "again. Resume IMPLIES start — do not call start_mission after. " <>
             "Inherited state is a suspect in every failure of a resumed run: if the resumed run " <>
             "fails in a way that could implicate the inherited design, plan or tree, run the " <>
-            "mission fresh instead of resuming again. Returns IMMEDIATELY: the worktree is " <>
-            "seeded in the background, so the mission comes back status \"pending\" with " <>
-            "resume_seeding true — poll show_mission until it is \"active\". One live resume " <>
+            "mission fresh instead of resuming again. A validation resume returns IMMEDIATELY: " <>
+            "the worktree is seeded in the background, so the mission comes back status " <>
+            "\"pending\" with resume_seeding true — poll show_mission until it is \"active\". " <>
+            "A requirements resume comes back active and already advancing. One live resume " <>
             "per parent: calling again returns the existing child with already_resumed true " <>
             "and creates nothing. Requires confirm: true.",
         inputSchema: %{
@@ -381,8 +385,8 @@ defmodule GiTF.MCPServer.Tools do
             from_phase: %{
               type: "string",
               description:
-                "Phase to re-enter at. Only \"validation\" (the endgame-iteration loop) " <>
-                  "is supported today.",
+                "Phase to re-enter at: \"validation\" (the endgame-iteration loop, on the " <>
+                  "parent's tree) or \"requirements\" (re-specify with the parent's answers).",
               default: "validation"
             },
             confirm: %{type: "boolean", description: "Must be true to execute"}

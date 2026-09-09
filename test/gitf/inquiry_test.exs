@@ -506,12 +506,12 @@ defmodule GiTF.InquiryTest do
       assert block =~ ~r/DIRECTION FROM THE OPERATOR.*: airier/
       refute block =~ "OPERATOR DECISIONS"
 
-      # Once the new round is chosen, both sections appear: the decision
-      # and the standing "do not re-offer".
+      # Once the new round is chosen, the decision stands alone: the
+      # rejection's "ask again with NEW options" would contradict it.
       {:ok, _, :answered} = Inquiry.answer(again.id, "cards", answered_by: "a")
       block = Inquiry.prompt_block(m.id)
       assert block =~ "OPERATOR DECISIONS" and block =~ "ANSWER: Cards"
-      assert block =~ "REJECTED PROPOSALS"
+      refute block =~ "REJECTED PROPOSALS"
     end
   end
 
@@ -767,6 +767,41 @@ defmodule GiTF.InquiryTest do
       assert block =~ "Which layout?"
       assert block =~ "List"
       assert block =~ "do not ask them again"
+    end
+
+    test "an answer inherited across a resume is a decision before any phase runs" do
+      m =
+        mission!(%{
+          answered_inquiries: [
+            %{
+              "phase" => "design",
+              "key" => "layout",
+              "prompt" => "Which layout?",
+              "answer" => "list",
+              "answer_label" => "List",
+              "answered_by" => "operator",
+              "outcome" => "chosen",
+              "options" => [%{"id" => "list", "label" => "List", "rationale" => "Scannable"}]
+            }
+          ]
+        })
+
+      assert Inquiry.list(m.id) == []
+      block = Inquiry.prompt_block(m.id)
+      assert block =~ "OPERATOR DECISIONS" and block =~ "ANSWER: List" and block =~ "Scannable"
+    end
+
+    test "a rejection the operator later resolved by choosing is history" do
+      m = mission!()
+      {:ok, first, :asked} = Inquiry.ask(m.id, choice())
+      {:ok, _, :answered} = Inquiry.reject(first.id, %{direction: "airier"})
+      {:ok, second, :asked} = Inquiry.ask(m.id, choice())
+      {:ok, _, :answered} = Inquiry.answer(second.id, "list")
+
+      block = Inquiry.prompt_block(m.id)
+      assert block =~ "ANSWER: List"
+      refute block =~ "REJECTED PROPOSALS"
+      refute block =~ "airier"
     end
 
     test "the chosen option's rationale travels with the answer — it is the spec" do

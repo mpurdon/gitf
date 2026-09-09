@@ -293,19 +293,36 @@ defmodule GiTF.Missions do
 
   # -- Resume ------------------------------------------------------------------
 
-  # v1 scope. `"validation"` is the endgame-iteration loop: everything before
+  # Two resume points, two shapes.
+  #
+  # `"validation"` is the endgame-iteration loop: everything before
   # implementation is inherited, the parent's final tree is checked out, and
-  # the mission re-enters at consolidation → validation → fix. Earlier resume
-  # points would have to re-derive a tree from artifacts, which is a different
-  # (and much less certain) operation.
-  @resumable_phases ["validation"]
+  # the mission re-enters at consolidation → validation → fix.
+  #
+  # `"requirements"` is the re-specification loop: the operator's answers
+  # and the triage/research artifacts are inherited, nothing else — there
+  # is no tree to seed, because every phase ghost cuts its own worktree.
+  # The child stands at research and the ladder walks it into requirements.
+  # (msn-fdc50b: the chosen option's rationale never reached the
+  # requirements prompt; the fix is in the prompt, the test is a resume
+  # that re-specifies with the same answer and does not ask it again.)
+  #
+  # Anything between the two would have to re-derive a tree from artifacts,
+  # which is a different (and much less certain) operation.
+  @resumable_phases ["validation", "requirements"]
 
   # Phases whose artifacts are inherited when resuming AT the key. Ordered:
   # the replayed transitions are written in this order so the timeline reads
   # as the journey it stands in for.
   @inherited_phases %{
-    "validation" => ~w(triage research requirements design review planning)
+    "validation" => ~w(triage research requirements design review planning),
+    "requirements" => ~w(triage research)
   }
+
+  # The phase a treeless resume stands at before its first advance: the last
+  # inherited one, so the ladder's own "is this leg done?" check carries it
+  # forward on the inherited artifact.
+  @treeless_resume_stand %{"requirements" => "research"}
 
   @doc "Phases `resume/2` can restart a mission at."
   @spec resumable_phases() :: [String.t()]
@@ -405,7 +422,7 @@ defmodule GiTF.Missions do
     GiTF.MissionLock.with_lock({:resume, parent_id}, [on_contention: {:wait, 30_000}], fn ->
       with :ok <- validate_from_phase(from_phase),
            {:ok, parent} <- fetch_resumable_parent(parent_id),
-           {:ok, archive_branch} <- fetch_archive_branch(parent) do
+           {:ok, archive_branch} <- fetch_tree(parent, from_phase) do
         case live_resume_of(parent_id) do
           nil -> build_resumed_mission(parent, from_phase, archive_branch, opts)
           existing -> {:ok, existing, :already_resumed}
@@ -452,6 +469,26 @@ defmodule GiTF.Missions do
     end
   end
 
+  # A treeless resume needs the sector, not the parent's archived tree — a
+  # parent that died before it ever had one is still re-specifiable.
+  defp fetch_tree(parent, from_phase) do
+    if Map.has_key?(@treeless_resume_stand, from_phase) do
+      with {:ok, _path} <- fetch_sector_path(parent), do: {:ok, nil}
+    else
+      fetch_archive_branch(parent)
+    end
+  end
+
+  defp fetch_sector_path(parent) do
+    with sector_id when is_binary(sector_id) <- Map.get(parent, :sector_id),
+         %{path: path} when is_binary(path) <- Archive.get(:sectors, sector_id),
+         true <- File.dir?(path) do
+      {:ok, path}
+    else
+      _ -> {:error, :sector_unavailable}
+    end
+  end
+
   defp fetch_archive_branch(parent) do
     branch = GiTF.Major.Topology.archive_branch(parent.id)
 
@@ -465,6 +502,24 @@ defmodule GiTF.Missions do
       end
     else
       _ -> {:error, :sector_unavailable}
+    end
+  end
+
+  defp build_resumed_mission(parent, from_phase, nil = _archive_branch, opts) do
+    stand = Map.fetch!(@treeless_resume_stand, from_phase)
+
+    # Nothing slow here — no worktree is cut — so the child is active from
+    # the start and the caller gets it back already advancing.
+    with {:ok, child} <- create_resumed_record(parent, from_phase, false),
+         :ok <- inherit_artifacts(child, parent, from_phase),
+         :ok <- replay_transitions(child, parent, from_phase) do
+      transition_phase(child.id, stand, "resumed from #{parent.id} at #{from_phase}")
+
+      if Keyword.get(opts, :advance, true) do
+        GiTF.Major.Orchestrator.advance_quest(child.id)
+      end
+
+      with {:ok, mission} <- get(child.id), do: {:ok, mission, :created}
     end
   end
 

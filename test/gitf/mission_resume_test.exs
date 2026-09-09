@@ -190,6 +190,7 @@ defmodule GiTF.MissionResumeTest do
 
       assert {:error, :unsupported_from_phase} = Missions.resume(mid, "design")
       assert {:error, :unsupported_from_phase} = Missions.resume(mid, "implementation")
+      assert {:error, :unsupported_from_phase} = Missions.resume(mid, "research")
     end
 
     test "no archive branch — a mission that failed before archival shipped", %{
@@ -393,6 +394,105 @@ defmodule GiTF.MissionResumeTest do
   # validator judged the identical code met — because the child's record
   # started with both requirement registers empty and had no way to know
   # the argument had already been had.
+  describe "resume/3 from requirements — the re-specification loop" do
+    # msn-fdc50b: the operator's chosen option was implemented by its label
+    # only; the fix was in the requirements prompt, and the test of the
+    # fix is a run that re-specifies with the same answer and never asks
+    # it again. There is no tree to seed for that — phase ghosts cut their
+    # own — so the child is treeless, stands at research, and walks on.
+    setup %{repo: repo, sector: sector, git: git} do
+      artifacts = %{
+        "triage" => %{"complexity" => "moderate"},
+        "research" => %{"summary" => "read the ground", "complexity" => "high"},
+        "requirements" => %{"reqs" => ["R1"], "questions" => []},
+        "design" => %{"approach" => "small"},
+        "planning" => %{"ops" => ["one"]}
+      }
+
+      parent = mission_with_work(sector, repo, git, artifacts: artifacts)
+
+      {:ok, inquiry, :asked} =
+        GiTF.Inquiry.ask(parent.mission_id, %{
+          key: "treatment",
+          phase: "requirements",
+          kind: :choice,
+          prompt: "Which treatment?",
+          options: [
+            %{id: "band", label: "Band", rationale: "closed on all sides when collapsed"},
+            %{id: "bar", label: "Bar", rationale: "a rule down the left"}
+          ]
+        })
+
+      {:ok, _, :answered} = GiTF.Inquiry.answer(inquiry.id, "band", answered_by: "operator")
+      {:ok, _} = Missions.fail_quest(parent.mission_id, "rejected at approval")
+
+      {:ok, child} = Missions.resume(parent.mission_id, "requirements", advance: false)
+      %{parent: parent, child: child}
+    end
+
+    test "the child is active at research, with no tree and no seeding", %{child: child} do
+      assert child.status == "active"
+      assert child.current_phase == "research"
+      assert child.resumed_at_phase == "requirements"
+      refute child.resume_seeding
+      assert Ops.list(mission_id: child.id) == []
+    end
+
+    test "only triage and research come along; the specification is redone", %{
+      parent: parent,
+      child: child
+    } do
+      assert child.artifacts["triage"]["inherited_from"] == parent.mission_id
+      assert child.artifacts["research"]["inherited_from"] == parent.mission_id
+      refute Map.has_key?(child.artifacts, "requirements")
+      refute Map.has_key?(child.artifacts, "design")
+    end
+
+    test "the operator's answer is a decision in the child's prompt before any phase runs",
+         %{child: child} do
+      block = GiTF.Inquiry.prompt_block(child.id)
+      assert block =~ "OPERATOR DECISIONS"
+      assert block =~ "ANSWER: Band"
+      assert block =~ "closed on all sides when collapsed"
+      refute block =~ "a rule down the left"
+    end
+
+    test "asking the answered question again does not hold the child", %{child: child} do
+      assert {:ok, inherited, :already_answered} =
+               GiTF.Inquiry.ask(child.id, %{
+                 key: "treatment",
+                 phase: "requirements",
+                 kind: :choice,
+                 prompt: "Which treatment?",
+                 options: [%{id: "band", label: "Band"}, %{id: "bar", label: "Bar"}]
+               })
+
+      assert inherited.answer == "band"
+      assert GiTF.Inquiry.list_open(child.id) == []
+
+      # Materialized on the child AND inherited on the record: one decision.
+      block = GiTF.Inquiry.prompt_block(child.id)
+      assert length(Regex.scan(~r/ANSWER: Band/, block)) == 1
+    end
+
+    test "a parent with no archive branch is still re-specifiable", %{
+      repo: repo,
+      sector: sector,
+      git: git
+    } do
+      %{mission_id: mid} = mission_with_work(sector, repo, git)
+      {:ok, _} = Missions.fail_quest(mid, "gone")
+
+      System.cmd(@git, ["branch", "-D", Topology.archive_branch(mid)],
+        cd: repo,
+        stderr_to_stdout: true
+      )
+
+      assert {:ok, %{current_phase: "research"}} =
+               Missions.resume(mid, "requirements", advance: false)
+    end
+  end
+
   describe "resume/3 — the requirement registers cross the boundary" do
     setup %{repo: repo, sector: sector, git: git} do
       artifacts = %{
