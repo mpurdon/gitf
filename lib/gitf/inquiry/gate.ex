@@ -109,19 +109,31 @@ defmodule GiTF.Inquiry.Gate do
   # phase cannot be invited to ask something the interception would ignore.
   defp holdable_phase?(phase), do: Inquiry.askable_phase?(phase)
 
+  @asked_suffix "_asked"
+
   # Parallel phases write suffixed keys ("design_minimal", "validation_v2").
   # Same prefix rule as `Missions.inheritable?/2`, so a tournament variant
   # can ask as readily as a single-strategy phase.
+  #
+  # A moved-aside `<key>_asked` artifact is in the family by spelling but
+  # is history, never a question. While its key was answered that fell out
+  # naturally (already answered — not held); once a rejected key became
+  # askable again, a periodic advance that ran mid-re-run found nothing
+  # but the old copy and re-asked the three treatments the operator had
+  # just thrown out (msn-fdc50b, 2026-09-09). The fresh artifact landed
+  # eighteen seconds later, unasked.
   defp questioning_artifacts(mission, phase) do
     (Map.get(mission, :artifacts) || %{})
     |> Enum.filter(fn {key, artifact} ->
-      is_binary(key) and family?(key, phase) and is_map(artifact) and
+      is_binary(key) and family?(key, phase) and not history?(key) and is_map(artifact) and
         questions_of(artifact) != []
     end)
     |> Enum.sort_by(fn {key, _} -> key end)
   end
 
   defp family?(key, phase), do: key == phase or String.starts_with?(key, phase <> "_")
+
+  defp history?(key), do: String.ends_with?(key, @asked_suffix)
 
   defp questions_of(artifact) do
     case Map.get(artifact, "questions") || Map.get(artifact, :questions) do
@@ -247,7 +259,7 @@ defmodule GiTF.Inquiry.Gate do
       updated =
         artifacts
         |> Map.delete(key)
-        |> Map.put(key <> "_asked", Map.put(artifact, "held_for_input_at", now_iso()))
+        |> Map.put(key <> @asked_suffix, Map.put(artifact, "held_for_input_at", now_iso()))
 
       Map.put(record, :artifacts, updated)
     end)

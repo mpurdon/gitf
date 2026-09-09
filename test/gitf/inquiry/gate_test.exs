@@ -269,6 +269,57 @@ defmodule GiTF.Inquiry.GateTest do
     end
   end
 
+  describe "the redesign round after a rejection" do
+    # msn-fdc50b: the operator rejected all three treatments; the phase
+    # re-ran and designed three new ones; the Catwalk showed the OLD three
+    # again. The Janitor's periodic advance fired eighteen seconds before
+    # the re-run finished, found only the moved-aside `design_asked`
+    # artifact — in the key family by spelling, askable again now that its
+    # key was rejected — and re-asked the stale question verbatim.
+    setup do
+      m = mission!(%{artifacts: %{"design" => artifact([question()])}})
+      {:held, "design"} = Gate.intercept(reload(m))
+      [first] = Inquiry.list_open(m.id)
+
+      {:ok, _, :answered} =
+        Inquiry.reject(first.id, %{votes: %{"grid" => "down"}, direction: "cards?"})
+
+      %{mission: m, first: first}
+    end
+
+    test "a periodic advance mid-re-run finds nothing to ask", %{mission: m} do
+      # The phase is running again; no fresh artifact yet. The moved-aside
+      # copy is history, not a question.
+      assert Gate.intercept(reload(m)) == :clear
+      assert Inquiry.list_open(m.id) == []
+      assert length(Inquiry.list(m.id)) == 1
+    end
+
+    test "the fresh artifact's question is asked once it lands", %{mission: m, first: first} do
+      Archive.update(:missions, m.id, fn r ->
+        r
+        |> Map.put(:current_phase, "design")
+        |> Map.update!(:artifacts, fn a ->
+          fresh =
+            question(%{
+              "options" => [
+                %{"id" => "cards", "label" => "Cards", "rationale" => "Tiles"},
+                %{"id" => "rows", "label" => "Rows", "rationale" => "Lines"}
+              ]
+            })
+
+          Map.put(a, "design", artifact([fresh]))
+        end)
+      end)
+
+      assert {:held, "design"} = Gate.intercept(reload(m))
+      assert [open] = Inquiry.list_open(m.id)
+      assert Enum.map(open.options, & &1.id) == ["cards", "rows"]
+      assert open.id != first.id
+      assert length(Inquiry.list(m.id)) == 2
+    end
+  end
+
   describe "a variant phase asking" do
     test "a suffixed artifact key is in the phase's family" do
       m = mission!(%{artifacts: %{"design_minimal" => artifact([question()])}})
