@@ -156,23 +156,35 @@ defmodule GiTF.Major.DesignBoard do
   """
   @spec promote_selected_design(String.t(), map()) :: :ok | {:error, term()}
   def promote_selected_design(mission_id, review) do
-    selected = review["selected_design"] || "normal"
-    key = "design_#{selected}"
+    variants = collect_design_variants(mission_id)
+    selected = review["selected_design"]
 
-    case GiTF.Missions.get_artifact(mission_id, key) do
+    # The reviewer is asked to name a pick only when several designs were
+    # drawn (PhasePrompts.review_prompt). A single-strategy round — fast
+    # mode, 'moderate' complexity — draws one design and the review names
+    # nothing: that design is the reviewed one. The sweep's stricter rule
+    # refused it and stalled the first standard-pipeline mission after it
+    # (msn-272e35, 2026-09-09). A pick that IS named and is not there
+    # (moved aside for a question, never written) is refused whatever the
+    # count: promoting another design would plan work nobody reviewed.
+    promoted =
+      cond do
+        is_binary(selected) -> variants[selected]
+        map_size(variants) == 1 -> variants |> Map.values() |> hd()
+        true -> variants["normal"]
+      end
+
+    case promoted do
+      %{} = design ->
+        GiTF.Missions.store_artifact(mission_id, "design", design)
+
       nil ->
-        # The reviewer's pick is not there (moved aside for a question, or
-        # never written). Promoting the first strategy in declaration
-        # order instead would plan and build a design nobody reviewed.
         Logger.error(
-          "Quest #{mission_id}: selected design variant #{inspect(selected)} has no artifact — " <>
-            "not promoting a substitute"
+          "Quest #{mission_id}: selected design variant #{inspect(selected)} has no artifact " <>
+            "among #{inspect(Map.keys(variants))} — not promoting a substitute"
         )
 
         {:error, :selected_variant_missing}
-
-      design ->
-        GiTF.Missions.store_artifact(mission_id, "design", design)
     end
   end
 

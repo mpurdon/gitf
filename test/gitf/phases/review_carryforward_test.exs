@@ -16,9 +16,47 @@ defmodule GiTF.Phases.ReviewCarryforwardTest do
     m
   end
 
-  test "a review whose pick has no artifact refuses the advance" do
+  test "with several designs, a pick that has no artifact refuses the advance" do
+    {:ok, m} =
+      GiTF.Archive.insert(:missions, %{
+        name: "cf",
+        goal: "g",
+        artifacts: %{
+          "design_minimal" => %{"approach" => "a"},
+          "design_complex" => %{"approach" => "b"}
+        }
+      })
+
+    assert {:error, :selected_variant_missing} =
+             Review.before_advance(m, :pass, %{"approved" => true, "selected_design" => "normal"})
+
+    # Unnamed among several: "normal" is the historic default; absent, refuse.
+    assert {:error, :selected_variant_missing} =
+             Review.before_advance(m, :pass, %{"approved" => true})
+  end
+
+  test "with no design at all the advance is refused" do
     {:ok, m} = GiTF.Archive.insert(:missions, %{name: "cf", goal: "g", artifacts: %{}})
 
+    assert {:error, :selected_variant_missing} =
+             Review.before_advance(m, :pass, %{"approved" => true, "selected_design" => "normal"})
+  end
+
+  test "the one design drawn is the reviewed design, named or not" do
+    # A single-strategy round (fast mode, or 'moderate' complexity) draws
+    # design_minimal and the reviewer never names a pick — msn-272e35
+    # stalled here on 2026-09-09.
+    {:ok, m} =
+      GiTF.Archive.insert(:missions, %{
+        name: "cf",
+        goal: "g",
+        artifacts: %{"design_minimal" => %{"approach" => "only"}}
+      })
+
+    :ok = Review.before_advance(m, :pass, %{"approved" => true})
+    assert GiTF.Missions.get_artifact(m.id, "design") == %{"approach" => "only"}
+
+    # A pick the reviewer NAMED that is not there is a different matter.
     assert {:error, :selected_variant_missing} =
              Review.before_advance(m, :pass, %{"approved" => true, "selected_design" => "normal"})
   end
