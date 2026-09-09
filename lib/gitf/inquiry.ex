@@ -1105,8 +1105,13 @@ defmodule GiTF.Inquiry do
   defp rejections_block(entries) do
     blocks =
       Enum.map_join(entries, "\n", fn entry ->
+        # Numbered as the Catwalk showed them, so "option 2" in the
+        # operator's direction names the same proposal here.
         options =
-          Enum.map_join(entry["options"] || [], "\n", fn o ->
+          entry["options"]
+          |> List.wrap()
+          |> Enum.with_index(1)
+          |> Enum.map_join("\n", fn {o, n} ->
             vote =
               case get_in(entry, ["votes", o["id"]]) do
                 "up" -> "KEEP THIS DIRECTION (thumbs up)"
@@ -1114,13 +1119,16 @@ defmodule GiTF.Inquiry do
                 _ -> "no signal"
               end
 
-            "    - #{o["label"]} — #{vote}"
+            "    - Option #{n}: #{o["label"]} — #{vote}"
           end)
 
         direction =
           case entry["direction"] do
-            d when is_binary(d) -> "\n  DIRECTION FROM THE OPERATOR: #{d}"
-            _ -> ""
+            d when is_binary(d) ->
+              "\n  DIRECTION FROM THE OPERATOR (\"option N\" refers to the numbering above): #{d}"
+
+            _ ->
+              ""
           end
 
         "- (#{entry["phase"]}/#{entry["key"]}) #{entry["prompt"]}\n" <>

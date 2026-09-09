@@ -501,9 +501,9 @@ defmodule GiTF.InquiryTest do
 
       block = Inquiry.prompt_block(m.id)
       assert block =~ "REJECTED PROPOSALS"
-      assert block =~ "Grid — DO NOT RE-OFFER"
-      assert block =~ "List — KEEP THIS DIRECTION"
-      assert block =~ "DIRECTION FROM THE OPERATOR: airier"
+      assert block =~ "Option 1: Grid — DO NOT RE-OFFER"
+      assert block =~ "Option 2: List — KEEP THIS DIRECTION"
+      assert block =~ ~r/DIRECTION FROM THE OPERATOR.*: airier/
       refute block =~ "OPERATOR DECISIONS"
 
       # Once the new round is chosen, both sections appear: the decision

@@ -177,7 +177,7 @@ defmodule GiTF.Dashboard.InquiryCard do
     ~H"""
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0.75rem">
       <div
-        :for={option <- @inquiry[:options] || []}
+        :for={{option, n} <- Enum.with_index(@inquiry[:options] || [], 1)}
         role="button"
         tabindex="0"
         phx-click="answer_inquiry"
@@ -204,7 +204,9 @@ defmodule GiTF.Dashboard.InquiryCard do
         </div>
         <div style="display:flex; gap:0.5rem; align-items:stretch; margin-top:0.45rem">
           <div style="flex:1; min-width:0">
-            <div style="font-weight:600; color:var(--text)">{option.label}</div>
+            <div style="font-weight:600; color:var(--text)">
+              <span class="badge badge-blue" style="margin-right:0.4rem">Option {n}</span>{option.label}
+            </div>
             <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
               {option.rationale}
             </div>
@@ -258,7 +260,7 @@ defmodule GiTF.Dashboard.InquiryCard do
       <textarea
         name="direction"
         rows="2"
-        placeholder="Optional direction — e.g. lighter than the band, but a clearer boundary than the hairline"
+        placeholder="Optional direction — refer to the proposals by number, e.g. option 2's weight with option 1's boundary"
         style="display:block; width:100%; box-sizing:border-box; background:var(--ground); border:1px solid var(--line); border-radius:4px; color:var(--text); font-size:0.82rem; padding:0.4rem 0.5rem"
       ></textarea>
       <button type="submit" class="btn btn-red" style="margin-top:0.5rem">Try again</button>
@@ -284,7 +286,7 @@ defmodule GiTF.Dashboard.InquiryCard do
     </div>
     <div style="display:flex; flex-direction:column; gap:0.5rem">
       <div
-        :for={option <- @inquiry[:options] || []}
+        :for={{option, n} <- Enum.with_index(@inquiry[:options] || [], 1)}
         role="button"
         tabindex="0"
         phx-click="answer_inquiry"
@@ -294,7 +296,9 @@ defmodule GiTF.Dashboard.InquiryCard do
         style="text-align:left; display:flex; gap:0.5rem; align-items:stretch; width:100%; padding:0.6rem 0.75rem; white-space:normal; cursor:pointer"
       >
         <div style="flex:1; min-width:0">
-          <div style="font-weight:600; color:var(--text)">{option.label}</div>
+          <div style="font-weight:600; color:var(--text)">
+            <span class="badge badge-blue" style="margin-right:0.4rem">Option {n}</span>{option.label}
+          </div>
           <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
             {option.rationale}
           </div>
