@@ -2,8 +2,17 @@
 
 Drafted 2026-08-28 while msn-6be1ba ran, from two runs' worth of hard data
 (msn-7683ac, msn-6be1ba) and the BEAM audit
-(`docs/audits/2026-08-28-beam-best-practices-audit.md`). Status: PLAN —
-nothing here is built except where noted.
+(`docs/audits/2026-08-28-beam-best-practices-audit.md`).
+
+**Status 2026-09-09: Phase 1 is BUILT.** A1 (chained worktrees,
+`Topology.impl_base_branch_opts/1`), A2 (merge-as-you-go,
+`Topology.consolidate_on_completion/1`, fired from the Major's
+verification task — clean merges only, conflicts left for the endgame),
+B2 (indexes on costs/ghost_id, ghosts/status, links/unread_to; ghost
+pruning), B4 (exec lane `GroundTruth`, audit lane
+`GiTF.Audit.VerdictCache`). Acceptance per doctrine still to run: the
+six-level-priority mission, wall clock vs run 1's 2h48m. Phase 2 (B1
+Major offload, A3 ownership-aware parallelism) is not started.
 
 ## The observation that frames everything
 
