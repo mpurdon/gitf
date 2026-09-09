@@ -75,3 +75,41 @@ flag. The flag-on A/B (`specs/WIRE.md` §8) has not been run.
 - The Janitor's periodic advance still runs the inquiry gate before asking
   whether the phase's op is finished. Harmless now that history is excluded,
   but the order is backwards.
+
+## Addendum, 2026-09-09 — the sweep
+
+After defect 8 came two more in the same family, then a four-lens sweep for
+every other instance of the classes the day exposed. All fixed and deployed in
+0.65.298–309; the resumed mission msn-e56adf → cora PR #22 is the acceptance
+test for the first three.
+
+9. **A withdrawn question blocked re-asking its key** — `existing/3` returned
+   it, `ask/2` had no arm for it, and the gate's never-raises guard swallowed
+   the crash and walked into design. Withdrawn is invisible to a re-ask; the
+   gate now stalls in place on a failure (`input_gate_failed`, critical).
+10. **The chosen option's rationale never reached the re-run** — only the
+    label did, so "Refined tinted band (no hatch)" was built without the
+    sealed-drawer geometry its description promised. The rationale is part
+    of the decision now. Found by rejecting apr-1319fa; verified by resuming.
+11. **No way to resume without re-asking** — `resume_mission` gained
+    `from_phase: "requirements"`: inherits triage, research and every
+    operator answer, no tree, and the requirements prompt carries the
+    decisions before any phase runs. The registers do not cross (the child
+    reuses FR-n ids for new text); source identity, workflow and the approval
+    rejection reasons do.
+
+The sweep (commits 8fbe75d, 6da9792, 58e1f07), by class:
+
+| Class | Instances fixed |
+|---|---|
+| History read as live | `_asked` artifacts inherited across a resume; fed the accepted-requirements ratchet and reset the validation respawn budget; preview cache served the rejected round's mockup for a reused option id; design promotion fell back to an unreviewed strategy; design completion counted the previous round's ops |
+| Missing status arms / fail-open | answer/reject on withdrawn; GATE 1 blind to killed/cancelled/paused (budget-paused missions re-advanced every 3 min); Janitor sweep list missing triage/publish; unknown approval state read as "not required"; gate rescue cleared; provider preflight, gh auth probe, autonomy meter admitted on error |
+| Decisions losing substance | text answers cut to 60 chars; rejected options without rationale; inherited rejections materialized as answers; review dissent/fingerprint read from fields the card lacks (every rejection fingerprinted identical → redesign budget 0); acceptance criteria never rendered (list vs binary guard); impl and fix ghosts saw no criteria and no operator decisions; planning lost the reviewer's coverage gaps; Wire budgets on mechanically-read fields |
+| Sweeps racing live work | gate holding on the first tournament variant; halts sealing missions without stopping ghosts; assigned-op timeout under a live worker; stale-phase respawn guard blind to pending; watchdog pausing held missions and auto-failing without archiving |
+
+Deferred, with reasons: workflow-mode `before_advance` results are ignored by
+contract (a missing selected variant still plans on the aggregate design);
+dashboard "Reject & Redesign" collects no reason; simplify ghosts run without
+requirements or decisions; PR-review intake caps inline comments at 25; the
+Janitor still runs the gate before asking whether the phase op is finished
+(harmless now, backwards); `list_outcomes` was empty for the resumed child.
