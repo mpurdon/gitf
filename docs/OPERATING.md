@@ -431,6 +431,11 @@ What the Cabinet does:
   decides wake / queue / drop. Every failure queues — never wakes.
 - **Modes** — normal (bugs + PR reviews wake, cost-cap gated), vacation
   (same; features queue for an explicit start), off (everything queues).
+- **Installing on the Cabinet** — same `rel/install-systemd.sh`; since
+  0.65.317 it sees `[cabinet] enabled = true` and leaves the idle-stop and
+  backup timers OFF (earlier installs re-enabled them, to be undone by
+  hand). Its env file needs no `GITF_CHECK_ORIGIN` — the `[server] url`
+  is an allowed websocket origin by construction (`GiTF.Web.Origin`).
 - **The fleet (Console → Ministries)** — every box as an object: state
   and how long it has been that way, the release it runs, when idle-stop
   will sleep it (or what holds it awake), last wake, spend against cap,
