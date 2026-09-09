@@ -240,7 +240,7 @@ defmodule GiTF.Dashboard.InputGatePipelineTest do
       {:ok, view, _html} = live(build_conn(), "/dashboard/questions")
 
       view
-      |> element(~s{button[phx-click="answer_inquiry"][phx-value-answer="list"]})
+      |> element(~s{[role="button"][phx-click="answer_inquiry"][phx-value-answer="list"]})
       |> render_click()
 
       assert Inquiry.status(inquiry.id) == :answered
