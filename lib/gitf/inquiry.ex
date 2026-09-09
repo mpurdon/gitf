@@ -906,11 +906,15 @@ defmodule GiTF.Inquiry do
 
   # Only questions this run actually put to a human count against the
   # budget. An inherited answer cost the operator nothing, and neither
-  # did a duplicate answered from a standing decision.
+  # did a duplicate answered from a standing decision, nor a withdrawn
+  # question that was taken back before anyone answered it.
   defp count_asked_here(mission_id) do
     mission_id
     |> for_mission()
-    |> Enum.count(&(is_nil(&1[:inherited_from]) and is_nil(&1[:duplicate_of])))
+    |> Enum.count(
+      &(is_nil(&1[:inherited_from]) and is_nil(&1[:duplicate_of]) and
+          &1[:status] != "withdrawn")
+    )
   end
 
   # -- The answered register (crosses a resume) --------------------------------

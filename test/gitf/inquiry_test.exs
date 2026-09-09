@@ -564,6 +564,15 @@ defmodule GiTF.InquiryTest do
       assert Inquiry.status(again.id) == :open
     end
 
+    test "a withdrawn question is not charged against the budget", %{mission: m, inquiry: inq} do
+      before = Inquiry.budget_remaining(m.id)
+      assert Inquiry.withdraw(m.id, "stale") == 1
+
+      {:ok, _again, :asked} = Inquiry.ask(m.id, choice())
+      assert Inquiry.budget_remaining(m.id) == before
+      refute inq.id in Enum.map(Inquiry.list_open(m.id), & &1.id)
+    end
+
     test "Missions.kill/1 withdraws the mission's questions", %{mission: m, inquiry: inq} do
       assert :ok = GiTF.Missions.kill(m.id)
       assert Inquiry.list_open() == []
