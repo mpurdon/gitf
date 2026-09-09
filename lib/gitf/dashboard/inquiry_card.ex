@@ -219,7 +219,7 @@ defmodule GiTF.Dashboard.InquiryCard do
       <div :for={option <- @inquiry[:options] || []} style="display:flex; align-items:center; gap:0.3rem">
         <span style="max-width:14rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{option.label}</span>
         <button
-          :for={{vote, glyph, title} <- [{"up", "👍", "keep this direction"}, {"neutral", "○", "no signal"}, {"down", "👎", "do not re-offer"}]}
+          :for={{vote, glyph, title} <- [{"up", "👍", "keep this direction"}, {"neutral", "➖", "no signal"}, {"down", "👎", "do not re-offer"}]}
           phx-click="vote_inquiry"
           phx-value-id={@inquiry.id}
           phx-value-option={option.id}
