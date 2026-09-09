@@ -894,10 +894,13 @@ defmodule GiTF.Inquiry do
 
   # A rejected question is an answer, but not one that settles its key:
   # the phase is expected to ask again, under the same key if it likes.
+  # Only a record that is still a decision or still awaiting one stands in
+  # the way of asking again: a rejected question was sent back for new
+  # options, and a withdrawn one was never resolved at all.
   defp existing(mission_id, phase, key) do
     mission_id
     |> for_mission()
-    |> Enum.reject(&rejected?/1)
+    |> Enum.filter(&(&1[:status] in ["open", "answered"] and not rejected?(&1)))
     |> Enum.find(&(&1[:phase] == phase and &1[:key] == key))
   end
 

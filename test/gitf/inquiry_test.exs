@@ -551,6 +551,19 @@ defmodule GiTF.InquiryTest do
       assert Inquiry.withdraw_orphans() == 0
     end
 
+    # A withdrawn question is not a standing answer and not an open hold;
+    # the same key must be askable again. Before this, `existing/3` handed
+    # `ask/2` the withdrawn record, which matched no arm — the raise was
+    # swallowed by the gate's never-raises guard and the mission walked
+    # straight past the question into design (msn-fdc50b, 2026-09-09).
+    test "the same key can be asked again after a withdrawal", %{mission: m, inquiry: inq} do
+      assert Inquiry.withdraw(m.id, "stale") == 1
+
+      assert {:ok, again, :asked} = Inquiry.ask(m.id, choice())
+      assert again.id != inq.id
+      assert Inquiry.status(again.id) == :open
+    end
+
     test "Missions.kill/1 withdraws the mission's questions", %{mission: m, inquiry: inq} do
       assert :ok = GiTF.Missions.kill(m.id)
       assert Inquiry.list_open() == []

@@ -94,9 +94,21 @@ defmodule GiTF.Inquiry.Gate do
     end
   rescue
     e ->
-      Logger.warning(
-        "Quest #{Map.get(mission, :id)}: input-gate interception failed " <>
+      id = Map.get(mission, :id)
+
+      Logger.error(
+        "Quest #{id}: input-gate interception failed " <>
           "(#{Exception.message(e)}) — advancing without holding"
+      )
+
+      # Advancing past a question the phase raised is the operator losing
+      # their say; it must not pass as a warning in the log (it did once,
+      # and a design ghost was spawned on an unchosen treatment).
+      Observability.Alerts.dispatch_webhook(
+        :input_gate_failed,
+        "Quest #{id}: the input gate failed (#{Exception.message(e)}) and the mission " <>
+          "advanced without asking — check the phase's questions",
+        dedup_key: "input_gate_failed:#{id}"
       )
 
       :clear
