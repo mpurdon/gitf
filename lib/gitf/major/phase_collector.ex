@@ -35,16 +35,39 @@ defmodule GiTF.Major.PhaseCollector do
           {:ok, map() | list()} | {:error, term()}
   def collect(phase, raw_output, parsed_events, opts \\ []) do
     text = extract_assistant_text(parsed_events, raw_output)
+    requested = if GiTF.Wire.requested?(opts[:prompt]), do: :wire, else: :json
 
-    case extract_structured(phase, text, opts) do
-      {:ok, data} ->
+    case extract_notated(phase, text, opts) do
+      {:ok, data, notation} ->
+        tally(opts[:mission_id], phase, requested, notation)
         validate_artifact(phase, data)
 
       {:error, reason} ->
+        tally(opts[:mission_id], phase, requested, :parse_failed)
         Logger.warning("Phase #{phase} structured-output extraction failed: #{inspect(reason)}")
         {:error, :parse_failed}
     end
   end
+
+  # The §8 metrics (specs/WIRE.md), counted on the mission record so an
+  # A/B reads them off `compare_missions` instead of a journal grep:
+  # replies parsed as Wire, as JSON, JSON after Wire was asked for (a card
+  # defect), and outright parse failures.
+  defp tally(mission_id, phase, requested, notation) when is_binary(mission_id) do
+    key =
+      case {requested, notation} do
+        {_, :parse_failed} -> "parse_failed"
+        {:wire, :json} -> "json_fallback"
+        {_, :wire} -> "wire"
+        {_, :json} -> "json"
+      end
+
+    GiTF.Missions.tally_notation(mission_id, phase, key)
+  rescue
+    _ -> :ok
+  end
+
+  defp tally(_mission_id, _phase, _requested, _notation), do: :ok
 
   @doc """
   Extracts the structured reply from assistant text: Wire when the reply
@@ -57,9 +80,22 @@ defmodule GiTF.Major.PhaseCollector do
   @spec extract_structured(String.t(), String.t(), keyword()) ::
           {:ok, map() | list()} | {:error, term()}
   def extract_structured(phase, text, opts \\ []) do
+    case extract_notated(phase, text, opts) do
+      {:ok, data, _notation} -> {:ok, data}
+      error -> error
+    end
+  end
+
+  defp extract_notated(phase, text, opts) do
     case GiTF.Wire.decode(text, phase, files: GiTF.Wire.files_in(opts[:prompt])) do
-      {:ok, data} -> {:ok, data}
-      {:error, _} -> extract_json(text)
+      {:ok, data} ->
+        {:ok, data, :wire}
+
+      {:error, _} ->
+        case extract_json(text) do
+          {:ok, data} -> {:ok, data, :json}
+          error -> error
+        end
     end
   end
 

@@ -41,9 +41,48 @@ defmodule GiTF.Wire do
   @version 1
   @fence_re ~r/```wire\s*\n([\s\S]*?)\n\s*```/
 
-  @doc "Whether prompts are built in Wire. Decoding does not consult this."
+  @doc """
+  Whether prompts are built in Wire. Decoding does not consult this.
+
+  A mission may pin its own mode (`mission.wire` true/false) for an A/B
+  against the global flag; the pin is honoured for the span of
+  `with_mission/2`, which the orchestrator wraps around everything that
+  builds a mission's prompts.
+  """
+  @mode_key {__MODULE__, :mission_mode}
+
   @spec enabled?() :: boolean()
-  def enabled?, do: Application.get_env(:gitf, :wire_enabled, false) == true
+  def enabled? do
+    case Process.get(@mode_key) do
+      mode when is_boolean(mode) -> mode
+      _ -> Application.get_env(:gitf, :wire_enabled, false) == true
+    end
+  end
+
+  @doc "Whether a prompt asked for a Wire reply (carries a Wire reply card)."
+  @spec requested?(String.t() | nil) :: boolean()
+  def requested?(prompt) when is_binary(prompt), do: String.contains?(prompt, "%wire 1 ")
+  def requested?(_), do: false
+
+  @doc "Runs `fun` with the mission's Wire pin (if any) in force."
+  @spec with_mission(map(), (-> result)) :: result when result: term()
+  def with_mission(mission, fun) when is_function(fun, 0) do
+    case Map.get(mission || %{}, :wire) do
+      mode when is_boolean(mode) ->
+        previous = Process.put(@mode_key, mode)
+
+        try do
+          fun.()
+        after
+          if is_nil(previous),
+            do: Process.delete(@mode_key),
+            else: Process.put(@mode_key, previous)
+        end
+
+      _ ->
+        fun.()
+    end
+  end
 
   @doc "The artifact kinds Wire speaks. `planning` is accepted as an alias of `plan`."
   def kinds, do: Kinds.kinds()

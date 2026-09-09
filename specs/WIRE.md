@@ -442,22 +442,32 @@ when it fires, is worth more per incident than the notation is per mission.
 
 Equal success rate is an empirical claim about models, not a property of a grammar. The
 argument for expecting it: no prose is removed or shortened where a later phase acts on
-it; the card is example-shaped and complete; the decoder is lenient and accepts JSON. The
-test:
+it; the card is example-shaped and complete; the decoder is lenient and accepts JSON.
 
-1. Keep `wire_enabled` off. Note the current baseline: msn-5f2be2 (fast), msn-ac0539
-   (full) are the recent acceptance runs.
-2. Turn it on for the box (`[features] wire_enabled = true`, reload — no restart).
-3. Re-run the **same** missions unchanged, per the failure doctrine. Compare: phase
-   parse-failure count (must stay 0 — `journalctl -u gitf | grep "structured-output
-   extraction failed"`), validation verdicts, fix-loop rounds, wall clock, `costs_summary`
-   by category.
-4. Any phase whose reply the collector had to fall back to JSON for, or that parsed with
-   skipped lines, is a card defect: fix the card, not the mission.
+The test is an A/B pair — the same goal run twice, one mission pinned to each notation —
+and it is mechanical (since 0.65.313):
 
-If a fast-tier model (Haiku) shows a higher parse-fallback rate than Sonnet, the
-mitigation is per-tier: keep the JSON card for that tier (the flag can become tiered),
-not to weaken the grammar.
+1. Create the pair. The pin beats the box's flag, so nothing global changes:
+   `create_mission goal: G, wire: false, name: "G-json"` and
+   `create_mission goal: G, wire: true, name: "G-wire"`, then `start_mission` each.
+   Run them one after the other, not concurrently, so neither's ghosts compete for the
+   sector's cache or the other's branch. Neither needs to merge: reject both at approval,
+   or approve one and close the other's PR.
+2. Read `compare_missions a: <json id>, b: <wire id>`. It reports, per mission and as
+   b's delta: `notation` (replies parsed as `wire`, `json`, `json_fallback` — JSON came
+   back when Wire was asked for — and `parse_failed`), validation verdicts and met/unmet
+   counts, fix rounds, wall clock, cost and tokens by phase.
+3. The pass bar: `parse_failed` and `json_fallback` are 0 on the Wire side; validation
+   verdicts and fix rounds are no worse; tokens by phase are lower. A `json_fallback` is
+   a card defect — fix the card (`GiTF.Wire.Cards`), not the mission — and re-run the
+   Wire side only.
+
+The tally is kept on the mission record (`notation_tally`, by phase) by the collector,
+so it survives the journal and reads the same from the MCP, the API and a resume.
+
+If a fast-tier model (Haiku) shows a higher fallback rate than Sonnet, the mitigation is
+per-tier: keep the JSON card for that tier (the flag can become tiered), not to weaken
+the grammar.
 
 ---
 

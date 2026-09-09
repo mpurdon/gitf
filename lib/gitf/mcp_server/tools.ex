@@ -194,6 +194,22 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "compare_missions",
+        description:
+          "Two missions side by side on A/B metrics: how each phase reply was parsed (wire / " <>
+            "json / json after Wire was asked for / parse failed), validation verdicts, fix " <>
+            "rounds, wall clock, cost and tokens by phase, with b's delta against a. The Wire " <>
+            "success-rate protocol (specs/WIRE.md §8) reads from this.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            a: %{type: "string", description: "Baseline mission ID"},
+            b: %{type: "string", description: "Mission ID to compare against the baseline"}
+          },
+          required: ["a", "b"]
+        }
+      },
+      %{
         name: "mission_report",
         description:
           "Generate a formatted performance report for a mission (timing, tokens, cost, output).",
@@ -353,6 +369,13 @@ defmodule GiTF.MCPServer.Tools do
               type: "boolean",
               description: "Pause at planning phase for manual review in the dashboard",
               default: false
+            },
+            wire: %{
+              type: "boolean",
+              description:
+                "Pin this mission's prompt notation: true = Wire, false = JSON, omitted = the " <>
+                  "box's wire_enabled flag. For an A/B (specs/WIRE.md §8): create the same goal " <>
+                  "twice, one each way, then compare_missions."
             },
             confirm: %{type: "boolean", description: "Must be true to execute"}
           },

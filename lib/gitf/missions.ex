@@ -68,6 +68,22 @@ defmodule GiTF.Missions do
   # different membership; this is the one that counts.
   @terminal_phases ~w(completed failed closed killed)
 
+  @doc """
+  Counts one phase reply under `key` ("wire" | "json" | "json_fallback" |
+  "parse_failed") in the mission's `notation_tally`, keyed by phase. The
+  Wire A/B's success-rate metrics (specs/WIRE.md §8).
+  """
+  @spec tally_notation(String.t(), String.t(), String.t()) :: :ok
+  def tally_notation(mission_id, phase, key) do
+    Archive.update(:missions, mission_id, fn m ->
+      Map.update(m, :notation_tally, %{phase => %{key => 1}}, fn tally ->
+        Map.update(tally || %{}, phase, %{key => 1}, &Map.update(&1, key, 1, fn n -> n + 1 end))
+      end)
+    end)
+
+    :ok
+  end
+
   @doc "Phases that end a mission's pipeline."
   @spec terminal_phases() :: [String.t()]
   def terminal_phases, do: @terminal_phases
@@ -314,6 +330,8 @@ defmodule GiTF.Missions do
         issue_ref: issue_ref,
         cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"],
         workflow_id: workflow_id,
+        # Per-mission Wire pin for an A/B (nil = the global flag decides).
+        wire: wire_pin(attrs[:wire] || attrs["wire"]),
         # Provenance for Aramaki (the admission layer). `source` identifies the
         # intake channel (e.g. "github_issue"); `source_issue` carries the
         # linkage used to report progress back; `aramaki_priority` orders the
@@ -1286,6 +1304,11 @@ defmodule GiTF.Missions do
       _ -> "standard"
     end
   end
+
+  defp wire_pin(mode) when is_boolean(mode), do: mode
+  defp wire_pin("true"), do: true
+  defp wire_pin("false"), do: false
+  defp wire_pin(_), do: nil
 
   defp generate_name(goal) do
     slug =

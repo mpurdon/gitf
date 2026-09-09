@@ -389,6 +389,15 @@ defmodule GiTF.MCPServer.Handlers do
     {:ok, json_text(Enum.map(links, &serialize_link/1))}
   end
 
+  def call("compare_missions", %{"a" => a, "b" => b}) do
+    case GiTF.Missions.Compare.compare(a, b) do
+      {:ok, comparison} -> {:ok, json_text(comparison)}
+      {:error, :not_found} -> {:error, "Mission not found: one of #{a}, #{b}"}
+    end
+  end
+
+  def call("compare_missions", _), do: {:error, "Missing required parameters: a, b"}
+
   def call("mission_report", %{"id" => id}) do
     case GiTF.Report.generate(id) do
       {:ok, report} -> {:ok, GiTF.Report.format(report)}
@@ -583,6 +592,7 @@ defmodule GiTF.MCPServer.Handlers do
       attrs = if args["sector_id"], do: Map.put(attrs, :sector_id, args["sector_id"]), else: attrs
       attrs = if args["name"], do: Map.put(attrs, :name, args["name"]), else: attrs
       attrs = if args["review_plan"], do: Map.put(attrs, :review_plan, true), else: attrs
+      attrs = if is_boolean(args["wire"]), do: Map.put(attrs, :wire, args["wire"]), else: attrs
 
       case GiTF.Missions.create(attrs) do
         {:ok, mission} -> {:ok, json_text(serialize_mission(mission))}

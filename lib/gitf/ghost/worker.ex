@@ -1907,7 +1907,10 @@ defmodule GiTF.Ghost.Worker do
     # Single-strategy planning or other phases use the phase name directly.
     artifact_key = planning_artifact_key(op)
 
-    case GiTF.Major.PhaseCollector.collect(op.phase, raw_output, events, prompt: op.description) do
+    case GiTF.Major.PhaseCollector.collect(op.phase, raw_output, events,
+           prompt: op.description,
+           mission_id: op.mission_id
+         ) do
       {:ok, artifact} ->
         GiTF.Missions.store_artifact(op.mission_id, artifact_key, artifact)
 

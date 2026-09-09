@@ -95,7 +95,24 @@ defmodule GiTF.Skills.Embedding do
   @doc "Returns the configured default embedding model spec."
   @spec default_model() :: String.t()
   def default_model do
-    Application.get_env(:gitf, :skill_embedding_model, "openai:text-embedding-3-small")
+    Application.get_env(:gitf, :skill_embedding_model) || model_for_configured_provider()
+  end
+
+  # No explicit model: use an embedding model the configured keys can
+  # actually call. The old hard default was OpenAI's, on a factory that
+  # has never had an OpenAI key — every retrieval failed and returned no
+  # skills, silently, so `skills_enabled` could be on and do nothing.
+  @by_provider [
+    {:openai, "openai:text-embedding-3-small"},
+    {:google, "google:gemini-embedding-001"}
+  ]
+
+  defp model_for_configured_provider do
+    keys = GiTF.Config.Provider.get([:llm, :keys]) || %{}
+
+    Enum.find_value(@by_provider, "openai:text-embedding-3-small", fn {provider, model} ->
+      if is_binary(keys[provider]) and keys[provider] != "", do: model
+    end)
   end
 
   # -- Cache (ETS, lazily created) ---------------------------------------------

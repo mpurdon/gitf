@@ -82,7 +82,9 @@ config :req_llm, load_dotenv: true
 # directory for Claude Code to discover. Defaults to disabled —
 # opt in per environment (see config/runtime.exs or override here).
 config :gitf, :skills_enabled, false
-config :gitf, :skill_embedding_model, "openai:text-embedding-3-small"
+# Unset: `GiTF.Skills.Embedding.default_model/0` picks an embedding model the
+# configured provider keys can call (openai, then google). Set to pin one.
+config :gitf, :skill_embedding_model, nil
 config :gitf, :skill_top_k, 5
 config :gitf, :skill_min_similarity, 0.45
 

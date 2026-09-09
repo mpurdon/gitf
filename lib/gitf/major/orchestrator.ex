@@ -272,7 +272,7 @@ defmodule GiTF.Major.Orchestrator do
           {:ok, atom() | tuple()} | {:error, term()}
   def dispatch_phase(phase_id, mission) do
     case Map.fetch(PhaseLauncher.phase_starters(), phase_id) do
-      {:ok, starter} -> starter.(mission)
+      {:ok, starter} -> GiTF.Wire.with_mission(mission, fn -> starter.(mission) end)
       :error -> {:error, {:unknown_phase, phase_id}}
     end
   end
@@ -332,7 +332,7 @@ defmodule GiTF.Major.Orchestrator do
 
         # All gates clear: walk one more leg of the journey.
         true ->
-          advance_mission_phase(mission)
+          GiTF.Wire.with_mission(mission, fn -> advance_mission_phase(mission) end)
       end
     end
   end
