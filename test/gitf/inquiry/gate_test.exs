@@ -331,6 +331,21 @@ defmodule GiTF.Inquiry.GateTest do
     end
   end
 
+  describe "a gate that breaks" do
+    test "reports the failure instead of clearing — the ladder must not walk past" do
+      # A record the gate cannot process: no id, so recording the question
+      # raises inside the interception. Validation is not the point here;
+      # the rescue path is.
+      broken = %{
+        id: nil,
+        current_phase: "design",
+        artifacts: %{"design" => artifact([question()])}
+      }
+
+      assert {:failed, _reason} = Gate.intercept(broken)
+    end
+  end
+
   describe "a question that cannot be answered" do
     test "is refused, the mission is NOT held, and the phase carries on" do
       m =

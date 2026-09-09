@@ -104,6 +104,12 @@ defmodule GiTF.OverrideTest do
       assert Override.approval_status(mission.id) == :not_required
     end
 
+    test "an approval artifact of unknown shape is pending, never 'not required'" do
+      mission = create_quest()
+      GiTF.Missions.store_artifact(mission.id, "approval", %{"compacted" => true})
+      assert Override.approval_status(mission.id) == :pending
+    end
+
     test "returns :pending after request_approval" do
       mission = create_quest()
       add_job(mission, %{risk_level: :high})

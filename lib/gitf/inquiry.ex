@@ -597,6 +597,13 @@ defmodule GiTF.Inquiry do
       %{status: "answered"} = decided ->
         {:ok, decided, :already_answered}
 
+      # Taken back before anyone answered — a kill, an orphan sweep, an
+      # operator reset. Answering it would write "answered" over the
+      # withdrawal and put a decision nobody is waiting for into the
+      # register every resumed descendant reads.
+      %{status: "withdrawn"} = gone ->
+        {:error, {:withdrawn, gone[:withdrawn_reason]}}
+
       inquiry ->
         with {:ok, value, label} <- validate_answer(inquiry, answer) do
           answered_by = Keyword.get(opts, :answered_by, "human")
@@ -660,6 +667,9 @@ defmodule GiTF.Inquiry do
 
       %{status: "answered"} = decided ->
         {:ok, decided, :already_answered}
+
+      %{status: "withdrawn"} = gone ->
+        {:error, {:withdrawn, gone[:withdrawn_reason]}}
 
       %{kind: kind} when kind != :choice ->
         {:error, {:invalid, "only a :choice question can be rejected — answer a #{kind} instead"}}

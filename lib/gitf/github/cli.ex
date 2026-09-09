@@ -261,7 +261,9 @@ defmodule GiTF.GitHub.CLI do
     :persistent_term.put({__MODULE__, :auth_ok}, {ok?, System.monotonic_time(:second)})
     ok?
   rescue
-    _ -> true
+    # A probe that cannot run is not a login. (Not cached: the next call
+    # gets to try again.)
+    _ -> false
   end
 
   defp normalize_reviews(reviews) when is_list(reviews) do

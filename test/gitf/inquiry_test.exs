@@ -564,6 +564,14 @@ defmodule GiTF.InquiryTest do
       assert Inquiry.status(again.id) == :open
     end
 
+    test "a withdrawn question can be neither answered nor rejected", %{mission: m, inquiry: inq} do
+      assert Inquiry.withdraw(m.id, "stale") == 1
+      assert {:error, {:withdrawn, "stale"}} = Inquiry.answer(inq.id, "list")
+      assert {:error, {:withdrawn, "stale"}} = Inquiry.reject(inq.id, %{})
+      assert Inquiry.status(inq.id) == :withdrawn
+      assert Inquiry.answered_register(m.id) == []
+    end
+
     test "a withdrawn question is not charged against the budget", %{mission: m, inquiry: inq} do
       before = Inquiry.budget_remaining(m.id)
       assert Inquiry.withdraw(m.id, "stale") == 1

@@ -180,6 +180,10 @@ defmodule GiTF.Missions do
   def non_terminal?(mission),
     do: not finished?(mission) and Map.get(mission, :status) not in @paused_statuses
 
+  @doc "Paused by the operator or the budget watchdog — waits, and must not be advanced."
+  @spec paused?(map()) :: boolean()
+  def paused?(mission), do: Map.get(mission, :status) in @paused_statuses
+
   # -- Public API --------------------------------------------------------------
 
   @doc """

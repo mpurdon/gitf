@@ -134,7 +134,9 @@ defmodule GiTF.Autonomy do
         |> Enum.max()
     end
   rescue
-    _ -> 0.0
+    # An unreadable meter reads as full pressure, not none — the number
+    # scales ghost concurrency up.
+    _ -> 1.0
   end
 
   # Group cost totals by mission_id in a single scan of :costs.

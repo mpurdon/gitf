@@ -2039,6 +2039,11 @@ defmodule GiTF.MCPServer.Handlers do
     end
   end
 
+  defp show_question_note(%{status: "withdrawn"} = inquiry),
+    do:
+      "Withdrawn (#{inquiry[:withdrawn_reason] || "no reason recorded"}) — nothing is waiting " <>
+        "on this question and it cannot be answered."
+
   defp show_question_note(%{status: "answered"} = inquiry),
     do:
       "Already answered (#{inquiry[:answer_label] || inquiry[:answer]}). The first answer " <>

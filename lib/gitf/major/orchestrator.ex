@@ -296,8 +296,12 @@ defmodule GiTF.Major.Orchestrator do
         # 'status=failed' missions every tick since msn-bf61a1). Nothing
         # downstream of a terminal status may schedule work. ("completed"
         # stays advanceable for async post-processing — scoring has its own
-        # failure path.)
-        mission.status in ["failed", "closed"] ->
+        # failure path.) A PAUSED mission is not terminal but must not be
+        # advanced either: the Janitor sweep selects by phase, so a
+        # budget-paused mission at "implementation" reached this gate every
+        # three minutes and re-spawned the ghosts the watchdog had killed.
+        mission.status in ["failed", "closed", "killed", "cancelled"] or
+            GiTF.Missions.paused?(mission) ->
           {:ok, :terminal}
 
         # GATE 2 — the clock.
@@ -386,8 +390,13 @@ defmodule GiTF.Major.Orchestrator do
       phase == GiTF.Inquiry.gate_phase() ->
         GiTF.Inquiry.Gate.handle_result(mission)
 
-      match?({:held, _}, GiTF.Inquiry.Gate.intercept(mission)) ->
-        {:ok, GiTF.Inquiry.gate_phase()}
+      (gate = GiTF.Inquiry.Gate.intercept(mission)) != :clear ->
+        case gate do
+          {:held, _} -> {:ok, GiTF.Inquiry.gate_phase()}
+          # A broken gate stalls the mission where it stands (alerted by the
+          # gate); the ladder does not get to walk past a raised question.
+          {:failed, _} -> {:ok, phase}
+        end
 
       WorkflowBridge.workflow_dispatch_active?(mission) ->
         WorkflowBridge.advance_via_workflow(mission, phase)
@@ -1307,8 +1316,8 @@ defmodule GiTF.Major.Orchestrator do
     end
   rescue
     e ->
-      Logger.warning("Provider preflight check failed: #{Exception.message(e)}, allowing")
-      :ok
+      Logger.warning("Provider preflight check failed: #{Exception.message(e)}")
+      {:error, :provider_check_failed}
   end
 
   defp validate_quest_ready(mission) do

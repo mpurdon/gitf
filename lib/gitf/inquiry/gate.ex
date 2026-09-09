@@ -72,15 +72,19 @@ defmodule GiTF.Inquiry.Gate do
   any of them raised questions, holds the mission.
 
   Returns `{:held, phase}` when the mission is now at `awaiting_input`
-  and the caller must stop advancing it, or `:clear` when there is
-  nothing to hold for — which is the answer on the overwhelming majority
-  of advances, and is therefore the cheap path: one artifact-map scan,
-  no store writes.
+  and the caller must stop advancing it, `:clear` when there is nothing
+  to hold for — the answer on the overwhelming majority of advances, and
+  therefore the cheap path: one artifact-map scan, no store writes — or
+  `{:failed, reason}` when the interception itself broke.
 
   Never raises. An advance loop that can be taken down by a malformed
-  `questions` value would be a worse bug than the one this closes.
+  `questions` value would be a worse bug than the one this closes. But
+  the fail direction is a STALL, not an advance: a phase that raised a
+  question the gate could not process must not be walked past (it was,
+  once — a design ghost was spawned on an unchosen treatment). The
+  caller leaves the mission where it is; the alert names it.
   """
-  @spec intercept(map()) :: {:held, String.t()} | :clear
+  @spec intercept(map()) :: {:held, String.t()} | :clear | {:failed, String.t()}
   def intercept(mission) when is_map(mission) do
     phase = Map.get(mission, :current_phase)
 
@@ -98,20 +102,17 @@ defmodule GiTF.Inquiry.Gate do
 
       Logger.error(
         "Quest #{id}: input-gate interception failed " <>
-          "(#{Exception.message(e)}) — advancing without holding"
+          "(#{Exception.message(e)}) — holding the mission in place"
       )
 
-      # Advancing past a question the phase raised is the operator losing
-      # their say; it must not pass as a warning in the log (it did once,
-      # and a design ghost was spawned on an unchosen treatment).
       Observability.Alerts.dispatch_webhook(
         :input_gate_failed,
-        "Quest #{id}: the input gate failed (#{Exception.message(e)}) and the mission " <>
-          "advanced without asking — check the phase's questions",
+        "Quest #{id}: the input gate failed (#{Exception.message(e)}); the mission is " <>
+          "stalled at #{Map.get(mission, :current_phase)} until the phase's questions are fixed",
         dedup_key: "input_gate_failed:#{id}"
       )
 
-      :clear
+      {:failed, Exception.message(e)}
   end
 
   def intercept(_), do: :clear

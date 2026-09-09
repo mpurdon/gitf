@@ -221,7 +221,9 @@ defmodule GiTF.Override do
           %{status: "pending"} -> :pending
           %{status: "approved"} -> :approved
           %{status: "rejected"} -> :rejected
-          _ -> :not_required
+          # A request in a status this code does not know is not "no human
+          # was ever needed" — that reading merges.
+          _ -> :pending
         end
 
       %{"approved" => true} ->
@@ -231,7 +233,7 @@ defmodule GiTF.Override do
         :rejected
 
       _ ->
-        :not_required
+        :pending
     end
   end
 

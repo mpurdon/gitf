@@ -473,10 +473,10 @@ defmodule GiTF.Major.Janitor do
 
   # -- Private: phase advancement --------------------------------------------
 
-  @phase_statuses ~w(
-    research requirements design review planning implementation
-    validation awaiting_input awaiting_approval sync simplify scoring
-  )
+  # The ladder's own phase list, minus the terminal ones. A hand-copied
+  # list here once lacked triage and publish, so a mission whose triage or
+  # publish ghost died with its completion message was never swept.
+  @phase_statuses GiTF.Major.Orchestrator.phases() -- GiTF.Missions.terminal_phases()
 
   defp advance_stuck_mission_phases do
     # Periodically call advance_quest for missions in non-terminal phases.
