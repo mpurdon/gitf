@@ -122,7 +122,7 @@ defmodule GiTF.Wire.Cards do
     C1 F1,F2 | Component name
       desc What this component does
       if Public function signature or API endpoint
-    # M: one per requirement — which component delivers it and how; ≤60 words
+    # M: one per requirement — which component delivers it and how (planning builds from this: be concrete)
     M R1 C1 | How this requirement is implemented by that component
     # D: C1 depends on C2
     D C1 C2
@@ -207,7 +207,7 @@ defmodule GiTF.Wire.Cards do
     """
     ```wire
     %wire 1 validation
-    # V: one per requirement — y|n, then evidence: file:line, command run, what you observed; ≤50 words
+    # V: one per requirement — y|n, then evidence: file:line, command run, what you observed (a fix ghost works from this: be complete)
     V R1 y | src/x.ts:78 declares the union; `npm run typecheck` exits 0
     #{rebut}V R2 n | What is missing and where you looked
     # unc: ids no op claimed AND no evidence delivered; `unc -` when none

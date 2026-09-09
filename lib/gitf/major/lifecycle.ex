@@ -85,7 +85,15 @@ defmodule GiTF.Major.Lifecycle do
         Config.get([:major, :mission_cost_cap_usd]) ||
         GiTF.Budget.config_budget()
 
-    spent = GiTF.Costs.for_quest(mission.id) |> GiTF.Costs.total()
+    # A resumed child is the same piece of work: its spend is the
+    # lineage's. A parent that burned $39 of $40 and failed was resumed
+    # with a fresh $40, ten hops deep if it kept failing.
+    spent =
+      mission
+      |> GiTF.Missions.lineage_ids()
+      |> Enum.map(&(GiTF.Costs.for_quest(&1) |> GiTF.Costs.total()))
+      |> Enum.sum()
+
     {:ok, {cap * 1.0, spent}}
   rescue
     e ->

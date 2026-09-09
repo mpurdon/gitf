@@ -1624,11 +1624,19 @@ defmodule GiTF.Ghost.Worker do
       nil ->
         case GiTF.Ops.get(state.op_id) do
           {:ok, op} ->
-            if op.description do
-              "#{op.title}\n\n#{op.description}"
-            else
-              op.title
-            end
+            # Title and description were the whole prompt: no acceptance
+            # criteria, no operator decisions. A fix ghost repairing "FR-3
+            # not met" could undo the behaviour the operator chose because
+            # it had never been told what the operator chose.
+            [
+              op.title,
+              op.description,
+              acceptance_section(op),
+              GiTF.Ops.target_files_text(op),
+              operator_decisions(op)
+            ]
+            |> Enum.reject(&(&1 in [nil, ""]))
+            |> Enum.join("\n\n")
 
           {:error, _} ->
             "Work on op #{state.op_id}"
@@ -1638,6 +1646,16 @@ defmodule GiTF.Ghost.Worker do
         prompt
     end
   end
+
+  defp acceptance_section(op) do
+    case GiTF.Ops.acceptance_criteria_text(op) do
+      "" -> ""
+      text -> "## Acceptance criteria\n\n#{text}"
+    end
+  end
+
+  defp operator_decisions(%{mission_id: id}) when is_binary(id), do: GiTF.Inquiry.prompt_block(id)
+  defp operator_decisions(_), do: ""
 
   # -- Private: completion handling --------------------------------------------
 
@@ -2604,12 +2622,9 @@ defmodule GiTF.Ghost.Worker do
       end
 
     sections =
-      case Map.get(op, :acceptance_criteria) do
-        criteria when is_binary(criteria) and criteria != "" ->
-          sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
-
-        _ ->
-          sections
+      case GiTF.Ops.acceptance_criteria_text(op) do
+        "" -> sections
+        criteria -> sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
       end
 
     sections =

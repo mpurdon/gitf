@@ -10,6 +10,25 @@ defmodule GiTF.Phases.ReviewValueTest do
     assert Review.rejection_fingerprint(a) == Review.rejection_fingerprint(b)
   end
 
+  # The review card carries issues, coverage and a risk assessment — not a
+  # summary. Fingerprinting the fields it does not have made every
+  # rejection identical, so the second one always read as a repeat.
+  test "the card's own fields carry the objection" do
+    a = %{
+      "approved" => false,
+      "issues" => [%{"description" => "No priority control", "suggestion" => "add one"}],
+      "coverage" => [%{"req_id" => "FR-2", "covered" => false, "gap" => "nothing persists"}],
+      "risk_assessment" => "moderate"
+    }
+
+    b = %{"approved" => false, "issues" => [%{"description" => "Restart loses state"}]}
+
+    assert Review.objection_text(a) =~ "No priority control"
+    assert Review.objection_text(a) =~ "FR-2: nothing persists"
+    refute Review.rejection_fingerprint(a) == Review.rejection_fingerprint(b)
+    refute Review.rejection_fingerprint(%{"approved" => false}) == Review.rejection_fingerprint(b)
+  end
+
   test "a genuinely new objection fingerprints differently" do
     a = %{"summary" => "The drawer lacks a priority control."}
     b = %{"summary" => "Persistence does not survive an app restart."}

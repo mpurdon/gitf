@@ -245,6 +245,9 @@ defmodule GiTF.Inquiry do
       answer_label: prior["answer_label"],
       answered_by: prior["answered_by"],
       answered_at: prior["answered_at"],
+      outcome: prior["outcome"],
+      votes: prior["votes"],
+      direction: prior["direction"],
       inherited_from: provenance[:inherited_from],
       duplicate_of: provenance[:duplicate_of]
     })
@@ -1053,8 +1056,12 @@ defmodule GiTF.Inquiry do
   defp inherited_answer(mission_id, phase, key) do
     case Archive.get(:missions, mission_id) do
       %{} = mission ->
+        # A rejection is not an answer — same rule as existing/3. Inheriting
+        # one as "already answered" would let the child walk past a
+        # question the operator sent back for new options.
         Enum.find(mission[:answered_inquiries] || [], fn entry ->
-          is_map(entry) and entry["phase"] == phase and entry["key"] == key
+          is_map(entry) and entry["phase"] == phase and entry["key"] == key and
+            entry["outcome"] != "rejected"
         end)
 
       _ ->
@@ -1129,7 +1136,7 @@ defmodule GiTF.Inquiry do
     lines =
       Enum.map_join(entries, "\n", fn entry ->
         "- (#{entry["phase"]}/#{entry["key"]}) #{entry["prompt"]}\n" <>
-          "  ANSWER: #{entry["answer_label"] || entry["answer"]}" <>
+          "  ANSWER: #{answer_text(entry)}" <>
           decided_suffix(entry) <> chosen_option_spec(entry)
       end)
 
@@ -1151,13 +1158,24 @@ defmodule GiTF.Inquiry do
     """
   end
 
+  # A text answer's label is its first sixty characters — a display
+  # affordance. The operator's paragraph is the decision; render all of it.
+  defp answer_text(%{"kind" => "text", "answer" => answer}) when is_binary(answer), do: answer
+  defp answer_text(entry), do: entry["answer_label"] || entry["answer"]
+
   # The label is the headline; the rationale is the spec. msn-fdc50b: the
   # operator chose "Refined tinted band (no hatch)", whose rationale said
   # collapsed groups close on all four sides like a sealed drawer. The
   # re-run saw only the label, wrote a dim-on-collapse requirement, and
   # the drawer geometry the operator had picked was never built.
   defp chosen_option_spec(entry) do
-    chosen = Enum.find(entry["options"] || [], &(&1["id"] == entry["answer"]))
+    options = entry["options"] || []
+
+    # By id, then by label: a duplicate matched on label carries the new
+    # question's options with the old question's option id.
+    chosen =
+      Enum.find(options, &(&1["id"] == entry["answer"])) ||
+        Enum.find(options, &(&1["label"] == entry["answer_label"]))
 
     case chosen do
       %{"rationale" => rationale} when is_binary(rationale) and rationale != "" ->
@@ -1192,7 +1210,13 @@ defmodule GiTF.Inquiry do
                 _ -> "no signal"
               end
 
-            "    - Option #{n}: #{o["label"]} — #{vote}"
+            # The rationale is what the operator voted on; a thumbs-up says
+            # "evolve THIS", and the ghost cannot evolve a headline.
+            "    - Option #{n}: #{o["label"]} — #{vote}" <>
+              if(is_binary(o["rationale"]) and o["rationale"] != "",
+                do: "\n      as proposed: #{o["rationale"]}",
+                else: ""
+              )
           end)
 
         direction =

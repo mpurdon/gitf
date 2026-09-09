@@ -812,6 +812,56 @@ defmodule GiTF.InquiryTest do
       refute block =~ "airier"
     end
 
+    test "a text answer is rendered in full, not its sixty-character label" do
+      m = mission!()
+      long = String.duplicate("the collapsed band closes on all four sides ", 4)
+
+      {:ok, inquiry, :asked} =
+        Inquiry.ask(m.id, %{key: "notes", phase: "design", kind: :text, prompt: "Anything else?"})
+
+      {:ok, _, :answered} = Inquiry.answer(inquiry.id, long)
+
+      block = Inquiry.prompt_block(m.id)
+      assert block =~ "ANSWER: #{long}"
+    end
+
+    test "a rejected round carries each option's rationale, not only its label" do
+      m = mission!()
+      {:ok, inq, :asked} = Inquiry.ask(m.id, choice())
+      {:ok, _, :answered} = Inquiry.reject(inq.id, %{votes: %{"grid" => "up"}})
+
+      block = Inquiry.prompt_block(m.id)
+      assert block =~ "Option 1: Grid — KEEP THIS DIRECTION"
+      assert block =~ "as proposed: Denser, harder to scan"
+    end
+
+    test "a rejection inherited across a resume is not an answer" do
+      m =
+        mission!(%{
+          answered_inquiries: [
+            %{
+              "phase" => "design",
+              "key" => "layout",
+              "prompt" => "Which layout?",
+              "answer" => nil,
+              "answer_label" => "none of these — redesign",
+              "outcome" => "rejected",
+              "direction" => "airier",
+              "votes" => %{"grid" => "down"},
+              "options" => [%{"id" => "grid", "label" => "Grid", "rationale" => "Denser"}]
+            }
+          ]
+        })
+
+      # Asked again on the child: a fresh question, held for the operator,
+      # with the parent's steering in the prompt.
+      assert {:ok, again, :asked} = Inquiry.ask(m.id, choice())
+      assert Inquiry.status(again.id) == :open
+      block = Inquiry.prompt_block(m.id)
+      assert block =~ "REJECTED PROPOSALS" and block =~ "airier"
+      refute block =~ "OPERATOR DECISIONS"
+    end
+
     test "the chosen option's rationale travels with the answer — it is the spec" do
       m = mission!()
       {:ok, inquiry, :asked} = Inquiry.ask(m.id, choice())

@@ -410,7 +410,17 @@ defmodule GiTF.MissionResumeTest do
       }
 
       parent = mission_with_work(sector, repo, git, artifacts: artifacts)
-      Missions.update(parent.mission_id, %{accepted_requirements: ["FR-1", "FR-2"]})
+
+      Missions.update(parent.mission_id, %{
+        accepted_requirements: ["FR-1", "FR-2"],
+        source: "github_issue",
+        source_issue: %{"number" => 7}
+      })
+
+      {:ok, _} =
+        GiTF.Override.reject(parent.mission_id, "built the label, not the drawer", %{
+          rejected_by: "operator"
+        })
 
       {:ok, inquiry, :asked} =
         GiTF.Inquiry.ask(parent.mission_id, %{
@@ -429,6 +439,20 @@ defmodule GiTF.MissionResumeTest do
 
       {:ok, child} = Missions.resume(parent.mission_id, "requirements", advance: false)
       %{parent: parent, child: child}
+    end
+
+    test "the approval rejection that sent the parent back is a requirement for the child",
+         %{child: child} do
+      assert [%{"reason" => "built the label, not the drawer"}] = child.rejection_notes
+      ctx = GiTF.Intel.get_prompt_context(child.sector_id, "requirements", child)
+      assert ctx =~ "REJECTED AT APPROVAL"
+      assert ctx =~ "built the label, not the drawer"
+    end
+
+    test "the child knows who asked for the work", %{child: child} do
+      assert child.source == "github_issue"
+      assert child.source_issue == %{"number" => 7}
+      refute child.aramaki_notified
     end
 
     test "the requirement registers do NOT cross — the spec is being rewritten", %{

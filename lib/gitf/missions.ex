@@ -641,6 +641,20 @@ defmodule GiTF.Missions do
       update(child.id, %{
         resumed_from: parent.id,
         resumed_at_phase: from_phase,
+        # Who asked for this work, and which issue or PR it serves. Without
+        # these the child pushed to the reviewer's branch but could never
+        # reply to them, release their request, or close the issue.
+        source: parent[:source],
+        source_issue: parent[:source_issue],
+        source_project: parent[:source_project],
+        issue_ref: parent[:issue_ref],
+        aramaki_priority: parent[:aramaki_priority],
+        aramaki_notified: false,
+        workflow_id: parent[:workflow_id],
+        # Why the parent was sent back at approval: the child re-specifies
+        # or re-validates against it. Recorded on the parent's approval
+        # artifact and, until now, read by nobody.
+        rejection_notes: inherited_rejection_notes(parent),
         # Visible in `show_mission` so an operator watching an async resume
         # can tell "worktree still being cut" from "nothing is happening".
         resume_seeding: async?,
@@ -768,6 +782,46 @@ defmodule GiTF.Missions do
   # mission was killed and reaped) truncates the walk rather than failing
   # it — a partial lineage still contests more than no lineage.
   defp resume_lineage(parent), do: walk_resume_lineage(parent, @resume_lineage_hops, [])
+
+  @doc """
+  Every mission in `mission`'s resume lineage, oldest ancestor first and
+  the mission itself last. Public for the budget meter: a resumed child is
+  the same piece of work, and its cap covers the lineage's spend.
+  """
+  @spec lineage_ids(map()) :: [String.t()]
+  def lineage_ids(mission) do
+    mission |> resume_lineage() |> Enum.map(& &1[:id]) |> Enum.filter(&is_binary/1)
+  rescue
+    _ -> [mission[:id]]
+  end
+
+  # The operator's approval rejections along the lineage, oldest first.
+  defp inherited_rejection_notes(parent) do
+    parent
+    |> resume_lineage()
+    |> Enum.flat_map(fn record ->
+      own =
+        case get_in(record, [:artifacts, "approval"]) do
+          %{"approved" => false, "reason" => reason} = a when is_binary(reason) ->
+            [
+              %{
+                "mission_id" => record[:id],
+                "reason" => reason,
+                "rejected_by" => a["rejected_by"],
+                "rejected_at" => a["rejected_at"]
+              }
+            ]
+
+          _ ->
+            []
+        end
+
+      own
+    end)
+    |> Enum.uniq_by(&{&1["mission_id"], &1["reason"]})
+  rescue
+    _ -> []
+  end
 
   defp walk_resume_lineage(nil, _hops, acc), do: acc
   defp walk_resume_lineage(record, 0, acc), do: [record | acc]

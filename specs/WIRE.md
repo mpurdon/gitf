@@ -344,9 +344,14 @@ mechanically — it exists for the operator and the dashboard:
 |---|---|---|
 | triage `why`, research `why` | 40 | logged; not consumed |
 | research `arch` | 60 | context for later phases, not acted on line by line |
-| design `desc` / `M` approach / `K` | 40 / 60 / 40 | planning reads them as context; briefs carry the detail |
-| review `risk` | 60 | **not passed to planning at all** (only `issues` and `sel` are) |
-| validation `V` evidence / `sum` | 50 / 60 | fix ghosts act on `gap` and unmet `V` lines; file:line beats paragraphs |
+| design `desc` / `K` | 40 / 40 | planning reads them as context; briefs carry the detail |
+| review `risk` | 60 | passed to planning as context only |
+| validation `sum` | 60 | fix ghosts act on `gap` and unmet `V` lines, not the summary |
+
+Two budgets were removed on 2026-09-09: design `M` (the per-requirement approach
+planning cuts into ops) and validation `V` evidence (the fix ghost's entire spec for
+an unmet requirement, and the contested reason quoted across resumes). Both are read
+mechanically; a cap on them was a cap on the spec.
 | scoring notes / `sum` | 40 / 80 | dashboard only |
 
 Requirement sentences, acceptance criteria, `gap` lines, `fix` lines and op `do` briefs

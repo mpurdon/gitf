@@ -468,8 +468,18 @@ defmodule GiTF.Major.PhasePrompts do
         issues = Map.get(review, "issues", [])
         selected = Map.get(review, "selected_design")
 
+        # The reviewer's statement of which requirement no component
+        # delivers is the one thing the planner must not lose.
+        uncovered =
+          for c <- List.wrap(Map.get(review, "coverage")), is_map(c), c["covered"] == false, do: c
+
         condensed =
-          %{"selected_design" => selected, "issues" => issues}
+          %{
+            "selected_design" => selected,
+            "issues" => issues,
+            "uncovered_requirements" => if(uncovered == [], do: nil, else: uncovered),
+            "risk_assessment" => Map.get(review, "risk_assessment")
+          }
           |> Map.reject(fn {_, v} -> is_nil(v) end)
 
         [{"Review Feedback", "review", condensed}]

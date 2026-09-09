@@ -54,6 +54,38 @@ defmodule GiTF.Ops do
   # -- Public API --------------------------------------------------------------
 
   @doc """
+  The op's acceptance criteria as prompt text — one bullet per criterion.
+  The field is a list (the planner writes one; the Wire decoder writes
+  one); both instruction renderers guarded on `is_binary` and rendered
+  nothing, so no implementation ghost was ever told what "done" meant.
+  """
+  @spec acceptance_criteria_text(map()) :: String.t()
+  def acceptance_criteria_text(op) do
+    case Map.get(op, :acceptance_criteria) do
+      list when is_list(list) and list != [] ->
+        Enum.map_join(list, "\n", &"- #{&1}")
+
+      text when is_binary(text) ->
+        String.trim(text)
+
+      _ ->
+        ""
+    end
+  end
+
+  @doc "The op's target files as a prompt section, or \"\" when it has none."
+  @spec target_files_text(map()) :: String.t()
+  def target_files_text(op) do
+    case Map.get(op, :target_files) do
+      files when is_list(files) and files != [] ->
+        "## Target files\n\n" <> Enum.map_join(files, "\n", &"- `#{&1}`")
+
+      _ ->
+        ""
+    end
+  end
+
+  @doc """
   Creates a new op.
 
   Required attrs: `title`, `mission_id`, `sector_id`.

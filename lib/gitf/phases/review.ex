@@ -79,11 +79,9 @@ defmodule GiTF.Phases.Review do
   end
 
   defp record_unresolved_objection(mission, artifact) do
-    text =
-      [artifact["summary"], artifact["reason"], artifact["feedback"]]
-      |> Enum.find(&(is_binary(&1) and String.trim(&1) != ""))
+    text = objection_text(artifact)
 
-    if text do
+    if text != "" do
       GiTF.Archive.update(:missions, mission.id, fn m ->
         artifacts = Map.get(m, :artifacts, %{})
 
@@ -98,18 +96,43 @@ defmodule GiTF.Phases.Review do
     _ -> :ok
   end
 
+  # What the reviewer actually said, from the fields the review card
+  # actually has: the risk assessment, each issue, and every requirement
+  # it found uncovered. (This once read `summary`/`reason`/`feedback`,
+  # none of which the card carries — the dissent was always empty and
+  # every rejection fingerprinted the same, so the second rejection always
+  # read as a repeat and the redesign budget was cut to zero.)
+  @doc false
+  @spec objection_text(map()) :: String.t()
+  def objection_text(artifact) when is_map(artifact) do
+    issues =
+      for i <- List.wrap(artifact["issues"]), is_map(i) do
+        [i["description"], i["suggestion"]]
+        |> Enum.filter(&is_binary/1)
+        |> Enum.join(" — ")
+      end
+
+    gaps =
+      for c <- List.wrap(artifact["coverage"]),
+          is_map(c),
+          c["covered"] == false,
+          do: "#{c["req_id"] || c["requirement_id"]}: #{c["gap"] || "not covered"}"
+
+    # `summary`/`gaps` are not on the card; honoured when present so a
+    # hand-written artifact still says what it meant.
+    ([artifact["risk_assessment"], artifact["summary"]] ++
+       issues ++ gaps ++ Enum.filter(List.wrap(artifact["gaps"]), &is_binary/1))
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.join("\n")
+  end
+
+  def objection_text(_), do: ""
+
   @doc false
   @spec rejection_fingerprint(map()) :: String.t()
   def rejection_fingerprint(artifact) do
-    [
-      artifact["summary"],
-      artifact["reason"],
-      artifact["feedback"],
-      artifact["gaps"]
-    ]
-    |> Enum.filter(&(is_binary(&1) or is_list(&1)))
-    |> Enum.map(&to_string_flat/1)
-    |> Enum.join(" ")
+    artifact
+    |> objection_text()
     |> String.downcase()
     # Normalise incidentals so "same objection, different words for the
     # variant it looked at" still counts as a repeat.
@@ -122,10 +145,6 @@ defmodule GiTF.Phases.Review do
     |> Base.encode16(case: :lower)
     |> String.slice(0, 16)
   end
-
-  defp to_string_flat(v) when is_list(v), do: Enum.map_join(v, " ", &to_string_flat/1)
-  defp to_string_flat(v) when is_binary(v), do: v
-  defp to_string_flat(v), do: inspect(v)
 
   defp record_rejection(mission, artifact) do
     fp = rejection_fingerprint(artifact)

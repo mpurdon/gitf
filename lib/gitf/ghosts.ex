@@ -857,12 +857,9 @@ defmodule GiTF.Ghosts do
       end
 
     sections =
-      case Map.get(op, :acceptance_criteria) do
-        criteria when is_binary(criteria) and criteria != "" ->
-          sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
-
-        _ ->
-          sections
+      case GiTF.Ops.acceptance_criteria_text(op) do
+        "" -> sections
+        criteria -> sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
       end
 
     sections =

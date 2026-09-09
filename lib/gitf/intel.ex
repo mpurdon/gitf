@@ -120,9 +120,10 @@ defmodule GiTF.Intel do
     historical = PromptContext.for_phase(sector_id, phase)
     knowledge = GiTF.Knowledge.PromptContext.for_phase(sector_id, phase, mission)
     decisions = operator_decisions(mission)
+    rejections = operator_rejections(mission)
     invitation = operator_invitation(mission, phase)
 
-    [historical, knowledge, decisions, invitation]
+    [historical, knowledge, decisions, rejections, invitation]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
   end
@@ -130,6 +131,36 @@ defmodule GiTF.Intel do
   # Both best-effort: a prompt must still be built if the inquiry store is
   # unreadable. The cost of missing a block is one re-asked question or one
   # unaskable one; the cost of raising here is a phase that never launches.
+  # Why an earlier run of this work was sent back at approval. A resumed
+  # child that does not see this re-specifies or re-validates blind to
+  # the one thing the operator said was wrong.
+  defp operator_rejections(mission) do
+    case Map.get(mission, :rejection_notes) do
+      [_ | _] = notes ->
+        lines =
+          Enum.map_join(notes, "\n", fn n ->
+            "- #{n["reason"]}" <>
+              if(is_binary(n["rejected_by"]), do: " (#{n["rejected_by"]}", else: " (") <>
+              if(is_binary(n["rejected_at"]), do: ", #{n["rejected_at"]})", else: ")")
+          end)
+
+        """
+        ## REJECTED AT APPROVAL — an earlier run of this work
+
+        The operator reviewed an earlier run's result and sent it back for
+        these reasons. They are requirements now: whatever you produce must
+        answer every one of them, and a validator must check that it does.
+
+        #{lines}
+        """
+
+      _ ->
+        ""
+    end
+  rescue
+    _ -> ""
+  end
+
   defp operator_decisions(mission) do
     case Map.get(mission, :id) do
       id when is_binary(id) -> GiTF.Inquiry.prompt_block(id)

@@ -635,6 +635,33 @@ defmodule GiTF.Validation do
   end
 
   # Build a comprehensive fix description from validation findings.
+  # req_id => requirement map, from the mission's requirements artifact.
+  defp requirement_index(mission) do
+    reqs = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
+
+    (List.wrap(reqs["functional_requirements"]) ++ List.wrap(reqs["non_functional"]))
+    |> Enum.filter(&is_map/1)
+    |> Map.new(&{&1["id"], &1})
+  rescue
+    _ -> %{}
+  end
+
+  defp requirement_lines(spec, id) do
+    case Map.get(spec, id) do
+      %{} = req ->
+        criteria =
+          req["acceptance_criteria"]
+          |> List.wrap()
+          |> Enum.map_join("", &"\n    - #{&1}")
+
+        "\n  requires: #{req["description"]}" <>
+          if(criteria != "", do: "\n  acceptance:" <> criteria, else: "")
+
+      _ ->
+        ""
+    end
+  end
+
   defp build_fix_description(mission, validation, impl_files) do
     gaps = Map.get(validation, "gaps", [])
 
@@ -646,7 +673,11 @@ defmodule GiTF.Validation do
     summary = Map.get(validation, "summary", "")
 
     sections = ["## Validation Feedback\n"]
+    spec = requirement_index(mission)
 
+    # The validator's evidence says what is wrong; the requirement says
+    # what right is. A fix ghost handed only "FR-3: <evidence>" repaired
+    # the symptom against its own reading of the goal.
     sections =
       if unmet != [] do
         req_lines =
@@ -655,10 +686,20 @@ defmodule GiTF.Validation do
             evidence = Map.get(req, "evidence", "No details")
             files = extract_file_paths(evidence)
             file_hint = if files != [], do: " (#{Enum.join(files, ", ")})", else: ""
-            "- **#{id}**: #{evidence}#{file_hint}"
+            "- **#{id}**: #{evidence}#{file_hint}" <> requirement_lines(spec, id)
           end)
 
         sections ++ ["### Unmet Requirements\n"] ++ req_lines ++ [""]
+      else
+        sections
+      end
+
+    uncovered = List.wrap(Map.get(validation, "uncovered_requirements"))
+
+    sections =
+      if uncovered != [] do
+        lines = Enum.map(uncovered, fn id -> "- **#{id}**" <> requirement_lines(spec, id) end)
+        sections ++ ["### Requirements with no evidence at all\n"] ++ lines ++ [""]
       else
         sections
       end
@@ -709,6 +750,13 @@ defmodule GiTF.Validation do
           ]
       else
         sections
+      end
+
+    # The operator's decisions bind the fix as much as the first attempt.
+    sections =
+      case GiTF.Inquiry.prompt_block(mission.id) do
+        "" -> sections
+        block -> sections ++ [block, ""]
       end
 
     instructions = """
