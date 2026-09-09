@@ -700,13 +700,26 @@ defmodule GiTF.Major do
           task =
             Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
               case GiTF.Audit.verify_job(op_id) do
-                {:ok, :pass, _result} -> {:verification_passed, link_msg.from, op_id}
+                {:ok, :pass, _result} ->
+                  # Merge-as-you-go: fold the verified branch into the
+                  # canonical tip here, in the task, BEFORE Major learns the
+                  # op passed — so the advance that may start validation
+                  # never races this merge. Deferred merges are the
+                  # endgame's job, as before.
+                  merge_on_completion(op_id)
+                  {:verification_passed, link_msg.from, op_id}
+
                 # Infra: the toolchain broke, the code was never judged. The
                 # op is marked inconclusive by Audit; advance rather than
                 # reject — the mission-level validation gate still stands.
-                {:ok, :infra, _result} -> {:verification_passed, link_msg.from, op_id}
-                {:ok, :fail, result} -> {:verification_failed, link_msg.from, op_id, result}
-                {:error, reason} -> {:verification_error, link_msg.from, op_id, reason}
+                {:ok, :infra, _result} ->
+                  {:verification_passed, link_msg.from, op_id}
+
+                {:ok, :fail, result} ->
+                  {:verification_failed, link_msg.from, op_id, result}
+
+                {:error, reason} ->
+                  {:verification_error, link_msg.from, op_id, reason}
               end
             end)
 
@@ -2187,6 +2200,19 @@ defmodule GiTF.Major do
              :ok <- File.write(settings_path, json) do
           :ok
         end
+    end
+  end
+
+  defp merge_on_completion(op_id) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         {:ok, mission} <- GiTF.Missions.get(op.mission_id) do
+      case GiTF.Major.Topology.consolidate_on_completion(mission) do
+        {:ok, _merged, []} -> :ok
+        {:ok, _merged, deferred} -> Logger.info("A2 left for the endgame: #{inspect(deferred)}")
+        {:skipped, reason} -> Logger.debug("A2 skipped after op #{op_id}: #{inspect(reason)}")
+      end
+    else
+      _ -> :ok
     end
   end
 

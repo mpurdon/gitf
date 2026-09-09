@@ -229,28 +229,7 @@ defmodule GiTF.Major.Topology do
           )
       end
 
-      branches =
-        done_impl_ops
-        # Resolution ops work IN the canonical worktree — they have no
-        # sibling branch worth merging, and a stale ghost/<id> ref for one
-        # would only add UNMERGED-BRANCH noise.
-        |> Enum.reject(&(&1[:conflict_resolution] != nil))
-        |> Enum.map(&{&1.id, &1[:ghost_id]})
-        |> Enum.filter(fn {_id, g} -> is_binary(g) end)
-        # Fix ghosts anchored to the canonical worktree commit straight
-        # onto its branch; a ghost/<id> ref for one never exists, and
-        # looking for it produced "UNMERGED BRANCH … not something we can
-        # merge" gaps that sent the next fix ghost after phantom work.
-        |> Enum.reject(fn {_id, g} -> works_in?(g, wt) end)
-        |> Enum.map(fn {id, g} -> {id, "ghost/" <> g} end)
-        |> Enum.uniq_by(&elem(&1, 1))
-        |> Enum.reject(fn {_id, b} -> b == target_branch end)
-        # Skip branches already contained in this tree. Consolidation runs
-        # on EVERY validation round, and re-merging a branch whose commits
-        # are already present re-injected the same conflict markers the fix
-        # loop had just reconciled — run 32 burned its whole budget
-        # resolving Settings.ts, then MainApp.tsx, then Settings.ts again.
-        |> Enum.reject(fn {_id, b} -> GiTF.Git.merged?(wt, b) end)
+      branches = mergeable_branches(done_impl_ops, wt, target_branch)
 
       result =
         Enum.reduce_while(branches, {:ok, []}, fn {op_id, branch}, {:ok, notes} ->
@@ -294,6 +273,144 @@ defmodule GiTF.Major.Topology do
       )
 
       {:ok, []}
+  end
+
+  @doc """
+  Merge-as-you-go (execution-efficiency A2): bring the canonical tip up
+  to date with every verified op the moment one passes audit, instead
+  of waiting for validation's batch. The next op then forks from a tip
+  that already carries the work (A1), so sequential work stays
+  cumulative and the endgame's consolidation finds branches already
+  merged.
+
+  Which way the merge goes falls out of `canonical_impl_shell/1`: the
+  just-verified op is usually the newest done op and therefore the new
+  canonical, so the older tip's branch is merged INTO it; when a deeper
+  chain op holds the canonical, the new branch is merged into that.
+  Either way the canonical worktree ends up containing all done work.
+
+  Conservative by design — this runs mid-implementation and the next
+  op forks from the result: only CLEAN merges land; a conflict is
+  aborted and left for the endgame's union merge + resolution op, which
+  is sized for that. Nothing is attempted when the mission is a
+  tournament (variants never consolidate), when a live ghost is editing
+  the canonical worktree (a merge under its feet is a race batch
+  consolidation never had), or when there is no canonical worktree.
+  Runs under the sector lock, like every other tree mutation.
+  """
+  @spec consolidate_on_completion(map()) ::
+          {:ok, merged :: [String.t()], deferred :: [{String.t(), term()}]} | {:skipped, term()}
+  def consolidate_on_completion(mission) do
+    with :ok <- consolidation_allowed(mission),
+         {:ok, wt, target_ghost} <- canonical_worktree(mission),
+         :ok <- canonical_free(wt) do
+      target = GiTF.Validation.canonical_branch(mission) || "ghost/#{target_ghost}"
+      done = Enum.filter(mission.ops, &(&1.status == "done"))
+
+      GiTF.WorktreeLock.with_lock({:sector, mission.sector_id}, fn ->
+        # Re-checked under the lock: a ghost may have moved in meanwhile.
+        with :ok <- canonical_free(wt) do
+          GiTF.Git.restore_tracked_residue(wt)
+
+          Enum.reduce(mergeable_branches(done, wt, target), {:ok, [], []}, fn {op_id, branch},
+                                                                              {:ok, merged,
+                                                                               deferred} ->
+            cond do
+              not fresh_mergeable?(op_id) ->
+                {:ok, merged, [{branch, :not_mergeable_now} | deferred]}
+
+              true ->
+                case GiTF.Git.merge_clean(wt, branch) do
+                  :ok ->
+                    Logger.info(
+                      "Quest #{mission.id}: merged #{branch} into #{target} on completion (A2)"
+                    )
+
+                    {:ok, [branch | merged], deferred}
+
+                  {:conflict, files} ->
+                    Logger.info(
+                      "Quest #{mission.id}: #{branch} conflicts with #{target} in " <>
+                        "#{Enum.join(files, ", ")} — left for the endgame"
+                    )
+
+                    {:ok, merged, [{branch, {:conflict, files}} | deferred]}
+
+                  {:error, out} ->
+                    reason = out |> String.trim() |> String.slice(0, 200)
+                    {:ok, merged, [{branch, {:merge_failed, reason}} | deferred]}
+                end
+            end
+          end)
+        end
+      end)
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "consolidate_on_completion crashed for #{mission.id}: #{Exception.message(e)}"
+      )
+
+      {:skipped, {:crashed, Exception.message(e)}}
+  end
+
+  defp consolidation_allowed(mission) do
+    if Enum.any?(mission.ops, &(&1[:variant] != nil)),
+      do: {:skipped, :tournament},
+      else: :ok
+  end
+
+  defp canonical_worktree(mission) do
+    case GiTF.Validation.canonical_impl_shell(mission) do
+      %{worktree_path: wt, ghost_id: ghost} when is_binary(wt) ->
+        if File.dir?(wt), do: {:ok, wt, ghost}, else: {:skipped, :no_canonical_worktree}
+
+      _ ->
+        {:skipped, :no_canonical_worktree}
+    end
+  end
+
+  defp canonical_free(wt) do
+    if live_ghost_in?(wt), do: {:skipped, :canonical_in_use}, else: :ok
+  end
+
+  # The branches consolidation would merge into the canonical worktree —
+  # shared by the endgame batch and the on-completion increment so the
+  # two can never disagree about what belongs in the tree.
+  defp mergeable_branches(done_impl_ops, wt, target_branch) do
+    done_impl_ops
+    |> Enum.reject(& &1[:phase_job])
+    # Resolution ops work IN the canonical worktree — they have no
+    # sibling branch worth merging, and a stale ghost/<id> ref for one
+    # would only add UNMERGED-BRANCH noise.
+    |> Enum.reject(&(&1[:conflict_resolution] != nil))
+    |> Enum.map(&{&1.id, &1[:ghost_id]})
+    |> Enum.filter(fn {_id, g} -> is_binary(g) end)
+    # Fix ghosts anchored to the canonical worktree commit straight
+    # onto its branch; a ghost/<id> ref for one never exists, and
+    # looking for it produced "UNMERGED BRANCH … not something we can
+    # merge" gaps that sent the next fix ghost after phantom work.
+    |> Enum.reject(fn {_id, g} -> works_in?(g, wt) end)
+    |> Enum.map(fn {id, g} -> {id, "ghost/" <> g} end)
+    |> Enum.uniq_by(&elem(&1, 1))
+    |> Enum.reject(fn {_id, b} -> b == target_branch end)
+    # Skip branches already contained in this tree. Consolidation runs
+    # on EVERY validation round, and re-merging a branch whose commits
+    # are already present re-injected the same conflict markers the fix
+    # loop had just reconciled — run 32 burned its whole budget
+    # resolving Settings.ts, then MainApp.tsx, then Settings.ts again.
+    |> Enum.reject(fn {_id, b} -> GiTF.Git.merged?(wt, b) end)
+  end
+
+  # A ghost still working in the canonical worktree owns it for now.
+  defp live_ghost_in?(worktree_path) do
+    target = Path.expand(worktree_path)
+
+    Archive.all(:ghosts)
+    |> Enum.any?(fn g ->
+      GiTF.Ghost.Status.active?(g.status) and is_binary(g[:shell_path]) and
+        Path.expand(g.shell_path) == target
+    end)
   end
 
   defp works_in?(ghost_id, worktree_path) do

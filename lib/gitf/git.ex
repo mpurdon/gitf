@@ -674,6 +674,34 @@ defmodule GiTF.Git do
     end
   end
 
+  @doc """
+  Merges `branch` into the worktree at `wt` only if it merges CLEAN.
+
+  The merge-as-you-go counterpart of `merge_union/2`: a conflict is
+  aborted (the tree is left exactly as it was) and reported as
+  `{:conflict, files}` for the endgame's union merge to reconcile later
+  with markers and a resolution op. Nothing here ever commits markers —
+  this runs mid-implementation, and the next op forks from this tree.
+  """
+  @spec merge_clean(String.t(), String.t()) ::
+          :ok | {:conflict, [String.t()]} | {:error, String.t()}
+  def merge_clean(wt, branch) do
+    case safe_cmd(["-C", wt, "merge", "--no-ff", "--no-edit", branch], stderr_to_stdout: true) do
+      {_, 0} ->
+        :ok
+
+      {out, _} ->
+        files =
+          case safe_cmd(["-C", wt, "diff", "--name-only", "--diff-filter=U"]) do
+            {files_out, 0} -> String.split(String.trim(to_string(files_out)), "\n", trim: true)
+            _ -> []
+          end
+
+        safe_cmd(["-C", wt, "merge", "--abort"], stderr_to_stdout: true)
+        if files == [], do: {:error, to_string(out)}, else: {:conflict, files}
+    end
+  end
+
   # <<<<<<<, |||||||, ======= and >>>>>>> at line start. ERE, since git grep
   # -E is what consumes it. The ={7} alternative is exact-line (a Markdown
   # setext underline is 3+ equals of arbitrary length, but a 7-equals line

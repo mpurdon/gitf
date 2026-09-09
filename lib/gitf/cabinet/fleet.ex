@@ -55,33 +55,44 @@ defmodule GiTF.Cabinet.Fleet do
   answer (no instance id, EC2 unreachable) is not remembered.
   """
   def observe(%{id: id} = ministry) do
-    prev = ministry[:box] || %{}
     now = DateTime.utc_now()
 
     case describe(ministry) do
       %{state: :unknown} = box ->
-        Map.put(ministry, :box, Map.merge(prev, box))
+        Map.put(ministry, :box, Map.merge(ministry[:box] || %{}, box))
 
       %{state: state} = box ->
-        since =
-          cond do
-            state == "running" -> box.launched_at || prev[:state_since] || now
-            state == prev[:state] -> prev[:state_since]
-            prev[:state] == nil -> nil
-            true -> now
-          end
+        # The remembering happens inside the update — the Console's refresh
+        # and the watcher observe concurrently, and two observers of the
+        # same transition must record it once.
+        {:ok, updated} =
+          GiTF.Cabinet.Registry.update(id, fn stored ->
+            prev = stored[:box] || %{}
 
-        box = Map.put(box, :state_since, since)
+            since =
+              cond do
+                state == "running" -> box.launched_at || prev[:state_since] || now
+                state == prev[:state] -> prev[:state_since]
+                prev[:state] == nil -> nil
+                true -> now
+              end
 
-        if prev[:state] != nil and state != prev[:state] do
+            transition? = prev[:state] != nil and state != prev[:state]
+
+            box =
+              Map.merge(box, %{
+                state_since: since,
+                transition_at: if(transition?, do: now, else: prev[:transition_at])
+              })
+
+            Map.put(stored, :box, box)
+          end)
+
+        if updated.box[:transition_at] == now do
           GiTF.Cabinet.Activity.record("cabinet", "observed", ministry.slug, state)
         end
 
-        if box != Map.take(prev, Map.keys(box)) do
-          GiTF.Cabinet.Registry.update(id, &Map.put(&1, :box, box))
-        end
-
-        Map.put(ministry, :box, box)
+        Map.put(ministry, :box, updated.box)
     end
   end
 
