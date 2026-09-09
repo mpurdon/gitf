@@ -596,7 +596,14 @@ defmodule GiTF.Missions do
   end
 
   defp create_resumed_record(parent, from_phase, async?) do
-    contested = inherited_contested(parent)
+    # The requirement registers are about the parent's SPEC. A validation
+    # resume keeps that spec, so verdicts on it carry. A requirements
+    # resume writes a new one, reusing the same ids for different text —
+    # a carried "accepted FR-2" would tell the child's validator to
+    # rubber-stamp exactly the requirement the re-specification exists to
+    # get right.
+    respecifies? = Map.has_key?(@treeless_resume_stand, from_phase)
+    contested = if respecifies?, do: [], else: inherited_contested(parent)
     contested_ids = Enum.map(contested, & &1["req_id"])
 
     with {:ok, child} <-
@@ -627,7 +634,8 @@ defmodule GiTF.Missions do
         # both lists is a contradiction, and the fail-closed reading is
         # the only safe one.
         contested_requirements: contested,
-        accepted_requirements: inherited_accepted(parent, contested_ids),
+        accepted_requirements:
+          if(respecifies?, do: [], else: inherited_accepted(parent, contested_ids)),
         # A question the operator has already answered is a decision, not
         # state the child gets to re-derive. Re-asking it spends their
         # attention a second time on a matter that was settled, and the

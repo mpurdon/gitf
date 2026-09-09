@@ -410,6 +410,7 @@ defmodule GiTF.MissionResumeTest do
       }
 
       parent = mission_with_work(sector, repo, git, artifacts: artifacts)
+      Missions.update(parent.mission_id, %{accepted_requirements: ["FR-1", "FR-2"]})
 
       {:ok, inquiry, :asked} =
         GiTF.Inquiry.ask(parent.mission_id, %{
@@ -428,6 +429,13 @@ defmodule GiTF.MissionResumeTest do
 
       {:ok, child} = Missions.resume(parent.mission_id, "requirements", advance: false)
       %{parent: parent, child: child}
+    end
+
+    test "the requirement registers do NOT cross — the spec is being rewritten", %{
+      child: child
+    } do
+      assert child.accepted_requirements == []
+      assert child.contested_requirements == []
     end
 
     test "the child is active at research, with no tree and no seeding", %{child: child} do
