@@ -258,8 +258,14 @@ defmodule GiTF.Major.Janitor do
     |> Enum.each(fn op ->
       age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
-      if age > assigned_timeout do
-        Logger.warning("Job #{op.id} stuck assigned for #{age}s, failing for retry")
+      # "assigned" spans the whole of provisioning — rate-limit backoff,
+      # then cutting a worktree — and the worker is alive for all of it.
+      # Failing the op under a live worker got it reset and re-spawned.
+      if age > assigned_timeout and not worker_alive?(op[:ghost_id]) do
+        Logger.warning(
+          "Job #{op.id} stuck assigned for #{age}s with no worker, failing for retry"
+        )
+
         GiTF.Ops.fail(op.id)
       end
     end)

@@ -197,9 +197,12 @@ defmodule GiTF.Major.OrchestratorTest do
       updated = Map.put(quest_record, :current_phase, "review")
       Archive.put(:missions, updated)
 
-      # Archive approved review artifact
+      # Archive approved review artifact, and the design it approved.
+      GiTF.Missions.store_artifact(mission.id, "design_normal", %{"approach" => "the one"})
+
       GiTF.Missions.store_artifact(mission.id, "review", %{
         "approved" => true,
+        "selected_design" => "normal",
         "coverage" => [],
         "issues" => [],
         "risk_assessment" => "Low risk"
@@ -207,6 +210,29 @@ defmodule GiTF.Major.OrchestratorTest do
 
       {:ok, phase} = Orchestrator.advance_quest(mission.id)
       assert phase == "planning"
+      assert GiTF.Missions.get_artifact(mission.id, "design")["approach"] == "the one"
+    end
+
+    test "an approved review whose design is missing holds at review, not a substitute",
+         %{mission: mission} do
+      quest_record = Archive.get(:missions, mission.id)
+      Archive.put(:missions, Map.put(quest_record, :current_phase, "review"))
+
+      # The reviewer picked "normal"; only "minimal" exists (normal was
+      # moved aside for a question, say). Planning the wrong design is
+      # worse than waiting.
+      GiTF.Missions.store_artifact(mission.id, "design_minimal", %{"approach" => "other"})
+
+      GiTF.Missions.store_artifact(mission.id, "review", %{
+        "approved" => true,
+        "selected_design" => "normal",
+        "coverage" => [],
+        "issues" => []
+      })
+
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
+      assert phase == "review"
+      assert GiTF.Missions.get_artifact(mission.id, "design") == nil
     end
 
     test "handles review rejection with redesign", %{mission: mission} do

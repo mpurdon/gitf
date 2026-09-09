@@ -331,6 +331,30 @@ defmodule GiTF.Inquiry.GateTest do
     end
   end
 
+  describe "a phase still fanning out" do
+    # A tournament writes one artifact per variant as each ghost lands.
+    # Holding on the first parks the mission at awaiting_input — a phase
+    # that cannot ask — so the sibling's questions are never raised, and
+    # the answer re-spawns the whole field. Wait for the field.
+    test "does not hold while a phase op for the phase is still in flight" do
+      m = mission!(%{artifacts: %{"design_minimal" => artifact([question()])}})
+
+      {:ok, _op} =
+        GiTF.Ops.create(%{
+          title: "Design [normal]",
+          mission_id: m.id,
+          sector_id: m.sector_id,
+          status: "running",
+          phase_job: true,
+          phase: "design"
+        })
+
+      assert Gate.intercept(reload(m)) == :clear
+      assert Inquiry.list_open(m.id) == []
+      assert reload(m).artifacts["design_minimal"]
+    end
+  end
+
   describe "a gate that breaks" do
     test "reports the failure instead of clearing — the ladder must not walk past" do
       # A record the gate cannot process: no id, so recording the question

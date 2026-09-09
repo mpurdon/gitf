@@ -106,12 +106,11 @@ defmodule GiTF.Major.DesignBoard do
 
   @doc false
   def check_design_complete(mission) do
-    design_ops =
-      Archive.filter(:ops, fn j ->
-        j.mission_id == mission.id and
-          j[:phase_job] == true and
-          j[:phase] == "design"
-      end)
+    # This generation's ops only. A redesign round or an operator's answer
+    # re-dispatches design; the previous round's done/failed ops made
+    # "every variant finished" true in the window before the new ones
+    # spawned, and mixed two rounds' variants in the review afterwards.
+    design_ops = PhaseLauncher.current_phase_ops(mission, "design")
 
     if design_ops == [] do
       {:ok, "design"}
@@ -162,13 +161,15 @@ defmodule GiTF.Major.DesignBoard do
 
     case GiTF.Missions.get_artifact(mission_id, key) do
       nil ->
-        # Fallback: try other variants or existing "design" artifact
-        fallback =
-          Enum.find_value(@design_strategies, fn %{name: name} ->
-            GiTF.Missions.get_artifact(mission_id, "design_#{name}")
-          end)
+        # The reviewer's pick is not there (moved aside for a question, or
+        # never written). Promoting the first strategy in declaration
+        # order instead would plan and build a design nobody reviewed.
+        Logger.error(
+          "Quest #{mission_id}: selected design variant #{inspect(selected)} has no artifact — " <>
+            "not promoting a substitute"
+        )
 
-        if fallback, do: GiTF.Missions.store_artifact(mission_id, "design", fallback)
+        {:error, :selected_variant_missing}
 
       design ->
         GiTF.Missions.store_artifact(mission_id, "design", design)

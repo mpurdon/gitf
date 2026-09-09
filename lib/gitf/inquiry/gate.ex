@@ -122,8 +122,6 @@ defmodule GiTF.Inquiry.Gate do
   # phase cannot be invited to ask something the interception would ignore.
   defp holdable_phase?(phase), do: Inquiry.askable_phase?(phase)
 
-  @asked_suffix "_asked"
-
   # Parallel phases write suffixed keys ("design_minimal", "validation_v2").
   # Same prefix rule as `Missions.inheritable?/2`, so a tournament variant
   # can ask as readily as a single-strategy phase.
@@ -146,7 +144,7 @@ defmodule GiTF.Inquiry.Gate do
 
   defp family?(key, phase), do: key == phase or String.starts_with?(key, phase <> "_")
 
-  defp history?(key), do: String.ends_with?(key, @asked_suffix)
+  defp history?(key), do: Missions.history_key?(key)
 
   defp questions_of(artifact) do
     case Map.get(artifact, "questions") || Map.get(artifact, :questions) do
@@ -155,7 +153,25 @@ defmodule GiTF.Inquiry.Gate do
     end
   end
 
+  # A tournament phase writes one artifact per variant as each ghost
+  # finishes. Holding on the first one moves it aside and parks the mission
+  # at awaiting_input — a phase that cannot ask — so the sibling that lands
+  # next has its questions silently never raised, and the operator's answer
+  # re-spawns every variant, the finished one included. Wait for the field.
   defp raise_all(mission, phase, pairs) do
+    if GiTF.Major.PhaseLauncher.phase_in_flight?(mission.id, phase) do
+      Logger.info(
+        "Quest #{mission.id}: #{phase} raised questions while a #{phase} ghost is still " <>
+          "running — asking once the field lands"
+      )
+
+      :clear
+    else
+      do_raise_all(mission, phase, pairs)
+    end
+  end
+
+  defp do_raise_all(mission, phase, pairs) do
     results =
       for {key, artifact} <- pairs,
           question <- questions_of(artifact),
@@ -272,7 +288,10 @@ defmodule GiTF.Inquiry.Gate do
       updated =
         artifacts
         |> Map.delete(key)
-        |> Map.put(key <> @asked_suffix, Map.put(artifact, "held_for_input_at", now_iso()))
+        |> Map.put(
+          key <> Missions.asked_suffix(),
+          Map.put(artifact, "held_for_input_at", now_iso())
+        )
 
       Map.put(record, :artifacts, updated)
     end)

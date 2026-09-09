@@ -54,6 +54,25 @@ defmodule GiTF.Phases.ValidationRatchetTest do
       assert Enum.sort(accepted(m.id)) == ["FR-1", "FR-3"]
     end
 
+    # A validator that stopped to ask the operator has its artifact moved
+    # aside as `validation_asked`. That verdict predates the answer; the
+    # ratchet must not bank it, or a requirement the answer invalidated
+    # can never be contested again.
+    test "a moved-aside validation artifact is history, not a verdict" do
+      m =
+        mission!(%{
+          "validation_asked" => %{
+            "overall_verdict" => "fail",
+            "requirements_met" => [%{"req_id" => "FR-9", "met" => true}],
+            "held_for_input_at" => "2026-09-09T00:00:00Z"
+          }
+        })
+
+      updated = Validation.record_accepted_requirements(m)
+      assert (updated[:accepted_requirements] || []) == []
+      assert (accepted(m.id) || []) == []
+    end
+
     test "accumulates across rounds and never un-accepts" do
       m = mission!(%{})
       Archive.update(:missions, m.id, &Map.put(&1, :accepted_requirements, ["FR-1", "FR-2"]))

@@ -223,9 +223,28 @@ defmodule GiTF.Major.Orchestrator do
           review
         end
 
-      DesignBoard.promote_selected_design(mission_id, review)
-      {:ok, mission} = GiTF.Missions.get(mission_id)
-      PhaseLauncher.start_planning(mission)
+      plan_on_promoted_design(mission_id, review)
+    end
+  end
+
+  # Planning starts on the reviewer's pick or not at all. A pick whose
+  # artifact is missing (moved aside for a question, never written) stalls
+  # at review — visibly — rather than planning a substitute.
+  defp plan_on_promoted_design(mission_id, review) do
+    case DesignBoard.promote_selected_design(mission_id, review) do
+      {:error, :selected_variant_missing} ->
+        GiTF.Observability.Alerts.dispatch_webhook(
+          :design_variant_missing,
+          "Quest #{mission_id}: the reviewed design variant #{inspect(review["selected_design"])} " <>
+            "has no artifact — holding at review rather than planning a substitute",
+          dedup_key: "design_variant_missing:#{mission_id}"
+        )
+
+        {:ok, "review"}
+
+      _ ->
+        {:ok, mission} = GiTF.Missions.get(mission_id)
+        PhaseLauncher.start_planning(mission)
     end
   end
 
@@ -329,6 +348,7 @@ defmodule GiTF.Major.Orchestrator do
       dedup_key: "quest_timeout:#{mission_id}"
     )
 
+    GiTF.Missions.stop_live_ghosts(mission_id)
     fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
   end
 
@@ -344,6 +364,8 @@ defmodule GiTF.Major.Orchestrator do
           "Quest #{mission_id} spent $#{Float.round(spent, 4)} (cap $#{Float.round(cap, 2)})",
           dedup_key: "budget_exceeded:#{mission_id}"
         )
+
+        GiTF.Missions.stop_live_ghosts(mission_id)
 
         fail_quest(
           mission_id,
@@ -641,7 +663,7 @@ defmodule GiTF.Major.Orchestrator do
               j.mission_id == mission.id and
                 j[:op_type] == "phase" and
                 j[:phase] == phase and
-                j.status in ["running", "assigned"]
+                j.status in ["pending", "running", "assigned"]
             end)
 
           running_worker =
@@ -675,7 +697,10 @@ defmodule GiTF.Major.Orchestrator do
 
               nil ->
                 Logger.info("Phase #{phase} doesn't use phase ghosts, attempting advancement")
-                advance_quest(mission.id)
+                # This process already holds the {:advance, id} lock;
+                # advance_quest/1 would see its own lock as contention and
+                # skip — the branch never advanced anything.
+                do_advance_quest(mission.id)
             end
           end
         end
@@ -694,9 +719,7 @@ defmodule GiTF.Major.Orchestrator do
 
       review["approved"] == true ->
         # Copy the selected design variant to the canonical "design" key
-        DesignBoard.promote_selected_design(mission.id, review)
-        {:ok, mission} = GiTF.Missions.get(mission.id)
-        PhaseLauncher.start_planning(mission)
+        plan_on_promoted_design(mission.id, review)
 
       true ->
         redesign_count = Map.get(mission, :redesign_count, 0)
@@ -713,9 +736,7 @@ defmodule GiTF.Major.Orchestrator do
             "Quest #{mission.id} exceeded max redesign iterations, proceeding with current design"
           )
 
-          DesignBoard.promote_selected_design(mission.id, review)
-          {:ok, mission} = GiTF.Missions.get(mission.id)
-          PhaseLauncher.start_planning(mission)
+          plan_on_promoted_design(mission.id, review)
         end
     end
   end

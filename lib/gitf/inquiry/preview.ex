@@ -310,13 +310,15 @@ defmodule GiTF.Inquiry.Preview do
   end
 
   defp build(mission, root, question, option) do
-    png = png_path(mission.id, question.key, option.id)
+    png = png_path(mission.id, question.key, option.id, round_of(mission, question))
 
     # The same question re-asked on a later advance sweep, or re-emitted by
     # a phase that was re-dispatched, must not pay for the browser twice.
-    # The path is deterministic in {mission, key, option}, and a question's
-    # key is its stable identity, so an image already at that path is by
-    # definition this option's image.
+    # The path is deterministic in {mission, key, round, option}. The round
+    # is in it because a REJECTED question is asked again under the same
+    # key with new proposals, and a ghost steered to "keep and refine"
+    # option N will reuse its id — the operator must see the refined
+    # mockup, not the one they just turned down.
     if File.regular?(png) do
       {:ok, describe_existing(png)}
     else
@@ -756,16 +758,27 @@ defmodule GiTF.Inquiry.Preview do
   @spec root() :: {:ok, Path.t()} | {:error, term()}
   def root, do: GiTF.Visual.Capture.screenshots_root()
 
+  # How many times this {phase, key} has already been put to the operator
+  # on this mission — the redesign round the question about to be asked
+  # belongs to.
+  defp round_of(mission, question) do
+    mission.id
+    |> GiTF.Inquiry.list()
+    |> Enum.count(&(&1[:phase] == question.phase and &1[:key] == question.key))
+  rescue
+    _ -> 0
+  end
+
   @doc "Where `option_id`'s image for `key` on `mission_id` is written."
-  @spec png_path(String.t(), String.t(), String.t()) :: Path.t() | nil
-  def png_path(mission_id, key, option_id) do
+  @spec png_path(String.t(), String.t(), String.t(), non_neg_integer()) :: Path.t() | nil
+  def png_path(mission_id, key, option_id, round \\ 0) do
     case root() do
       {:ok, root} ->
         Path.join([
           root,
           @subdir,
           segment(mission_id),
-          segment(key),
+          segment(key) <> if(round > 0, do: "~#{round}", else: ""),
           segment(option_id) <> ".png"
         ])
 

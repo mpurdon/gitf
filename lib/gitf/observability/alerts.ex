@@ -81,6 +81,7 @@ defmodule GiTF.Observability.Alerts do
     # class of stranding as workflow drift.
     input_return_unknown: :critical,
     input_gate_failed: :critical,
+    design_variant_missing: :critical,
     # A phase emitted a question no human could answer. The mission was
     # NOT held (it proceeded on the phase's own judgement), so this is a
     # prompt-compliance defect to fix, not an outage.

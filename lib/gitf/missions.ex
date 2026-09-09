@@ -72,6 +72,24 @@ defmodule GiTF.Missions do
   @spec terminal_phases() :: [String.t()]
   def terminal_phases, do: @terminal_phases
 
+  # When a phase holds for the operator, its artifact is renamed
+  # `<key>_asked` (GiTF.Inquiry.Gate.move_aside/3). The copy is the record
+  # of what the phase was thinking when it asked — history, never a live
+  # artifact. Every prefix scan over artifact keys must skip it: the gate
+  # re-asked one (msn-fdc50b), inheritance carried them into resumed
+  # children, and the validation scans fed the accepted-requirements
+  # ratchet from a superseded verdict.
+  @asked_suffix "_asked"
+
+  @doc "The suffix a moved-aside artifact key carries."
+  @spec asked_suffix() :: String.t()
+  def asked_suffix, do: @asked_suffix
+
+  @doc "True for a moved-aside artifact key — history, not a live artifact."
+  @spec history_key?(term()) :: boolean()
+  def history_key?(key) when is_binary(key), do: String.ends_with?(key, @asked_suffix)
+  def history_key?(_), do: false
+
   @doc """
   Whether the mission is over. A plain store read — no ops list — because
   the callers (quality gates, fix requests) only need the status.
@@ -772,7 +790,8 @@ defmodule GiTF.Missions do
 
     (Map.get(record, :artifacts) || %{})
     |> Enum.filter(fn {key, value} ->
-      is_binary(key) and String.starts_with?(key, "validation") and is_map(value)
+      is_binary(key) and String.starts_with?(key, "validation") and not history_key?(key) and
+        is_map(value)
     end)
     |> Enum.sort_by(fn {key, _artifact} -> key end)
     |> Enum.flat_map(fn {_key, artifact} -> requirement_entries(artifact, mission_id) end)
@@ -862,7 +881,8 @@ defmodule GiTF.Missions do
   # "validation_v2"). Prefix-matching carries the whole family, so a resumed
   # design tournament arrives with its full field rather than one variant.
   defp inheritable?(key, phases) when is_binary(key) do
-    Enum.any?(phases, fn phase -> key == phase or String.starts_with?(key, phase <> "_") end)
+    not history_key?(key) and
+      Enum.any?(phases, fn phase -> key == phase or String.starts_with?(key, phase <> "_") end)
   end
 
   defp inheritable?(_key, _phases), do: false
@@ -1585,6 +1605,28 @@ defmodule GiTF.Missions do
   def delete(mission_id) do
     # Kill first to clean up ops, ghosts, shells/worktrees, then delete
     kill(mission_id)
+  end
+
+  @doc """
+  Stops every ghost still working for `mission_id` — ops, shells and the
+  record are left alone. What a halt (timeout, budget) needs before it
+  seals the mission: `fail_quest/2` writes the status and nothing else,
+  so a mission sealed with a live validation ghost kept spending, and the
+  ghost's completion then hit an invalid transition and was orphaned.
+  """
+  @spec stop_live_ghosts(String.t()) :: non_neg_integer()
+  def stop_live_ghosts(mission_id) do
+    GiTF.Ops.list(mission_id: mission_id)
+    |> Enum.filter(&(&1[:status] in ["running", "assigned"] and is_binary(&1[:ghost_id])))
+    |> Enum.map(fn op ->
+      Logger.warning("Quest #{mission_id}: stopping ghost #{op.ghost_id} (op #{op.id}) for halt")
+      GiTF.Ghosts.stop(op.ghost_id)
+    end)
+    |> length()
+  rescue
+    e ->
+      Logger.warning("Quest #{mission_id}: stopping live ghosts failed: #{Exception.message(e)}")
+      0
   end
 
   @doc """

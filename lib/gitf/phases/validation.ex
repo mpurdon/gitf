@@ -376,7 +376,8 @@ defmodule GiTF.Phases.Validation do
   defp validation_artifact_pairs(mission) do
     (Map.get(mission, :artifacts) || %{})
     |> Enum.filter(fn {key, value} ->
-      is_binary(key) and String.starts_with?(key, "validation") and is_map(value)
+      is_binary(key) and String.starts_with?(key, "validation") and
+        not GiTF.Missions.history_key?(key) and is_map(value)
     end)
     |> Enum.sort_by(fn {key, _artifact} -> key end)
   end

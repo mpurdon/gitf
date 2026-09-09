@@ -54,8 +54,13 @@ defmodule GiTF.Budget.Watchdog do
   defp check_active_quests(state) do
     active_statuses = GiTF.Missions.active_statuses()
 
+    # A mission held for a human spends nothing and must not be paused or
+    # escalated for the crime of the operator being asleep — the same
+    # exemption Lifecycle.over_budget? makes.
     active_quests =
-      Archive.filter(:missions, fn q -> q[:status] in active_statuses end)
+      Archive.filter(:missions, fn q ->
+        q[:status] in active_statuses and not GiTF.Missions.held_for_human?(q)
+      end)
 
     Enum.reduce(active_quests, state, fn mission, acc ->
       case Budget.check(mission.id) do
@@ -201,13 +206,12 @@ defmodule GiTF.Budget.Watchdog do
             "Quest #{mission.id} paused for #{Float.round(hours_paused, 1)}h (grace period exceeded), auto-failing"
           )
 
-          GiTF.Missions.transition_phase(
+          # Through fail_quest, so the canonical branch is archived (the
+          # mission stays resumable) and whoever asked for the work is told.
+          GiTF.Missions.fail_quest(
             mission.id,
-            "completed",
             "Budget exhausted — auto-failed after #{@pause_grace_hours}h grace period"
           )
-
-          GiTF.Missions.update_status!(mission.id)
 
           GiTF.Observability.Alerts.dispatch_webhook(
             :budget_auto_failed,
