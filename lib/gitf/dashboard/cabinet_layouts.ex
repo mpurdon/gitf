@@ -75,7 +75,7 @@ defmodule GiTF.Dashboard.CabinetLayouts do
           .view-head{display:flex;align-items:baseline;gap:12px}
           .view-head h1{font-size:20px;font-weight:600;letter-spacing:-.01em}
           .view-head .sub{color:var(--muted);font-size:13px}
-          .view-head .end{margin-left:auto}
+          .view-head .end,.fleet-actions .end,.opening .end{margin-left:auto}
 
           .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
           .panel-head{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--line-2)}
@@ -116,6 +116,15 @@ defmodule GiTF.Dashboard.CabinetLayouts do
           .stat .k{font-size:11px;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;font-weight:600}
           .stat .v{font-size:13.5px;color:var(--text-2)}
           .stat .v b{font-family:var(--mono);font-weight:500;color:var(--text)}
+
+          .fleet.sel{border-color:var(--accent)}
+          .fleet-head{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;padding:16px 20px;text-align:left}
+          .fleet-head:hover{background:var(--panel-2)}
+          .fleet-head .strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+          .fleet-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 18px;padding:12px 20px 14px;border-top:1px solid var(--line-2)}
+          .fleet-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 20px 14px;border-top:1px solid var(--line-2)}
+          .btn[disabled]{opacity:.5;pointer-events:none}
+          .opening{display:flex;align-items:center;gap:14px;padding:14px 20px;font-size:13.5px;color:var(--text-2)}
 
           .irow{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:16px;align-items:center;width:100%;padding:14px 20px;border-bottom:1px solid var(--line-2)}
           .irow:last-child{border-bottom:0}

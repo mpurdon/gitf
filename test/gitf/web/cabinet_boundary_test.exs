@@ -32,6 +32,7 @@ defmodule GiTF.Web.CabinetBoundaryTest do
 
     test "the Cabinet's own surfaces do exist" do
       assert routes?("/")
+      assert routes?("/wake/some-ministry")
       assert routes?("/hooks/some-ministry", "POST")
       assert routes?("/api/v1/health")
       assert routes?("/api/v1/mcp", "POST")

@@ -266,7 +266,7 @@ defmodule GiTF.Application do
     children =
       if GiTF.Cabinet.mode?() do
         Logger.info("CABINET MODE — factory supervision skipped")
-        foundation ++ [interface]
+        foundation ++ [interface, GiTF.Cabinet.Watch]
       else
         foundation ++ [core, interface, plugins] ++ background_children()
       end

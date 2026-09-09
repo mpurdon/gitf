@@ -6,7 +6,11 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   Frame (GiTF Control Surface plan §07, operator-chosen): dark icon rail
   on the left, workspace in the middle, contextual inspector on the
-  right. Views: Overview · Inbox · Systems · Registry · Policy.
+  right. Views: Overview · Ministries · Inbox · Systems · Registry ·
+  Policy. Ministries is the fleet as objects: every box's state, how
+  long it has been that way, when it will sleep, and wake / stop / open
+  in place. `/wake/:slug` deep-links into "wake and open" — bookmark it
+  for a factory you expect to find asleep.
   Selecting a ministry or an activation fills the inspector — the
   why-chain reads the decision provenance the Gate records on every
   inbox entry (rule row, mode, cap state). Every operator act lands in
@@ -21,11 +25,12 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   @refresh :timer.seconds(20)
 
-  @views ~w(overview inbox systems registry policy)
+  @views ~w(overview ministries inbox systems registry policy)
+  @wake_timeout_ms 180_000
   @ifilters ~w(waiting woke dropped all)
 
   @impl true
-  def mount(_params, session, socket) do
+  def mount(params, session, socket) do
     if connected?(socket), do: Process.send_after(self(), :refresh, @refresh)
 
     {:ok,
@@ -37,9 +42,24 @@ defmodule GiTF.Dashboard.CabinetLive do
      |> assign(:itab, "overview")
      |> assign(:ifilter, "waiting")
      |> assign(:editing, nil)
+     |> assign(:opening, nil)
      |> init_toasts()
-     |> load()}
+     |> load()
+     |> maybe_wake_from_route(params)}
   end
+
+  # /wake/:slug — the bookmark for a factory you expect to find asleep:
+  # wakes it and forwards to its dashboard the moment it answers.
+  defp maybe_wake_from_route(%{assigns: %{live_action: :wake}} = socket, %{"slug" => slug}) do
+    socket = assign(socket, :view, "ministries")
+
+    case Registry.by_slug(slug) do
+      %{} = ministry -> if connected?(socket), do: wake_and_open(socket, ministry), else: socket
+      nil -> put_flash(socket, :error, "No ministry called #{slug}.")
+    end
+  end
+
+  defp maybe_wake_from_route(socket, _params), do: socket
 
   @impl true
   def handle_info(:refresh, socket) do
@@ -48,6 +68,26 @@ defmodule GiTF.Dashboard.CabinetLive do
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # The wait after "wake & open" runs off the LiveView process so the
+  # Console stays live while the box boots (~60–90s).
+  @impl true
+  def handle_async(:open, {:ok, {:ok, url}}, socket) do
+    {:noreply, redirect(socket, external: url)}
+  end
+
+  def handle_async(:open, {:ok, {:error, reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:opening, nil)
+     |> put_flash(:error, "The factory did not answer in time (#{inspect(reason)}).")
+     |> load()}
+  end
+
+  def handle_async(:open, {:exit, reason}, socket) do
+    {:noreply,
+     socket |> assign(:opening, nil) |> put_flash(:error, "Wait failed: #{inspect(reason)}")}
+  end
 
   @impl true
   def handle_event("view", %{"view" => view}, socket) when view in @views do
@@ -76,6 +116,17 @@ defmodule GiTF.Dashboard.CabinetLive do
       other ->
         {:noreply, put_flash(socket, :error, "Wake failed: #{inspect(other)}")}
     end
+  end
+
+  def handle_event("wake_open", %{"id" => id}, socket) do
+    case Registry.get(id) do
+      %{} = ministry -> {:noreply, wake_and_open(socket, ministry)}
+      nil -> {:noreply, put_flash(socket, :error, "Unknown ministry.")}
+    end
+  end
+
+  def handle_event("cancel_open", _params, socket) do
+    {:noreply, socket |> cancel_async(:open) |> assign(:opening, nil)}
   end
 
   def handle_event("stop", %{"id" => id}, socket) do
@@ -186,10 +237,42 @@ defmodule GiTF.Dashboard.CabinetLive do
     end
   end
 
+  defp wake_and_open(socket, %{url: url} = ministry) when is_binary(url) and url != "" do
+    case Fleet.wake(ministry) do
+      :ok ->
+        Activity.record(socket.assigns.actor, "wake", ministry.slug, "starting · will open")
+        timeout = @wake_timeout_ms
+
+        socket
+        |> assign(:opening, ministry.slug)
+        |> start_async(:open, fn ->
+          with :ok <- Fleet.await_healthy(ministry, timeout), do: {:ok, url}
+        end)
+        |> load()
+
+      other ->
+        put_flash(socket, :error, "Wake failed: #{inspect(other)}")
+    end
+  end
+
+  defp wake_and_open(socket, ministry) do
+    put_flash(socket, :error, "#{ministry.slug} has no factory url to open.")
+  end
+
+  # One EC2 describe (remembered — see Fleet.observe/1) plus, for a
+  # running box, its own /health: version, uptime, load, and when the
+  # idle-stop timer will put it to sleep. In parallel: a ministry that
+  # is asleep costs a describe, one that is awake a describe and a
+  # 5s-bounded HTTP call.
   defp load(socket) do
+    registered = Registry.list()
+
     ministries =
-      Enum.map(Registry.list(), fn m ->
-        Map.put(m, :box_state, Fleet.instance_state(m))
+      registered
+      |> Task.async_stream(&observe/1, timeout: 15_000, on_timeout: :kill_task)
+      |> Enum.zip_with(registered, fn
+        {:ok, m}, _ -> m
+        _, m -> Map.put_new(m, :box, %{state: :unknown})
       end)
 
     socket
@@ -206,20 +289,94 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   defp find_by_id(list, id), do: Enum.find(list, &(&1.id == id))
 
+  defp observe(ministry) do
+    m = Fleet.observe(ministry)
+
+    live =
+      case running?(m) && Fleet.health(m) do
+        {:ok, %{"data" => %{} = data}} -> data
+        _ -> nil
+      end
+
+    Map.put(m, :live, live)
+  end
+
   # -- helpers -----------------------------------------------------------------
 
-  defp running?(m), do: m[:box_state] == "running"
+  defp box_state(m), do: get_in(m, [:box, :state])
+
+  defp running?(m), do: box_state(m) == "running"
 
   defp state_pill(m) do
-    case m[:box_state] do
+    case box_state(m) do
       "running" -> {"ok", "Running"}
       "pending" -> {"recon", "Waking"}
       "stopping" -> {"recon", "Stopping"}
       "stopped" -> {"off", "Stopped"}
       nil -> {"off", "No factory"}
+      :unknown -> {"off", "Unknown"}
       other -> {"off", to_string(other)}
     end
   end
+
+  # -- fleet metrics -----------------------------------------------------------
+  #
+  # "How long has it been like this" is the one number an operator wants
+  # of a fleet that sleeps: awake → the daemon's own uptime (the box may
+  # have booted a minute before the release came up); asleep → since the
+  # Cabinet saw it stop, which is the best anyone has (EC2 forgets).
+
+  defp state_for(m) do
+    live = m[:live]
+    since = get_in(m, [:box, :state_since])
+
+    cond do
+      live && is_integer(live["uptime_seconds"]) -> "up #{dur(live["uptime_seconds"])}"
+      running?(m) and since -> "up #{ago(since)} (box)"
+      box_state(m) == "stopped" and since -> "asleep #{ago(since)}"
+      box_state(m) == "stopped" -> "asleep since before the Cabinet watched"
+      box_state(m) in ["pending", "stopping"] -> "for #{ago(since)}"
+      true -> "—"
+    end
+  end
+
+  defp sleeps_in(%{live: %{} = live}) do
+    cond do
+      live["idle"] != true ->
+        "held awake — #{live["active_missions"] || 0} missions · #{live["active_ghosts"] || 0} ghosts"
+
+      is_binary(live["idle_stop_at"]) ->
+        case DateTime.from_iso8601(live["idle_stop_at"]) do
+          {:ok, at, _} -> "in #{until(at)} (idle)"
+          _ -> "idle"
+        end
+
+      true ->
+        "idle · idle-stop not scheduled"
+    end
+  end
+
+  defp sleeps_in(m), do: if(running?(m), do: "running, health unreachable", else: "—")
+
+  defp version(%{live: %{"version" => v}}), do: v
+  defp version(_), do: "—"
+
+  defp dur(secs) when is_integer(secs) and secs < 60, do: "#{secs}s"
+  defp dur(secs) when is_integer(secs) and secs < 3_600, do: "#{div(secs, 60)}m"
+
+  defp dur(secs) when is_integer(secs) and secs < 86_400,
+    do: "#{div(secs, 3_600)}h #{rem(div(secs, 60), 60)}m"
+
+  defp dur(secs) when is_integer(secs), do: "#{div(secs, 86_400)}d #{rem(div(secs, 3_600), 24)}h"
+  defp dur(_), do: "—"
+
+  defp ago(%DateTime{} = dt), do: dur(max(DateTime.diff(DateTime.utc_now(), dt), 0))
+  defp ago(_), do: "—"
+
+  defp until(%DateTime{} = dt), do: dur(max(DateTime.diff(dt, DateTime.utc_now()), 0))
+
+  defp date(%DateTime{} = dt), do: Calendar.strftime(dt, "%b %d %H:%MZ")
+  defp date(_), do: "—"
 
   defp queued(inbox, slug \\ nil) do
     Enum.filter(inbox, &(&1.status == "queued" and (slug == nil or &1.ministry_slug == slug)))
@@ -470,6 +627,53 @@ defmodule GiTF.Dashboard.CabinetLive do
               </div>
             </div>
 
+          <% "ministries" -> %>
+            <div class="view-head">
+              <h1>Ministries</h1>
+              <span class="sub">the fleet as it is right now — every box, how long it has been that way, and when it sleeps</span>
+              <span class="end muted" style="font-size:12.5px">refreshes every 20s</span>
+            </div>
+
+            <div :if={@opening} class="panel opening">
+              <span class="pill recon"><span class="dot"></span>Waking {@opening}</span>
+              <span>Its dashboard opens in this tab the moment the factory answers — usually within a minute, up to three.</span>
+              <button class="btn sm end" phx-click="cancel_open">Stay here</button>
+            </div>
+
+            <div :if={@ministries == []} class="empty">No ministries registered yet — Registry → Register a ministry.</div>
+            <div :for={m <- @ministries} class={["panel", "fleet", match?({"ministry", id} when id == m.id, @sel) && "sel"]}>
+              <button class="fleet-head" phx-click="select" phx-value-type="ministry" phx-value-id={m.id}>
+                <span class="who">
+                  <span class={["avatar", !running?(m) && "dim"]}>{initials(m.name)}</span>
+                  <span>
+                    <div class="nm">{m.name}</div>
+                    <div class="sub">{m.slug} · {m[:instance_id] || "not provisioned"}</div>
+                  </span>
+                </span>
+                <span class="strip">
+                  <.state_badge ministry={m} />
+                  <span class={"pill #{if queued(@inbox, m.slug) == [], do: "off", else: "warn"}"}><span class="dot"></span>{length(queued(@inbox, m.slug))} waiting</span>
+                  <span class="tag">{m.mode}</span>
+                </span>
+              </button>
+              <div class="fleet-metrics">
+                <span class="stat"><span class="k">State</span><span class="v"><b>{state_for(m)}</b></span></span>
+                <span class="stat"><span class="k">Sleeps</span><span class="v"><b>{sleeps_in(m)}</b></span></span>
+                <span class="stat"><span class="k">Release</span><span class="v"><b>{version(m)}</b></span></span>
+                <span class="stat"><span class="k">Load</span><span class="v"><b>{(m[:live] && "#{m.live["active_missions"] || 0} missions · #{m.live["active_ghosts"] || 0} ghosts") || "—"}</b></span></span>
+                <span class="stat"><span class="k">Last woke</span><span class="v"><b>{date(get_in(m, [:box, :launched_at]))}</b></span></span>
+                <span class="stat"><span class="k">Spend</span><span class="v"><b>{money(m[:spend_usd])}</b> · cap {money(m[:cost_cap_usd])}</span></span>
+              </div>
+              <div class="fleet-actions">
+                <button :if={!running?(m)} class="btn pri sm" phx-click="wake" phx-value-id={m.id} disabled={box_state(m) in ["pending", "stopping"]}>Wake</button>
+                <button :if={!running?(m) and m.url} class="btn sm" phx-click="wake_open" phx-value-id={m.id} disabled={@opening != nil}>Wake &amp; open</button>
+                <button :if={running?(m)} class="btn sm" phx-click="stop" phx-value-id={m.id}>Sleep</button>
+                <button :if={running?(m)} class="btn sm" phx-click="snapshot" phx-value-id={m.id}>Refresh snapshot</button>
+                <a :if={m.url} class="btn sm" href={m.url} target="_blank">Dashboard ↗</a>
+                <span class="muted end" style="font-size:12px">bookmark <span class="mono">/wake/{m.slug}</span> to wake &amp; open from cold</span>
+              </div>
+            </div>
+
           <% "inbox" -> %>
             <div class="view-head">
               <h1>Inbox</h1>
@@ -506,7 +710,7 @@ defmodule GiTF.Dashboard.CabinetLive do
                   <span class="sysicon"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6.5" rx="1.5" /><rect x="4" y="13.5" width="16" height="6.5" rx="1.5" /><path d="M7.2 7.2h.01M7.2 16.7h.01" /></svg></span>
                   <span class="nm"><span class="ty">Factory</span>{m[:instance_id] || "not provisioned"}</span>
                   <span class="kv">{if m.url, do: m.url, else: "no url"}</span>
-                  <span class="kv"><b>{m[:box_state] || "—"}</b>{if m[:health], do: " · health #{m.health}"}</span>
+                  <span class="kv"><b>{box_state(m) || "—"}</b> · {state_for(m)}</span>
                   <span class="kv">{spend_line(m)}</span>
                 </div>
               <% end %>
@@ -619,6 +823,7 @@ defmodule GiTF.Dashboard.CabinetLive do
                   <button :for={mode <- ~w(normal vacation off)} class={m.mode == mode && "on"} phx-click="set_mode" phx-value-id={m.id} phx-value-mode={mode}>{mode}</button>
                 </span>
                 <button :if={!running?(m)} class="btn pri sm" phx-click="wake" phx-value-id={m.id}>Wake factory</button>
+                <button :if={!running?(m) and m.url} class="btn sm" phx-click="wake_open" phx-value-id={m.id}>Wake &amp; open</button>
                 <button :if={running?(m)} class="btn sm" phx-click="stop" phx-value-id={m.id}>Stop factory</button>
                 <button :if={running?(m)} class="btn sm" phx-click="snapshot" phx-value-id={m.id}>Refresh snapshot</button>
                 <a :if={m.url} class="btn sm" href={m.url} target="_blank">Dashboard ↗</a>
@@ -630,7 +835,10 @@ defmodule GiTF.Dashboard.CabinetLive do
                 <% "overview" -> %>
                   <dl class="kv">
                     <dt>factory</dt><dd class="mono">{m[:instance_id] || "not provisioned"}</dd>
-                    <dt>state</dt><dd>{m[:box_state] || "—"}{if m[:health], do: " · health #{m.health}"}</dd>
+                    <dt>state</dt><dd>{box_state(m) || "—"} · {state_for(m)}</dd>
+                    <dt>sleeps</dt><dd>{sleeps_in(m)}</dd>
+                    <dt>release</dt><dd class="mono">{version(m)}</dd>
+                    <dt>last woke</dt><dd>{date(get_in(m, [:box, :launched_at]))}</dd>
                     <dt>url</dt><dd>{m.url || "—"}</dd>
                     <dt>spend</dt><dd>{spend_line(m)}</dd>
                     <dt>cost cap</dt><dd>{money(m[:cost_cap_usd])} / month</dd>
@@ -760,6 +968,8 @@ defmodule GiTF.Dashboard.CabinetLive do
     [
       {"overview", "Overview",
        ~s(<svg class="ico" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="2"/><rect x="13" y="13" width="7.5" height="7.5" rx="2"/></svg>)},
+      {"ministries", "Ministries",
+       ~s(<svg class="ico" viewBox="0 0 24 24"><path d="M12 3.5 20 7v5.5c0 4.5-3.2 7.3-8 8.5-4.8-1.2-8-4-8-8.5V7z"/></svg>)},
       {"inbox", "Inbox",
        ~s(<svg class="ico" viewBox="0 0 24 24"><path d="M3.5 13.5 6 5.5h12l2.5 8"/><path d="M3.5 13.5V18a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-4.5h-5a3.5 3.5 0 0 1-7 0h-5z"/></svg>)},
       {"systems", "Systems",

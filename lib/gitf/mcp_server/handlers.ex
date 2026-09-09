@@ -419,13 +419,17 @@ defmodule GiTF.MCPServer.Handlers do
   def call("cabinet_status", _args) do
     ministries =
       Enum.map(GiTF.Cabinet.Registry.list(), fn m ->
+        box = GiTF.Cabinet.Fleet.observe(m).box
+
         %{
           slug: m.slug,
           name: m.name,
           mode: m[:mode],
           url: m[:url],
           instance_id: m[:instance_id],
-          box_state: to_string(GiTF.Cabinet.Fleet.instance_state(m)),
+          box_state: to_string(box.state),
+          state_since: box[:state_since],
+          last_woke: box[:launched_at],
           queued: Enum.count(GiTF.Cabinet.Gate.inbox(m.slug), &(&1.status == "queued"))
         }
       end)

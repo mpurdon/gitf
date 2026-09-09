@@ -9,6 +9,7 @@ defmodule GiTF.Web.CabinetRouter do
   What the Cabinet serves:
 
     * `/` — the Console (fleet, inbox, policy; `GiTF.Dashboard.CabinetLive`)
+    * `/wake/:slug` — wake a ministry and forward to its dashboard when it answers
     * `POST /hooks/:ministry` — webhook ingress, HMAC per ministry
     * `/api/v1/health` `/version` `/ready` — public probes
     * `POST /api/v1/mcp` — the Cabinet's MCP bridge (cabinet tool set only)
@@ -80,6 +81,7 @@ defmodule GiTF.Web.CabinetRouter do
 
     live_session :cabinet, on_mount: GiTF.Web.TailnetAuth do
       live("/", CabinetLive)
+      live("/wake/:slug", CabinetLive, :wake)
     end
   end
 

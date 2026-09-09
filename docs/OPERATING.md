@@ -431,6 +431,16 @@ What the Cabinet does:
   decides wake / queue / drop. Every failure queues — never wakes.
 - **Modes** — normal (bugs + PR reviews wake, cost-cap gated), vacation
   (same; features queue for an explicit start), off (everything queues).
+- **The fleet (Console → Ministries)** — every box as an object: state
+  and how long it has been that way, the release it runs, when idle-stop
+  will sleep it (or what holds it awake), last wake, spend against cap,
+  with Wake / Sleep / Wake & open in place. **Hitting a sleeping factory
+  from cold:** bookmark `https://cabinet.<domain>/wake/<slug>` — it
+  starts the box and forwards to its dashboard when `/health` answers.
+  EC2 keeps a box's launch time but not its stop time (an idle-stop is an
+  instance-initiated shutdown, no timestamp), so `GiTF.Cabinet.Watch`
+  polls every minute and `Fleet.observe/1` records transitions — "asleep
+  3h" is since the Cabinet noticed, and a box first seen asleep says so.
 - **The inbox** — queued events with "start this": wakes the Section and
   forwards the ORIGINAL body + signature verbatim; the Section verifies
   with the same secret and handles it as if it had been awake. The
