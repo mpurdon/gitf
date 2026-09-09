@@ -28,7 +28,14 @@ defmodule GiTF.Cabinet.ClassifierTest do
 
   test "review feedback is pr_review" do
     assert Classifier.classify("pull_request_review", %{}) == :pr_review
-    assert Classifier.classify("issue_comment", %{}) == :pr_review
+
+    assert Classifier.classify("issue_comment", %{"issue" => %{"pull_request" => %{"url" => "x"}}}) ==
+             :pr_review
+  end
+
+  test "a comment on a plain issue is noise — Aramaki's own comment woke the factory it came from" do
+    assert Classifier.classify("issue_comment", %{"issue" => %{"number" => 23}}) == :noise
+    assert Classifier.classify("issue_comment", %{}) == :noise
   end
 
   test "CI chatter and unknown events never wake anything" do

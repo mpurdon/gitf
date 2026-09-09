@@ -45,9 +45,25 @@ defmodule GiTF.Aramaki.Intake do
   @spec issue_key(String.t(), integer()) :: String.t()
   def issue_key(repo_full_name, number), do: "#{repo_full_name}##{number}"
 
+  # One issue, one mission — under a lock on the issue key. GitHub sends
+  # `opened` and one `labeled` per label within the same second, and the
+  # Cabinet forwards each after the same wake, so three deliveries for
+  # cora#23 arrived milliseconds apart and the check-then-create below
+  # made two missions (2026-09-09). Late arrivals wait for the first to
+  # finish and then dedup against it.
   defp upsert_mission(sector, repo, issue, priority) do
     key = issue_key(repo["full_name"], issue["number"])
 
+    GiTF.MissionLock.with_lock({:intake, key}, [on_contention: {:wait, 10_000}], fn ->
+      do_upsert_mission(sector, repo, issue, priority, key)
+    end)
+    |> case do
+      {:error, :timeout} -> {:error, {:intake_locked, key}}
+      result -> result
+    end
+  end
+
+  defp do_upsert_mission(sector, repo, issue, priority, key) do
     case existing_mission(key) do
       nil ->
         goal = build_goal(issue)

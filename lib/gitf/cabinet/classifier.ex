@@ -33,8 +33,15 @@ defmodule GiTF.Cabinet.Classifier do
   def classify("issues", _), do: :noise
 
   def classify(event, _payload)
-      when event in ["pull_request_review", "pull_request_review_comment", "issue_comment"],
+      when event in ["pull_request_review", "pull_request_review_comment"],
       do: :pr_review
+
+  # An issue_comment is a PR review only when the issue IS a pull request.
+  # A comment on a plain issue — Aramaki's own "picked this up", say — woke
+  # the factory it had just been posted from (cora#23, 2026-09-09).
+  def classify("issue_comment", payload) do
+    if is_map(get_in(payload, ["issue", "pull_request"])), do: :pr_review, else: :noise
+  end
 
   def classify(event, _) when event in ["check_suite", "check_run", "status", "workflow_run"],
     do: :ci

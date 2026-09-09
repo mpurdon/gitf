@@ -85,6 +85,22 @@ defmodule GiTF.AramakiTest do
       assert length(GiTF.Archive.all(:missions)) == 1
     end
 
+    test "concurrent deliveries of one issue make one mission", %{sector: _sector} do
+      # GitHub sends `opened` plus one `labeled` per label in the same
+      # second, and the Cabinet forwards them after the same wake; cora#23
+      # got two missions this way (2026-09-09).
+      results =
+        ["opened", "labeled", "labeled"]
+        |> Task.async_stream(fn action -> Intake.dispatch(event(issue(), action)) end,
+          max_concurrency: 3
+        )
+        |> Enum.map(fn {:ok, r} -> r end)
+
+      assert Enum.count(results, &match?({:ok, :admitted, _}, &1)) == 1
+      assert Enum.count(results, &match?({:ok, :deduped, _}, &1)) == 2
+      assert length(GiTF.Archive.all(:missions)) == 1
+    end
+
     test "ignores an issue for an untracked repo" do
       payload = %{
         "action" => "labeled",
