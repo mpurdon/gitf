@@ -1994,6 +1994,10 @@ defmodule GiTF.MCPServer.Handlers do
       default: inquiry[:default],
       asked_by: inquiry[:asked_by],
       answer_label: inquiry[:answer_label],
+      # A rejection carries the steering for the next round.
+      outcome: inquiry[:outcome] || (inquiry[:status] == "answered" && "chosen") || nil,
+      votes: inquiry[:votes],
+      direction: inquiry[:direction],
       answered_at: inquiry[:answered_at] && to_string(inquiry[:answered_at]),
       # An inherited answer was given on an ancestor run and carried across
       # a resume. It cost nobody's attention on THIS mission, and it does
