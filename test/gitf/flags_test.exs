@@ -48,4 +48,22 @@ defmodule GiTF.FlagsTest do
     Flags.apply_from_config(%{features: %{skills_enabled: true}})
     assert Application.get_env(:gitf, :lsp_validation_enabled) == true
   end
+
+  test "effective/1 reports each flag's value and whether the config pins it" do
+    Application.put_env(:gitf, :skills_enabled, true)
+    rows = Flags.effective(%{"features" => %{"skills_enabled" => true}})
+
+    assert {:skills_enabled, true, :config} in rows
+
+    assert {:lsp_validation_enabled, nil, :boot} in rows or
+             {:lsp_validation_enabled, false, :boot} in rows
+
+    assert length(rows) == length(Flags.known())
+  end
+
+  test "every known flag has a description" do
+    for flag <- Flags.known() do
+      refute Flags.describe(flag) == to_string(flag), "#{flag} has no description"
+    end
+  end
 end

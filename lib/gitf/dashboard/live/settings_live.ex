@@ -93,16 +93,23 @@ defmodule GiTF.Dashboard.SettingsLive do
 
       updated =
         Enum.reduce(values, current, fn {key, value}, sec ->
-          # LLM keys are stored nested under "keys" in the TOML
-          if section == "llm" and key in ["anthropic", "google"] do
-            keys = Map.get(sec, "keys", %{})
-            Map.put(sec, "keys", Map.put(keys, key, value))
-          else
-            Map.put(sec, key, coerce(section, key, value))
+          cond do
+            # LLM keys are stored nested under "keys" in the TOML
+            section == "llm" and key in ["anthropic", "google"] ->
+              keys = Map.get(sec, "keys", %{})
+              Map.put(sec, "keys", Map.put(keys, key, value))
+
+            # A feature flag set back to "inherit" leaves the table, so the
+            # boot value (env var or default) decides again.
+            section == "features" and value == "" ->
+              Map.delete(sec, key)
+
+            true ->
+              Map.put(sec, key, coerce(section, key, value))
           end
         end)
 
-      Map.put(acc, section, updated)
+      if updated == %{}, do: Map.delete(acc, section), else: Map.put(acc, section, updated)
     end)
   end
 
@@ -114,7 +121,20 @@ defmodule GiTF.Dashboard.SettingsLive do
   defp coerce("major", "dark_factory", "true"), do: true
   defp coerce("major", "dark_factory", _), do: false
   defp coerce("tachikoma", _key, v), do: parse_int(v)
+  defp coerce("features", _key, "true"), do: true
+  defp coerce("features", _key, "false"), do: false
   defp coerce(_section, _key, v), do: v
+
+  # The [features] table as written: "" (inherit) unless the file pins it.
+  defp flag_setting(config, flag) do
+    case config |> Map.get("features", %{}) |> Map.get(to_string(flag)) do
+      true -> "true"
+      false -> "false"
+      _ -> ""
+    end
+  end
+
+  defp flag_rows(config), do: GiTF.Flags.effective(config)
 
   defp parse_float(v) when is_binary(v) do
     case Float.parse(v) do
@@ -158,6 +178,35 @@ defmodule GiTF.Dashboard.SettingsLive do
         </div>
 
         <form phx-change="update">
+          <%!-- Feature flags. Most of the intelligence layer is default-off;
+                this is the one place that says what is actually on, and why.
+                Before it existed the only ground truth was a journal grep, and
+                a flag the old box carried in its env file was silently lost in
+                an instance replacement (outcomes_enabled, 2026-09-01). --%>
+          <div class="panel" style="margin-bottom:1rem">
+            <h3 style="color:var(--text-2); margin:0 0 0.25rem; font-size:0.95rem">Features</h3>
+            <div style="color:var(--muted); font-size:0.75rem; margin-bottom:0.75rem">
+              Saved flags live in this file's <code>[features]</code> table and beat the boot
+              env. "Inherit" removes the pin so the boot value decides again.
+            </div>
+            <div style="display:grid; grid-template-columns:auto 1fr auto; gap:0.4rem 0.75rem; align-items:center">
+              <%= for {flag, value, source} <- flag_rows(@config) do %>
+                <span class={"badge #{if value == true, do: "badge-green", else: "badge-grey"}"} title={"effective value (#{source})"}>
+                  {if value == true, do: "on", else: "off"}
+                </span>
+                <div style="min-width:0">
+                  <div style="font-family:monospace; font-size:0.8rem">{flag}</div>
+                  <div style="color:var(--muted); font-size:0.72rem">{GiTF.Flags.describe(flag)}</div>
+                </div>
+                <select name={"config[features][#{flag}]"} class="form-select" style="font-size:0.8rem">
+                  <option value="" selected={flag_setting(@config, flag) == ""}>inherit ({source})</option>
+                  <option value="true" selected={flag_setting(@config, flag) == "true"}>on</option>
+                  <option value="false" selected={flag_setting(@config, flag) == "false"}>off</option>
+                </select>
+              <% end %>
+            </div>
+          </div>
+
           <%!-- GitHub --%>
           <div class="panel" style="margin-bottom:1rem">
             <h3 style="color:var(--text-2); margin:0 0 0.75rem; font-size:0.95rem">GitHub</h3>
