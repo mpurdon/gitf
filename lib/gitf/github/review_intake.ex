@@ -348,7 +348,10 @@ defmodule GiTF.GitHub.ReviewIntake do
           matched -> matched
         end
 
-      Enum.take(scoped, 25)
+      # No cap: a comment dropped here is marked handled and never seen
+      # again. A very long review is the reviewer's choice, and the goal
+      # text is the only place it can land.
+      scoped
     else
       _ -> []
     end

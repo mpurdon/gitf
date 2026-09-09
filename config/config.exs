@@ -107,6 +107,18 @@ config :gitf, :skill_critic_model, "google:gemini-2.5-flash"
 config :gitf, :outcomes_enabled, false
 config :gitf, :outcome_refinement_enabled, false
 
+# Every flag has an explicit boolean default: a flag that reads nil is
+# "off" everywhere it is checked, but the settings page and the boot log
+# should not have to say nil to mean it.
+config :gitf, :vault_writer_enabled, false
+config :gitf, :knowledge_context_enabled, false
+config :gitf, :knowledge_compile_enabled, false
+config :gitf, :lsp_validation_enabled, false
+# These two default ON in the code that reads them; the table says so.
+config :gitf, :sandbox_enabled, true
+config :gitf, :bedrock_prompt_cache, true
+config :gitf, :wire_enabled, false
+
 # Review-driven follow-up missions. When enabled, a `changes_requested`
 # review on a PR the factory opened creates a mission that amends that
 # PR's branch in place. Requires :outcomes_enabled — intake only fires

@@ -18,6 +18,8 @@ defmodule GiTF.Workflow.Advancer do
   effects and decides what to do with each decision.
   """
 
+  require Logger
+
   alias GiTF.Workflow
   alias GiTF.Workflow.Phase
   alias GiTF.Workflow.Verdict
@@ -71,32 +73,54 @@ defmodule GiTF.Workflow.Advancer do
             {:retries_exhausted, phase_id}
 
           verdict when verdict in [:advance, :pass, :fail] ->
-            run_before_advance(phase_config, mission, verdict, artifact)
-            # `before_advance` may have enriched the phase artifact (e.g.
-            # `GiTF.Phases.Triage` writing a derived flag a conditional
-            # `next:` rule reads) AND the mission itself (Triage writes
-            # pipeline_mode). Re-read both, so routing and the handler this
-            # dispatches to see the latest — a stale map here is how a fast
-            # mission spawned the full three-variant design tournament
-            # (msn-1729cb, msn-f48ae9, msn-5f2be2).
-            mission = refresh_mission(mission)
-            ctx = %{artifact: GiTF.Missions.get_artifact(mission.id, phase_id), mission: mission}
+            case run_before_advance(phase_config, mission, verdict, artifact) do
+              {:error, reason} ->
+                # The handler says the next phase must not start on this
+                # state. Wait, visibly: the phase's own stall handling and
+                # the operator take it from here.
+                Logger.error(
+                  "Quest #{mission.id}: #{phase_id} refused to advance (#{inspect(reason)}) — waiting"
+                )
 
-            case verdict do
-              :fail ->
-                handle_fail(mission, workflow, phase_config, ctx)
+                GiTF.Observability.Alerts.dispatch_webhook(
+                  :phase_advance_refused,
+                  "Quest #{mission.id}: #{phase_id} refused to advance: #{inspect(reason)}",
+                  dedup_key: "phase_advance_refused:#{mission.id}:#{phase_id}"
+                )
 
-              v ->
-                # An operator gate blocks advancing PAST this phase until a
-                # human clears it. Without this, `gate: await_operator` was
-                # parsed but never enforced (review_plan silently bypassed;
-                # security-patch could auto-merge).
-                if gate_blocks?(phase_config, mission, ctx) do
-                  {:wait, phase_id}
-                else
-                  advance_via(workflow, phase_id, v, ctx)
-                end
+                {:wait, phase_id}
+
+              :ok ->
+                advance_after_hook(mission, workflow, phase_id, phase_config, verdict)
             end
+        end
+    end
+  end
+
+  defp advance_after_hook(mission, workflow, phase_id, phase_config, verdict) do
+    # `before_advance` may have enriched the phase artifact (e.g.
+    # `GiTF.Phases.Triage` writing a derived flag a conditional
+    # `next:` rule reads) AND the mission itself (Triage writes
+    # pipeline_mode). Re-read both, so routing and the handler this
+    # dispatches to see the latest — a stale map here is how a fast
+    # mission spawned the full three-variant design tournament
+    # (msn-1729cb, msn-f48ae9, msn-5f2be2).
+    mission = refresh_mission(mission)
+    ctx = %{artifact: GiTF.Missions.get_artifact(mission.id, phase_id), mission: mission}
+
+    case verdict do
+      :fail ->
+        handle_fail(mission, workflow, phase_config, ctx)
+
+      v ->
+        # An operator gate blocks advancing PAST this phase until a
+        # human clears it. Without this, `gate: await_operator` was
+        # parsed but never enforced (review_plan silently bypassed;
+        # security-patch could auto-merge).
+        if gate_blocks?(phase_config, mission, ctx) do
+          {:wait, phase_id}
+        else
+          advance_via(workflow, phase_id, v, ctx)
         end
     end
   end
@@ -198,13 +222,18 @@ defmodule GiTF.Workflow.Advancer do
        when not is_nil(handler) do
     if ensure_exported?(handler, :before_advance, 3) do
       try do
-        handler.before_advance(mission, verdict, artifact)
+        case handler.before_advance(mission, verdict, artifact) do
+          {:error, _} = refusal -> refusal
+          _ -> :ok
+        end
       rescue
-        _ -> :ok
+        # A hook that crashes has not done its side effects; advancing on
+        # top of that is the same class of mistake as ignoring a refusal.
+        e -> {:error, {:before_advance_crashed, Exception.message(e)}}
       end
+    else
+      :ok
     end
-
-    :ok
   end
 
   defp run_before_advance(_phase_config, _mission, _verdict, _artifact), do: :ok

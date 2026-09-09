@@ -3,11 +3,24 @@ defmodule GiTF.Phases.ReviewCarryforwardTest do
 
   alias GiTF.Phases.Review
 
+  # The hook promotes the reviewer's pick (default "normal"); the fixture
+  # carries one so the promotion is not what these tests exercise.
   defp mission!(artifacts \\ %{}) do
     {:ok, m} =
-      GiTF.Archive.insert(:missions, %{name: "cf", goal: "g", artifacts: artifacts})
+      GiTF.Archive.insert(:missions, %{
+        name: "cf",
+        goal: "g",
+        artifacts: Map.merge(%{"design_normal" => %{"approach" => "x"}}, artifacts)
+      })
 
     m
+  end
+
+  test "a review whose pick has no artifact refuses the advance" do
+    {:ok, m} = GiTF.Archive.insert(:missions, %{name: "cf", goal: "g", artifacts: %{}})
+
+    assert {:error, :selected_variant_missing} =
+             Review.before_advance(m, :pass, %{"approved" => true, "selected_design" => "normal"})
   end
 
   test "an overruled review records its objection for downstream" do

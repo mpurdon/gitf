@@ -120,10 +120,12 @@ defmodule GiTF.Budget.Watchdog do
   defp pause_quest(mission, spent) do
     mission_id = mission.id
 
-    # Stop active ghosts but don't fail their ops (they can resume)
+    # Stop active ghosts but don't fail their ops (they can resume).
+    # `GhostStatus.active?/1` is the live predicate: a ghost still
+    # provisioning is about to spend too.
     active_ghosts =
       Archive.filter(:ghosts, fn b ->
-        b.op_id != nil && b.status == GhostStatus.working()
+        b.op_id != nil && GhostStatus.active?(b.status)
       end)
       |> Enum.filter(fn b ->
         case Archive.get(:ops, b.op_id) do

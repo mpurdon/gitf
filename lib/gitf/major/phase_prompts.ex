@@ -798,6 +798,26 @@ defmodule GiTF.Major.PhasePrompts do
   # The floor is quoted from `GiTF.Phases.Validation` rather than repeated
   # here: a prompt that advertises a threshold the gate does not enforce
   # is worse than no prompt at all.
+  # The requirements (brief) and the operator context, as the fence a
+  # simplify ghost must not cross.
+  defp simplify_bounds(mission, ctx) do
+    requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
+
+    reqs =
+      if is_map(requirements) do
+        artifacts_block([
+          {"Requirements — every one must still hold after your changes", "requirements",
+           requirements, view: :brief}
+        ])
+      else
+        ""
+      end
+
+    [reqs, ctx]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
+  end
+
   @doc """
   Why an earlier run of this work was sent back at approval, from the
   mission's `rejection_notes` (inherited across a resume). Empty when
@@ -1021,11 +1041,16 @@ defmodule GiTF.Major.PhasePrompts do
   Returns 3 {focus, prompt} tuples for parallel simplify agents.
   Each agent reviews changed files with a different lens.
   """
-  def simplify_prompts(mission, repo_path, changed_files) do
+  def simplify_prompts(mission, repo_path, changed_files, ctx \\ "") do
     files_list =
       if changed_files != [], do: Enum.join(changed_files, "\n"), else: "(no files tracked)"
 
     location = repo_path || "(unknown)"
+
+    # A simplify ghost applies fixes directly. Without the requirements and
+    # the operator's decisions it can consolidate away the very behaviour
+    # the operator picked ("that special case is duplicated — extract it").
+    bounds = simplify_bounds(mission, ctx)
 
     [
       {"reuse",
@@ -1040,6 +1065,8 @@ defmodule GiTF.Major.PhasePrompts do
 
        ## Changed Files
        #{files_list}
+
+       #{bounds}
 
        ## Instructions
 
@@ -1080,6 +1107,8 @@ defmodule GiTF.Major.PhasePrompts do
 
        ## Changed Files
        #{files_list}
+
+       #{bounds}
 
        ## Instructions
 
@@ -1123,6 +1152,8 @@ defmodule GiTF.Major.PhasePrompts do
 
        ## Changed Files
        #{files_list}
+
+       #{bounds}
 
        ## Instructions
 

@@ -116,9 +116,14 @@ defmodule GiTF.Phase do
   :advance`); `artifact` is the just-completed phase's artifact (may
   be nil for `:advance` phases that produce no output).
 
+  Returns `:ok` to let the advance proceed, or `{:error, reason}` to
+  refuse it — the mission then waits at this phase (alerted) instead of
+  dispatching the next one on a precondition that did not hold (a review
+  that approved a design variant with no artifact, say).
+
   Default no-op when not implemented.
   """
-  @callback before_advance(mission(), verdict(), artifact :: term()) :: :ok
+  @callback before_advance(mission(), verdict(), artifact :: term()) :: :ok | {:error, term()}
 
   @doc """
   Called when the workflow terminates at this phase — either because

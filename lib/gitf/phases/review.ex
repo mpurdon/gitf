@@ -41,8 +41,6 @@ defmodule GiTF.Phases.Review do
   @impl true
   def before_advance(mission, verdict, artifact)
       when verdict in [:pass, :advance] and is_map(artifact) do
-    GiTF.Major.DesignBoard.promote_selected_design(mission.id, artifact)
-
     # An OVERRULED review (advance-on-exhaustion) is an unresolved
     # objection, not a settled one. Record it so validation and the PR can
     # say "the design reviewer wanted X; we shipped anyway" — otherwise the
@@ -52,7 +50,11 @@ defmodule GiTF.Phases.Review do
       record_unresolved_objection(mission, artifact)
     end
 
-    :ok
+    # Planning starts on the reviewer's pick or not at all.
+    case GiTF.Major.DesignBoard.promote_selected_design(mission.id, artifact) do
+      {:error, _} = refusal -> refusal
+      _ -> :ok
+    end
   end
 
   # A rejection is only worth another redesign round if it says something

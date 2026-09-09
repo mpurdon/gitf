@@ -22,6 +22,12 @@ defmodule GiTF.Observability.Alerts do
   @dedup_table :gitf_alert_dedup
   @dedup_window_seconds 300
 
+  # Rule alerts describe a STATE the periodic check keeps observing, not an
+  # event; with dedup on the message text and a window no longer than the
+  # check interval, `cost_spike` re-fired every five minutes for hours.
+  # Keyed by rule name and held for an hour.
+  @rule_dedup_window_seconds 60 * 60
+
   @alert_rules [
     # 30 minutes
     {:quest_stuck, 30 * 60},
@@ -82,6 +88,7 @@ defmodule GiTF.Observability.Alerts do
     input_return_unknown: :critical,
     input_gate_failed: :critical,
     design_variant_missing: :critical,
+    phase_advance_refused: :critical,
     # A phase emitted a question no human could answer. The mission was
     # NOT held (it proceeded on the phase's own judgement), so this is a
     # prompt-compliance defect to fix, not an outage.
@@ -147,7 +154,12 @@ defmodule GiTF.Observability.Alerts do
   """
   @spec notify([{atom(), String.t()}], atom()) :: :ok
   def notify(alerts, channel \\ :auto) do
-    Enum.each(alerts, fn {type, message} -> raise_alert(type, message, channel, []) end)
+    Enum.each(alerts, fn {type, message} ->
+      raise_alert(type, message, channel,
+        dedup_key: to_string(type),
+        dedup_window: @rule_dedup_window_seconds
+      )
+    end)
   end
 
   @doc """
@@ -169,8 +181,9 @@ defmodule GiTF.Observability.Alerts do
   # channels like Telegram subscribe to), log, severity-gated webhook.
   defp raise_alert(type, message, channel, opts) do
     dedup_key = Keyword.get(opts, :dedup_key, message)
+    window = Keyword.get(opts, :dedup_window, @dedup_window_seconds)
 
-    if duplicate?(type, dedup_key) do
+    if duplicate?(type, dedup_key, window) do
       Logger.debug("Alert suppressed (dedup): #{type}")
     else
       record_alert(type, dedup_key)
@@ -388,13 +401,13 @@ defmodule GiTF.Observability.Alerts do
     :ets.whereis(@dedup_table) != :undefined
   end
 
-  defp duplicate?(type, message) do
+  defp duplicate?(type, message, window) do
     if dedup_table_exists?() do
       key = {type, :erlang.phash2(message)}
       now = System.monotonic_time(:second)
 
       case :ets.lookup(@dedup_table, key) do
-        [{^key, ts}] when now - ts < @dedup_window_seconds -> true
+        [{^key, ts}] when now - ts < window -> true
         _ -> false
       end
     else
@@ -427,7 +440,7 @@ defmodule GiTF.Observability.Alerts do
 
     if run_gc? do
       :ets.insert(@dedup_table, {last_gc_key, now})
-      cutoff = now - @dedup_window_seconds * 2
+      cutoff = now - @rule_dedup_window_seconds * 2
 
       :ets.select_delete(@dedup_table, [
         {{:_, :"$1"}, [{:is_integer, :"$1"}, {:<, :"$1", cutoff}], [true]}

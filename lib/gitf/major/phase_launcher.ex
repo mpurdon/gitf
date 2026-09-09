@@ -170,6 +170,19 @@ defmodule GiTF.Major.PhaseLauncher do
           ""
         end
 
+      # An operator's redesign reason (DesignBoard.reject_design/2) reaches
+      # the ghosts, or the redesign runs on the identical prompt.
+      extra_instructions =
+        case Map.get(mission, :redesign_reason) do
+          reason when is_binary(reason) and reason != "" ->
+            extra_instructions <>
+              "\n\n## THE OPERATOR REJECTED THE PREVIOUS DESIGNS\n\n" <>
+              "Their direction, verbatim — it binds this round:\n\n#{reason}"
+
+          _ ->
+            extra_instructions
+        end
+
       strategies =
         if FastPath.fast_mode?(mission) do
           [%{name: "minimal", hint: "Simplest approach that satisfies the core requirements"}]
@@ -801,7 +814,10 @@ defmodule GiTF.Major.PhaseLauncher do
         # branch from sector HEAD and simplify commits are orphaned.
         opts = [model: "general"] ++ Topology.quest_branch_base_opts(mission)
 
-        for {focus, prompt} <- PhasePrompts.simplify_prompts(mission, repo_path, changed_files) do
+        ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "simplify", mission)
+
+        for {focus, prompt} <-
+              PhasePrompts.simplify_prompts(mission, repo_path, changed_files, ctx) do
           spawn_phase_ghost(mission, "simplify", prompt, opts ++ [strategy: focus])
         end
 

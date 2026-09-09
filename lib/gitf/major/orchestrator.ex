@@ -410,6 +410,11 @@ defmodule GiTF.Major.Orchestrator do
     if phase == GiTF.Inquiry.gate_phase() do
       GiTF.Inquiry.Gate.handle_result(mission)
     else
+      # The gate runs before the "is this leg finished?" check on purpose:
+      # its no-questions path is one artifact-map scan and no store read,
+      # and when a phase HAS asked it refuses to hold while any op of that
+      # phase is still in flight — so the order costs nothing and a
+      # half-landed fan-out is never held on.
       case GiTF.Inquiry.Gate.intercept(mission) do
         {:held, _} ->
           {:ok, GiTF.Inquiry.gate_phase()}

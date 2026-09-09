@@ -96,10 +96,16 @@ defmodule GiTF.Dashboard.DesignLive do
     end
   end
 
-  def handle_event("reject_design", _params, socket) do
+  def handle_event("reject_design", params, socket) do
     mission = socket.assigns.mission
 
-    case GiTF.Major.DesignBoard.reject_design(mission.id, "Human rejected via dashboard") do
+    reason =
+      case String.trim(params["reason"] || "") do
+        "" -> "Rejected by the operator on the Catwalk (no reason given)"
+        text -> text
+      end
+
+    case GiTF.Major.DesignBoard.reject_design(mission.id, reason) do
       {:ok, _} ->
         {:ok, mission} = GiTF.Missions.get(mission.id)
 
@@ -215,7 +221,16 @@ defmodule GiTF.Dashboard.DesignLive do
       </div>
       <div style="display:flex; gap:0.5rem">
         <button phx-click="approve_design" class="btn btn-green" disabled={is_nil(@review)}>Approve &amp; Plan</button>
-        <button phx-click="reject_design" class="btn btn-red" data-confirm="Trigger redesign?">Reject &amp; Redesign</button>
+        <form phx-submit="reject_design" style="display:inline-flex; gap:0.5rem; align-items:flex-start">
+          <textarea
+            name="reason"
+            rows="2"
+            class="form-input"
+            style="min-width:22rem; font-size:0.8rem"
+            placeholder="What should the redesign do differently? (goes to the design ghosts verbatim)"
+          ></textarea>
+          <button type="submit" class="btn btn-red" data-confirm="Trigger redesign?">Reject &amp; Redesign</button>
+        </form>
       </div>
     </div>
 

@@ -67,7 +67,9 @@ defmodule GiTF.Major.GroundTruthBaselineTest do
           mission,
           %{"functional_requirements" => []},
           [],
-          "", exec_validation: {:pre_existing, "sh check.sh", "impl: E0433", "base: E0433"})
+          "",
+          exec_validation: {:pre_existing, "sh check.sh", "impl: E0433", "base: E0433"}
+        )
 
       assert prompt =~ "ALSO FAILS ON THE BASE COMMIT (pre-existing)"
       assert prompt =~ "Do NOT mark any requirement unmet on account of this failure"

@@ -94,10 +94,15 @@ defmodule GiTF.Phases.Design do
     GiTF.Missions.store_artifact(mission.id, "design", artifact)
 
     if single_variant? do
-      GiTF.Major.DesignBoard.promote_selected_design(mission.id, %{"selected_design" => selected})
+      case GiTF.Major.DesignBoard.promote_selected_design(mission.id, %{
+             "selected_design" => selected
+           }) do
+        {:error, _} = refusal -> refusal
+        _ -> :ok
+      end
+    else
+      :ok
     end
-
-    :ok
   end
 
   def before_advance(_mission, _verdict, _artifact), do: :ok
