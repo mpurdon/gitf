@@ -120,4 +120,35 @@ defmodule GiTF.Skills.RetrievalTest do
       assert {:ok, []} = Retrieval.retrieve(op, nil)
     end
   end
+
+  describe "without an embedding provider" do
+    # The subscription box has no API key at all and the claude CLI cannot
+    # embed; a library that is only applied when someone pays for
+    # embeddings is never applied. BM25 over name + description + body.
+    setup do
+      prev = Application.get_env(:gitf, :embedding_client)
+      Application.delete_env(:gitf, :embedding_client)
+      # A provider nobody has a key for.
+      Application.put_env(:gitf, :skill_embedding_model, "nokey:embedder")
+
+      on_exit(fn ->
+        Application.delete_env(:gitf, :skill_embedding_model)
+        if prev, do: Application.put_env(:gitf, :embedding_client, prev)
+      end)
+
+      refute GiTF.Skills.Embedding.available?()
+      :ok
+    end
+
+    test "ranks lexically by token overlap" do
+      op = %{title: "Regenerate the lockfile after package.json changes", description: ""}
+      assert {:ok, [first | _]} = Retrieval.retrieve(op, nil)
+      assert first.name == "lockfile-rule"
+    end
+
+    test "nothing in common means no skills" do
+      op = %{title: "Rotate the kubernetes certificates", description: "cert-manager"}
+      assert {:ok, []} = Retrieval.retrieve(op, nil)
+    end
+  end
 end

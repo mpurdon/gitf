@@ -12,6 +12,14 @@ defmodule GiTF.Skills.Retrieval do
     5. Cosine top-K against the query.
     6. Apply min-similarity threshold.
 
+  On a factory with no embedding provider (the claude-CLI subscription
+  box has no API key at all, and the CLI cannot embed), steps 2–6 are
+  replaced by BM25 over name + description + body: exact-token
+  overlap — a function name, a command, a file — is a decent proxy
+  for "this skill is about this op", and a library that can only be
+  applied when someone pays for embeddings is a library that is never
+  applied. The same fallback covers an embedding call that fails.
+
   Config knobs (with defaults):
 
     * `:skill_top_k` — default 5
@@ -52,21 +60,25 @@ defmodule GiTF.Skills.Retrieval do
         {:ok, []}
 
       candidates ->
-        with {:ok, query_vec} <- Embedding.embed(model, query),
-             prepared <- ensure_embeddings(candidates, model) do
-          ranked =
-            Embedding.top_k(query_vec, prepared, & &1.embedding, top_k)
-            |> Enum.filter(fn {score, _} -> score >= min_sim end)
-            |> Enum.map(fn {_score, skill} -> skill end)
+        if Embedding.available?() do
+          with {:ok, query_vec} <- Embedding.embed(model, query),
+               prepared <- ensure_embeddings(candidates, model) do
+            ranked =
+              Embedding.top_k(query_vec, prepared, & &1.embedding, top_k)
+              |> Enum.filter(fn {score, _} -> score >= min_sim end)
+              |> Enum.map(fn {_score, skill} -> skill end)
 
-          {:ok, ranked}
+            {:ok, ranked}
+          else
+            {:error, reason} ->
+              Logger.warning(
+                "Skills.Retrieval: embedding failed (#{inspect(reason)}); ranking lexically"
+              )
+
+              {:ok, lexical(query, candidates, top_k)}
+          end
         else
-          {:error, reason} ->
-            Logger.warning(
-              "Skills.Retrieval: embedding failed (#{inspect(reason)}); returning no skills"
-            )
-
-            {:ok, []}
+          {:ok, lexical(query, candidates, top_k)}
         end
     end
   rescue
@@ -76,6 +88,25 @@ defmodule GiTF.Skills.Retrieval do
   end
 
   # -- Private -----------------------------------------------------------------
+
+  # Function words carry no "aboutness"; on a corpus of a few dozen skills
+  # they would otherwise match everything to everything.
+  @stopwords ~w(the a an and or of to in on for with by from at as is are be
+    was were this that these those it its into over after before when then
+    than not no do does did done use using used via)
+
+  @doc false
+  def lexical(query, candidates, top_k) do
+    query =
+      query
+      |> GiTF.Knowledge.BM25.tokenize()
+      |> Enum.reject(&(&1 in @stopwords))
+      |> Enum.join(" ")
+
+    GiTF.Knowledge.BM25.rank(query, candidates, &"#{&1.name}\n#{&1.description}\n#{&1.body}")
+    |> Enum.take(top_k)
+    |> Enum.map(fn {_score, skill} -> skill end)
+  end
 
   # Lazy-embeds skills whose `embedding` is nil or was produced by a
   # different model. Persists the embedding back to the Archive so future

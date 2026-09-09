@@ -92,26 +92,42 @@ defmodule GiTF.Skills.Embedding do
     |> Enum.take(k)
   end
 
-  @doc "Returns the configured default embedding model spec."
-  @spec default_model() :: String.t()
-  def default_model do
-    Application.get_env(:gitf, :skill_embedding_model) || model_for_configured_provider()
-  end
-
   # No explicit model: use an embedding model the configured keys can
   # actually call. The old hard default was OpenAI's, on a factory that
   # has never had an OpenAI key — every retrieval failed and returned no
   # skills, silently, so `skills_enabled` could be on and do nothing.
   @by_provider [
-    {:openai, "openai:text-embedding-3-small"},
-    {:google, "google:gemini-embedding-001"}
+    {"openai", "openai:text-embedding-3-small"},
+    {"google", "google:gemini-embedding-001"}
   ]
+  @fallback_model @by_provider |> hd() |> elem(1)
+
+  @doc "Returns the configured default embedding model spec."
+  @spec default_model() :: String.t()
+  def default_model do
+    Application.get_env(:gitf, :skill_embedding_model) || model_for_configured_provider() ||
+      @fallback_model
+  end
+
+  @doc """
+  Whether any embedding call can succeed here: the chosen model's
+  provider has an API key. The claude CLI (subscription mode) can
+  generate text but not embeddings, so a key-less factory has no
+  semantic retrieval — `GiTF.Skills.Retrieval` ranks lexically instead.
+  """
+  @spec available?() :: boolean()
+  def available? do
+    # An injected client (tests, a local embedder) answers regardless of keys.
+    Application.get_env(:gitf, :embedding_client) != nil or
+      case String.split(default_model(), ":", parts: 2) do
+        [provider, _] -> GiTF.Runtime.ProviderManager.api_key_for(provider) != nil
+        _ -> false
+      end
+  end
 
   defp model_for_configured_provider do
-    keys = GiTF.Config.Provider.get([:llm, :keys]) || %{}
-
-    Enum.find_value(@by_provider, "openai:text-embedding-3-small", fn {provider, model} ->
-      if is_binary(keys[provider]) and keys[provider] != "", do: model
+    Enum.find_value(@by_provider, fn {provider, model} ->
+      if GiTF.Runtime.ProviderManager.api_key_for(provider), do: model
     end)
   end
 
