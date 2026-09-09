@@ -155,7 +155,7 @@ defmodule GiTF.Dashboard.InquiryCardTest do
       assert html =~ ~s(phx-value-option="bars") and html =~ ~s(phx-value-option="dots")
       assert html =~ ~s(phx-submit="reject_inquiry")
       assert html =~ ~s(name="direction")
-      assert html =~ "None of these"
+      assert html =~ "Try again"
     end
 
     test "a collected vote renders pressed" do

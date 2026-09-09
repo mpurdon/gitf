@@ -171,71 +171,73 @@ defmodule GiTF.Dashboard.InquiryCard do
 
   defp preview_choice(assigns) do
     ~H"""
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:0.75rem">
-      <button
-        :for={option <- @inquiry[:options] || []}
-        phx-click="answer_inquiry"
-        phx-value-id={@inquiry.id}
-        phx-value-answer={option.id}
-        class="btn btn-grey"
-        style="text-align:left; display:block; width:100%; padding:0.5rem; white-space:normal"
-      >
-        <%!-- The frame carries its own fallback text. A broken or pruned
-              image hides itself and the text underneath becomes visible,
-              so the tile degrades to a labelled option in place. --%>
-        <div style="position:relative; background:var(--ground); border:1px solid var(--line); border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
-          <span style="position:absolute; font-size:0.7rem; color:var(--muted); padding:0 0.5rem; text-align:center">
-            {option[:preview_error] || "no preview"}
-          </span>
-          <img
-            :if={Preview.url(@inquiry, option)}
-            src={Preview.url(@inquiry, option)}
-            alt={"Mockup of #{option.label}"}
-            loading="lazy"
-            onerror="this.style.display='none'"
-            style="position:relative; width:100%; height:100%; object-fit:contain; background:var(--ground)"
-          />
-        </div>
-        <div style="font-weight:600; color:var(--text); margin-top:0.45rem">{option.label}</div>
-        <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
-          {option.rationale}
-        </div>
-      </button>
-    </div>
-    <.vote_row inquiry={@inquiry} votes={@votes} />
-    """
-  end
-
-  # One thumbs-up / thumbs-down / neutral toggle per option. Votes are not
-  # an answer: they steer the NEXT round when the operator rejects all of
-  # these, so they sit outside the option buttons and only mean something
-  # once "none of these" is submitted.
-  attr(:inquiry, :map, required: true)
-  attr(:votes, :map, default: %{})
-
-  defp vote_row(assigns) do
-    ~H"""
-    <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:0.5rem; font-size:0.78rem; color:var(--muted)">
-      <div :for={option <- @inquiry[:options] || []} style="display:flex; align-items:center; gap:0.3rem">
-        <span style="max-width:14rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{option.label}</span>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0.75rem">
+      <div :for={option <- @inquiry[:options] || []} style="display:flex; gap:0.4rem; align-items:stretch">
         <button
-          :for={{vote, glyph, title} <- [{"up", "👍", "keep this direction"}, {"neutral", "➖", "no signal"}, {"down", "👎", "do not re-offer"}]}
-          phx-click="vote_inquiry"
+          phx-click="answer_inquiry"
           phx-value-id={@inquiry.id}
-          phx-value-option={option.id}
-          phx-value-vote={vote}
-          title={title}
-          aria-pressed={to_string(Map.get(@votes, option.id, "neutral") == vote)}
+          phx-value-answer={option.id}
           class="btn btn-grey"
-          style={"padding:0.1rem 0.45rem; font-size:0.85rem; #{if Map.get(@votes, option.id, "neutral") == vote, do: "border-color:var(--accent); color:var(--text)", else: "opacity:0.6"}"}
-        >{glyph}</button>
+          style="text-align:left; display:block; flex:1; min-width:0; padding:0.5rem; white-space:normal"
+        >
+          <%!-- The frame carries its own fallback text. A broken or pruned
+                image hides itself and the text underneath becomes visible,
+                so the tile degrades to a labelled option in place. --%>
+          <div style="position:relative; background:var(--ground); border:1px solid var(--line); border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
+            <span style="position:absolute; font-size:0.7rem; color:var(--muted); padding:0 0.5rem; text-align:center">
+              {option[:preview_error] || "no preview"}
+            </span>
+            <img
+              :if={Preview.url(@inquiry, option)}
+              src={Preview.url(@inquiry, option)}
+              alt={"Mockup of #{option.label}"}
+              loading="lazy"
+              onerror="this.style.display='none'"
+              style="position:relative; width:100%; height:100%; object-fit:contain; background:var(--ground)"
+            />
+          </div>
+          <div style="font-weight:600; color:var(--text); margin-top:0.45rem">{option.label}</div>
+          <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
+            {option.rationale}
+          </div>
+        </button>
+        <.vote_column inquiry={@inquiry} option={option} votes={@votes} />
       </div>
     </div>
     """
   end
 
-  # "None of these." A rejection is an answer that sends the phase back to
-  # propose again, carrying the votes above and the direction typed here.
+  # A thumbs-up / neutral / thumbs-down stack on the right edge of each
+  # option, top to bottom. Votes are not an answer: they steer the NEXT
+  # round when the operator asks for another, so they sit beside the
+  # option's button rather than inside it (a button cannot nest buttons)
+  # and only mean something once "Try again" is submitted.
+  attr(:inquiry, :map, required: true)
+  attr(:option, :map, required: true)
+  attr(:votes, :map, default: %{})
+
+  defp vote_column(assigns) do
+    ~H"""
+    <div style="display:flex; flex-direction:column; justify-content:space-between; gap:0.3rem; flex:0 0 auto">
+      <button
+        :for={{vote, glyph, title} <- [{"up", "👍", "keep this direction"}, {"neutral", "➖", "no signal"}, {"down", "👎", "do not re-offer"}]}
+        phx-click="vote_inquiry"
+        phx-value-id={@inquiry.id}
+        phx-value-option={@option.id}
+        phx-value-vote={vote}
+        title={title}
+        aria-label={"#{title}: #{@option.label}"}
+        aria-pressed={to_string(Map.get(@votes, @option.id, "neutral") == vote)}
+        class="btn btn-grey"
+        style={"padding:0.25rem 0.5rem; font-size:0.95rem; line-height:1; #{if Map.get(@votes, @option.id, "neutral") == vote, do: "border-color:var(--accent); color:var(--text)", else: "opacity:0.55"}"}
+      >{glyph}</button>
+    </div>
+    """
+  end
+
+  # "Try again." A rejection is an answer that sends the phase back to
+  # propose again, carrying the votes beside each option and the direction
+  # typed here.
   attr(:inquiry, :map, required: true)
   attr(:votes, :map, default: %{})
 
@@ -244,24 +246,19 @@ defmodule GiTF.Dashboard.InquiryCard do
     <form phx-submit="reject_inquiry" style="margin-top:0.9rem; border-top:1px dashed var(--line); padding-top:0.7rem">
       <input type="hidden" name="inquiry_id" value={@inquiry.id} />
       <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.35rem">
-        None of these? Vote on each above, say where to go instead, and send the phase back for another round.
+        None of these? Vote beside each option, say where to go instead, and send the phase back for another round.
       </div>
-      <div style="display:flex; gap:0.5rem; align-items:flex-start; flex-wrap:wrap">
-        <textarea
-          name="direction"
-          rows="2"
-          placeholder="Optional direction — e.g. lighter than the band, but a clearer boundary than the hairline"
-          style="flex:1; min-width:16rem; background:var(--ground); border:1px solid var(--line); border-radius:4px; color:var(--text); font-size:0.82rem; padding:0.4rem 0.5rem"
-        ></textarea>
-        <button type="submit" class="btn btn-red" style="white-space:nowrap">None of these — redesign</button>
-      </div>
+      <textarea
+        name="direction"
+        rows="2"
+        placeholder="Optional direction — e.g. lighter than the band, but a clearer boundary than the hairline"
+        style="display:block; width:100%; box-sizing:border-box; background:var(--ground); border:1px solid var(--line); border-radius:4px; color:var(--text); font-size:0.82rem; padding:0.4rem 0.5rem"
+      ></textarea>
+      <button type="submit" class="btn btn-red" style="margin-top:0.5rem">Try again</button>
     </form>
     """
   end
 
-  # The rationale is not decoration. It is the whole reason a choice can
-  # be answered in ten seconds from a phone: the operator has to be able
-  # to judge between the options without opening the code.
   # A list arm reached because every mockup failed to render must say so:
   # "no mockup was attempted" and "three were made and the renderer broke"
   # are different facts, and only the second is a factory defect to fix.
@@ -279,21 +276,22 @@ defmodule GiTF.Dashboard.InquiryCard do
       </span>
     </div>
     <div style="display:flex; flex-direction:column; gap:0.5rem">
-      <button
-        :for={option <- @inquiry[:options] || []}
-        phx-click="answer_inquiry"
-        phx-value-id={@inquiry.id}
-        phx-value-answer={option.id}
-        class="btn btn-grey"
-        style="text-align:left; display:block; width:100%; padding:0.6rem 0.75rem; white-space:normal"
-      >
-        <div style="font-weight:600; color:var(--text)">{option.label}</div>
-        <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
-          {option.rationale}
-        </div>
-      </button>
+      <div :for={option <- @inquiry[:options] || []} style="display:flex; gap:0.4rem; align-items:stretch">
+        <button
+          phx-click="answer_inquiry"
+          phx-value-id={@inquiry.id}
+          phx-value-answer={option.id}
+          class="btn btn-grey"
+          style="text-align:left; display:block; flex:1; min-width:0; padding:0.6rem 0.75rem; white-space:normal"
+        >
+          <div style="font-weight:600; color:var(--text)">{option.label}</div>
+          <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
+            {option.rationale}
+          </div>
+        </button>
+        <.vote_column :if={@inquiry[:kind] == :choice} inquiry={@inquiry} option={option} votes={@votes} />
+      </div>
     </div>
-    <.vote_row inquiry={@inquiry} votes={@votes} />
     """
   end
 
