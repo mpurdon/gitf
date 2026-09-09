@@ -54,7 +54,7 @@ defmodule GiTF.Dashboard.InquiryCard do
 
   def inquiry_card(assigns) do
     ~H"""
-    <div class="panel" style={"margin-bottom:0.75rem; border-left:3px solid #{if @inquiry[:status] == "open", do: "var(--warn)", else: "var(--ok)"}"}>
+    <div class="panel" style={"margin-bottom:0.75rem; border-left:3px solid #{edge_colour(@inquiry)}"}>
       <div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap">
         <div style="min-width:0; flex:1">
           <div style="display:flex; gap:0.4rem; align-items:baseline; flex-wrap:wrap; margin-bottom:0.35rem">
@@ -93,10 +93,23 @@ defmodule GiTF.Dashboard.InquiryCard do
           </div>
         </div>
       <% else %>
-        <div style="margin-top:0.8rem">
-          <.answer_controls inquiry={@inquiry} draft={@draft} votes={@votes} />
-        </div>
-        <.redesign_controls :if={@inquiry[:kind] == :choice} inquiry={@inquiry} votes={@votes} />
+        <%!-- A withdrawn question was taken back before anyone answered it
+              (a kill, an orphan sweep, an operator reset). It is history:
+              no controls, or the page invites a vote on a question the
+              factory no longer holds for. --%>
+        <%= if @inquiry[:status] == "withdrawn" do %>
+          <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
+            <span class="badge badge-grey">withdrawn</span>
+            <span style="color:var(--muted); margin-left:0.4rem">
+              {@inquiry[:withdrawn_reason]}{if @inquiry[:withdrawn_at], do: " — #{format_timestamp(@inquiry[:withdrawn_at])}"}
+            </span>
+          </div>
+        <% else %>
+          <div style="margin-top:0.8rem">
+            <.answer_controls inquiry={@inquiry} draft={@draft} votes={@votes} />
+          </div>
+          <.redesign_controls :if={@inquiry[:kind] == :choice} inquiry={@inquiry} votes={@votes} />
+        <% end %>
       <% end %>
     </div>
     """
@@ -111,6 +124,10 @@ defmodule GiTF.Dashboard.InquiryCard do
   # to render must fall back to the plain list rather than draw a grid of
   # empty frames — the operator loses the pictures either way, and a list
   # of labelled options is the better thing to be left with.
+  defp edge_colour(%{status: "open"}), do: "var(--warn)"
+  defp edge_colour(%{status: "withdrawn"}), do: "var(--muted)"
+  defp edge_colour(_), do: "var(--ok)"
+
   defp answer_controls(%{inquiry: %{kind: :choice, options: options}} = assigns)
        when is_list(options) do
     if Enum.any?(options, &(&1[:preview] != nil)) do

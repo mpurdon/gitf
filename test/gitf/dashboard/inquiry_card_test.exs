@@ -187,6 +187,25 @@ defmodule GiTF.Dashboard.InquiryCardTest do
       assert html =~ "rejected" and html =~ "airier"
       refute html =~ ~s(phx-submit="reject_inquiry")
     end
+
+    # msn-fdc50b's page showed a withdrawn question with a full vote row
+    # and a "Try again" button — an invitation to steer a round the
+    # factory was no longer holding for.
+    test "a withdrawn question is history: its reason, no controls" do
+      inquiry =
+        choice([previewed("bars", "Bars")])
+        |> Map.merge(%{
+          status: "withdrawn",
+          withdrawn_reason: "stale re-ask",
+          withdrawn_at: DateTime.utc_now()
+        })
+
+      html = card(inquiry)
+      assert html =~ "withdrawn" and html =~ "stale re-ask"
+      refute html =~ ~s(phx-click="answer_inquiry")
+      refute html =~ ~s(phx-click="vote_inquiry")
+      refute html =~ ~s(phx-submit="reject_inquiry")
+    end
   end
 
   describe "the other kinds are untouched" do
