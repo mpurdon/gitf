@@ -169,49 +169,56 @@ defmodule GiTF.Dashboard.InquiryCard do
     """
   end
 
+  # Each tile is a clickable panel rather than a <button>: the vote stack
+  # lives inside it beside the description, and a button cannot nest
+  # buttons. LiveView dispatches a click to the CLOSEST phx-click only, so
+  # a vote never answers the question.
   defp preview_choice(assigns) do
     ~H"""
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0.75rem">
-      <div :for={option <- @inquiry[:options] || []} style="display:flex; gap:0.4rem; align-items:stretch">
-        <button
-          phx-click="answer_inquiry"
-          phx-value-id={@inquiry.id}
-          phx-value-answer={option.id}
-          class="btn btn-grey"
-          style="text-align:left; display:block; flex:1; min-width:0; padding:0.5rem; white-space:normal"
-        >
-          <%!-- The frame carries its own fallback text. A broken or pruned
-                image hides itself and the text underneath becomes visible,
-                so the tile degrades to a labelled option in place. --%>
-          <div style="position:relative; background:var(--ground); border:1px solid var(--line); border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
-            <span style="position:absolute; font-size:0.7rem; color:var(--muted); padding:0 0.5rem; text-align:center">
-              {option[:preview_error] || "no preview"}
-            </span>
-            <img
-              :if={Preview.url(@inquiry, option)}
-              src={Preview.url(@inquiry, option)}
-              alt={"Mockup of #{option.label}"}
-              loading="lazy"
-              onerror="this.style.display='none'"
-              style="position:relative; width:100%; height:100%; object-fit:contain; background:var(--ground)"
-            />
+      <div
+        :for={option <- @inquiry[:options] || []}
+        role="button"
+        tabindex="0"
+        phx-click="answer_inquiry"
+        phx-value-id={@inquiry.id}
+        phx-value-answer={option.id}
+        class="btn btn-grey"
+        style="text-align:left; display:block; padding:0.5rem; white-space:normal; cursor:pointer"
+      >
+        <%!-- The frame carries its own fallback text. A broken or pruned
+              image hides itself and the text underneath becomes visible,
+              so the tile degrades to a labelled option in place. --%>
+        <div style="position:relative; background:var(--ground); border:1px solid var(--line); border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
+          <span style="position:absolute; font-size:0.7rem; color:var(--muted); padding:0 0.5rem; text-align:center">
+            {option[:preview_error] || "no preview"}
+          </span>
+          <img
+            :if={Preview.url(@inquiry, option)}
+            src={Preview.url(@inquiry, option)}
+            alt={"Mockup of #{option.label}"}
+            loading="lazy"
+            onerror="this.style.display='none'"
+            style="position:relative; width:100%; height:100%; object-fit:contain; background:var(--ground)"
+          />
+        </div>
+        <div style="display:flex; gap:0.5rem; align-items:stretch; margin-top:0.45rem">
+          <div style="flex:1; min-width:0">
+            <div style="font-weight:600; color:var(--text)">{option.label}</div>
+            <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
+              {option.rationale}
+            </div>
           </div>
-          <div style="font-weight:600; color:var(--text); margin-top:0.45rem">{option.label}</div>
-          <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
-            {option.rationale}
-          </div>
-        </button>
-        <.vote_column inquiry={@inquiry} option={option} votes={@votes} />
+          <.vote_column inquiry={@inquiry} option={option} votes={@votes} />
+        </div>
       </div>
     </div>
     """
   end
 
-  # A thumbs-up / neutral / thumbs-down stack on the right edge of each
-  # option, top to bottom. Votes are not an answer: they steer the NEXT
-  # round when the operator asks for another, so they sit beside the
-  # option's button rather than inside it (a button cannot nest buttons)
-  # and only mean something once "Try again" is submitted.
+  # A thumbs-up / neutral / thumbs-down stack, top to bottom, beside the
+  # option's description. Votes are not an answer: they steer the NEXT
+  # round and only mean something once "Try again" is submitted.
   attr(:inquiry, :map, required: true)
   attr(:option, :map, required: true)
   attr(:votes, :map, default: %{})
@@ -276,20 +283,23 @@ defmodule GiTF.Dashboard.InquiryCard do
       </span>
     </div>
     <div style="display:flex; flex-direction:column; gap:0.5rem">
-      <div :for={option <- @inquiry[:options] || []} style="display:flex; gap:0.4rem; align-items:stretch">
-        <button
-          phx-click="answer_inquiry"
-          phx-value-id={@inquiry.id}
-          phx-value-answer={option.id}
-          class="btn btn-grey"
-          style="text-align:left; display:block; flex:1; min-width:0; padding:0.6rem 0.75rem; white-space:normal"
-        >
+      <div
+        :for={option <- @inquiry[:options] || []}
+        role="button"
+        tabindex="0"
+        phx-click="answer_inquiry"
+        phx-value-id={@inquiry.id}
+        phx-value-answer={option.id}
+        class="btn btn-grey"
+        style="text-align:left; display:flex; gap:0.5rem; align-items:stretch; width:100%; padding:0.6rem 0.75rem; white-space:normal; cursor:pointer"
+      >
+        <div style="flex:1; min-width:0">
           <div style="font-weight:600; color:var(--text)">{option.label}</div>
           <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
             {option.rationale}
           </div>
-        </button>
-        <.vote_column :if={@inquiry[:kind] == :choice} inquiry={@inquiry} option={option} votes={@votes} />
+        </div>
+        <.vote_column inquiry={@inquiry} option={option} votes={@votes} />
       </div>
     </div>
     """
