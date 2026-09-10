@@ -331,7 +331,7 @@ defmodule GiTF.Missions do
         cost_cap_usd: attrs[:cost_cap_usd] || attrs["cost_cap_usd"],
         workflow_id: workflow_id,
         # Per-mission Wire pin for an A/B (nil = the global flag decides).
-        wire: wire_pin(attrs[:wire] || attrs["wire"]),
+        wire: wire_pin(Map.get(attrs, :wire, attrs["wire"])),
         # Provenance for Aramaki (the admission layer). `source` identifies the
         # intake channel (e.g. "github_issue"); `source_issue` carries the
         # linkage used to report progress back; `aramaki_priority` orders the
