@@ -224,9 +224,18 @@ One change to the design below: the bot **provisions its own channels**
 `#<slug>` on `register_ministry`, a thread per mission), so the config is a guild id, not four channel ids.
 M0's fallback webhook is inside the relay plugin (`DISCORD_WEBHOOK_URL`,
 used only when the relay fails). Operator setup is in OPERATING §9c.
+**Deployed 2026-09-10 (0.65.332 on both boxes):** bot "Cabinet" in the
+operator's guild `1547247808145268869`; `Cabinet` and `Ministries`
+categories provisioned; factory relays through the funnel's `/relay`;
+first sleep warning rendered end to end (factory → Cabinet → embed with
+buttons, 3 ms). Lesson: Discord drops `Manage Channels` from an invite
+unless granted explicitly — set it on the bot's role in Server Settings.
+
+**There is no LLM in M1.** Outbound is deterministic rendering, inbound is
+a `custom_id` → tool lookup. Free text in a channel is ignored until M2.
 Not yet: M2 (free text → agent), M3 (mockup images, slash commands, quiet
-hours), `#plan` / `#aramaki` content (channels exist, nothing posts there
-yet).
+hours), M4 (voice), `#plan` / `#aramaki` content (channels exist, nothing
+posts there yet).
 
 ## Milestones
 
@@ -253,6 +262,16 @@ weekly digest (the one place an LLM *writes* — fast tier, from the ledger).
 box provisioning — msn-629e74's question shipped without previews for
 exactly that reason); `/gitf` slash commands mirroring the CLI; a
 per-ministry "quiet hours" so a client box's channel does not page at 03:00.
+
+**M4 — voice.** Operator direction (2026-09-10): the bot's permissions were
+granted wide on purpose so it can join voice channels and take voice
+control. The pieces exist: Nostrum does voice natively (join, receive,
+play), and the studio already runs a bidirectional voice loop
+(`GiTF.Studio` + Gemini Live, voice milestone M4 of the Aramaki plan).
+Shape: the Cabinet joins a voice channel on request; audio goes to that
+channel's M2 agent through the studio's voice session; the agent answers
+by voice AND every write it wants is still proposed as buttons in the
+text channel — voice never bypasses the tap. Not started; after M2.
 
 ## Risks and the honest bits
 
