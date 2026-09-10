@@ -1,13 +1,16 @@
 defmodule GiTF.Cabinet.Discord.Guild do
   @moduledoc """
   The bot's own structure in the guild, provisioned and reconciled by the
-  bot rather than configured by hand:
+  bot rather than configured by hand. Discord nests exactly one level
+  (category → channel → thread), and that one level is the authority
+  split:
 
-      GiTF                 (category)
+      CABINET              (category — what the Cabinet owns)
       ├─ #cabinet          fleet, inbox, sleep warnings for every factory
       ├─ #plan             projects
-      ├─ #aramaki          issue intake
-      └─ #<ministry>       one per registered ministry, created on register
+      └─ #aramaki          issue intake
+      MINISTRIES           (category — one channel per factory)
+      └─ #<ministry>       created on register
          └─ msn-…          one thread per mission, archived when it ends
 
   Channel ids are remembered (`:discord` record `"guild"`; a ministry's
@@ -32,25 +35,33 @@ defmodule GiTF.Cabinet.Discord.Guild do
   @category 4
   @public_thread 11
 
-  @doc "The remembered structure: %{category_id, channels: %{name => id}, threads: %{mission_id => id}}."
+  @doc "The remembered structure: %{cabinet_category_id, ministries_category_id, channels: %{name => id}, threads: %{mission_id => id}}."
   def state do
     Archive.get(@collection, @record_id) || %{id: @record_id, channels: %{}, threads: %{}}
   end
 
   @doc """
-  Makes sure the category, the fixed channels and every ministry's channel
-  exist, creating what is missing. Idempotent; safe on every connect.
+  Makes sure both categories, the fixed channels and every ministry's
+  channel exist, creating what is missing. Idempotent; safe on every
+  connect. `categories` is `%{cabinet: name, ministries: name}`.
   """
-  def ensure_structure(guild_id, category_name) do
+  def ensure_structure(guild_id, categories) do
     with {:ok, existing} <- Api.Guild.channels(guild_id) do
-      category_id = ensure_category(guild_id, existing, category_name)
+      cabinet_cat = ensure_category(guild_id, existing, categories.cabinet)
+      ministries_cat = ensure_category(guild_id, existing, categories.ministries)
 
       channels =
         Map.new(@fixed_channels, fn name ->
-          {name, ensure_text_channel(guild_id, existing, name, category_id)}
+          {name, ensure_text_channel(guild_id, existing, name, cabinet_cat)}
         end)
 
-      remember(&Map.merge(&1, %{category_id: category_id, channels: channels}))
+      remember(
+        &Map.merge(&1, %{
+          cabinet_category_id: cabinet_cat,
+          ministries_category_id: ministries_cat,
+          channels: channels
+        })
+      )
 
       for ministry <- Registry.list(), do: ensure_ministry_channel(ministry, guild_id, existing)
       :ok
@@ -60,7 +71,7 @@ defmodule GiTF.Cabinet.Discord.Guild do
   @doc "The channel for a ministry, creating it if needed; nil when the bot is off."
   def ensure_ministry_channel(ministry, guild_id, existing \\ nil) do
     existing = existing || channels_or_empty(guild_id)
-    category_id = state()[:category_id]
+    category_id = state()[:ministries_category_id]
     id = ensure_text_channel(guild_id, existing, ministry.slug, category_id)
 
     if id && ministry[:discord_channel_id] != id do

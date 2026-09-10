@@ -478,10 +478,12 @@ every alert and mission event to `POST /relay/<slug>` on the Cabinet,
 signed with the same webhook secret the GitHub ingress uses, and the
 Cabinet posts it.
 
-- **Structure is the bot's, not yours.** On connect it provisions a `GiTF`
-  category with `#cabinet`, `#plan`, `#aramaki`, and one `#<slug>` per
-  registered ministry (created the moment `register_ministry` runs),
-  reconciled by name on every connect. Missions get a thread in their
+- **Structure is the bot's, not yours.** On connect it provisions a
+  `Cabinet` category (`#cabinet`, `#plan`, `#aramaki`) and a `Ministries`
+  category with one `#<slug>` per registered ministry (created the moment
+  `register_ministry` runs), reconciled by name on every connect. Discord
+  nests one level only — category → channel → thread — so that is the
+  whole hierarchy. Missions get a thread in their
   ministry's channel (opened on start, archived on completion).
 - **What arrives, with buttons.** A choice question → select menu of the
   option ids (+ "Reject all"); a confirm → Yes/No; an approval →

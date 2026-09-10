@@ -10,14 +10,16 @@ defmodule GiTF.Cabinet.Discord do
   tap runs one tool on that factory as `discord:<user>`.
 
   The bot provisions its own structure in the guild and remembers it — a
-  `GiTF` category with `#cabinet`, `#plan`, `#aramaki`, and one channel per
-  registered ministry — so the only configuration is the guild id:
+  `Cabinet` category with `#cabinet`, `#plan`, `#aramaki`, and a
+  `Ministries` category with one channel per registered ministry — so the
+  only configuration is the guild id:
 
       [plugins.channels.discord]
       token_env = "DISCORD_BOT_TOKEN"     # name of the env var, never the token
       guild_id = "1547247808145268869"    # or GITF_DISCORD_GUILD_ID in the env file
       operators = ["123456789012345678"]  # Discord user ids allowed to act; empty = the guild owner
-      category = "GiTF"                   # optional
+      cabinet_category = "Cabinet"        # optional
+      ministries_category = "Ministries"  # optional
 
   Nostrum is started here, on demand, rather than as an application of its
   own: a factory release must never try to log into Discord, and Nostrum's
@@ -30,8 +32,8 @@ defmodule GiTF.Cabinet.Discord do
 
   @doc """
   The `[plugins.channels.discord]` table, with `GITF_DISCORD_GUILD_ID`,
-  `GITF_DISCORD_OPERATORS` (comma-separated) and `GITF_DISCORD_CATEGORY`
-  filling any key the file leaves out — the box's env file is where its
+  `GITF_DISCORD_OPERATORS` (comma-separated) and the two `*_CATEGORY`
+  env vars filling any key the file leaves out — the box's env file is where its
   other identity (api key, webhook secret) already arrives. Nil when
   neither names a guild.
   """
@@ -46,7 +48,8 @@ defmodule GiTF.Cabinet.Discord do
       %{
         guild_id: System.get_env("GITF_DISCORD_GUILD_ID"),
         operators: split_env("GITF_DISCORD_OPERATORS"),
-        category: System.get_env("GITF_DISCORD_CATEGORY")
+        cabinet_category: System.get_env("GITF_DISCORD_CABINET_CATEGORY"),
+        ministries_category: System.get_env("GITF_DISCORD_MINISTRIES_CATEGORY")
       }
       |> Enum.reject(fn {_, v} -> v in [nil, "", []] end)
       |> Map.new()
@@ -83,7 +86,12 @@ defmodule GiTF.Cabinet.Discord do
     end
   end
 
-  def category_name(cfg), do: get(cfg, :category, "GiTF")
+  def categories(cfg) do
+    %{
+      cabinet: get(cfg, :cabinet_category, "Cabinet"),
+      ministries: get(cfg, :ministries_category, "Ministries")
+    }
+  end
 
   @doc "Discord user ids allowed to press buttons. Empty means: the guild owner only."
   def operators(cfg) do

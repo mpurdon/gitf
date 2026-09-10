@@ -58,7 +58,7 @@ defmodule GiTF.Cabinet.Discord.Bot do
     {:ok,
      %{
        guild_id: Discord.guild_id(cfg),
-       category: Discord.category_name(cfg),
+       categories: Discord.categories(cfg),
        digest: %{},
        ready: false
      }}
@@ -66,7 +66,7 @@ defmodule GiTF.Cabinet.Discord.Bot do
 
   @impl true
   def handle_cast(:connected, state) do
-    case Guild.ensure_structure(state.guild_id, state.category) do
+    case Guild.ensure_structure(state.guild_id, state.categories) do
       :ok ->
         Logger.info("Cabinet Discord: connected to guild #{state.guild_id}, structure reconciled")
 
