@@ -68,6 +68,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             done_ops: 0
           })
           |> assign(:rollback_status, :unknown)
+          |> assign(:world, [])
           |> assign(:priority, :normal)
           |> assign(:duration, nil)
           |> assign(:phase_durations, %{})
@@ -494,6 +495,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           sectors: load_sectors(),
           budget_info: budget_info,
           rollback_status: rollback_status,
+          world: world_events(id),
           priority: priority,
           duration: duration,
           phase_durations: phase_durations,
@@ -509,6 +511,30 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   # Best-effort, like every other join in `reload/1`: a mission page must
   # still render if the inquiry store is unreadable.
+  defp world_events(mission_id) do
+    GiTF.EventStore.replay(mission_id, types: [:outcome_observed, :reported_back])
+    |> Enum.map(fn %{type: type, data: d, timestamp: at} ->
+      case type do
+        :outcome_observed ->
+          %{
+            at: at,
+            ok: true,
+            text: "saw #{d[:pr_url]} #{String.replace(to_string(d[:category]), "_", " ")}"
+          }
+
+        :reported_back ->
+          %{
+            at: at,
+            ok: d[:ok] != false,
+            text:
+              "#{d[:action]} #{d[:target]}" <>
+                if(d[:detail], do: " — #{String.slice(d[:detail], 0, 70)}", else: "") <>
+                if(d[:ok] == false, do: " (FAILED: #{d[:error]})", else: "")
+          }
+      end
+    end)
+  end
+
   defp load_inquiries(mission_id) do
     GiTF.Inquiry.list(mission_id)
   rescue
@@ -1389,6 +1415,19 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <%= if @rollback_status == :reverted do %>
               <span class="badge badge-red" style="font-size:0.6rem">Reverted</span>
             <% end %>
+          </div>
+        </div>
+
+        <%!-- Out in the world: what the factory saw happen to this work and
+              what it did about it. Answers "did it notice the merge?" here,
+              not on GitHub. --%>
+        <div :if={@world != []} class="panel" style="padding:0.85rem 1rem">
+          <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.5rem; padding-bottom:0.4rem">Out in the world</div>
+          <div style="display:flex; flex-direction:column; gap:0.35rem">
+            <div :for={w <- @world} style="font-size:0.78rem; display:flex; gap:0.5rem; align-items:baseline">
+              <span style="color:var(--muted); font-family:var(--mono); font-size:0.7rem; white-space:nowrap">{Calendar.strftime(w.at, "%b %d %H:%MZ")}</span>
+              <span style={"color:#{if w.ok, do: "var(--text)", else: "var(--crit)"}"}>{w.text}</span>
+            </div>
           </div>
         </div>
 

@@ -41,7 +41,13 @@ defmodule GiTF.EventStore do
     :project_completed,
     :link_sent,
     :backup,
-    :error
+    :error,
+    # What the factory saw happen to its work in the world (a PR merged,
+    # closed, reverted) and what it did about it out there (a comment, a
+    # label, an issue closed). Before these existed the only evidence
+    # that the factory had acted on a merge was on GitHub itself.
+    :outcome_observed,
+    :reported_back
   ]
 
   @collection :events

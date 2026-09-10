@@ -306,6 +306,17 @@ defmodule GiTF.Outcomes.Tracker do
     mission = GiTF.Archive.get(:missions, outcome.mission_id)
 
     if mission do
+      Logger.info(
+        "Outcomes: #{outcome.pr_url} is #{outcome.outcome_category} (mission #{mission.id})"
+      )
+
+      GiTF.EventStore.record(
+        :outcome_observed,
+        mission.id,
+        %{pr_url: outcome.pr_url, category: to_string(outcome.outcome_category)},
+        %{mission_id: mission.id}
+      )
+
       # The issue that prompted this mission learns its real fate here —
       # merged, or closed unmerged — not at mission completion, which only
       # ever meant "a PR exists".

@@ -503,6 +503,16 @@ off the chain ends at "forwarded" and the factory's journal says `issues
 event ignored (Aramaki disabled)`. Loop prevention: set `bot_login` so the
 factory ignores issues it opened itself.
 
+**What the factory says on the issue, and where to see it.** Admitted →
+`gitf:in-progress` + "picked this up". PR published → `gitf:in-review` +
+the PR link (the issue stays open). PR merged (observed by the outcome
+tracker — a merge wakes the box via the Cabinet) → "Merged — closing",
+`gitf:done`, issue closed. PR closed unmerged → a comment, issue left open.
+Every one of these is on the mission page under **Out in the world** and on
+the Timeline under the **GitHub** filter (`:outcome_observed` /
+`:reported_back` events), with FAILED marked — so "did it see the merge and
+act?" is answered inside the factory, not by reading GitHub.
+
 ## 11. Guards you should not route around
 
 - **Daily spend ceiling** — factory-wide, rolling 24h, **fail-closed**. Breach

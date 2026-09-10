@@ -33,6 +33,14 @@ defmodule GiTF.Cabinet.ClassifierTest do
              :pr_review
   end
 
+  test "a merged pull request wakes (pr_review); one closed unmerged does not" do
+    merged = %{"action" => "closed", "pull_request" => %{"merged" => true}}
+    closed = %{"action" => "closed", "pull_request" => %{"merged" => false}}
+    assert Classifier.classify("pull_request", merged) == :pr_review
+    assert Classifier.classify("pull_request", closed) == :noise
+    assert Classifier.classify("pull_request", %{"action" => "opened"}) == :noise
+  end
+
   test "a comment on a plain issue is noise — Aramaki's own comment woke the factory it came from" do
     assert Classifier.classify("issue_comment", %{"issue" => %{"number" => 23}}) == :noise
     assert Classifier.classify("issue_comment", %{}) == :noise

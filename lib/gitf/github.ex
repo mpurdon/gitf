@@ -10,6 +10,10 @@ defmodule GiTF.GitHub do
 
   @api_base "https://api.github.com"
 
+  # Overridable so a test can stand a Plug in for GitHub and pin what the
+  # factory says and does out there, not just that it tried.
+  defp api_base, do: Application.get_env(:gitf, :github_api_base, @api_base)
+
   @doc """
   Creates a GitHub PR for a shell's branch.
 
@@ -447,6 +451,25 @@ defmodule GiTF.GitHub do
     end
   end
 
+  @doc "Removes a label from an issue; a label that is not there is not an error."
+  def remove_label(sector, issue_number, label) do
+    with {:ok, client} <- client(sector) do
+      case Req.delete(client,
+             url:
+               "/repos/#{sector.github_owner}/#{sector.github_repo}/issues/#{issue_number}/labels/#{URI.encode(label)}"
+           ) do
+        {:ok, %{status: status}} when status in [200, 204, 404] ->
+          :ok
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
   @doc "Lists repositories for the authenticated user."
   @spec list_repos(keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_repos(opts \\ []) do
@@ -463,7 +486,7 @@ defmodule GiTF.GitHub do
       sort = Keyword.get(opts, :sort, "updated")
       per_page = Keyword.get(opts, :per_page, 30)
 
-      case Req.get(Req.new(base_url: @api_base, headers: headers),
+      case Req.get(Req.new(base_url: api_base(), headers: headers),
              url: "/user/repos",
              params: [sort: sort, per_page: per_page, type: "owner"]
            ) do
@@ -517,7 +540,7 @@ defmodule GiTF.GitHub do
           [accept: "application/vnd.github+json"]
           |> maybe_add_auth(github_token())
 
-        {:ok, Req.new(base_url: @api_base, headers: headers)}
+        {:ok, Req.new(base_url: api_base(), headers: headers)}
     end
   end
 

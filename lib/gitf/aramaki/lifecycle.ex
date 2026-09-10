@@ -24,13 +24,10 @@ defmodule GiTF.Aramaki.Lifecycle do
   @spec on_admitted(map()) :: :ok
   def on_admitted(mission) do
     with_issue(mission, fn sector, num ->
-      GiTF.GitHub.add_label(sector, num, "gitf:in-progress")
-
-      comment(
-        sector,
-        num,
-        "Aramaki picked this up. Mission `#{mission.id}` is now running." <> @signature
-      )
+      report(mission, sector, num, [
+        {:label, "gitf:in-progress"},
+        {:comment, "Aramaki picked this up. Mission `#{mission.id}` is now running."}
+      ])
     end)
   end
 
@@ -38,8 +35,25 @@ defmodule GiTF.Aramaki.Lifecycle do
   @spec on_published(map(), String.t()) :: :ok
   def on_published(mission, pr_url) do
     with_issue(mission, fn sector, num ->
-      GiTF.GitHub.add_label(sector, num, "gitf:in-review")
-      comment(sector, num, "Opened a pull request for this: #{pr_url}" <> @signature)
+      report(mission, sector, num, [
+        {:unlabel, "gitf:in-progress"},
+        {:label, "gitf:in-review"},
+        {:comment, "Opened a pull request for this: #{pr_url}"}
+      ])
+    end)
+  end
+
+  @doc "The PR merged → say so and close the issue."
+  @spec on_merged(map()) :: :ok
+  def on_merged(mission) do
+    with_issue(mission, fn sector, num ->
+      report(mission, sector, num, [
+        {:comment, "Merged — closing this issue."},
+        {:unlabel, "gitf:in-progress"},
+        {:unlabel, "gitf:in-review"},
+        {:label, "gitf:done"},
+        :close
+      ])
     end)
   end
 
@@ -47,22 +61,11 @@ defmodule GiTF.Aramaki.Lifecycle do
   @spec on_closed_unmerged(map()) :: :ok
   def on_closed_unmerged(mission) do
     with_issue(mission, fn sector, num ->
-      comment(
-        sector,
-        num,
-        "The pull request for this was closed without merging. Leaving the issue open for a human." <>
-          @signature
-      )
-    end)
-  end
-
-  @doc "Mission merged → close the issue."
-  @spec on_merged(map()) :: :ok
-  def on_merged(mission) do
-    with_issue(mission, fn sector, num ->
-      comment(sector, num, "Merged — closing this issue." <> @signature)
-      GiTF.GitHub.add_label(sector, num, "gitf:done")
-      GiTF.GitHub.close_issue(sector, num)
+      report(mission, sector, num, [
+        {:unlabel, "gitf:in-review"},
+        {:comment,
+         "The pull request for this was closed without merging. Leaving the issue open for a human."}
+      ])
     end)
   end
 
@@ -70,11 +73,50 @@ defmodule GiTF.Aramaki.Lifecycle do
   @spec on_failed(map(), String.t()) :: :ok
   def on_failed(mission, reason) do
     with_issue(mission, fn sector, num ->
-      comment(
-        sector,
-        num,
-        "Mission `#{mission.id}` could not complete this: #{String.slice(reason, 0, 300)}. " <>
-          "Leaving the issue open for a human." <> @signature
+      report(mission, sector, num, [
+        {:unlabel, "gitf:in-progress"},
+        {:comment,
+         "Mission `#{mission.id}` could not complete this: #{String.slice(reason, 0, 300)}. " <>
+           "Leaving the issue open for a human."}
+      ])
+    end)
+  end
+
+  # Every outbound act on an issue goes through here, so each one is
+  # RECORDED on the mission's timeline (`:reported_back`) as well as done:
+  # "did the factory see the merge and act on it?" was unanswerable from
+  # inside the factory until it was — the only evidence lived on GitHub.
+  defp report(mission, sector, num, steps) do
+    target = "#{sector.github_owner}/#{sector.github_repo}##{num}"
+
+    Enum.each(steps, fn step ->
+      {action, detail, result} =
+        case step do
+          {:comment, body} -> {"commented", body, comment(sector, num, body <> @signature)}
+          {:label, label} -> {"labelled", label, GiTF.GitHub.add_label(sector, num, label)}
+          {:unlabel, label} -> {"unlabelled", label, GiTF.GitHub.remove_label(sector, num, label)}
+          :close -> {"closed", nil, GiTF.GitHub.close_issue(sector, num)}
+        end
+
+      ok? = result == :ok
+
+      Logger.log(
+        if(ok?, do: :info, else: :warning),
+        "Aramaki: #{action} #{target}#{if detail, do: " — #{String.slice(detail, 0, 80)}"}" <>
+          if(ok?, do: "", else: " FAILED: #{inspect(result)}")
+      )
+
+      GiTF.EventStore.record(
+        :reported_back,
+        mission.id,
+        %{
+          target: target,
+          action: action,
+          detail: detail,
+          ok: ok?,
+          error: unless(ok?, do: inspect(result))
+        },
+        %{mission_id: mission.id}
       )
     end)
   end
@@ -221,8 +263,12 @@ defmodule GiTF.Aramaki.Lifecycle do
   end
 
   defp comment(sector, num, body) do
-    GiTF.GitHub.add_comment(sector, num, body)
+    case GiTF.GitHub.add_comment(sector, num, body) do
+      :ok -> :ok
+      {:ok, _} -> :ok
+      other -> other
+    end
   rescue
-    _ -> :ok
+    e -> {:error, Exception.message(e)}
   end
 end

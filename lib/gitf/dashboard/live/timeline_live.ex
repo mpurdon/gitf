@@ -136,6 +136,7 @@ defmodule GiTF.Dashboard.TimelineLive do
       |> maybe_add(filter_type, "all", "ops", &op_events(mission_id, &1))
       |> maybe_add(filter_type, "all", "links", &link_events(mission_id, &1))
       |> maybe_add(filter_type, "all", "approvals", &approval_events(mission_id, &1))
+      |> maybe_add(filter_type, "all", "world", &world_events(mission_id, &1))
 
     events
     |> List.flatten()
@@ -265,6 +266,50 @@ defmodule GiTF.Dashboard.TimelineLive do
     end)
   end
 
+  # What the factory saw happen to its work out in the world and what it
+  # did about it — the merge it noticed, the comment and close it posted.
+  # Without these rows the timeline ended at "quest completed" and the
+  # only proof the factory had acted on a merge was on GitHub.
+  defp world_events(mission_id, _acc) do
+    GiTF.EventStore.list(limit: 500)
+    |> Enum.filter(&(&1.type in [:outcome_observed, :reported_back]))
+    |> Enum.filter(&(mission_id == nil or &1.entity_id == mission_id))
+    |> Enum.map(fn e ->
+      d = e.data || %{}
+
+      case e.type do
+        :outcome_observed ->
+          %{
+            type: :world,
+            icon: "eye",
+            color: if(d[:category] in ["merged_clean"], do: "var(--ok)", else: "var(--warn)"),
+            title: "Saw #{d[:pr_url]} #{humanize_category(d[:category])}",
+            detail: nil,
+            mission_id: e.entity_id,
+            timestamp: e.timestamp
+          }
+
+        :reported_back ->
+          %{
+            type: :world,
+            icon: "github",
+            color: if(d[:ok], do: "var(--ok)", else: "var(--crit)"),
+            title:
+              "#{String.capitalize(d[:action] || "acted on")} #{d[:target]}#{if d[:ok] == false, do: " — FAILED"}",
+            detail: d[:error] || d[:detail],
+            mission_id: e.entity_id,
+            timestamp: e.timestamp
+          }
+      end
+    end)
+  end
+
+  defp humanize_category("merged_clean"), do: "merged"
+  defp humanize_category("closed_unmerged"), do: "closed without merging"
+  defp humanize_category("merged_reverted"), do: "merged then reverted"
+  defp humanize_category("merged_broke_main"), do: "merged — and main went red"
+  defp humanize_category(other), do: to_string(other)
+
   defp op_icon("done"), do: "check"
   defp op_icon("failed"), do: "x"
   defp op_icon("running"), do: "play"
@@ -279,6 +324,7 @@ defmodule GiTF.Dashboard.TimelineLive do
   defp event_type_label(:op_event), do: "Op"
   defp event_type_label(:link), do: "Link"
   defp event_type_label(:approval), do: "Approval"
+  defp event_type_label(:world), do: "GitHub"
   defp event_type_label(_), do: "Event"
 
   @impl true
@@ -299,7 +345,7 @@ defmodule GiTF.Dashboard.TimelineLive do
       <div style="display:flex; gap:1rem; margin-bottom:1rem; align-items:center; flex-wrap:wrap">
         <%!-- Type filter --%>
         <div style="display:flex; gap:0.25rem">
-          <%= for {label, key} <- [{"All", "all"}, {"Phases", "transitions"}, {"Ops", "ops"}, {"Links", "links"}, {"Approvals", "approvals"}] do %>
+          <%= for {label, key} <- [{"All", "all"}, {"Phases", "transitions"}, {"Ops", "ops"}, {"Links", "links"}, {"Approvals", "approvals"}, {"GitHub", "world"}] do %>
             <button
               phx-click="filter_type"
               phx-value-type={key}
@@ -348,6 +394,7 @@ defmodule GiTF.Dashboard.TimelineLive do
                         :op_event -> "badge-blue"
                         :link -> "badge-grey"
                         :approval -> "badge-yellow"
+                        :world -> "badge-green"
                         _ -> "badge-grey"
                       end}"} style="font-size:0.6rem">
                         {event_type_label(event.type)}

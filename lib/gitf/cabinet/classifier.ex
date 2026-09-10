@@ -36,6 +36,14 @@ defmodule GiTF.Cabinet.Classifier do
       when event in ["pull_request_review", "pull_request_review_comment"],
       do: :pr_review
 
+  # A merged pull request is PR lifecycle the factory owes a response to:
+  # record the outcome, close the issue that prompted it, feed the
+  # learning loop — while it is fresh, not at whatever wake comes next.
+  # A PR closed WITHOUT merging is not worth a wake; the next wake's poll
+  # records it.
+  def classify("pull_request", %{"action" => "closed", "pull_request" => %{"merged" => true}}),
+    do: :pr_review
+
   # An issue_comment is a PR review only when the issue IS a pull request.
   # A comment on a plain issue — Aramaki's own "picked this up", say — woke
   # the factory it had just been posted from (cora#23, 2026-09-09).
