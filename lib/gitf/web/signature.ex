@@ -30,6 +30,23 @@ defmodule GiTF.Web.Signature do
     end
   end
 
+  @doc """
+  GitHub-style check on a conn: `x-hub-signature-256` over the cached raw
+  body. The Cabinet's two signed ingresses (GitHub webhooks, a ministry's
+  Discord relay) share it, so a ministry's one secret covers both.
+  """
+  @spec valid?(Plug.Conn.t(), binary() | nil) :: boolean()
+  def valid?(conn, secret) do
+    provided = conn |> Plug.Conn.get_req_header("x-hub-signature-256") |> List.first()
+    verify(secret, provided, conn.assigns[:raw_body])
+  end
+
+  @doc "The `x-hub-signature-256` header value for `body` under `secret`."
+  @spec sign(binary(), binary()) :: String.t()
+  def sign(body, secret) do
+    "sha256=" <> Base.encode16(:crypto.mac(:hmac, :sha256, secret, body), case: :lower)
+  end
+
   defp strip_prefix("sha256=" <> rest), do: rest
   defp strip_prefix(other), do: other
 end

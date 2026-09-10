@@ -213,6 +213,21 @@ relay_url = "https://gitf-cabinet.tailcf2c46.ts.net:8443/relay/home-affairs"
 fallback_webhook_env = "DISCORD_WEBHOOK_URL"   # M0 path, used when the relay fails
 ```
 
+## Status (2026-09-10)
+
+**M1 built** (`GiTF.Cabinet.Discord.{Bot,Consumer,Guild,Render,Actions}`,
+`GiTF.Plugin.Builtin.Channels.Discord`, `POST /relay/:slug`, D4's
+`idle_stop_imminent` via `GiTF.IdleStop.Warning`, D5's `Handlers.call/3`
+actor with `params.actor` over the MCP RPC and `Proxy.call(actor:)`).
+One change to the design below: the bot **provisions its own channels**
+(category + fixed channels on connect, `#<slug>` on `register_ministry`,
+a thread per mission), so the config is a guild id, not four channel ids.
+M0's fallback webhook is inside the relay plugin (`DISCORD_WEBHOOK_URL`,
+used only when the relay fails). Operator setup is in OPERATING §9c.
+Not yet: M2 (free text → agent), M3 (mockup images, slash commands, quiet
+hours), `#plan` / `#aramaki` content (channels exist, nothing posts there
+yet).
+
 ## Milestones
 
 **M0 — this week, no bot.** `[observability] discord_webhook_url`: a

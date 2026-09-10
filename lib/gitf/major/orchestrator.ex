@@ -1014,7 +1014,8 @@ defmodule GiTF.Major.Orchestrator do
 
     GiTF.Observability.Alerts.dispatch_webhook(
       :quest_failed,
-      "Quest #{mission_id} lost in the net: #{reason}"
+      "Quest #{mission_id} lost in the net: #{reason}",
+      data: %{mission_id: mission_id, reason: reason}
     )
 
     # Record failure outcome in the Ledger

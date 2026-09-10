@@ -108,6 +108,10 @@ defmodule GiTF.Observability.Alerts do
     ghost_stalled: :high,
     ghost_hard_stalled: :high,
     quest_stuck: :medium,
+    # The box will power itself off in a few minutes. :high so it reaches
+    # the phone immediately — it is the last chance to say "wait", and the
+    # answer wakes the box anyway.
+    idle_stop_imminent: :high,
     quality_drop: :medium,
     budget_escalated: :low,
     # Good-news / informational types: kept below the webhook floor on
@@ -171,6 +175,11 @@ defmodule GiTF.Observability.Alerts do
     * `:dedup_key` — dedup on this value instead of the message text, so
       recurring callers (e.g. the stall check) can keep useful detail like
       elapsed time in the message without defeating suppression.
+    * `:data` — structured facts about the alert (mission id, question id
+      and options, when the box stops…) for channels that render more than
+      a line of text: Discord turns a question into a select menu and a
+      sleep warning into "keep awake" buttons, which needs the ids, not
+      the prose. Absent for alerts that are only a sentence.
   """
   @spec dispatch_webhook(atom(), String.t(), keyword()) :: :ok
   def dispatch_webhook(type, message, opts \\ []) do
@@ -191,7 +200,8 @@ defmodule GiTF.Observability.Alerts do
       GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
         type: type,
         message: message,
-        severity: severity(type)
+        severity: severity(type),
+        data: Keyword.get(opts, :data, %{})
       })
 
       send_notification(:log, type, message)

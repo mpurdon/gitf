@@ -39,20 +39,30 @@ defmodule GiTF.Cabinet.Registry do
         {:error, {:invalid, "slug #{slug} is taken"}}
 
       true ->
-        Archive.insert(@collection, %{
-          slug: slug,
-          name: attrs[:name] || attrs["name"] || slug,
-          url: attrs[:url] || attrs["url"],
-          instance_id: attrs[:instance_id] || attrs["instance_id"],
-          webhook_secret_env: attrs[:webhook_secret_env] || attrs["webhook_secret_env"],
-          api_key_env: attrs[:api_key_env] || attrs["api_key_env"],
-          cost_cap_usd: normalize_cap(attrs[:cost_cap_usd] || attrs["cost_cap_usd"]),
-          rules: attrs[:rules] || attrs["rules"],
-          mode: attrs[:mode] || attrs["mode"] || "normal",
-          inserted_at: DateTime.utc_now()
-        })
+        result =
+          Archive.insert(@collection, %{
+            slug: slug,
+            name: attrs[:name] || attrs["name"] || slug,
+            url: attrs[:url] || attrs["url"],
+            instance_id: attrs[:instance_id] || attrs["instance_id"],
+            webhook_secret_env: attrs[:webhook_secret_env] || attrs["webhook_secret_env"],
+            api_key_env: attrs[:api_key_env] || attrs["api_key_env"],
+            cost_cap_usd: normalize_cap(attrs[:cost_cap_usd] || attrs["cost_cap_usd"]),
+            rules: attrs[:rules] || attrs["rules"],
+            mode: attrs[:mode] || attrs["mode"] || "normal",
+            inserted_at: DateTime.utc_now()
+          })
+
+        # A ministry gets its Discord channel the moment it exists.
+        with {:ok, ministry} <- result, true <- discord_bot_up?() do
+          GiTF.Cabinet.Discord.Bot.ministry_registered(ministry)
+        end
+
+        result
     end
   end
+
+  defp discord_bot_up?, do: Process.whereis(GiTF.Cabinet.Discord.Bot) != nil
 
   def update(id, fun) when is_function(fun, 1), do: Archive.update(@collection, id, fun)
 

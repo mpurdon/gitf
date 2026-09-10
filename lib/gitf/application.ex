@@ -266,7 +266,8 @@ defmodule GiTF.Application do
     children =
       if GiTF.Cabinet.mode?() do
         Logger.info("CABINET MODE — factory supervision skipped")
-        foundation ++ [interface, GiTF.Cabinet.Watch]
+        discord = if GiTF.Cabinet.Discord.enabled?(), do: [GiTF.Cabinet.Discord], else: []
+        foundation ++ [interface, GiTF.Cabinet.Watch] ++ discord
       else
         foundation ++ [core, interface, plugins] ++ background_children()
       end
@@ -453,7 +454,10 @@ defmodule GiTF.Application do
           {GiTF.Observability, []},
           {GiTF.Tachikoma, []},
           {GiTF.Sync.Queue, []},
-          {GiTF.Ledger, []}
+          {GiTF.Ledger, []},
+          # "The box powers off in 10 minutes" — the operator's last chance
+          # to hold it, raised as an ordinary alert.
+          {GiTF.IdleStop.Warning, []}
         ]
       end
 

@@ -131,7 +131,7 @@ defmodule GiTF.MCPServer do
     {:ok, %{tools: tools}}
   end
 
-  defp handle_tools_call(%{"name" => name, "arguments" => args}) do
+  defp handle_tools_call(%{"name" => name, "arguments" => args} = params) do
     if GiTF.Cabinet.mode?() and name not in GiTF.MCPServer.Tools.cabinet_tool_names() do
       {:ok,
        %{
@@ -146,7 +146,11 @@ defmodule GiTF.MCPServer do
          isError: true
        }}
     else
-      do_tools_call(name, args)
+      # `actor` is not part of MCP proper — it is how an authenticated
+      # relay (the Cabinet forwarding a Discord tap) says who is acting.
+      # Any holder of the API key could assert one, which is the same trust
+      # `send_link`'s `from` already extends to the key.
+      do_tools_call(name, args, actor: params["actor"])
     end
   end
 
@@ -154,8 +158,8 @@ defmodule GiTF.MCPServer do
     {:error, -32602, "Invalid params: name and arguments required"}
   end
 
-  defp do_tools_call(name, args) do
-    case GiTF.MCPServer.Handlers.call(name, args) do
+  defp do_tools_call(name, args, opts) do
+    case GiTF.MCPServer.Handlers.call(name, args, opts) do
       {:ok, text} ->
         {:ok, %{content: [%{type: "text", text: text}]}}
 

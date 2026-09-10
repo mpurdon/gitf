@@ -1072,10 +1072,14 @@ defmodule GiTF.MCPServer.Tools do
       %{
         name: "idle_stop_override",
         description:
-          "Temporarily change how long the box tolerates being idle before powering itself off. Requires BOTH a new threshold and a duration — e.g. idle_minutes 60 for duration_minutes 240 means 'for the next 4 hours, wait an hour of idleness before stopping'. Pass clear:true to restore the default immediately. Overrides always expire; there is no permanent hold.",
+          "Temporarily change how long the box tolerates being idle before powering itself off. The simple form is hold_minutes: 'keep the box up for at least N minutes from now'. The precise form needs BOTH a threshold and a duration — e.g. idle_minutes 60 for duration_minutes 240 means 'for the next 4 hours, wait an hour of idleness before stopping'. Pass clear:true to restore the default immediately. Overrides always expire; there is no permanent hold.",
         inputSchema: %{
           type: "object",
           properties: %{
+            hold_minutes: %{
+              type: "integer",
+              description: "Keep the box awake for at least this many minutes from now (max 720)"
+            },
             idle_minutes: %{
               type: "integer",
               description: "Idle minutes to tolerate while the override is active (max 720)"

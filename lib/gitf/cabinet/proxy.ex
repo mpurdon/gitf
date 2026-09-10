@@ -12,24 +12,34 @@ defmodule GiTF.Cabinet.Proxy do
 
   alias GiTF.Cabinet.{Fleet, Registry}
 
-  @doc "Calls `tool` with `args` on the ministry's Section. Returns {:ok, result_text} | {:error, reason}."
+  @doc """
+  Calls `tool` with `args` on the ministry's Section. Returns
+  `{:ok, result_text} | {:error, reason}`.
+
+  Options: `wake: true` starts the box first; `actor:` names who is acting
+  (a Discord user, a tailnet login) and is recorded on the factory wherever
+  the tool attributes a decision.
+  """
   def call(slug, tool, args, opts \\ []) do
     with %{} = ministry <- Registry.by_slug(slug) || {:error, :unknown_ministry},
          url when is_binary(url) and url != "" <- ministry[:url] || {:error, :no_url},
          :ok <- maybe_wake(ministry, Keyword.get(opts, :wake, false)) do
-      request(ministry, url, tool, args)
+      request(ministry, url, tool, args, Keyword.get(opts, :actor))
     end
   end
 
   defp maybe_wake(ministry, true), do: Fleet.wake_and_await(ministry)
   defp maybe_wake(_ministry, false), do: :ok
 
-  defp request(ministry, url, tool, args) do
+  defp request(ministry, url, tool, args, actor) do
+    params = %{name: tool, arguments: args || %{}}
+    params = if is_binary(actor), do: Map.put(params, :actor, actor), else: params
+
     body = %{
       jsonrpc: "2.0",
       id: System.unique_integer([:positive]),
       method: "tools/call",
-      params: %{name: tool, arguments: args || %{}}
+      params: params
     }
 
     headers =

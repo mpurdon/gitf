@@ -260,7 +260,15 @@ defmodule GiTF.Inquiry do
       :input_requested,
       "Quest #{record.mission_id} is holding for an answer (#{record.phase}): " <>
         String.slice(record.prompt, 0, 120) <> questions_link(),
-      dedup_key: "input_requested:#{record.id}"
+      dedup_key: "input_requested:#{record.id}",
+      data: %{
+        mission_id: record.mission_id,
+        inquiry_id: record.id,
+        kind: record.kind,
+        phase: record.phase,
+        prompt: record.prompt,
+        options: Enum.map(record.options || [], &Map.take(&1, [:id, :label, :rationale]))
+      }
     )
 
     Phoenix.PubSub.broadcast(

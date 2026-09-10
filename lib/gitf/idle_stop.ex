@@ -170,6 +170,24 @@ defmodule GiTF.IdleStop do
   def disable(duration_minutes, opts \\ []),
     do: set(@max_idle_minutes, duration_minutes, opts)
 
+  @doc """
+  "Keep the box up for at least `minutes` from NOW", whatever the idle
+  countdown already says.
+
+  The countdown runs from `idle_since`, which is in the past, so the idle
+  threshold must cover what has already elapsed plus the ask; the override
+  itself lasts exactly `minutes`. This is the one shape every "keep awake"
+  surface wants — the Catwalk's sleep banner, the MCP, a Discord button —
+  and the arithmetic used to live in the controller alone.
+  """
+  @spec hold(pos_integer(), keyword()) :: {:ok, t()} | {:error, term()}
+  def hold(minutes, opts \\ []) when is_integer(minutes) do
+    elapsed =
+      DateTime.diff(DateTime.utc_now(), GiTF.Observability.Activity.last_activity_at(), :minute)
+
+    set(min(max(elapsed, 0) + minutes, @max_idle_minutes), minutes, opts)
+  end
+
   @doc "Minutes remaining on the active override, or 0."
   @spec remaining_minutes() :: non_neg_integer()
   def remaining_minutes do

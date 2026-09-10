@@ -11,6 +11,7 @@ defmodule GiTF.Web.CabinetRouter do
     * `/` — the Console (fleet, inbox, policy; `GiTF.Dashboard.CabinetLive`)
     * `/wake/:slug` — wake a ministry and forward to its dashboard when it answers
     * `POST /hooks/:ministry` — webhook ingress, HMAC per ministry
+    * `POST /relay/:ministry` — a ministry's alerts for the Discord bot, same HMAC
     * `/api/v1/health` `/version` `/ready` — public probes
     * `POST /api/v1/mcp` — the Cabinet's MCP bridge (cabinet tool set only)
     * `/metrics` — Prometheus
@@ -88,6 +89,11 @@ defmodule GiTF.Web.CabinetRouter do
   scope "/hooks", GiTF.Web do
     pipe_through(:webhooks)
     post("/:ministry", CabinetHookController, :receive)
+  end
+
+  scope "/relay", GiTF.Web do
+    pipe_through(:webhooks)
+    post("/:ministry", CabinetRelayController, :receive)
   end
 
   scope "/api/v1", GiTF.Web do

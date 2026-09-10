@@ -136,6 +136,43 @@ defmodule GiTF.Observability.Health do
   def idle?(ghosts, running_missions), do: ghosts == 0 and running_missions == []
 
   @doc """
+  The idle-stop picture in one read — the same facts `/health` reports and
+  `IdleStop.Warning` checks, computed once so the two can never disagree
+  about whether the box is quiet or since when.
+  """
+  @spec idle_state() :: %{
+          idle: boolean(),
+          idle_since: DateTime.t() | nil,
+          ghosts: non_neg_integer() | nil,
+          missions: [map()],
+          held: [map()],
+          running: [map()]
+        }
+  def idle_state do
+    missions = active_missions()
+    {held, running} = Enum.split_with(missions, &GiTF.Missions.held_for_human?/1)
+    ghosts = active_ghost_count()
+    idle = idle?(ghosts, running)
+
+    %{
+      idle: idle,
+      idle_since: GiTF.Observability.Activity.idle_since(idle),
+      ghosts: ghosts,
+      missions: missions,
+      held: held,
+      running: running
+    }
+  end
+
+  # nil, never 0, when the ghost store cannot be read: an unknown count
+  # must not read as "quiet" to the idle-stop timer.
+  defp active_ghost_count do
+    GiTF.Ghosts.list() |> Enum.count(&GiTF.Ghost.Status.active?(&1.status))
+  rescue
+    _ -> nil
+  end
+
+  @doc """
   True when a running mission's own record has not moved within the stuck
   threshold, by awake time. The one rule behind `check_quests/0`, the
   `quest_stuck` alert and the dashboard.

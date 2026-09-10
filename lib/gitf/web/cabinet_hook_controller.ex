@@ -20,7 +20,7 @@ defmodule GiTF.Web.CabinetHookController do
   def receive(conn, %{"ministry" => slug}) do
     with %{} = ministry <- Registry.by_slug(slug),
          secret when is_binary(secret) <- Registry.webhook_secret(ministry),
-         true <- signature_valid?(conn, secret) do
+         true <- GiTF.Web.Signature.valid?(conn, secret) do
       event = conn |> get_req_header("x-github-event") |> List.first() || "unknown"
 
       raw = %{
@@ -34,18 +34,6 @@ defmodule GiTF.Web.CabinetHookController do
     else
       _ ->
         conn |> put_status(404) |> json(%{error: "not found"})
-    end
-  end
-
-  defp signature_valid?(conn, secret) do
-    with [sig] <- get_req_header(conn, "x-hub-signature-256"),
-         raw when is_binary(raw) <- conn.assigns[:raw_body] do
-      expected =
-        "sha256=" <> Base.encode16(:crypto.mac(:hmac, :sha256, secret, raw), case: :lower)
-
-      Plug.Crypto.secure_compare(sig, expected)
-    else
-      _ -> false
     end
   end
 

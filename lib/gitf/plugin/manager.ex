@@ -26,7 +26,8 @@ defmodule GiTF.Plugin.Manager do
     GiTF.Plugin.Builtin.Commands.PluginCmd
   ]
   @builtin_channels [
-    GiTF.Plugin.Builtin.Channels.Telegram
+    GiTF.Plugin.Builtin.Channels.Telegram,
+    GiTF.Plugin.Builtin.Channels.Discord
   ]
   @builtin_tool_providers [
     GiTF.Plugin.Builtin.ToolProviders.ProjectContext,

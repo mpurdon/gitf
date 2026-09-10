@@ -28,12 +28,15 @@ defmodule GiTF.Cabinet.Gate do
         {:drop, class}
 
       {"wake", prov} ->
-        entry = record(ministry, class, event, payload, "waking", prov)
+        entry = record(ministry, class, event, payload, "waking", prov, nil)
         start_forward(ministry, entry, raw)
         {:wake, entry}
 
       {_queue, prov} ->
-        {:queue, record(ministry, class, event, payload, "queued", prov)}
+        # The delivery is KEPT on a queued entry: "start this" later must
+        # forward the same signed bytes GitHub sent, or the factory learns
+        # of the issue only when its events poller next happens to look.
+        {:queue, record(ministry, class, event, payload, "queued", prov, raw)}
     end
   end
 
@@ -83,7 +86,12 @@ defmodule GiTF.Cabinet.Gate do
   def dismiss_queued(entry_id) do
     case Archive.get(@inbox, entry_id) do
       %{status: "queued"} ->
-        Archive.update(@inbox, entry_id, &Map.put(&1, :status, "dismissed"))
+        Archive.update(
+          @inbox,
+          entry_id,
+          &(&1 |> Map.put(:status, "dismissed") |> Map.put(:raw, nil))
+        )
+
         :ok
 
       %{} ->
@@ -104,7 +112,7 @@ defmodule GiTF.Cabinet.Gate do
 
   # -- internals ---------------------------------------------------------------
 
-  defp record(ministry, class, event, payload, status, prov) do
+  defp record(ministry, class, event, payload, status, prov, raw) do
     {:ok, entry} =
       Archive.insert(@inbox, %{
         ministry_slug: ministry.slug,
@@ -113,9 +121,15 @@ defmodule GiTF.Cabinet.Gate do
         summary: summarize(event, payload),
         status: status,
         decision: prov,
-        raw: nil,
+        raw: raw,
         inserted_at: DateTime.utc_now()
       })
+
+    # A queued entry is a question for the operator — it goes wherever the
+    # operator's questions go (the Console inbox, and the Discord bot).
+    if status == "queued" do
+      Phoenix.PubSub.broadcast(GiTF.PubSub, "cabinet:inbox", {:inbox_queued, entry})
+    end
 
     entry
   end
@@ -128,7 +142,8 @@ defmodule GiTF.Cabinet.Gate do
         end
 
       status = if result == :ok, do: "forwarded", else: "forward_failed"
-      Archive.update(@inbox, entry.id, &Map.put(&1, :status, status))
+      # The delivery has done its job (or can't); don't keep payloads around.
+      Archive.update(@inbox, entry.id, &(&1 |> Map.put(:status, status) |> Map.put(:raw, nil)))
 
       if result != :ok do
         Logger.warning(

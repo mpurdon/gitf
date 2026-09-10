@@ -126,7 +126,8 @@ defmodule GiTF.Approval do
       Observability.Alerts.dispatch_webhook(
         :approval_requested,
         "Quest #{mission.id} awaiting human approval: #{String.slice(mission.goal, 0, 80)}" <>
-          approvals_link()
+          approvals_link(),
+        data: %{mission_id: mission.id, goal: mission.goal, pr_url: Missions.pr_url(mission)}
       )
 
       {:ok, "awaiting_approval"}

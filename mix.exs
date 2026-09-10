@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.65.330"
+  @version "0.65.331"
 
   def project do
     [
@@ -47,7 +47,9 @@ defmodule GiTF.MixProject do
         # Set RELEASE_TAR=1 at build time to also emit a deployable tarball
         # artifact (for non-Docker deploys).
         steps: if(System.get_env("RELEASE_TAR") == "1", do: [:assemble, :tar], else: [:assemble]),
-        applications: [runtime_tools: :permanent],
+        # nostrum ships in the release but is only LOADED: the Cabinet
+        # starts it when it has a bot token; a factory never does.
+        applications: [runtime_tools: :permanent, nostrum: :load],
         # Production deployments MUST set RELEASE_COOKIE to a stable secret
         # via the environment (see rel/vm.args.eex). We intentionally do NOT
         # derive a cookie from System.user_home!() here — in a container that
@@ -84,6 +86,10 @@ defmodule GiTF.MixProject do
       {:opentelemetry, "~> 1.6"},
       {:opentelemetry_exporter, "~> 1.9"},
       {:req_llm, "~> 1.6"},
+      # Discord gateway + REST for the Cabinet's bot. runtime: false — the
+      # Cabinet starts it explicitly (GiTF.Cabinet.Discord); a Section
+      # never does, it only relays alerts to the Cabinet.
+      {:nostrum, "~> 0.10", runtime: false},
       {:mox, "~> 1.1", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test}
     ]

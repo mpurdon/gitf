@@ -22,6 +22,8 @@ defmodule GiTF.Cabinet.Activity do
       })
 
     prune()
+    # Listeners (the Discord bot's #cabinet feed) get the entry as written.
+    Phoenix.PubSub.broadcast(GiTF.PubSub, "cabinet:activity", {:cabinet_activity, entry})
     entry
   end
 

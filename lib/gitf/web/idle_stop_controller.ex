@@ -18,8 +18,7 @@ defmodule GiTF.Web.IdleStopController do
     minutes = params |> Map.get("minutes", "60") |> to_string() |> Integer.parse()
 
     with {minutes, _} when minutes >= @min_minutes and minutes <= @max_minutes <- minutes,
-         {:ok, override} <-
-           GiTF.IdleStop.set(idle_minutes_for(minutes), minutes, reason: reason(conn)) do
+         {:ok, override} <- GiTF.IdleStop.hold(minutes, reason: reason(conn)) do
       GiTF.AuditLog.record(actor(conn), "idle_stop.hold", "factory", %{minutes: minutes})
       json(conn, %{data: %{until: override.expires_at, idle_minutes: override.idle_minutes}})
     else
@@ -31,15 +30,6 @@ defmodule GiTF.Web.IdleStopController do
         |> put_status(422)
         |> json(%{error: "minutes must be #{@min_minutes}-#{@max_minutes}"})
     end
-  end
-
-  # The countdown runs from idle_since, which is in the past; to guarantee
-  # `minutes` from NOW the threshold must cover what has already elapsed.
-  defp idle_minutes_for(minutes) do
-    elapsed =
-      DateTime.diff(DateTime.utc_now(), GiTF.Observability.Activity.last_activity_at(), :minute)
-
-    min(max(elapsed, 0) + minutes, @max_minutes)
   end
 
   defp actor(conn) do

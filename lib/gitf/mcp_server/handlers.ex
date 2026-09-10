@@ -11,14 +11,42 @@ defmodule GiTF.MCPServer.Handlers do
   # suggests orchestration or ghost-pool issues.
   @terminal_phases ~w(completed closed killed)
 
-  # Who an approve/reject over the MCP is attributed to. Person-level
-  # identity is resolved at the HTTP edge (GiTF.Tailnet) and is NOT plumbed
-  # down to tool handlers — the local socket listener has no peer identity
-  # at all — so naming the surface honestly beats inventing a human. It
+  # Who an approve/reject over the MCP is attributed to when the caller
+  # says nothing. The local socket listener has no peer identity at all,
+  # so naming the surface honestly beats inventing a human. It
   # deliberately does not start with "auto": GiTF.Override.approve/2 treats
   # an "auto*" approver as a machine timeout and refuses to clear the phase
-  # gate, and this IS an operator decision.
+  # gate, and this IS an operator decision. A caller that DOES know who is
+  # acting — the Cabinet relaying a Discord button as `discord:<user>` —
+  # passes it through `call/3`.
   @mcp_actor "mcp_operator"
+
+  @doc """
+  Runs a tool as a named actor. `actor:` is recorded wherever the tool
+  attributes a decision (approvals, answers, links); it may not start with
+  "auto", which is reserved for the factory's own timeouts.
+  """
+  def call(name, args, opts) when is_list(opts) do
+    case Keyword.get(opts, :actor) do
+      actor when is_binary(actor) and actor != "" ->
+        if String.starts_with?(actor, "auto") do
+          {:error, "actor #{inspect(actor)} is reserved for the factory's own timeouts"}
+        else
+          Process.put(:mcp_actor, actor)
+
+          try do
+            call(name, args)
+          after
+            Process.delete(:mcp_actor)
+          end
+        end
+
+      _ ->
+        call(name, args)
+    end
+  end
+
+  defp actor, do: Process.get(:mcp_actor) || @mcp_actor
 
   # A fat-fingered 10000 would park every approval indefinitely; 0 or a
   # negative would auto-approve everything the instant it was requested.
@@ -828,7 +856,7 @@ defmodule GiTF.MCPServer.Handlers do
         notes = args["notes"]
         triage = GiTF.Approval.Triage.build(mission)
 
-        case GiTF.Override.approve(mission.id, %{approved_by: @mcp_actor, notes: notes}) do
+        case GiTF.Override.approve(mission.id, %{approved_by: actor(), notes: notes}) do
           {:ok, _} ->
             audit_write("approval.approve", mission.id, %{
               notes: notes,
@@ -850,7 +878,7 @@ defmodule GiTF.MCPServer.Handlers do
     with :ok <- require_confirm(args),
          {:ok, reason} <- require_reason(reason) do
       with_pending_approval("reject_mission", id, fn mission ->
-        case GiTF.Override.reject(mission.id, reason, %{rejected_by: @mcp_actor}) do
+        case GiTF.Override.reject(mission.id, reason, %{rejected_by: actor()}) do
           {:ok, _} ->
             audit_write("approval.reject", mission.id, %{reason: reason})
             {:ok, json_text(reject_receipt(mission, reason))}
@@ -872,7 +900,7 @@ defmodule GiTF.MCPServer.Handlers do
   # The MCP is the primary control surface, so a mission that stops for a
   # human has to be answerable here or the gate is not usable — the
   # Catwalk is the visual surface, not the one the operator drives from.
-  # Same confirm-gating, receipt shape and @mcp_actor attribution as the
+  # Same confirm-gating, receipt shape and actor attribution as the
   # approval trio; the difference is that an answer is not binary and the
   # mission goes BACKWARDS to the phase that asked.
   def call("list_questions", args) when is_map(args) do
@@ -910,7 +938,7 @@ defmodule GiTF.MCPServer.Handlers do
   def call("answer_question", %{"id" => id, "answer" => answer} = args) do
     with :ok <- require_confirm(args) do
       safe_handler("answer_question", %{"id" => id}, fn ->
-        case GiTF.Inquiry.answer(id, answer, answered_by: @mcp_actor) do
+        case GiTF.Inquiry.answer(id, answer, answered_by: actor()) do
           {:ok, inquiry, :answered} ->
             audit_write("inquiry.answer", inquiry.mission_id, %{
               inquiry_id: id,
@@ -941,7 +969,7 @@ defmodule GiTF.MCPServer.Handlers do
       safe_handler("reject_question", %{"id" => id}, fn ->
         feedback = %{votes: args["votes"] || %{}, direction: args["direction"]}
 
-        case GiTF.Inquiry.reject(id, feedback, answered_by: @mcp_actor) do
+        case GiTF.Inquiry.reject(id, feedback, answered_by: actor()) do
           {:ok, inquiry, :answered} ->
             audit_write("inquiry.reject", inquiry.mission_id, %{
               inquiry_id: id,
@@ -1074,11 +1102,14 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("stop_ghost", _), do: {:error, "Missing required parameter: id"}
 
-  def call(
-        "send_link",
-        %{"from" => from, "to" => to, "subject" => subject, "body" => body} = args
-      ) do
-    with :ok <- require_confirm(args) do
+  # `from` is caller-asserted unless a named actor is running the call —
+  # then the link is from THEM: a Discord user cannot sign as another
+  # surface, and the Major sees who actually wrote.
+  def call("send_link", %{"to" => to, "subject" => subject, "body" => body} = args) do
+    from = Process.get(:mcp_actor) || args["from"]
+
+    with :ok <- require_confirm(args),
+         true <- is_binary(from) or {:error, "Missing required parameter: from"} do
       {:ok, link} = GiTF.Link.send(from, to, subject, body)
       {:ok, json_text(serialize_link(link))}
     end
@@ -1408,23 +1439,36 @@ defmodule GiTF.MCPServer.Handlers do
     safe_handler("idle_stop_override", args, fn ->
       idle = args["idle_minutes"]
       duration = args["duration_minutes"]
+      hold = args["hold_minutes"]
 
-      if is_integer(idle) and is_integer(duration) do
-        case GiTF.IdleStop.set(idle, duration, reason: args["reason"]) do
-          {:ok, override} ->
-            {:ok,
-             json_text(%{
-               idle_minutes: override.idle_minutes,
-               expires_at: DateTime.to_iso8601(override.expires_at),
-               reason: override.reason,
-               status: "active"
-             })}
+      result =
+        cond do
+          is_integer(hold) ->
+            GiTF.IdleStop.hold(hold, reason: args["reason"])
 
-          {:error, reason} ->
-            {:error, "Invalid override: #{inspect(reason)}"}
+          is_integer(idle) and is_integer(duration) ->
+            GiTF.IdleStop.set(idle, duration, reason: args["reason"])
+
+          true ->
+            {:error, :missing_args}
         end
-      else
-        {:error, "Both idle_minutes and duration_minutes are required (integers)"}
+
+      case result do
+        {:ok, override} ->
+          {:ok,
+           json_text(%{
+             idle_minutes: override.idle_minutes,
+             expires_at: DateTime.to_iso8601(override.expires_at),
+             reason: override.reason,
+             status: "active"
+           })}
+
+        {:error, :missing_args} ->
+          {:error,
+           "Either hold_minutes, or both idle_minutes and duration_minutes, are required (integers)"}
+
+        {:error, reason} ->
+          {:error, "Invalid override: #{inspect(reason)}"}
       end
     end)
   end
@@ -1930,7 +1974,7 @@ defmodule GiTF.MCPServer.Handlers do
       mission_id: mission.id,
       decided: true,
       approval_status: "approved",
-      approved_by: @mcp_actor,
+      approved_by: actor(),
       notes: notes,
       tally: GiTF.Approval.Triage.tally(triage),
       note:
@@ -1963,7 +2007,7 @@ defmodule GiTF.MCPServer.Handlers do
       mission_id: mission.id,
       decided: true,
       approval_status: "rejected",
-      rejected_by: @mcp_actor,
+      rejected_by: actor(),
       reason: reason,
       note:
         "Rejection recorded. The mission terminal-fails on the next advance sweep, and its " <>
@@ -2100,7 +2144,7 @@ defmodule GiTF.MCPServer.Handlers do
       answered: true,
       answer: inquiry[:answer],
       answer_label: inquiry[:answer_label],
-      answered_by: @mcp_actor,
+      answered_by: actor(),
       resumes_phase: inquiry[:phase],
       note:
         "Recorded. Once every open question on this mission is answered it transitions back " <>

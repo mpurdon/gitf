@@ -469,6 +469,48 @@ CLI note: there is no `-m` flag yet — drive a specific ministry with
 `GITF_SERVER=https://<slug>.ghostinthefactory.com gitf ...`, or via the
 Cabinet's `ministry_call` tool.
 
+### The Discord bot (the operator's phone)
+
+Plan of record: `docs/plans/discord.md`. The bot is **Cabinet** — one
+identity for the fleet, held by the one box that is always on. A factory
+never logs into Discord; it **relays** (`GiTF.Plugin.Builtin.Channels.Discord`)
+every alert and mission event to `POST /relay/<slug>` on the Cabinet,
+signed with the same webhook secret the GitHub ingress uses, and the
+Cabinet posts it.
+
+- **Structure is the bot's, not yours.** On connect it provisions a `GiTF`
+  category with `#cabinet`, `#plan`, `#aramaki`, and one `#<slug>` per
+  registered ministry (created the moment `register_ministry` runs),
+  reconciled by name on every connect. Missions get a thread in their
+  ministry's channel (opened on start, archived on completion).
+- **What arrives, with buttons.** A choice question → select menu of the
+  option ids (+ "Reject all"); a confirm → Yes/No; an approval →
+  Approve/Reject; a failure → Resume; the **sleep warning** → Keep awake
+  1h / 4h / Sleep now; a queued inbox entry (in `#cabinet`) → Start/Drop.
+  A text question links to the Catwalk — free text is M2. Urgent alerts
+  post at once; the rest arrive as a 30 s digest.
+- **A tap is one tool call** on that ministry's factory through
+  `ministry_call` with `wake: true` — a hold tapped after the box slept
+  wakes it and applies — recorded as actor `discord:<username>`. The
+  message then rewrites itself as settled ("✓ approved by @matt · 21:04",
+  buttons disabled). Only configured `operators` (Discord user ids) or,
+  when none are set, the guild owner can act; anyone else gets a private
+  "not an operator here".
+- **The sleep warning** is a factory alert (`idle_stop_imminent`,
+  `GiTF.IdleStop.Warning`, `GITF_IDLE_STOP_WARN_MINUTES`, default 10),
+  raised once per idle episode by the daemon's own countdown — the same
+  arithmetic `gitf-idle-stop.sh` runs. Telegram and the webhook get it
+  too; nothing about it is Discord's.
+- **Setup.** Cabinet env file: `DISCORD_BOT_TOKEN` (from Parameter Store
+  `/gitf/cabinet/discord-bot-token`, like the api key), `GITF_DISCORD_GUILD_ID`,
+  optionally `GITF_DISCORD_OPERATORS=<id,id>`. Each factory's env file:
+  `GITF_DISCORD_RELAY_URL=https://gitf-cabinet.tailcf2c46.ts.net:8443/relay/<slug>`
+  (the funnel exposes `/relay` beside `/hooks`) and optionally
+  `DISCORD_WEBHOOK_URL`, a Discord incoming webhook used **only when the
+  relay fails** — plain embed, no buttons, so a dead Cabinet loses the
+  reply path, not the notification. Nostrum ships in every release in
+  `:load` mode and is started only by a Cabinet with a token.
+
 ## 10. Feature flags
 
 Most of the differentiating intelligence layer ships **default-off**. The
