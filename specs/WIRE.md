@@ -469,6 +469,31 @@ If a fast-tier model (Haiku) shows a higher fallback rate than Sonnet, the mitig
 per-tier: keep the JSON card for that tier (the flag can become tiered), not to weaken
 the grammar.
 
+### 8.1 First pair (2026-09-09, cora, fast pipeline)
+
+Goal: the `parseDiff` header-vs-content fix (`-- `/`++ ` lines inside a hunk).
+A = msn-612200 (JSON), B = msn-2b30ac (Wire), both on 0.65.326, run one after the
+other, both PRs left unmerged.
+
+| | A (JSON) | B (Wire) | delta |
+|---|---|---|---|
+| notation | json 3 | wire 2 · json 1 (triage is not on Wire) | fallback 0 · parse_failed 0 |
+| validation | pass, 5/5 met, 0 fix rounds | pass, 5/5 met, 0 fix rounds | — |
+| wall clock | 673 s | 652 s | −21 s |
+| cost | $1.55 | $1.46 | −6.1% |
+| scoring output tokens | 3154 | 1920 | −39% |
+| validation output tokens | 3728 | 3357 | −10% |
+| implementation output tokens | 7996 | 8054 | +1% (the implementation ghost is not on Wire) |
+
+Passes the bar. The saving is real but small on the fast pipeline, which has only three
+phase replies; the standard pipeline (research → requirements → design → review →
+planning, five more Wire-carded replies, prose-heavy) is where the −15% / −23%
+structural estimate should show. Next pair: a standard-pipeline goal.
+
+Gotcha that cost one run: an MCP client that connected before 0.65.314 holds the old
+`create_mission` schema and silently drops the `wire` argument — B ran as JSON.
+Reconnect the client, or create the pair through `POST /api/v1/mcp` directly.
+
 ---
 
 ## 9. Operating notes and next steps

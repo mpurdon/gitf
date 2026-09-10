@@ -518,6 +518,12 @@ factory ignores issues it opened itself.
 
 ## 12. Landmines
 
+- **A long-lived MCP client holds the tool schema it connected with.** After a
+  release adds a parameter to a tool (`create_mission wire:`, 0.65.314), a
+  client session that connected earlier passes the call but drops the new
+  argument, silently. Reconnect the client, or call `POST /api/v1/mcp` directly
+  (key: `[server] api_key` in `~/.config/gitf/config.toml`).
+
 - **A replaced box has no `claude` on the daemon's PATH.** The official
   installer puts it in `/var/lib/gitf/.local/bin`, which a systemd unit's
   PATH never includes; `deploy-aws.md` step "CLI mode" adds a hand-made
