@@ -104,12 +104,45 @@ defmodule GiTF.Plugin.DiscordRelayTest do
     assert {:error, :disabled} = Discord.send_message(pid, "hi")
   end
 
+  # The plugin manager starts a (disabled) Discord channel at boot as a
+  # PERMANENT child, so GenServer.stop just gets it restarted and the name is
+  # taken again by the time start_link runs — which is how this passed locally
+  # and failed in CI. Terminate it through its supervisor, then wait for the
+  # name to actually free up.
   defp stop_existing do
     case Process.whereis(Discord) do
-      nil -> :ok
-      pid -> GenServer.stop(pid, :normal, 5_000)
+      nil ->
+        :ok
+
+      pid ->
+        ref = Process.monitor(pid)
+
+        case DynamicSupervisor.terminate_child(GiTF.Plugin.ChannelSupervisor, pid) do
+          :ok -> :ok
+          _ -> safe_stop(pid)
+        end
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _} -> :ok
+        after
+          5_000 -> Process.demonitor(ref, [:flush])
+        end
+
+        await_name_free()
     end
+  end
+
+  defp safe_stop(pid) do
+    GenServer.stop(pid, :normal, 5_000)
   catch
     :exit, _ -> :ok
+  end
+
+  defp await_name_free(tries \\ 100) do
+    cond do
+      tries == 0 -> :ok
+      is_nil(Process.whereis(Discord)) -> :ok
+      true -> Process.sleep(10) && await_name_free(tries - 1)
+    end
   end
 end
