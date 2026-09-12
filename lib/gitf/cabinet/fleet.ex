@@ -92,6 +92,11 @@ defmodule GiTF.Cabinet.Fleet do
           GiTF.Cabinet.Activity.record("cabinet", "observed", ministry.slug, state)
         end
 
+        # A factory that is no longer running has no live facts. Leaving the
+        # last payload in place would let the Console keep rendering "up 3h"
+        # and a sleep countdown for a box that has been off for an hour.
+        if state != "running", do: GiTF.Cabinet.Snapshot.clear_live(id)
+
         Map.put(ministry, :box, updated.box)
     end
   end

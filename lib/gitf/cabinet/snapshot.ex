@@ -4,6 +4,13 @@ defmodule GiTF.Cabinet.Snapshot do
   API while it is awake (the Cabinet holds no mission state — a snapshot
   is a cached answer, and the factory stays authoritative).
 
+  Health is stored whole, not as a status string: `release`, `sleeps in`
+  and `load` are facts the Console shows on every ministry, and the old
+  console fetched them live inside its render path — an HTTP call per
+  running ministry on every mount and every 20-second tick, per open
+  console. The watcher already visits each awake factory once a minute;
+  storing what it finds there means the Console does no I/O to draw itself.
+
   Spend comes from the factory's cost ledger via `/api/v1/costs/summary`
   with the ministry's api key (by env reference): `spend_usd` is the
   ledger's total (bounded by its retention — days, not the month), and
@@ -22,8 +29,16 @@ defmodule GiTF.Cabinet.Snapshot do
     with url when is_binary(url) and url != "" <- ministry[:url] || :no_url,
          key when is_binary(key) and key != "" <- api_key(ministry) || :no_api_key,
          {:ok, spend, month_spend} <- fetch_spend(url, key) do
-      health = fetch_health(url)
-      Registry.update(id, &(&1 |> merge_spend(spend, month_spend) |> Map.put(:health, health)))
+      live = fetch_health(url)
+
+      Registry.update(
+        id,
+        &(&1
+          |> merge_spend(spend, month_spend)
+          |> Map.put(:health, live["status"] || "unreachable")
+          |> merge_live(live))
+      )
+
       :ok
     else
       reason ->
@@ -69,14 +84,26 @@ defmodule GiTF.Cabinet.Snapshot do
     end
   end
 
+  @doc """
+  Stores the health payload the Console reads — or clears it when the factory
+  stops answering, so a stale `up 3h` cannot outlive the box it described.
+  """
+  def merge_live(ministry, live) when is_map(live) and map_size(live) > 0,
+    do: Map.merge(ministry, %{live: live, live_at: DateTime.utc_now()})
+
+  def merge_live(ministry, _), do: Map.merge(ministry, %{live: nil, live_at: nil})
+
+  @doc "Drops the stored liveness — called when a factory is seen to stop."
+  def clear_live(id), do: Registry.update(id, &merge_live(&1, nil))
+
   defp fetch_health(url) do
     case Req.get(
            url: String.trim_trailing(url, "/") <> "/api/v1/health",
            retry: false,
            receive_timeout: 8_000
          ) do
-      {:ok, %{status: 200, body: %{"data" => %{"status" => status}}}} -> status
-      _ -> "unreachable"
+      {:ok, %{status: 200, body: %{"data" => %{} = data}}} -> data
+      _ -> %{}
     end
   end
 end

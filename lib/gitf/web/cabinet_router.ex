@@ -8,7 +8,9 @@ defmodule GiTF.Web.CabinetRouter do
 
   What the Cabinet serves:
 
-    * `/` — the Console (fleet, inbox, policy; `GiTF.Dashboard.CabinetLive`)
+    * `/` — the Cabinet Console (`GiTF.Dashboard.CabinetLive`)
+    * `/console` — the GiTF Console, which will replace it; running beside it
+      until `parity_test.exs` and an operator both agree it has everything
     * `/wake/:slug` — wake a ministry and forward to its dashboard when it answers
     * `POST /hooks/:ministry` — webhook ingress, HMAC per ministry
     * `POST /relay/:ministry` — a ministry's alerts for the Discord bot, same HMAC
@@ -83,6 +85,11 @@ defmodule GiTF.Web.CabinetRouter do
     live_session :cabinet, on_mount: GiTF.Web.TailnetAuth do
       live("/", CabinetLive)
       live("/wake/:slug", CabinetLive, :wake)
+
+      # One LiveView for every scope: the console patches between objects
+      # rather than remounting, so the tree and the workspace stay put.
+      live("/console", ConsoleLive)
+      live("/console/*path", ConsoleLive)
     end
   end
 
