@@ -11,7 +11,7 @@ defmodule GiTF.Dashboard.SettingsLive do
     {:ok,
      socket
      |> assign(:page_title, "Settings")
-     |> assign(:current_path, "/dashboard/settings")
+     |> assign(:current_path, "/settings")
      |> assign_config(config)
      |> init_toasts()}
   end

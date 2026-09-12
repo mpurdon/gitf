@@ -119,12 +119,22 @@ defmodule GiTF.Dashboard.CabinetLayouts do
           .btn[disabled]{opacity:.5;pointer-events:none}
           .opening{display:flex;align-items:center;gap:14px;padding:14px 20px;font-size:13.5px;color:var(--text-2)}
 
+          /* The row selects; the actions sit BESIDE it as real buttons. They
+             used to be spans nested inside the row's <button>, which is not
+             focusable and made Start/Dismiss unreachable from a keyboard. */
+          .irow-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
+            border-bottom:1px solid var(--line-2)}
+          .irow-wrap:last-child{border-bottom:0}
+          .irow-wrap:hover{background:var(--panel-2)}
+          .irow-wrap.sel{background:var(--accent-soft)}
+          .irow-actions{display:inline-flex;gap:6px;padding-right:20px}
           .irow{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:16px;align-items:center;width:100%;padding:14px 20px;border-bottom:1px solid var(--line-2)}
           .irow:last-child{border-bottom:0}
+          .irow-wrap .irow{border-bottom:0}
           .irow:hover{background:var(--panel-2)}
           .irow.sel{background:var(--accent-soft)}
-          .irow .t1{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-          .irow .t2{font-size:12.5px;color:var(--muted);margin-top:2px}
+          .irow .t1{display:block;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .irow .t2{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
           .irow .t2 em{font-style:normal;color:var(--text-2);font-weight:600}
           .when{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
 
@@ -168,9 +178,9 @@ defmodule GiTF.Dashboard.CabinetLayouts do
           .itabs button{padding:10px 12px;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
           .itabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
           .ipane{padding:8px 24px 26px}
-          .insp .kv{display:grid;grid-template-columns:96px 1fr;gap:9px 14px;font-size:13px;padding:14px 0;border-bottom:1px solid var(--line-2)}
-          .insp .kv dt{color:var(--muted);font-weight:600;font-size:12px}
-          .insp .kv dd{color:var(--text-2)}
+          .inspector .kv{display:grid;grid-template-columns:96px 1fr;gap:9px 14px;font-size:13px;padding:14px 0;border-bottom:1px solid var(--line-2)}
+          .inspector .kv dt{color:var(--muted);font-weight:600;font-size:12px}
+          .inspector .kv dd{color:var(--text-2)}
           .rel{display:flex;flex-direction:column;gap:10px;padding:14px 0;border-bottom:1px solid var(--line-2);font-size:13px}
           .rel .verb{font-size:10.5px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;font-weight:600;display:block;margin-bottom:1px}
           .decision{padding:14px 0;border-bottom:1px solid var(--line-2)}
@@ -178,7 +188,7 @@ defmodule GiTF.Dashboard.CabinetLayouts do
           .factor{display:grid;grid-template-columns:1fr auto;gap:12px;font-size:13px;padding:8px 0;border-top:1px solid var(--line-2)}
           .factor .v{font-family:var(--mono);color:var(--muted);font-size:11.5px;text-align:right}
           .mini-head{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:16px 0 6px}
-          .insp pre.raw{border-radius:10px;border:1px solid var(--line-2)}
+          .inspector pre.raw{border-radius:10px;border:1px solid var(--line-2)}
           .empty{color:var(--muted);font-size:13px;padding:16px 20px}
 
           .field{display:grid;gap:4px;margin-bottom:12px}

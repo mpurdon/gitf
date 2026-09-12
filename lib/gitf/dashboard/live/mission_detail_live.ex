@@ -43,11 +43,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         socket =
           socket
           |> assign(:page_title, Map.get(mission, :name, "Mission"))
-          |> assign(:current_path, "/dashboard/missions")
+          |> assign(:current_path, "/missions")
           |> assign(:mission, mission)
           |> assign(:pr_url, pr_url(mission))
           |> assign(:ops, ops)
-          |> assign(:op_filter, "active")
+          |> assign(:op_filter, default_op_filter(mission))
           |> assign(:show_full_goal, false)
           |> assign(:selected_phase, nil)
           |> assign(:artifact, nil)
@@ -554,6 +554,19 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   @doc """
+  Which filter the Ops card opens on.
+
+  `active` is right while work is in flight and wrong the moment it stops: a
+  finished mission has zero active ops, so the card opened empty and said
+  "No ops created yet" about a mission with thirteen of them. Finished
+  missions open on everything.
+  """
+  @spec default_op_filter(map()) :: String.t()
+  def default_op_filter(mission) do
+    if GiTF.Missions.finished?(mission), do: "all", else: "active"
+  end
+
+  @doc """
   The Ops card's filter chips and the list they filter, derived together.
 
   Every count is the LENGTH OF THE LIST ITS CHIP SELECTS — not a parallel
@@ -920,31 +933,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   @doc false
   def compute_duration(mission, transitions) do
-    started = mission[:inserted_at]
-
-    case started do
-      %DateTime{} ->
-        ended =
-          if mission[:status] in ["completed", "failed"],
-            do: terminal_transition_at(transitions) || mission[:updated_at],
-            else: DateTime.utc_now()
-
-        case ended do
-          %DateTime{} ->
-            seconds = DateTime.diff(ended, started, :second)
-
-            cond do
-              seconds < 60 -> "#{seconds}s"
-              seconds < 3600 -> "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
-              true -> "#{div(seconds, 3600)}h #{rem(div(seconds, 60), 60)}m"
-            end
-
-          _ ->
-            nil
-        end
-
-      _ ->
-        nil
+    case GiTF.Missions.duration_seconds(mission, terminal_transition_at(transitions)) do
+      nil -> nil
+      seconds -> GiTF.Dashboard.Helpers.duration(seconds)
     end
   rescue
     _ -> nil
@@ -1272,7 +1263,15 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <% end %>
           </div>
           <%= if @visible_ops == [] do %>
-            <div class="empty">No ops created yet.</div>
+            <div class="empty">
+              <%= if @total_ops == 0 do %>
+                No ops created yet.
+              <% else %>
+                None of this mission's {@total_ops} ops match the <b>{@op_filter}</b> filter.
+                <button phx-click="filter_ops" phx-value-filter="all" class="op-filter-chip"
+                        style="margin-left:0.5rem">Show all {@total_ops}</button>
+              <% end %>
+            </div>
           <% else %>
             <%= for op <- @visible_ops do %>
               <% op_status = Map.get(op, :status, "pending")

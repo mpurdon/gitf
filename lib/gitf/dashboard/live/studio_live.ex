@@ -24,7 +24,7 @@ defmodule GiTF.Dashboard.StudioLive do
       {:ok,
        socket
        |> assign(:page_title, "Planning Studio")
-       |> assign(:current_path, "/dashboard/studio")
+       |> assign(:current_path, "/studio")
        |> assign(:session_id, id)
        |> assign(:studio, Session.get_state(id))
        |> assign(:tab, "brief")
@@ -51,7 +51,7 @@ defmodule GiTF.Dashboard.StudioLive do
           {:ok,
            socket
            |> assign(:page_title, "Planning Studio")
-           |> assign(:current_path, "/dashboard/studio")
+           |> assign(:current_path, "/studio")
            |> assign(:session_id, nil)
            |> assign(:boot_error, inspect(reason))
            |> init_toasts()}
@@ -60,7 +60,7 @@ defmodule GiTF.Dashboard.StudioLive do
       {:ok,
        socket
        |> assign(:page_title, "Planning Studio")
-       |> assign(:current_path, "/dashboard/studio")
+       |> assign(:current_path, "/studio")
        |> assign(:session_id, nil)
        |> assign(:boot_error, nil)
        |> init_toasts()}

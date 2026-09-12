@@ -20,7 +20,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
         {:ok,
          socket
          |> assign(:page_title, Map.get(op, :title, "Op"))
-         |> assign(:current_path, "/dashboard/missions")
+         |> assign(:current_path, "/ops")
          |> assign(:op, op)
          |> assign(:refresh_scheduled, false)
          |> assign_extras(op)

@@ -182,7 +182,10 @@ defmodule GiTF.Dashboard.CabinetLive do
   end
 
   def handle_event("snapshot", %{"id" => id}, socket) do
-    with %{} = ministry <- Registry.get(id) do
+    # No else clause here meant a stale id (a retired ministry, a stale DOM)
+    # returned nil from the `with`, which is not {:noreply, socket} — the
+    # LiveView crashed and the console reloaded itself.
+    with %{} = ministry <- Registry.get(id) || {:error, :unknown_ministry} do
       case Snapshot.refresh(ministry) do
         :ok ->
           {:noreply, socket |> put_flash(:info, "Snapshot refreshed from the factory.") |> load()}
@@ -195,6 +198,8 @@ defmodule GiTF.Dashboard.CabinetLive do
              "Snapshot needs a running, reachable factory (#{inspect(reason)})."
            )}
       end
+    else
+      _ -> {:noreply, put_flash(socket, :error, "That ministry no longer exists.")}
     end
   end
 
@@ -351,7 +356,7 @@ defmodule GiTF.Dashboard.CabinetLive do
 
     cond do
       live && is_integer(live["uptime_seconds"]) -> "up #{dur(live["uptime_seconds"])}"
-      running?(m) and since -> "up #{ago(since)} (box)"
+      running?(m) and since -> "up #{ago(since)} (EC2)"
       box_state(m) == "stopped" and since -> "asleep #{ago(since)}"
       box_state(m) == "stopped" -> "asleep since before the Cabinet watched"
       box_state(m) in ["pending", "stopping"] -> "for #{ago(since)}"
@@ -627,7 +632,7 @@ defmodule GiTF.Dashboard.CabinetLive do
                 </span>
                 <.state_badge ministry={m} />
                 <span class="stat"><span class="k">Mode</span><span class="v"><b>{m.mode}</b></span></span>
-                <span class="stat"><span class="k">Spend</span><span class="v"><b>{money(m[:spend_usd])}</b> · cap {money(m[:cost_cap_usd])}</span></span>
+                <span class="stat"><span class="k">Spend, month</span><span class="v"><b>{money(m[:spend_month_usd])}</b> · cap {money(m[:cost_cap_usd])}</span></span>
                 <span class="stat"><span class="k">Waiting</span><span class="v"><b>{length(queued(@inbox, m.slug))}</b></span></span>
               </button>
             </div>
@@ -651,7 +656,7 @@ defmodule GiTF.Dashboard.CabinetLive do
           <% "ministries" -> %>
             <div class="view-head">
               <h1>Ministries</h1>
-              <span class="sub">the fleet as it is right now — every box, how long it has been that way, and when it sleeps</span>
+              <span class="sub">the fleet as it is right now — every factory, how long it has been that way, and when it sleeps</span>
               <span class="end muted" style="font-size:12.5px">refreshes every 20s</span>
             </div>
 
@@ -683,14 +688,14 @@ defmodule GiTF.Dashboard.CabinetLive do
                 <span class="stat"><span class="k">Release</span><span class="v"><b>{version(m)}</b></span></span>
                 <span class="stat"><span class="k">Load</span><span class="v"><b>{(m[:live] && "#{m.live["active_missions"] || 0} missions · #{m.live["active_ghosts"] || 0} ghosts") || "—"}</b></span></span>
                 <span class="stat"><span class="k">Last woke</span><span class="v"><b>{date(get_in(m, [:box, :launched_at]))}</b></span></span>
-                <span class="stat"><span class="k">Spend</span><span class="v"><b>{money(m[:spend_usd])}</b> · cap {money(m[:cost_cap_usd])}</span></span>
+                <span class="stat"><span class="k">Spend, month</span><span class="v"><b>{money(m[:spend_month_usd])}</b> · cap {money(m[:cost_cap_usd])}</span></span>
               </div>
               <div class="fleet-actions">
                 <button :if={!running?(m)} class="btn pri sm" phx-click="wake" phx-value-id={m.id} disabled={box_state(m) in ["pending", "stopping"]}>Wake</button>
                 <button :if={!running?(m) and m.url} class="btn sm" phx-click="wake_open" phx-value-id={m.id} disabled={@opening != nil}>Wake &amp; open</button>
                 <button :if={running?(m)} class="btn sm" phx-click="stop" phx-value-id={m.id}>Sleep</button>
                 <button :if={running?(m)} class="btn sm" phx-click="snapshot" phx-value-id={m.id}>Refresh snapshot</button>
-                <a :if={m.url} class="btn sm" href={m.url} target="_blank">Dashboard ↗</a>
+                <a :if={m.url} class="btn sm" href={m.url} target="_blank">Catwalk ↗</a>
                 <span class="muted end" style="font-size:12px">bookmark <span class="mono">/wake/{m.slug}</span> to wake &amp; open from cold</span>
               </div>
             </div>
@@ -847,7 +852,7 @@ defmodule GiTF.Dashboard.CabinetLive do
                 <button :if={!running?(m) and m.url} class="btn sm" phx-click="wake_open" phx-value-id={m.id}>Wake &amp; open</button>
                 <button :if={running?(m)} class="btn sm" phx-click="stop" phx-value-id={m.id}>Stop factory</button>
                 <button :if={running?(m)} class="btn sm" phx-click="snapshot" phx-value-id={m.id}>Refresh snapshot</button>
-                <a :if={m.url} class="btn sm" href={m.url} target="_blank">Dashboard ↗</a>
+                <a :if={m.url} class="btn sm" href={m.url} target="_blank">Catwalk ↗</a>
               </div>
             </div>
             <.itab_bar itab={@itab} why_label="Evidence" />
@@ -960,23 +965,25 @@ defmodule GiTF.Dashboard.CabinetLive do
 
   defp inbox_row(assigns) do
     ~H"""
-    <button class={["irow", match?({"entry", id} when id == @entry.id, @sel) && "sel"]} phx-click="select" phx-value-type="entry" phx-value-id={@entry.id}>
-      <span class={"tag #{@entry.class}"}>{@entry.class}</span>
-      <span style="min-width:0">
-        <div class="t1">{@entry.summary}</div>
-        <div class="t2">
-          <em>{@entry.class}</em> under <em>{@entry[:decision][:mode] || "?"}</em>
-          → {@entry[:decision][:action] || @entry.status}<span :if={@entry[:decision][:rule]}> · rule {@entry.decision.rule}</span>
-          · {@entry.ministry_slug}
-        </div>
+    <div class={["irow-wrap", match?({"entry", id} when id == @entry.id, @sel) && "sel"]}>
+      <button class="irow" phx-click="select" phx-value-type="entry" phx-value-id={@entry.id}>
+        <span class={"tag #{@entry.class}"}>{@entry.class}</span>
+        <span style="min-width:0">
+          <span class="t1">{@entry.summary}</span>
+          <span class="t2">
+            <em>{@entry.class}</em> under <em>{@entry[:decision][:mode] || "?"}</em>
+            → {@entry[:decision][:action] || @entry.status}<span :if={@entry[:decision][:rule]}> · rule {@entry.decision.rule}</span>
+            · {@entry.ministry_slug}
+          </span>
+        </span>
+        <span class="when">{hhmm(@entry.inserted_at)}</span>
+      </button>
+      <span class="irow-actions">
+        <button :if={@show_start} class="btn pri sm" phx-click="start_entry" phx-value-id={@entry.id}>Start this</button>
+        <button :if={@show_start} class="btn sm" phx-click="dismiss_entry" phx-value-id={@entry.id}>Dismiss</button>
+        <.status_pill :if={!@show_start} status={@entry.status} />
       </span>
-      <span class="when">{hhmm(@entry.inserted_at)}</span>
-      <span :if={@show_start} style="display:inline-flex;gap:6px">
-        <span class="btn pri sm" phx-click="start_entry" phx-value-id={@entry.id}>Start this</span>
-        <span class="btn sm" phx-click="dismiss_entry" phx-value-id={@entry.id}>Dismiss</span>
-      </span>
-      <span :if={!@show_start}><.status_pill status={@entry.status} /></span>
-    </button>
+    </div>
     """
   end
 

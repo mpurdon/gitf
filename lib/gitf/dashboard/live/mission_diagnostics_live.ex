@@ -20,7 +20,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
         {:ok,
          socket
          |> assign(:page_title, "Diagnostics — #{Map.get(mission, :name, "Mission")}")
-         |> assign(:current_path, "/dashboard/missions")
+         |> assign(:current_path, "/missions")
          |> assign(:mission, mission)
          |> assign(:selected_op, nil)
          |> assign(:analyzing, MapSet.new())

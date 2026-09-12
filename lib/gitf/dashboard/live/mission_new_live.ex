@@ -16,7 +16,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
     {:ok,
      socket
      |> assign(:page_title, "New Mission")
-     |> assign(:current_path, "/dashboard/missions")
+     |> assign(:current_path, "/missions")
      |> assign(:sectors, sectors)
      |> assign(:form, %{"goal" => "", "name" => "", "sector" => "", "quick" => "false"})
      |> assign(:source, "manual")
@@ -125,7 +125,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
             {:ok, _} ->
               {:noreply,
                socket
-               |> put_flash(:info, "Quick task started — ghost is working.")
+               |> put_flash(:info, "Mission started — a ghost is working on it.")
                |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
 
             {:error, reason} ->
@@ -398,7 +398,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
             <div class="action-bar">
               <a href="/dashboard/missions" class="btn btn-grey">Cancel</a>
               <button type="submit" class="btn btn-green" disabled={String.trim(@form["goal"] || "") == ""}>
-                {if @form["quick"] == "true", do: "Run Task", else: "Create Mission"}
+                {if @form["quick"] == "true", do: "Run mission", else: "Create Mission"}
               </button>
             </div>
           </form>

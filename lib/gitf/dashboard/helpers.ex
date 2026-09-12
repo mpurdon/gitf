@@ -5,6 +5,24 @@ defmodule GiTF.Dashboard.Helpers do
 
   require GiTF.Ghost.Status, as: GhostStatus
 
+  @doc """
+  A duration in seconds as an operator reads it.
+
+  One definition, because two of them disagreed: the register rendered
+  `11m` where the mission page rendered `11m 14s` for the same mission, and
+  that was the smaller of the two disagreements.
+  """
+  @spec duration(non_neg_integer() | nil) :: String.t()
+  def duration(nil), do: "—"
+
+  def duration(seconds) when is_integer(seconds) do
+    cond do
+      seconds < 60 -> "#{seconds}s"
+      seconds < 3600 -> "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
+      true -> "#{div(seconds, 3600)}h #{rem(div(seconds, 60), 60)}m"
+    end
+  end
+
   def status_badge("completed"), do: "badge-green"
   def status_badge("done"), do: "badge-green"
   def status_badge("active"), do: "badge-blue"

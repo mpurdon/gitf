@@ -29,7 +29,7 @@ defmodule GiTF.Dashboard.DesignLive do
         socket =
           socket
           |> assign(:page_title, "Design: #{Map.get(mission, :name, "Mission")}")
-          |> assign(:current_path, "/dashboard/missions")
+          |> assign(:current_path, "/missions")
           |> assign(:strategy_list, @strategies)
           |> assign(:strategy_instructions, @strategy_instructions)
           |> assign(:collapsed, MapSet.new())

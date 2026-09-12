@@ -183,7 +183,7 @@ defmodule GiTF.Dashboard.OverviewLive do
             {:ok, _phase} ->
               {:noreply,
                socket
-               |> put_flash(:info, "Task started — ghost is working on it.")
+               |> put_flash(:info, "Mission started — a ghost is working on it.")
                |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
 
             {:error, reason} ->
@@ -682,14 +682,14 @@ defmodule GiTF.Dashboard.OverviewLive do
           <% end %>
         </div>
 
-        <%!-- Row 3: Active Ghosts, Quest Phases, Pending Approvals --%>
+        <%!-- Row 3: Active Ghosts, Mission Phases, Pending Approvals --%>
         <div class="card">
           <div class="card-label">Active Ghosts</div>
           <div class="card-value blue">{@active_ghosts}</div>
           <div class="card-label" style="margin-top:0.25rem">{@ghost_count} total</div>
         </div>
         <div class="card">
-          <div class="card-label">Quest Phases</div>
+          <div class="card-label">Mission Phases</div>
           <div class="card-value purple">{@implementation_quests}</div>
           <div class="card-label" style="margin-top:0.25rem">
             R:{@research_quests} P:{@planning_quests} I:{@implementation_quests}

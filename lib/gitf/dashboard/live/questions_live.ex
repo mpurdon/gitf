@@ -190,8 +190,8 @@ defmodule GiTF.Dashboard.QuestionsLive do
         </div>
       <% else %>
         <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.9rem">
-          {length(@open)} {if length(@open) == 1, do: "mission is", else: "questions are"}
-          holding the factory. Oldest first.
+          {length(@open)} {if length(@open) == 1, do: "mission is", else: "missions are"}
+          holding for an answer. Oldest first.
         </div>
         <div :for={inquiry <- @open}>
           <div :if={inquiry[:mission_goal]} style="font-size:0.78rem; color:var(--muted); margin:0 0 0.25rem 0.2rem">

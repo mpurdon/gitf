@@ -199,6 +199,10 @@ defmodule GiTF.Dashboard.MissionsLive do
   end
 
   defp load_quests do
+    # One pass for every mission's end time — terminal_transition_at/1 scans
+    # the whole transition collection, and this list asks for sixty of them.
+    terminal_at = GiTF.Missions.terminal_transition_index()
+
     GiTF.Missions.list()
     |> Enum.map(fn mission ->
       m =
@@ -225,28 +229,9 @@ defmodule GiTF.Dashboard.MissionsLive do
         end
 
       duration =
-        case {m[:inserted_at], m[:updated_at]} do
-          {%DateTime{} = s, %DateTime{} = e} when m.status in ["completed", "failed"] ->
-            secs = DateTime.diff(e, s, :second)
-
-            cond do
-              secs < 60 -> "#{secs}s"
-              secs < 3600 -> "#{div(secs, 60)}m"
-              true -> "#{div(secs, 3600)}h#{rem(div(secs, 60), 60)}m"
-            end
-
-          {%DateTime{} = s, _} ->
-            secs = DateTime.diff(DateTime.utc_now(), s, :second)
-
-            cond do
-              secs < 60 -> "#{secs}s"
-              secs < 3600 -> "#{div(secs, 60)}m"
-              true -> "#{div(secs, 3600)}h#{rem(div(secs, 60), 60)}m"
-            end
-
-          _ ->
-            "-"
-        end
+        m
+        |> GiTF.Missions.duration_seconds(Map.get(terminal_at, m.id))
+        |> GiTF.Dashboard.Helpers.duration()
 
       Map.merge(m, %{effective_priority: priority, budget_pct: budget_pct, duration: duration})
     end)
@@ -317,7 +302,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                 <th class="sortable" phx-click="sort" phx-value-col="phase">Phase {sort_arrow(@sort_by, @sort_dir, :phase)}</th>
                 <th class="sortable" phx-click="sort" phx-value-col="budget">Budget {sort_arrow(@sort_by, @sort_dir, :budget)}</th>
                 <th>Duration</th>
-                <th>Jobs</th>
+                <th>Ops</th>
                 <th></th>
               </tr>
             </thead>
@@ -374,7 +359,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                           <table>
                             <thead>
                               <tr>
-                                <th>Job ID</th>
+                                <th>Op ID</th>
                                 <th>Title</th>
                                 <th>Status</th>
                                 <th>Audit</th>

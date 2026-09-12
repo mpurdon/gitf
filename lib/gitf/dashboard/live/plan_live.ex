@@ -21,7 +21,7 @@ defmodule GiTF.Dashboard.PlanLive do
         socket =
           socket
           |> assign(:page_title, "Plan: #{Map.get(mission, :name, "Mission")}")
-          |> assign(:current_path, "/dashboard/missions")
+          |> assign(:current_path, "/missions")
           |> assign(:collapsed, MapSet.new())
           |> assign(:expanded_ops, MapSet.new())
           |> assign(:refresh_scheduled, false)

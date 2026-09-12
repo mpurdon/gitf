@@ -37,7 +37,7 @@ defmodule GiTF.Dashboard.Layouts do
             --accent:#4C9AFF; --accent-ink:#0E1218; --accent-soft:#1B2C45;
             --rail:#0D1218; --rail-text:#8B98A9; --rail-on:#FFFFFF; --rail-active:rgba(255,255,255,.07);
             --ok:#43C383; --ok-bg:#15291F; --warn:#E0A82E; --warn-bg:#2E2513;
-            --crit:#EA6A62; --crit-bg:#321B1B; --recon:var(--recon); --recon-bg:#241E38;
+            --crit:#EA6A62; --crit-bg:#321B1B; --recon:#A78BFA; --recon-bg:#241E38;
             --off:#6B7684; --off-bg:#232933;
             --shadow:0 1px 2px rgba(0,0,0,.3);
             --mono:"JetBrains Mono","SF Mono","Fira Code",ui-monospace,monospace;
@@ -641,6 +641,14 @@ defmodule GiTF.Dashboard.Layouts do
           .sidebar-stat-row:hover { background: var(--panel-2); }
           .sidebar-stat-label { color: var(--muted); }
           .sidebar-stat-value { font-weight: 700; font-family: monospace; font-size: 1rem; }
+          /* The call sites conditionally apply these (e.g. "red" only when
+             failures > 0) and nothing defined them, so every counter rendered
+             in one colour and the condition did nothing. */
+          .sidebar-stat-value.green { color: var(--ok); }
+          .sidebar-stat-value.blue { color: var(--accent); }
+          .sidebar-stat-value.yellow { color: var(--warn); }
+          .sidebar-stat-value.red { color: var(--crit); }
+          .card-value.purple { color: var(--recon); }
 
           /* -- Op filter chips ------------------------------------------------ */
           .op-filters { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line-2); }

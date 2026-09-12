@@ -240,6 +240,57 @@ defmodule GiTF.Missions do
     end)
   end
 
+  @doc """
+  How long a mission actually took, in seconds, or nil when it never started.
+
+  Measured to the phase transition that ENDED it, never to `updated_at`: an
+  outcome poll, a late artifact write or a scoring pass touches that record
+  for days afterwards, which is how the register came to report `190h48m`
+  for a mission the detail page correctly called `29m 38s`. A mission still
+  running is measured to now.
+
+  `ended_at` lets a caller that already knows the terminal timestamp — from
+  `terminal_transition_index/0`, say — skip the lookup.
+  """
+  @spec duration_seconds(map(), DateTime.t() | nil) :: non_neg_integer() | nil
+  def duration_seconds(mission, ended_at \\ :lookup) do
+    with %DateTime{} = started <- mission[:inserted_at],
+         %DateTime{} = ended <- resolve_end(mission, ended_at) do
+      max(DateTime.diff(ended, started, :second), 0)
+    else
+      _ -> nil
+    end
+  end
+
+  defp resolve_end(mission, :lookup) do
+    if finished?(mission),
+      do: terminal_transition_at(mission.id) || mission[:updated_at],
+      else: DateTime.utc_now()
+  end
+
+  defp resolve_end(mission, nil) do
+    if finished?(mission), do: mission[:updated_at], else: DateTime.utc_now()
+  end
+
+  defp resolve_end(_mission, %DateTime{} = ended), do: ended
+
+  @doc """
+  Terminal timestamp per mission id, in one pass over the transitions.
+
+  The register needs this for every row; `terminal_transition_at/1` scans the
+  whole collection per mission, so asking it sixty times is sixty scans.
+  """
+  @spec terminal_transition_index() :: %{String.t() => DateTime.t()}
+  def terminal_transition_index do
+    :mission_phase_transitions
+    |> Archive.all()
+    |> Enum.filter(&(&1[:to_phase] in @terminal_phases))
+    |> Enum.group_by(& &1.mission_id)
+    |> Map.new(fn {id, ts} ->
+      {id, ts |> Enum.max_by(&Map.get(&1, :seq, 0)) |> Map.get(:inserted_at)}
+    end)
+  end
+
   @doc "True when the mission will see no further work from anyone."
   @spec finished?(map()) :: boolean()
   def finished?(mission), do: Map.get(mission, :status) in @finished_statuses

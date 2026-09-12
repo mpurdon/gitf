@@ -190,6 +190,9 @@ defmodule GiTF.Dashboard.AppLayout do
     overview: ["/", "/progress", "/costs"],
     operations: [
       "/missions",
+      # An Op is an Operations object with its own route; without this the op
+      # page could only land on the right rail item by claiming to be a mission.
+      "/ops",
       "/approvals",
       "/questions",
       "/merges",
@@ -204,7 +207,16 @@ defmodule GiTF.Dashboard.AppLayout do
     administration: ["/settings"]
   }
 
-  defp concept_for(current_path) do
+  @doc """
+  Which rail concept a path belongs to.
+
+  Public so a test can hold every page's assigned `current_path` against it:
+  eight LiveViews once assigned a `/dashboard`-prefixed path, matched nothing
+  here, and fell through to `:overview` — so the rail highlighted the wrong
+  concept on every drill-down into a mission, an op or Settings.
+  """
+  @spec concept_for(String.t()) :: atom()
+  def concept_for(current_path) do
     Enum.find_value(@concept_paths, :overview, fn {concept, paths} ->
       Enum.any?(paths, fn
         "/" -> current_path == "/"
