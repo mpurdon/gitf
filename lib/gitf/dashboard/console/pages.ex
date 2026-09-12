@@ -72,8 +72,11 @@ defmodule GiTF.Dashboard.Console.Pages do
 
     <.section title="Waiting on you">
       <:hint><.link patch={Scope.path(@scope, :activity)} class="chip">the inbox ›</.link></:hint>
-      <.rows empty={@inbox == [] && "Nothing is waiting on you."}>
-        <.row :for={e <- Enum.take(@inbox, 5)} cols="86px minmax(0,1fr) 92px">
+      <%!-- Queued only. Listing every activation under a heading that says
+            "waiting on you" is the same lie as a count that disagrees with
+            the rows under it — and it was doing both at once. --%>
+      <.rows empty={Format.queued(@inbox) == [] && "Nothing is waiting on you."}>
+        <.row :for={e <- Enum.take(Format.queued(@inbox), 5)} cols="86px minmax(0,1fr) 92px">
           <.pill>{e[:class]}</.pill>
           <.identity name={e[:summary]} id={"#{e[:ministry_slug]} · #{Format.decision_line(e)}"} />
           <span class="dim">{Format.hhmm(e[:inserted_at])}</span>

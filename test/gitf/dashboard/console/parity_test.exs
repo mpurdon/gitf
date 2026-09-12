@@ -85,8 +85,22 @@ defmodule GiTF.Dashboard.Console.ParityTest do
     src = File.read!(@new)
 
     assert src =~ "Wake &amp; open", "wake-and-open is the path from a phone and must stay"
-    assert src =~ "/wake/", "the bookmark that wakes and forwards must still be advertised"
     assert src =~ "cancel_open", "an operator must be able to stop waiting on a wake"
+  end
+
+  test "the bookmark the page advertises actually resolves" do
+    alias GiTF.Dashboard.Console.Scope
+
+    advertised = "#{Scope.root()}/wake/home-affairs"
+    assert File.read!(@new) =~ "/wake/", "the cold bookmark must still be advertised"
+
+    scope = Scope.from_params(%{"path" => ["wake", "home-affairs"]})
+    assert scope.level == :wake and scope.ministry == "home-affairs"
+    assert Scope.to_path(scope) == advertised
+
+    # and the router has to serve it, or the bookmark is a promise the page cannot keep
+    assert Phoenix.Router.route_info(GiTF.Web.CabinetRouter, "GET", advertised, "cabinet") !=
+             :error
   end
 
   test "an activation can still be started or dismissed" do

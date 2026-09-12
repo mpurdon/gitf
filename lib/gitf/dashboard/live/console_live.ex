@@ -63,7 +63,40 @@ defmodule GiTF.Dashboard.ConsoleLive do
   @impl true
   def handle_params(params, _uri, socket) do
     scope = Scope.from_params(params)
-    {:noreply, socket |> assign(scope: scope) |> assign_object()}
+    socket = socket |> assign(scope: scope) |> assign_object()
+
+    # /console/wake/<slug> is the cold bookmark: it is an act, not a place, so
+    # it starts the wake and settles on the ministry rather than rendering a
+    # page of its own. Landing here from a phone with the fleet asleep is the
+    # single path that has to work, so it must not depend on the Console
+    # already being open.
+    if scope.level == :wake do
+      {:noreply, wake_and_open(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp wake_and_open(%{assigns: %{ministry: nil, scope: scope}} = socket) do
+    socket
+    |> put_flash(:error, "No ministry called #{scope.ministry} is registered.")
+    |> push_patch(to: Scope.path(scope, :cabinet))
+  end
+
+  defp wake_and_open(%{assigns: %{ministry: m, scope: scope}} = socket) do
+    socket = push_patch(socket, to: Scope.path(scope, :ministry, ministry: m.slug))
+
+    cond do
+      is_nil(m[:url]) ->
+        put_flash(socket, :error, "#{m.slug} has no URL to open.")
+
+      Format.running?(m) ->
+        redirect(socket, external: factory_url(m, "/dashboard"))
+
+      true ->
+        record(socket, "wake", m.slug, "starting · will open")
+        start_open(socket, m, "/dashboard")
+    end
   end
 
   # A record changed somewhere — the watcher observed a transition, the Gate
@@ -233,6 +266,14 @@ defmodule GiTF.Dashboard.ConsoleLive do
     """
   end
 
+  # :wake redirects in handle_params, but the render between the two must not
+  # crash — a LiveView that raises on a bookmark is a bookmark that does not work.
+  defp head(%{scope: %{level: :wake}} = assigns) do
+    ~H"""
+    <.object_head kind="Ministry" name={@scope.ministry || "…"} sub="waking…" />
+    """
+  end
+
   defp head(%{ministry: nil} = assigns) do
     ~H"""
     <.object_head kind="Ministry" name={@scope.ministry || "Unknown"} />
@@ -352,6 +393,11 @@ defmodule GiTF.Dashboard.ConsoleLive do
   defp page(%{scope: %{level: :activity}} = assigns) do
     ~H"""
     <Pages.activity scope={@scope} activity={@activity} inbox={@inbox} filter={@filter} />
+    """
+  end
+
+  defp page(%{scope: %{level: :wake}} = assigns) do
+    ~H"""
     """
   end
 

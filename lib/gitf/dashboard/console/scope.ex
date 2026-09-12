@@ -15,6 +15,7 @@ defmodule GiTF.Dashboard.Console.Scope do
       /m/<slug>               one ministry
       /m/<slug>/ruleset       its activation ruleset
       /m/<slug>/registration  its registry record
+      /wake/<slug>            wake that factory and open it — the cold bookmark
 
   The depth tab (`overview` / `evidence` / `raw`) is a query parameter rather
   than a path segment: it is a lens on the object, not a different object, and
@@ -24,7 +25,7 @@ defmodule GiTF.Dashboard.Console.Scope do
   @enforce_keys [:level]
   defstruct level: :cabinet, ministry: nil, tab: "overview"
 
-  @type level :: :cabinet | :activity | :ministry | :ruleset | :registration
+  @type level :: :cabinet | :activity | :ministry | :ruleset | :registration | :wake
   @type t :: %__MODULE__{level: level(), ministry: String.t() | nil, tab: String.t()}
 
   @tabs ~w(overview evidence raw)
@@ -47,6 +48,7 @@ defmodule GiTF.Dashboard.Console.Scope do
     case Map.get(params, "path") || [] do
       [] -> %__MODULE__{level: :cabinet, tab: tab}
       ["activity"] -> %__MODULE__{level: :activity, tab: tab}
+      ["wake", slug] -> %__MODULE__{level: :wake, ministry: slug, tab: tab}
       ["m", slug] -> %__MODULE__{level: :ministry, ministry: slug, tab: tab}
       ["m", slug, child] -> ministry_child(slug, child, tab)
       _ -> %__MODULE__{level: :cabinet, tab: tab}
@@ -76,6 +78,7 @@ defmodule GiTF.Dashboard.Console.Scope do
   defp segments(%{level: :ministry, ministry: slug}), do: "/m/#{slug}"
   defp segments(%{level: :ruleset, ministry: slug}), do: "/m/#{slug}/ruleset"
   defp segments(%{level: :registration, ministry: slug}), do: "/m/#{slug}/registration"
+  defp segments(%{level: :wake, ministry: slug}), do: "/wake/#{slug}"
 
   defp query(%{tab: "overview"}), do: ""
   defp query(%{tab: tab}), do: "?t=#{tab}"
@@ -101,6 +104,8 @@ defmodule GiTF.Dashboard.Console.Scope do
     do: [{"overview", "Rules & coverage"}, {"evidence", "What it decided"}, {"raw", "Raw JDM"}]
 
   def tabs(%__MODULE__{level: :registration}), do: [{"overview", "Record"}, {"raw", "Raw"}]
+  # :wake is an act, not a place — it redirects before a tab strip means anything.
+  def tabs(%__MODULE__{level: :wake}), do: []
 
   def tabs(%__MODULE__{}),
     do: [{"overview", "Overview"}, {"evidence", "Evidence"}, {"raw", "Raw"}]
@@ -125,6 +130,7 @@ defmodule GiTF.Dashboard.Console.Scope do
 
         case level do
           :ministry -> [cabinet, ministry]
+          :wake -> [cabinet, ministry]
           :ruleset -> [cabinet, ministry, {"Activation ruleset", path(scope, :ruleset)}]
           :registration -> [cabinet, ministry, {"Registration", path(scope, :registration)}]
         end

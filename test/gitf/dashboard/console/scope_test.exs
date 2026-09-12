@@ -85,6 +85,20 @@ defmodule GiTF.Dashboard.Console.ScopeTest do
     assert Scope.crumbs(%Scope{level: :cabinet}) == [{"Cabinet", "/console"}]
   end
 
+  test "the cold bookmark is an address, and names its ministry" do
+    scope = %Scope{level: :wake, ministry: "home-affairs"}
+    assert Scope.to_path(scope) == "/console/wake/home-affairs"
+    assert parse("/console/wake/home-affairs") == scope
+
+    # it is an act, not a place: no tab strip, and it still knows where it is
+    assert Scope.tabs(scope) == []
+
+    assert Scope.crumbs(scope, & &1) == [
+             {"Cabinet", "/console"},
+             {"home-affairs", "/console/m/home-affairs"}
+           ]
+  end
+
   test "the ministry in scope is the subtree that opens" do
     assert Scope.expanded(%Scope{level: :cabinet}) |> Enum.empty?()
     assert Scope.expanded(%Scope{level: :ruleset, ministry: "ha"}) |> MapSet.member?("ha")

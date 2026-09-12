@@ -71,24 +71,40 @@ defmodule GiTF.Dashboard.Console.Tree do
     [head | if(open?, do: children(m, scope, slug), else: [])]
   end
 
-  # An unprovisioned ministry has a registration and nothing else — saying so
-  # is more useful than an empty branch.
+  # Three different reasons a ministry lists no sectors, and they are not the
+  # same thing to an operator: it was never provisioned; it has a factory that
+  # is asleep; or it is awake and genuinely has none. The Cabinet holds no
+  # mission state by design, so sectors arrive over the proxy — saying "no
+  # factory yet" about a registered, sleeping factory is simply false.
   defp children(m, scope, slug) do
     sectors = m[:sectors] || []
 
     sector_part =
-      if sectors == [] do
-        [
-          node("no-factory:#{slug}", :hint, "no factory yet", 2,
-            path: Scope.path(scope, :registration, ministry: slug)
-          )
-        ]
-      else
-        [group("sectors:#{slug}", "Sectors", 2) | Enum.map(sectors, &sector_node(&1, slug))]
+      cond do
+        sectors != [] ->
+          [group("sectors:#{slug}", "Sectors", 2) | Enum.map(sectors, &sector_node(&1, slug))]
+
+        is_nil(m[:instance_id]) ->
+          [
+            node("no-factory:#{slug}", :hint, "no factory yet", 2,
+              path: Scope.path(scope, :registration, ministry: slug)
+            )
+          ]
+
+        true ->
+          [
+            group("sectors:#{slug}", "Sectors", 2),
+            node("sectors-away:#{slug}", :hint, sector_hint(m), 2,
+              path: Scope.path(scope, :ministry, ministry: slug)
+            )
+          ]
       end
 
     sector_part ++ [group("config:#{slug}", "Configuration", 2) | config_nodes(m, scope, slug)]
   end
+
+  defp sector_hint(%{box: %{state: "running"}}), do: "loading\u2026"
+  defp sector_hint(_), do: "wake the factory to browse"
 
   defp sector_node(sector, slug) do
     name = sector[:name] || sector["name"] || to_string(sector)

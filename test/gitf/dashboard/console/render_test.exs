@@ -142,6 +142,32 @@ defmodule GiTF.Dashboard.Console.RenderTest do
       assert html =~ "rule 4"
     end
 
+    test "\"waiting on you\" means queued — not every activation ever seen" do
+      forwarded = %{
+        id: "e0",
+        class: "bug",
+        summary: "issue #23",
+        status: "forwarded",
+        ministry_slug: "home-affairs",
+        decision: %{action: "wake", mode: "normal", rule: 2},
+        inserted_at: DateTime.utc_now()
+      }
+
+      html =
+        render(:cabinet, %{
+          scope: %Scope{level: :cabinet},
+          ministries: [],
+          activity: [],
+          inbox: [forwarded],
+          cabinet: %{host: "h", release: "v", ingress: "i"}
+        })
+
+      assert html =~ "Nothing is waiting on you.",
+             "a forwarded activation is history, not a thing waiting on a person"
+
+      refute html =~ "issue #23"
+    end
+
     test "an empty inbox is a sentence, not a blank box" do
       html =
         render(:activity, %{
