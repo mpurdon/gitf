@@ -126,15 +126,24 @@ defmodule GiTF.Cabinet.Discord.Actions do
 
       {:inbox_start, id} ->
         with :ok <- Gate.start_queued(id) do
-          GiTF.Cabinet.Activity.record(actor, "start_queued", id, "ok")
+          GiTF.Cabinet.Activity.record(actor, "start_queued", id, "ok", ministry_of(id))
           {:ok, "started by #{who}"}
         end
 
       {:inbox_drop, id} ->
         with :ok <- Gate.dismiss_queued(id) do
-          GiTF.Cabinet.Activity.record(actor, "dismiss_queued", id, "ok")
+          GiTF.Cabinet.Activity.record(actor, "dismiss_queued", id, "ok", ministry_of(id))
           {:ok, "dropped by #{who}"}
         end
+    end
+  end
+
+  # An inbox id says nothing about which ministry it was headed for; the entry
+  # does, and the Console groups by it.
+  defp ministry_of(id) do
+    case Enum.find(Gate.inbox(), &(&1.id == id)) do
+      %{ministry_slug: slug} -> slug
+      _ -> nil
     end
   end
 
@@ -149,7 +158,7 @@ defmodule GiTF.Cabinet.Discord.Actions do
         if String.starts_with?(text, "Error:") do
           {:error, String.replace_prefix(text, "Error: ", "")}
         else
-          GiTF.Cabinet.Activity.record(actor, name, "#{slug} #{args["id"] || ""}", "ok")
+          GiTF.Cabinet.Activity.record(actor, name, "#{slug} #{args["id"] || ""}", "ok", slug)
           :ok
         end
 

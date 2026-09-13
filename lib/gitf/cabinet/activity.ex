@@ -11,13 +11,29 @@ defmodule GiTF.Cabinet.Activity do
   @collection :cabinet_activity
   @keep 200
 
-  def record(actor, action, target, result \\ nil) do
+  @doc """
+  Records one act.
+
+  `target` is free text — a slug, an issue title, "home-affairs rule 3" — so it
+  cannot in general be read back as a ministry. `ministry` says which ministry
+  the act was about, and is what the Console groups and filters by.
+
+  Most acts pass the slug as the target, so it is derived from there when not
+  given; pass it explicitly whenever the target is something else. Anything not
+  slug-shaped is recorded as no ministry rather than as a wrong one — a
+  dismissed issue's title once appeared in the Console's ministry facet as
+  though it were a ministry.
+  """
+  def record(actor, action, target, result \\ nil, ministry \\ nil) do
+    target = to_string(target)
+
     {:ok, entry} =
       Archive.insert(@collection, %{
         actor: to_string(actor),
         action: to_string(action),
-        target: to_string(target),
+        target: target,
         result: result && to_string(result),
+        ministry: slug(ministry || target),
         at: DateTime.utc_now()
       })
 
@@ -33,6 +49,15 @@ defmodule GiTF.Cabinet.Activity do
     |> Archive.all()
     |> Enum.sort_by(& &1.at, {:desc, DateTime})
     |> Enum.take(limit)
+  end
+
+  # A slug or nothing. Trailing whitespace has reached this field before, and a
+  # slug that differs from another only by a space reads as two ministries.
+  defp slug(nil), do: nil
+
+  defp slug(value) do
+    trimmed = value |> to_string() |> String.trim()
+    if trimmed =~ ~r/^[a-z0-9][a-z0-9-]*$/, do: trimmed
   end
 
   defp prune do

@@ -182,7 +182,8 @@ defmodule GiTF.Dashboard.Console.Layouts do
           .row:last-child{border-bottom:0}
           a.row:hover,button.row:hover{background:var(--panel-2)}
           .row .nm,.needs .nm{font-weight:500;overflow:hidden;text-overflow:ellipsis}
-          .row .dim,.needs .dim{color:var(--ink-3);font-family:var(--mono);font-size:var(--t-sm)}
+          .row .dim,.needs .dim{color:var(--ink-3);font-family:var(--mono);font-size:var(--t-sm);
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
           .empty{padding:var(--s6);text-align:center;color:var(--ink-3);font-size:var(--t-md)}
           .kv{display:grid;grid-template-columns:140px minmax(0,1fr);gap:7px var(--s4);
             font-size:var(--t-md);margin:0}

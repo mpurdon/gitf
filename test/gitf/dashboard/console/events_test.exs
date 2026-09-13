@@ -227,4 +227,49 @@ defmodule GiTF.Dashboard.Console.EventsTest do
     assert filters.kind == ["activation"]
     assert Events.toggle(filters, :kind, :activation).kind == []
   end
+
+  describe "the vocabulary matches what the Cabinet actually writes" do
+    test "every recorded action has a kind, and none fall through to :other" do
+      # `Activity.record(actor, "<action>", ...)` — the literal second argument
+      # at every call site in lib/. A new one landing in :other is how the
+      # facet ended up offering "Other" for a perfectly ordinary dismissal.
+      actions =
+        Path.wildcard("lib/**/*.ex")
+        |> Enum.flat_map(fn file ->
+          Regex.scan(~r/Activity\.record\(\s*[^,]+,\s*"([a-z_.]+)"/, File.read!(file))
+        end)
+        |> Enum.map(&List.last/1)
+        |> Enum.uniq()
+
+      assert length(actions) > 5, "the scan found nothing; the call shape must have changed"
+
+      unmapped =
+        Enum.filter(actions, fn action ->
+          acts = [%{action: action, at: DateTime.utc_now(), target: "home-affairs"}]
+          [event] = Events.build([], acts, %Scope{level: :activity})
+          event.kind == :other
+        end)
+
+      assert unmapped == [], "unmapped actions: #{inspect(unmapped)}"
+    end
+
+    test "an act's ministry comes from the record, not from parsing its target" do
+      act = %{
+        action: "dismiss",
+        target: "issue #100: Crash when saving priorities",
+        ministry: "home-affairs",
+        at: DateTime.utc_now()
+      }
+
+      [event] = Events.build([], [act], %Scope{level: :activity})
+
+      assert event.ministry == "home-affairs"
+      assert event.kind == :activation
+
+      # And without one, no ministry — never the issue title, which is how a
+      # dismissed issue appeared in the ministry facet as though it were one.
+      [bare] = Events.build([], [Map.delete(act, :ministry)], %Scope{level: :activity})
+      assert bare.ministry == nil
+    end
+  end
 end

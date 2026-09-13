@@ -833,7 +833,7 @@ defmodule GiTF.Dashboard.Console.Pages do
         <.rows>
           <.row
             :for={e <- rows}
-            cols="60px 104px 132px minmax(0,1fr) 112px"
+            cols="60px 104px 168px minmax(0,1fr) 112px"
             to={e.to}
           >
             <span class="dim">{Format.hhmm(e.at)}</span>

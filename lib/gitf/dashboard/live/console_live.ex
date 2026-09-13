@@ -690,9 +690,13 @@ defmodule GiTF.Dashboard.ConsoleLive do
   end
 
   def handle_event("start_entry", %{"id" => id}, socket) do
+    # Read the entry before acting: dismissing takes it out of the inbox, and
+    # the act has to say which ministry it was about.
+    slug = entry_ministry(socket, id)
+
     case Gate.start_queued(id) do
       :ok ->
-        record(socket, "start_queued", id, "ok")
+        record(socket, "start_queued", id, "ok", slug)
 
         {:noreply,
          socket |> put_flash(:info, "Starting it — waking the factory and forwarding.") |> load()}
@@ -703,9 +707,11 @@ defmodule GiTF.Dashboard.ConsoleLive do
   end
 
   def handle_event("dismiss_entry", %{"id" => id}, socket) do
+    slug = entry_ministry(socket, id)
+
     case Gate.dismiss_queued(id) do
       :ok ->
-        record(socket, "dismiss_queued", id, "ok")
+        record(socket, "dismiss_queued", id, "ok", slug)
         {:noreply, socket |> put_flash(:info, "Dismissed. Nothing was woken.") |> load()}
 
       other ->
@@ -940,8 +946,15 @@ defmodule GiTF.Dashboard.ConsoleLive do
     base <> to
   end
 
-  defp record(socket, action, target, result),
-    do: Activity.record(socket.assigns.actor, action, target, result)
+  defp entry_ministry(socket, id) do
+    case Enum.find(socket.assigns.inbox, &(&1.id == id)) do
+      %{ministry_slug: slug} -> slug
+      _ -> nil
+    end
+  end
+
+  defp record(socket, action, target, result, ministry \\ nil),
+    do: Activity.record(socket.assigns.actor, action, target, result, ministry)
 
   defp actor(socket) do
     case get_connect_params(socket) do

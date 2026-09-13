@@ -83,7 +83,7 @@ defmodule GiTF.Dashboard.Console.Events do
       detail: decision_detail(entry),
       result: entry[:status],
       tone: status_tone(entry[:status]),
-      ministry: entry[:ministry_slug],
+      ministry: slug(entry[:ministry_slug]),
       to: ministry_path(scope, entry[:ministry_slug], :ruleset),
       needs: needs_of(entry)
     }
@@ -102,29 +102,40 @@ defmodule GiTF.Dashboard.Console.Events do
       detail: nil,
       result: act[:result],
       tone: result_tone(act[:result]),
-      ministry: act[:target],
-      to: ministry_path(scope, act[:target], :ministry),
+      to: ministry_path(scope, act[:ministry] || slug(act[:target]), :ministry),
+      # Acts recorded before the field existed carry the ministry in `target`
+      # when the target happened to be a slug, and something else when it did
+      # not; `slug/1` is what tells the two apart either way.
+      ministry: act[:ministry] || slug(act[:target]),
       needs: nil
     }
   end
 
-  # The Cabinet writes a small, closed set of actions. Anything unmapped lands
-  # in :other rather than being silently filed under something it is not.
+  # The Cabinet writes a small, closed set of actions — every `Activity.record`
+  # call site in lib/ is covered here. Anything unmapped lands in :other rather
+  # than being silently filed under something it is not.
   defp kind_of("wake"), do: :wake
   defp kind_of("stop"), do: :sleep
+  defp kind_of("sleep"), do: :sleep
   defp kind_of("observed"), do: :observation
   defp kind_of("snapshot"), do: :observation
   defp kind_of("mode"), do: :policy
   defp kind_of("rule"), do: :policy
   defp kind_of("ruleset.publish"), do: :policy
   defp kind_of("ruleset.discard"), do: :policy
+  defp kind_of("idle_stop_override"), do: :policy
   defp kind_of("edit"), do: :registry
   defp kind_of("register"), do: :registry
+  defp kind_of("start"), do: :activation
+  defp kind_of("dismiss"), do: :activation
   defp kind_of("start_queued"), do: :activation
   defp kind_of("dismiss_queued"), do: :activation
   defp kind_of(_), do: :other
 
   defp humanise("observed"), do: "observed"
+  defp humanise("start"), do: "started a queued activation"
+  defp humanise("dismiss"), do: "dismissed a queued activation"
+  defp humanise("idle_stop_override"), do: "held awake"
   defp humanise("mode"), do: "set the mode of"
   defp humanise("ruleset.publish"), do: "published a ruleset for"
   defp humanise("ruleset.discard"), do: "discarded a ruleset draft for"
@@ -181,12 +192,22 @@ defmodule GiTF.Dashboard.Console.Events do
     end
   end
 
+  # A slug or nothing. A ministry that differs from another only by a trailing
+  # space reads as two ministries in the facet, and has.
+  defp slug(nil), do: nil
+
+  defp slug(value) do
+    trimmed = value |> to_string() |> String.trim()
+    if trimmed =~ ~r/^[a-z0-9][a-z0-9-]*$/, do: trimmed
+  end
+
   defp ministry_path(_scope, nil, _level), do: nil
 
-  defp ministry_path(scope, slug, level) do
-    if String.match?(slug, ~r/^[a-z0-9][a-z0-9-]*$/),
-      do: Scope.path(scope, level, ministry: slug),
-      else: nil
+  defp ministry_path(scope, value, level) do
+    case slug(value) do
+      nil -> nil
+      slug -> Scope.path(scope, level, ministry: slug)
+    end
   end
 
   # ==========================================================================

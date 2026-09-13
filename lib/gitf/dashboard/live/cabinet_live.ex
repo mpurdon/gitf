@@ -154,7 +154,15 @@ defmodule GiTF.Dashboard.CabinetLive do
     case Gate.start_queued(id) do
       :ok ->
         entry = Enum.find(socket.assigns.inbox, &(&1.id == id))
-        Activity.record(socket.assigns.actor, "start", (entry && entry.summary) || id, "waking")
+
+        Activity.record(
+          socket.assigns.actor,
+          "start",
+          (entry && entry.summary) || id,
+          "waking",
+          entry && entry.ministry_slug
+        )
+
         {:noreply, socket |> put_flash(:info, "Waking the factory and forwarding.") |> load()}
 
       other ->
@@ -171,7 +179,8 @@ defmodule GiTF.Dashboard.CabinetLive do
           socket.assigns.actor,
           "dismiss",
           (entry && entry.summary) || id,
-          "dismissed"
+          "dismissed",
+          entry && entry.ministry_slug
         )
 
         {:noreply, socket |> put_flash(:info, "Dismissed — nothing woken.") |> load()}
@@ -251,7 +260,14 @@ defmodule GiTF.Dashboard.CabinetLive do
          {:ok, updated_doc} <- cycle_rule_action(ministry, n),
          {:ok, m} <- Registry.update(id, &Map.put(&1, :rules, updated_doc)) do
       row = Enum.find(policy_rows(m), &(&1.n == n))
-      Activity.record(socket.assigns.actor, "rule", "#{m.slug} rule #{n}", row && row.action)
+
+      Activity.record(
+        socket.assigns.actor,
+        "rule",
+        "#{m.slug} rule #{n}",
+        row && row.action,
+        m.slug
+      )
 
       {:noreply,
        socket |> put_flash(:info, "Rule #{n}: #{row && row.action} — first hit wins.") |> load()}
