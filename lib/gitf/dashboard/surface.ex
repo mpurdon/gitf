@@ -114,7 +114,11 @@ defmodule GiTF.Dashboard.Surface do
     .objhead{padding:var(--s4) var(--s5) 0;background:var(--panel)}
     .objhead .idl{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;margin-top:3px}
     .objhead h2{font-size:var(--t-xl);font-weight:600;letter-spacing:-.015em}
-    .objhead .sub{font-family:var(--mono);font-size:var(--t-sm);color:var(--ink-3);margin-top:5px}
+    /* Two lines, then ellipsis. `sub` is a one-liner by intent, but an op's
+       description is sometimes a 1,500-word prompt, and a head that grows to
+       fit it stops being a head. The full text belongs in the body. */
+    .objhead .sub{font-family:var(--mono);font-size:var(--t-sm);color:var(--ink-3);margin-top:5px;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .mrow{display:flex;gap:var(--s6);flex-wrap:wrap;padding:var(--s4) 0 var(--s3)}
     .acts{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center;padding-bottom:var(--s4)}
     .tabsrow{display:flex;gap:var(--s1);padding:0 var(--s5);background:var(--panel);
@@ -140,6 +144,10 @@ defmodule GiTF.Dashboard.Surface do
     .row .dim,.needs .dim{color:var(--ink-3);font-family:var(--mono);font-size:var(--t-sm);
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .empty{padding:var(--s6);text-align:center;color:var(--ink-3);font-size:var(--t-md)}
+    /* The body of an object page. Distinct from the Console's `.body`, which is
+       a scroll container inside a fixed-height frame — on a page that sits in
+       ordinary document flow that would add a nested scrollbar and 70px of air. */
+    .objbody{padding-top:var(--s5)}
     .kv{display:grid;grid-template-columns:140px minmax(0,1fr);gap:7px var(--s4);
       font-size:var(--t-md);margin:0}
     .kv dt{color:var(--ink-3)}

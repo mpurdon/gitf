@@ -14,8 +14,6 @@ defmodule GiTF.Dashboard.Surface.Components do
 
   use Phoenix.Component
 
-  alias GiTF.Dashboard.Console.Scope
-
   # -- status ----------------------------------------------------------------
 
   @doc "A semantic dot. Colour means something here, so `nil` is the common case."
@@ -86,6 +84,7 @@ defmodule GiTF.Dashboard.Surface.Components do
 
   @doc "The trail of ancestors, each a link back to itself."
   attr(:crumbs, :list, required: true)
+  attr(:link, :atom, default: :patch, doc: ":patch within one LiveView, :navigate across two")
   slot(:inner_block)
 
   def scopebar(assigns) do
@@ -94,7 +93,14 @@ defmodule GiTF.Dashboard.Surface.Components do
       <%= for {{label, path}, i} <- Enum.with_index(@crumbs) do %>
         <span :if={i > 0} class="sep">›</span>
         <.link
+          :if={@link == :patch}
           patch={path}
+          class="crumb"
+          aria-current={if i == length(@crumbs) - 1, do: "page"}
+        >{label}</.link>
+        <.link
+          :if={@link == :navigate}
+          navigate={path}
           class="crumb"
           aria-current={if i == length(@crumbs) - 1, do: "page"}
         >{label}</.link>
@@ -112,18 +118,20 @@ defmodule GiTF.Dashboard.Surface.Components do
   Depth is part of the address: a link to the evidence for a decision is
   something you can send to someone.
   """
-  attr(:scope, :map, required: true)
+  attr(:tabs, :list, required: true, doc: "`{label, path, current?}` — already resolved")
+  attr(:link, :atom, default: :patch, doc: ":patch within one LiveView, :navigate across two")
 
   def tabs(assigns) do
-    assigns = assign(assigns, :tabs, Scope.tabs(assigns.scope))
-
     ~H"""
     <div class="tabsrow">
-      <.link
-        :for={{id, label} <- @tabs}
-        patch={Scope.to_path(Scope.with_tab(@scope, id))}
-        aria-current={if @scope.tab == id, do: "page"}
-      >{label}</.link>
+      <%= for {label, path, current?} <- @tabs do %>
+        <.link :if={@link == :patch} patch={path} aria-current={if current?, do: "page"}>
+          {label}
+        </.link>
+        <.link :if={@link == :navigate} navigate={path} aria-current={if current?, do: "page"}>
+          {label}
+        </.link>
+      <% end %>
     </div>
     """
   end
@@ -161,12 +169,28 @@ defmodule GiTF.Dashboard.Surface.Components do
   """
   attr(:cols, :string, required: true)
   attr(:to, :string, default: nil)
+  attr(:link, :atom, default: :patch, doc: ":patch within one LiveView, :navigate across two")
   attr(:rest, :global)
   slot(:inner_block, required: true)
 
   def row(assigns) do
     ~H"""
-    <.link :if={@to} patch={@to} class="row" style={"grid-template-columns:#{@cols}"} {@rest}>
+    <.link
+      :if={@to && @link == :patch}
+      patch={@to}
+      class="row"
+      style={"grid-template-columns:#{@cols}"}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </.link>
+    <.link
+      :if={@to && @link == :navigate}
+      navigate={@to}
+      class="row"
+      style={"grid-template-columns:#{@cols}"}
+      {@rest}
+    >
       {render_slot(@inner_block)}
     </.link>
     <div :if={!@to} class="row" style={"grid-template-columns:#{@cols}"} {@rest}>

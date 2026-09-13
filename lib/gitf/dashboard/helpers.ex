@@ -23,6 +23,56 @@ defmodule GiTF.Dashboard.Helpers do
     end
   end
 
+  @doc """
+  A status as a Surface tone.
+
+  `status_badge/1` and friends return CSS class names — a second vocabulary for
+  the same fact, and one the shared components cannot read. These map the same
+  domain statuses onto the four tones every surface already speaks, so a running
+  op reads the same colour on the Catwalk, in the Console rail, and in Discord's
+  eventual embed.
+  """
+  @spec tone(term()) :: atom() | nil
+  def tone(status) when is_atom(status) and not is_nil(status), do: tone(to_string(status))
+
+  def tone(status) when is_binary(status) do
+    cond do
+      status in ~w(completed done closed merged passed pass healthy ok clean) ->
+        :ok
+
+      status in ~w(failed fail crashed killed rejected conflicted error) ->
+        :crit
+
+      status in ~w(active running assigned starting working executing validating syncing) ->
+        :recon
+
+      status in ~w(paused blocked pending awaiting_approval awaiting_input behind risky) ->
+        :warn
+
+      true ->
+        nil
+    end
+  end
+
+  def tone(_), do: nil
+
+  @doc "A mission phase as a tone. Phases are progress, not health."
+  @spec phase_tone(term()) :: atom() | nil
+  def phase_tone(phase) when is_atom(phase) and not is_nil(phase),
+    do: phase_tone(to_string(phase))
+
+  def phase_tone(phase) when is_binary(phase) do
+    cond do
+      phase == "completed" -> :ok
+      phase in ~w(awaiting_approval awaiting_input) -> :warn
+      phase in ~w(research requirements design review planning) -> nil
+      phase in ~w(implementation validation simplify scoring sync) -> :recon
+      true -> nil
+    end
+  end
+
+  def phase_tone(_), do: nil
+
   def status_badge("completed"), do: "badge-green"
   def status_badge("done"), do: "badge-green"
   def status_badge("active"), do: "badge-blue"

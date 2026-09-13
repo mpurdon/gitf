@@ -1,10 +1,19 @@
 defmodule GiTF.Dashboard.OpDetailLive do
-  @moduledoc "Op detail page showing full op metadata, acceptance criteria, and verification."
+  @moduledoc """
+  One op, at whatever depth you asked for.
+
+  An op is the smallest unit of work the factory schedules, and the question
+  about one is almost always "what is it doing, and if it went wrong, why". So
+  Overview is that; Evidence is everything the op produced and every attempt it
+  took; Raw is the record, because the simplified view must never be a dead end.
+  """
 
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   @heartbeat_interval :timer.seconds(15)
 
@@ -34,6 +43,11 @@ defmodule GiTF.Dashboard.OpDetailLive do
          |> push_navigate(to: "/dashboard/missions")}
     end
   end
+
+  # Depth is a query parameter, so a link to an op's evidence is a link you can
+  # send to someone.
+  @impl true
+  def handle_params(params, _uri, socket), do: {:noreply, assign(socket, :tab, params["t"])}
 
   @impl true
   def handle_info(:heartbeat, socket) do
@@ -184,225 +198,260 @@ defmodule GiTF.Dashboard.OpDetailLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assigns
+      |> assign(:tab, assigns[:tab] || "overview")
+      |> assign(:failed?, Map.get(assigns.op, :status) == "failed")
+
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <.breadcrumbs crumbs={[
-        {"Missions", "/dashboard/missions"},
-        {(@mission && Map.get(@mission, :name)) || "Mission", @op[:mission_id] && "/dashboard/missions/#{@op.mission_id}"},
-        {Map.get(@op, :title, "Op"), nil}
-      ]} />
-      <%!-- Header --%>
-      <div style="margin-bottom:1.25rem">
-        <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap">
-          <span class={"badge #{status_badge(Map.get(@op, :status, "unknown"))}"}>{Map.get(@op, :status, "unknown")}</span>
-          <%= if Map.get(@op, :verification_status) do %>
-            <span class={"badge #{verification_badge(@op.verification_status)}"}>{@op.verification_status}</span>
-          <% end %>
-          <span style="font-family:monospace; font-size:0.75rem; color:var(--ink-3)">{@op.id}</span>
-        </div>
-        <h1 class="page-title" style="margin-bottom:0.75rem; font-size:1.1rem; line-height:1.4; word-break:break-word">
-          {Map.get(@op, :title, "Op")}
-        </h1>
-        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-          <%= if @prev_op do %>
-            <a href={"/dashboard/ops/#{@prev_op.id}"} class="btn btn-grey" title={Map.get(@prev_op, :title, "Previous op")}>&larr; Prev</a>
-          <% end %>
-          <%= if @next_op do %>
-            <a href={"/dashboard/ops/#{@next_op.id}"} class="btn btn-grey" title={Map.get(@next_op, :title, "Next op")}>Next &rarr;</a>
-          <% end %>
-          <%= if Map.get(@op, :status) == "failed" do %>
-            <button phx-click="reset" class="btn btn-blue">Reset</button>
-          <% end %>
-          <%= if Map.get(@op, :status) in ["active", "running", "assigned"] do %>
-            <button phx-click="kill" class="btn btn-red" data-confirm="Kill this op?">Kill</button>
-          <% end %>
-          <%= if Map.get(@op, :mission_id) do %>
-            <a href={"/dashboard/missions/#{@op.mission_id}"} class="btn btn-grey">Back to Mission</a>
-          <% else %>
-            <a href="/dashboard/missions" class="btn btn-grey">Back</a>
-          <% end %>
-        </div>
-      </div>
+    <.live_component
+      module={GiTF.Dashboard.AppLayout}
+      id="layout"
+      current_path={@current_path}
+      flash={@flash}
+      toasts={@toasts}
+    >
+      <.object
+        kind="Op"
+        name={Map.get(@op, :title) || "Op"}
+        sub={one_line(Map.get(@op, :description))}
+        crumbs={crumbs(@op, @mission)}
+        tabs={depths("/dashboard/ops/#{@op.id}", @tab, standard_depths())}
+      >
+        <:badges>
+          <.pill tone={tone(Map.get(@op, :status))}>{Map.get(@op, :status) || "unknown"}</.pill>
+          <%!-- "pending" twice, unlabelled, reads as one fact stuttered. --%>
+          <.pill :if={Map.get(@op, :verification_status)} tone={tone(@op.verification_status)}>
+            verification {@op.verification_status}
+          </.pill>
+          <span class="mono" style="font-size:var(--t-sm);color:var(--ink-3)">{@op.id}</span>
+        </:badges>
 
-      <%!-- Metadata --%>
+        <:metrics>
+          <.metric label="Type" value={Map.get(@op, :type) || "—"} />
+          <.metric label="Phase" value={Map.get(@op, :phase) || "—"} />
+          <.metric label="Model" value={Map.get(@op, :model) || "—"} />
+          <%!-- This op's own position in the retry chain, not a count of the
+                chain: `retry_count` is a counter on the record and the chain is
+                walked through retry_of/retried_as, and the two disagree when a
+                link is missing. Showing the counter as "attempts" made the head
+                contradict the Evidence tab. --%>
+          <.metric
+            label="Attempt"
+            value={"##{Map.get(@op, :retry_count) || 0}"}
+            tone={if (Map.get(@op, :retry_count) || 0) > 0, do: :warn}
+          />
+        </:metrics>
 
-      <div class="panel">
-        <div class="panel-title">Metadata</div>
-        <div class="grid-2">
-          <dl class="metadata-grid">
-            <dt>Type</dt><dd>{Map.get(@op, :type, "-")}</dd>
-            <dt>Complexity</dt><dd>{Map.get(@op, :complexity, "-")}</dd>
-            <dt>Model</dt><dd>{Map.get(@op, :model, "-")}</dd>
-            <dt>Risk</dt><dd>{Map.get(@op, :risk_level, "-")}</dd>
-          </dl>
-          <dl class="metadata-grid">
-            <dt>Retries</dt><dd>{Map.get(@op, :retry_count, 0)}</dd>
-            <dt>Ghost</dt>
-            <dd>
-              <%= if Map.get(@op, :ghost_id) do %>
-                <span style="font-family:monospace">{short_id(@op.ghost_id)}</span>
-              <% else %>
-                -
-              <% end %>
-            </dd>
-            <dt>Mission</dt>
-            <dd>
-              <%= if Map.get(@op, :mission_id) do %>
-                <a href={"/dashboard/missions/#{@op.mission_id}"} style="font-family:monospace">{short_id(@op.mission_id)}</a>
-              <% else %>
-                -
-              <% end %>
-            </dd>
-            <dt>Phase</dt><dd>{Map.get(@op, :phase, "-")}</dd>
-          </dl>
-        </div>
-      </div>
+        <:actions>
+          <button :if={@failed?} phx-click="reset" class="btn pri sm">Reset</button>
+          <button
+            :if={Map.get(@op, :status) in ["active", "running", "assigned"]}
+            phx-click="kill"
+            class="btn sm danger"
+            data-confirm="Kill this op?"
+          >
+            Kill
+          </button>
+          <.link :if={@prev_op} navigate={"/dashboard/ops/#{@prev_op.id}"} class="btn sm">
+            ← Prev
+          </.link>
+          <.link :if={@next_op} navigate={"/dashboard/ops/#{@next_op.id}"} class="btn sm">
+            Next →
+          </.link>
+        </:actions>
 
-      <%!-- Ghost & Shell --%>
-      <%= if @ghost do %>
-        <div class="panel">
-          <div class="panel-title">Ghost</div>
-          <div class="grid-2">
-            <dl class="metadata-grid">
-              <dt>Ghost ID</dt><dd style="font-family:monospace">{short_id(@ghost.id)}</dd>
-              <dt>Model</dt><dd>{Map.get(@ghost, :assigned_model, "-")}</dd>
-              <dt>Status</dt><dd><span class={"badge #{status_badge(Map.get(@ghost, :status, "unknown"))}"}>{Map.get(@ghost, :status, "?")}</span></dd>
-            </dl>
-            <dl class="metadata-grid">
-              <dt>Context</dt><dd>{Float.round((Map.get(@ghost, :context_percentage, 0.0) || 0.0) * 100, 1)}%</dd>
-              <%= if @shell do %>
-                <dt>Worktree</dt><dd style="font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px" title={@shell[:worktree_path]}>{@shell[:worktree_path] && Path.basename(@shell.worktree_path)}</dd>
-                <dt>Drift</dt><dd><span class={"badge #{case @shell[:drift_state] do
-                  d when d in [:clean, "clean"] -> "badge-green"
-                  d when d in [:behind, "behind"] -> "badge-yellow"
-                  d when d in [:risky, "risky"] -> "badge-orange"
-                  d when d in [:conflicted, "conflicted"] -> "badge-red"
-                  _ -> "badge-grey"
-                end}"}>{@shell[:drift_state] || "unknown"}</span></dd>
-              <% end %>
-            </dl>
-          </div>
-        </div>
-      <% end %>
-
-      <%!-- Retry Chain --%>
-      <%= if length(@retry_chain) > 1 do %>
-        <div class="panel">
-          <div class="panel-title">Retry Chain</div>
-          <div style="display:flex; align-items:center; gap:0.25rem; flex-wrap:wrap">
-            <%= for {entry, idx} <- Enum.with_index(@retry_chain) do %>
-              <%= if idx > 0 do %>
-                <span style="color:var(--ink-3); font-size:0.8rem">&rarr;</span>
-              <% end %>
-              <a
-                href={"/dashboard/ops/#{entry.id}"}
-                style={"padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem; text-decoration:none; border:1px solid #{if entry.id == @op.id, do: "var(--accent)", else: "var(--line)"}; background:#{if entry.id == @op.id, do: "var(--panel-2)", else: "transparent"}; color:#{case entry.status do
-                  "done" -> "var(--ok)"
-                  "failed" -> "var(--crit)"
-                  "running" -> "var(--accent)"
-                  _ -> "var(--ink-3)"
-                end}"}
-              >
-                #{entry.retry_count}
-                <span class={"badge #{status_badge(entry.status)}"} style="font-size:0.55rem; margin-left:0.25rem">{entry.status}</span>
-                <%= if entry.retry_strategy do %>
-                  <span style="font-size:0.6rem; color:var(--ink-3); margin-left:0.25rem">({entry.retry_strategy})</span>
-                <% end %>
-              </a>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-
-      <%!-- Ghost Output Summary --%>
-      <%= if Map.get(@op, :output_summary) do %>
-        <div class="panel" style="border-left:3px solid var(--ok)">
-          <div class="panel-title" style="color:var(--ok)">Ghost Output</div>
-          <div class="pre-block" style="white-space:pre-wrap; font-size:0.85rem">{@op.output_summary}</div>
-        </div>
-      <% end %>
-
-      <%!-- Description --%>
-      <%= if Map.get(@op, :description) do %>
-        <div class="panel">
-          <div class="panel-title">Description</div>
-          <div style="color:var(--ink-2); font-size:0.9rem; line-height:1.6">{@op.description}</div>
-        </div>
-      <% end %>
-
-      <%!-- Failure Info --%>
-      <%= if @op.status == "failed" do %>
-        <div class="panel" style="border-left:3px solid var(--crit)">
-          <div class="panel-title" style="color:var(--crit)">Failure Details</div>
-          <%= if Map.get(@op, :error_message) do %>
-            <div style="margin-bottom:0.75rem">
-              <div style="font-size:0.75rem; color:var(--ink-3); margin-bottom:0.25rem">Error Message</div>
-              <div class="pre-block" style="border-color:var(--crit)33">{@op.error_message}</div>
-            </div>
-          <% end %>
-          <%= if Map.get(@op, :failure_info) do %>
-            <div style="margin-bottom:0.75rem">
-              <div style="font-size:0.75rem; color:var(--ink-3); margin-bottom:0.25rem">Failure Analysis</div>
-              <div class="pre-block">{inspect(@op.failure_info, pretty: true, limit: :infinity)}</div>
-            </div>
-          <% end %>
-          <%= if Map.get(@op, :audit_result) do %>
-            <div>
-              <div style="font-size:0.75rem; color:var(--ink-3); margin-bottom:0.25rem">Audit Output</div>
-              <div class="pre-block">{@op.audit_result}</div>
-            </div>
-          <% end %>
-          <%= if is_nil(Map.get(@op, :error_message)) and is_nil(Map.get(@op, :failure_info)) and is_nil(Map.get(@op, :audit_result)) do %>
-            <div style="color:var(--ink-3); font-size:0.85rem">No failure details recorded. Check <a href={"/dashboard/missions/#{@op.mission_id}/diagnostics"} style="color:var(--accent)">diagnostics</a> for more info.</div>
-          <% end %>
-        </div>
-      <% end %>
-
-      <%!-- Acceptance Criteria --%>
-      <%= if Map.get(@op, :acceptance_criteria) do %>
-        <div class="panel">
-          <div class="panel-title">Acceptance Criteria</div>
-          <%= if is_list(@op.acceptance_criteria) do %>
-            <%= for criterion <- @op.acceptance_criteria do %>
-              <div style="padding:0.35rem 0; display:flex; gap:0.5rem; align-items:flex-start">
-                <span style={"color:#{if Map.get(@op, :verification_status) == "passed", do: "var(--ok)", else: "var(--ink-3)"}"}>
-                  {if Map.get(@op, :verification_status) == "passed", do: "✓", else: "○"}
-                </span>
-                <span style="font-size:0.9rem">{criterion}</span>
-              </div>
-            <% end %>
-          <% else %>
-            <div style="color:var(--ink-2); font-size:0.9rem">{@op.acceptance_criteria}</div>
-          <% end %>
-        </div>
-      <% end %>
-
-      <%!-- Verification --%>
-      <%= if Map.get(@op, :verification_result) do %>
-        <div class="panel">
-          <div class="panel-title">Verification Result</div>
-          <div class="pre-block">{inspect(@op.verification_result, pretty: true, limit: :infinity)}</div>
-        </div>
-      <% end %>
-
-      <%!-- Target Files --%>
-      <%= if Map.get(@op, :target_files) && @op.target_files != [] do %>
-        <div class="panel">
-          <div class="panel-title">Target Files</div>
-          <%= for file <- List.wrap(@op.target_files) do %>
-            <div style="padding:0.25rem 0; font-family:monospace; font-size:0.85rem; color:var(--accent)">{file}</div>
-          <% end %>
-        </div>
-      <% end %>
-
-      <%!-- Audit --%>
-      <%= if Map.get(@op, :audit_result) do %>
-        <div class="panel">
-          <div class="panel-title">Audit Result</div>
-          <div class="pre-block">{inspect(@op.audit_result, pretty: true, limit: :infinity)}</div>
-        </div>
-      <% end %>
+        <.overview :if={@tab == "overview"} op={@op} ghost={@ghost} shell={@shell} failed?={@failed?} />
+        <.evidence :if={@tab == "evidence"} op={@op} retry_chain={@retry_chain} />
+        <.raw
+          :if={@tab == "raw"}
+          term={@op}
+          note="The op record as the Archive holds it."
+        />
+      </.object>
     </.live_component>
     """
+  end
+
+  # A crumb trail only goes up as far as the page actually knows: an op with no
+  # mission recorded gets two crumbs, not a broken link to nowhere.
+  defp crumbs(op, mission) do
+    [{"Missions", "/dashboard/missions"}] ++
+      case op[:mission_id] do
+        nil ->
+          []
+
+        id ->
+          [{(mission && Map.get(mission, :name)) || short_id(id), "/dashboard/missions/#{id}"}]
+      end ++ [{Map.get(op, :title) || "Op", "/dashboard/ops/#{op.id}"}]
+  end
+
+  attr(:op, :map, required: true)
+  attr(:ghost, :any, default: nil)
+  attr(:shell, :any, default: nil)
+  attr(:failed?, :boolean, required: true)
+
+  defp overview(assigns) do
+    ~H"""
+    <%!-- A failed op is here to be understood, so its reason comes before its
+          metadata rather than eight panels below it. --%>
+    <.section :if={@failed?} title="Why it failed">
+      <.banner tone={:crit}>
+        {Map.get(@op, :error_message) || "No error message was recorded."}
+      </.banner>
+      <p :if={no_failure_detail?(@op)} class="note" style="margin:var(--s3) 0 0">
+        Nothing else was recorded. The
+        <.link navigate={"/dashboard/missions/#{@op[:mission_id]}/diagnostics"}>
+          mission diagnostics
+        </.link>
+        may know more.
+      </p>
+    </.section>
+
+    <.section :if={Map.get(@op, :description)} title="What it was asked to do">
+      <pre class="raw" style="max-height:22rem">{@op.description}</pre>
+    </.section>
+
+    <.section :if={Map.get(@op, :acceptance_criteria)} title="What would make it done">
+      <:hint :if={Map.get(@op, :verification_status)}>
+        verification {@op.verification_status}
+      </:hint>
+      <.rows>
+        <.row
+          :for={criterion <- List.wrap(@op.acceptance_criteria)}
+          cols="22px minmax(0,1fr)"
+        >
+          <span style={"color:var(--#{if Map.get(@op, :verification_status) == "passed", do: "ok", else: "ink-3"})"}>
+            {if Map.get(@op, :verification_status) == "passed", do: "✓", else: "○"}
+          </span>
+          <span>{criterion}</span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.section title="Who is doing it">
+      <.rows empty={is_nil(@ghost) && "No ghost is assigned to this op."}>
+        <.row :if={@ghost} cols="170px minmax(0,1fr)">
+          <.identity name="Ghost" id="the process running this op" />
+          <span class="dim">
+            {short_id(@ghost.id)} · {Map.get(@ghost, :assigned_model) || "no model"}
+          </span>
+        </.row>
+        <.row :if={@ghost} cols="170px minmax(0,1fr)">
+          <.identity name="Context used" id="how full its window is" />
+          <span class="dim">
+            {Float.round((Map.get(@ghost, :context_percentage, 0.0) || 0.0) * 100, 1)}%
+          </span>
+        </.row>
+        <.row :if={@shell} cols="170px minmax(0,1fr)">
+          <.identity name="Worktree" id="where it is working" />
+          <span class="dim">{@shell[:worktree_path] && Path.basename(@shell.worktree_path)}</span>
+        </.row>
+        <.row :if={@shell} cols="170px minmax(0,1fr)">
+          <.identity name="Drift" id="how far the worktree is from the trunk" />
+          <span><.pill tone={tone(@shell[:drift_state])}>{@shell[:drift_state] || "unknown"}</.pill></span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.section title="Where it sits">
+      <.rows>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Complexity" id="what the planner judged" />
+          <span class="dim">{Map.get(@op, :complexity) || "—"}</span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Risk" id="what it could break" />
+          <span class="dim">{Map.get(@op, :risk_level) || "—"}</span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.relations>
+      <:rel verb="part of" to={@op[:mission_id] && "/dashboard/missions/#{@op.mission_id}"}>
+        {(@op[:mission_id] && short_id(@op.mission_id)) || "no mission"}
+      </:rel>
+      <:rel :if={@op[:ghost_id]} verb="run by" to="/dashboard/ghosts">
+        {short_id(@op.ghost_id)}
+      </:rel>
+    </.relations>
+    """
+  end
+
+  attr(:op, :map, required: true)
+  attr(:retry_chain, :list, required: true)
+
+  defp evidence(assigns) do
+    ~H"""
+    <.section :if={length(@retry_chain) > 1} title="Attempts">
+      <:hint>{length(@retry_chain)} in this chain · newest last</:hint>
+      <.rows>
+        <.row
+          :for={entry <- @retry_chain}
+          cols="60px minmax(0,1fr) 140px 96px"
+          to={"/dashboard/ops/#{entry.id}"}
+          link={:navigate}
+        >
+          <span class="dim">#{entry.retry_count}</span>
+          <.identity name={entry.title || entry.id} id={entry.id} />
+          <span class="dim">{entry.retry_strategy || "first attempt"}</span>
+          <span style="justify-self:end"><.pill tone={tone(entry.status)}>{entry.status}</.pill></span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.section :if={Map.get(@op, :output_summary)} title="What the ghost reported">
+      <pre class="raw">{@op.output_summary}</pre>
+    </.section>
+
+    <.section :if={Map.get(@op, :target_files) not in [nil, []]} title="Files it was to touch">
+      <.rows>
+        <.row :for={file <- List.wrap(@op.target_files)} cols="minmax(0,1fr)">
+          <span class="mono" style="color:var(--accent)">{file}</span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.section :if={Map.get(@op, :verification_result)} title="Verification">
+      <.raw term={@op.verification_result} />
+    </.section>
+
+    <.section :if={Map.get(@op, :audit_result)} title="Audit">
+      <pre class="raw">{@op.audit_result}</pre>
+    </.section>
+
+    <.section :if={Map.get(@op, :failure_info)} title="Failure analysis">
+      <.raw term={@op.failure_info} />
+    </.section>
+
+    <p :if={nothing_to_show?(@op, @retry_chain)} class="empty">
+      This op produced no output, no verification and no audit — it has not run yet,
+      or it was reset.
+    </p>
+    """
+  end
+
+  # The head's sub is one line. A description that is really a prompt gets its
+  # first sentence here and all of itself in the body.
+  defp one_line(nil), do: nil
+
+  defp one_line(text) do
+    text
+    |> to_string()
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> String.slice(0, 180)
+  end
+
+  defp no_failure_detail?(op) do
+    is_nil(op[:error_message]) and is_nil(op[:failure_info]) and is_nil(op[:audit_result])
+  end
+
+  defp nothing_to_show?(op, retry_chain) do
+    length(retry_chain) <= 1 and
+      Enum.all?(
+        [:output_summary, :target_files, :verification_result, :audit_result, :failure_info],
+        &(op[&1] in [nil, []])
+      )
   end
 end

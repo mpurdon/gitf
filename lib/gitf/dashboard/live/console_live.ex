@@ -280,6 +280,14 @@ defmodule GiTF.Dashboard.ConsoleLive do
     end
   end
 
+  # The shared tabs component takes resolved links, so it needs to know nothing
+  # about a Scope — the Catwalk has no such thing and uses the same component.
+  defp scope_tabs(scope) do
+    Enum.map(Scope.tabs(scope), fn {id, label} ->
+      {label, Scope.to_path(Scope.with_tab(scope, id)), scope.tab == id}
+    end)
+  end
+
   defp deep_kind(:sector), do: "Sector"
   defp deep_kind(:mission), do: "Mission"
   defp deep_kind(:op), do: "Op"
@@ -355,7 +363,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
               factory-side objects need `depth`, and enumerating attributes here
               means a new head crashes the page instead of missing a field. --%>
         <.head {assigns} />
-        <.tabs scope={@scope} />
+        <.tabs tabs={scope_tabs(@scope)} />
 
         <div class="body">
           <.banner :if={@scope.ministry && is_nil(@ministry) && @scope.ministry != "new"} tone={:warn}>
