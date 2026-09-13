@@ -137,13 +137,13 @@ defmodule GiTF.Dashboard.GhostsLive do
       <%!-- Summary counters --%>
       <div style="display:flex; gap:1rem; margin-bottom:1rem">
         <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="var(--ok)" /><span style="color:var(--ok); font-weight:600">{@ghosts_working}</span><span style="color:var(--muted)">working</span>
+          <.dot color="var(--ok)" /><span style="color:var(--ok); font-weight:600">{@ghosts_working}</span><span style="color:var(--ink-3)">working</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="var(--muted)" /><span style="color:var(--muted)">{@ghosts_total - @ghosts_working - @ghosts_stopped}</span><span style="color:var(--muted)">idle</span>
+          <.dot color="var(--ink-3)" /><span style="color:var(--ink-3)">{@ghosts_total - @ghosts_working - @ghosts_stopped}</span><span style="color:var(--ink-3)">idle</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="var(--crit)" /><span style="color:var(--crit)">{@ghosts_stopped}</span><span style="color:var(--muted)">stopped</span>
+          <.dot color="var(--crit)" /><span style="color:var(--crit)">{@ghosts_stopped}</span><span style="color:var(--ink-3)">stopped</span>
         </div>
       </div>
 
@@ -185,16 +185,16 @@ defmodule GiTF.Dashboard.GhostsLive do
                         {String.slice(ghost.op[:title] || short_id(ghost.op.id), 0, 25)}
                       </a>
                     <% else %>
-                      <span style="color:var(--muted)">-</span>
+                      <span style="color:var(--ink-3)">-</span>
                     <% end %>
                   </td>
                   <td style="font-size:0.8rem">
                     <%= if ghost.mission do %>
-                      <a href={"/dashboard/missions/#{ghost.mission.id}"} style="color:var(--muted)">
+                      <a href={"/dashboard/missions/#{ghost.mission.id}"} style="color:var(--ink-3)">
                         {Map.get(ghost.mission, :name) || short_id(ghost.mission.id)}
                       </a>
                     <% else %>
-                      <span style="color:var(--muted)">-</span>
+                      <span style="color:var(--ink-3)">-</span>
                     <% end %>
                   </td>
                   <td>
@@ -216,7 +216,7 @@ defmodule GiTF.Dashboard.GhostsLive do
                         _ -> "badge-grey"
                       end}"} style="font-size:0.65rem">{ghost.drift}</span>
                     <% else %>
-                      <span style="color:var(--muted); font-size:0.75rem">-</span>
+                      <span style="color:var(--ink-3); font-size:0.75rem">-</span>
                     <% end %>
                   </td>
                   <td>
@@ -270,11 +270,11 @@ defmodule GiTF.Dashboard.GhostsLive do
 
   defp status_dot_color(GhostStatus.working()), do: "var(--ok)"
   defp status_dot_color(GhostStatus.starting()), do: "var(--accent)"
-  defp status_dot_color(GhostStatus.idle()), do: "var(--muted)"
+  defp status_dot_color(GhostStatus.idle()), do: "var(--ink-3)"
   defp status_dot_color("paused"), do: "var(--warn)"
-  defp status_dot_color(GhostStatus.stopped()), do: "var(--line-strong)"
+  defp status_dot_color(GhostStatus.stopped()), do: "var(--line)"
   defp status_dot_color(GhostStatus.crashed()), do: "var(--crit)"
-  defp status_dot_color(_), do: "var(--line-strong)"
+  defp status_dot_color(_), do: "var(--line)"
 
   defp context_badge(percentage) when percentage >= 45, do: "badge-red"
   defp context_badge(percentage) when percentage >= 40, do: "badge-yellow"

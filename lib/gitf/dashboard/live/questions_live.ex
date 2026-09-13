@@ -189,12 +189,12 @@ defmodule GiTF.Dashboard.QuestionsLive do
           </div>
         </div>
       <% else %>
-        <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.9rem">
+        <div style="font-size:0.8rem; color:var(--ink-3); margin-bottom:0.9rem">
           {length(@open)} {if length(@open) == 1, do: "mission is", else: "missions are"}
           holding for an answer. Oldest first.
         </div>
         <div :for={inquiry <- @open}>
-          <div :if={inquiry[:mission_goal]} style="font-size:0.78rem; color:var(--muted); margin:0 0 0.25rem 0.2rem">
+          <div :if={inquiry[:mission_goal]} style="font-size:0.78rem; color:var(--ink-3); margin:0 0 0.25rem 0.2rem">
             {String.slice(inquiry.mission_goal, 0, 160)}
           </div>
           <.inquiry_card

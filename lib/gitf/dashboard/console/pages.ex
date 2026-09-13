@@ -10,7 +10,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   use Phoenix.Component
 
-  import GiTF.Dashboard.Console.Components
+  import GiTF.Dashboard.Surface.Components
 
   alias GiTF.Cabinet.Ruleset
   alias GiTF.Dashboard.Console.{Events, Format, Scope}

@@ -1,16 +1,15 @@
-defmodule GiTF.Dashboard.Console.Components do
+defmodule GiTF.Dashboard.Surface.Components do
   @moduledoc """
-  The Console's primitives.
+  The vocabulary both surfaces are written in.
 
-  The old console wrote a ministry's identity block out four times, with three
-  different sets of fields, and its action cluster twice with different labels
-  for the same act — `Sleep` here, `Stop factory` there. Everything shared
-  lives here instead, so a change to how an object is presented is one edit and
-  the same everywhere.
+  A dot, a pill, a metric, an object head, a table of rows: the small set of
+  shapes every page in the system is assembled from. They live beside
+  `GiTF.Dashboard.Surface` rather than inside either surface, because a
+  component only the Console can use is a component the Catwalk will re-invent
+  slightly differently — which is how one product came to have two pills.
 
-  The set is deliberately operational rather than generic: an identity, a
-  health dot, a metric, a navigable row, a relation, a decision factor. These
-  are the shapes the domain actually has.
+  The styles these need are in `Surface.components/0`, and the two travel
+  together: a component here without a rule there renders naked.
   """
 
   use Phoenix.Component

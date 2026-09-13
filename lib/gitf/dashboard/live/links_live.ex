@@ -113,11 +113,11 @@ defmodule GiTF.Dashboard.LinksLive do
                   <td style="font-family:monospace; font-size:0.8rem">{link_msg.from}</td>
                   <td style="font-family:monospace; font-size:0.8rem">{link_msg.to}</td>
                   <td class={unless link_msg.read, do: "link_msg-subject"}>{link_msg.subject || "(no subject)"}</td>
-                  <td style="font-size:0.8rem; color:var(--muted)">{format_timestamp(link_msg.inserted_at)}</td>
+                  <td style="font-size:0.8rem; color:var(--ink-3)">{format_timestamp(link_msg.inserted_at)}</td>
                 </tr>
                 <tr id={"link-body-#{link_msg.id}"} style="display:none">
                   <td colspan="6" style="padding:0.5rem 1rem; background:var(--ground); border-top:none">
-                    <div style="font-size:0.8rem; color:var(--text-2); white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto">
+                    <div style="font-size:0.8rem; color:var(--ink-2); white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto">
                       {link_msg.body || "(empty)"}
                     </div>
                   </td>

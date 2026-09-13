@@ -318,7 +318,7 @@ defmodule GiTF.Dashboard.TimelineLive do
   defp op_color("done"), do: "var(--ok)"
   defp op_color("failed"), do: "var(--crit)"
   defp op_color("running"), do: "var(--accent)"
-  defp op_color(_), do: "var(--muted)"
+  defp op_color(_), do: "var(--ink-3)"
 
   defp event_type_label(:phase_transition), do: "Phase"
   defp event_type_label(:op_event), do: "Op"
@@ -335,10 +335,10 @@ defmodule GiTF.Dashboard.TimelineLive do
         <h1 class="page-title" style="margin-bottom:0">
           Factory Timeline
           <%= if @mission_name do %>
-            <span style="color:var(--muted); font-size:0.8rem; font-weight:400"> &mdash; {@mission_name}</span>
+            <span style="color:var(--ink-3); font-size:0.8rem; font-weight:400"> &mdash; {@mission_name}</span>
           <% end %>
         </h1>
-        <span style="color:var(--muted); font-size:0.8rem">{@event_count} events</span>
+        <span style="color:var(--ink-3); font-size:0.8rem">{@event_count} events</span>
       </div>
 
       <%!-- Filters --%>
@@ -359,7 +359,7 @@ defmodule GiTF.Dashboard.TimelineLive do
 
         <%!-- Mission filter --%>
         <form phx-change="filter_mission" style="display:flex; align-items:center; gap:0.5rem">
-          <label style="font-size:0.8rem; color:var(--muted)">Mission:</label>
+          <label style="font-size:0.8rem; color:var(--ink-3)">Mission:</label>
           <select name="mission_id" class="form-input" style="font-size:0.8rem; padding:0.25rem 0.5rem; max-width:250px">
             <option value="">All missions</option>
             <%= for m <- @missions do %>
@@ -378,7 +378,7 @@ defmodule GiTF.Dashboard.TimelineLive do
         <% else %>
           <div style="position:relative; padding-left:2rem">
             <%!-- Vertical line --%>
-            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:var(--line-2)"></div>
+            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:var(--line-soft)"></div>
 
             <div id="timeline-events" phx-update="stream">
             <%= for {dom_id, event} <- @streams.events do %>
@@ -399,10 +399,10 @@ defmodule GiTF.Dashboard.TimelineLive do
                       end}"} style="font-size:0.6rem">
                         {event_type_label(event.type)}
                       </span>
-                      <span style="color:var(--text); font-size:0.85rem; font-weight:500">{event.title}</span>
+                      <span style="color:var(--ink); font-size:0.85rem; font-weight:500">{event.title}</span>
                     </div>
                     <%= if event.detail do %>
-                      <div style="color:var(--muted); font-size:0.8rem; margin-top:0.1rem; max-width:600px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+                      <div style="color:var(--ink-3); font-size:0.8rem; margin-top:0.1rem; max-width:600px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
                         {event.detail}
                       </div>
                     <% end %>
@@ -419,7 +419,7 @@ defmodule GiTF.Dashboard.TimelineLive do
                       <% end %>
                     </div>
                   </div>
-                  <span style="color:var(--muted); font-size:0.75rem; white-space:nowrap; margin-left:1rem">
+                  <span style="color:var(--ink-3); font-size:0.75rem; white-space:nowrap; margin-left:1rem">
                     <span title={format_timestamp(event.timestamp)}>{relative_time(event.timestamp)}</span>
                   </span>
                 </div>

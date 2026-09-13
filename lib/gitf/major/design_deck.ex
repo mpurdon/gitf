@@ -296,13 +296,13 @@ defmodule GiTF.Major.DesignDeck do
     .rail{flex:0 0 13rem;position:sticky;top:2.5rem;align-self:flex-start;
       display:flex;flex-direction:column;gap:2px}
     .rail-head{font:700 .68rem/1 system-ui;letter-spacing:.16em;text-transform:uppercase;
-      color:var(--muted);padding:0 .6rem .6rem;border-bottom:1px solid var(--rule);margin-bottom:.4rem}
+      color:var(--ink-3);padding:0 .6rem .6rem;border-bottom:1px solid var(--rule);margin-bottom:.4rem}
     .rail-item{display:flex;gap:.6rem;align-items:baseline;text-align:left;width:100%;
       background:none;border:none;border-left:2px solid transparent;cursor:pointer;
-      padding:.32rem .6rem;color:var(--muted);
+      padding:.32rem .6rem;color:var(--ink-3);
       font:500 .85rem/1.35 system-ui,-apple-system,"Segoe UI",sans-serif}
     .rail-item .rail-no{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-      font-size:.7rem;color:var(--muted);opacity:.7}
+      font-size:.7rem;color:var(--ink-3);opacity:.7}
     .rail-item:hover{color:var(--ink)}
     .rail-item.on{color:var(--ink);border-left-color:var(--stamp);background:var(--stamp-soft);font-weight:600}
     .rail-item.on .rail-no{color:var(--stamp);opacity:1}
@@ -316,7 +316,7 @@ defmodule GiTF.Major.DesignDeck do
     @media(prefers-reduced-motion:reduce){.slide.on{animation:none}#progfill{transition:none}}
     .slide.won{border-color:var(--stamp)}
     .no{position:absolute;top:1.1rem;right:1.25rem;
-      font:600 .72rem/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--muted)}
+      font:600 .72rem/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--ink-3)}
 
     .stamp{position:absolute;top:2.2rem;right:2.4rem;transform:rotate(-6deg);
       font:800 .8rem/1 system-ui;letter-spacing:.22em;text-transform:uppercase;
@@ -329,12 +329,12 @@ defmodule GiTF.Major.DesignDeck do
     h2{font:750 1.6rem/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;
       letter-spacing:-.015em;text-wrap:balance;margin-bottom:1rem}
     h3{font:700 .8rem/1.4 system-ui;letter-spacing:.1em;text-transform:uppercase;
-      color:var(--muted);margin:1.5rem 0 .5rem}
+      color:var(--ink-3);margin:1.5rem 0 .5rem}
     .eyebrow{font:700 .7rem/1 system-ui;letter-spacing:.16em;text-transform:uppercase;
       color:var(--stamp);margin-bottom:.9rem}
     .lede{font-size:1.2rem;line-height:1.5;font-style:italic;margin-bottom:1.1rem;max-width:36rem}
     .body{max-width:60ch;margin-bottom:1rem}
-    .meta{color:var(--muted);font-size:.87rem;margin-top:.75rem}
+    .meta{color:var(--ink-3);font-size:.87rem;margin-top:.75rem}
     ul,ol{padding-left:1.15rem}
 
     .points{list-style:none;padding:0;display:flex;flex-direction:column;gap:.55rem;margin-bottom:.5rem}
@@ -342,17 +342,17 @@ defmodule GiTF.Major.DesignDeck do
     .saw::before{content:"✓";position:absolute;left:0;color:var(--ok);font-weight:700}
     .missed::before{content:"✗";position:absolute;left:0;color:var(--miss);font-weight:700}
     .risks{border-left:2px solid var(--rule);padding-left:1rem;margin-top:1.25rem}
-    .risks ul{display:flex;flex-direction:column;gap:.4rem;font-size:.92rem;color:var(--muted)}
+    .risks ul{display:flex;flex-direction:column;gap:.4rem;font-size:.92rem;color:var(--ink-3)}
     .reqs li{margin-bottom:.55rem}
     .reqs b{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.8rem;
       color:var(--stamp);font-weight:600;margin-right:.3rem}
     .watch{list-style:none;padding:0;display:flex;flex-direction:column;gap:1rem}
     .watch li{border-left:2px solid var(--rule);padding-left:1rem}
     .watch b{display:block;font-family:system-ui;font-weight:650}
-    .watch span{color:var(--muted);font-size:.92rem}
+    .watch span{color:var(--ink-3);font-size:.92rem}
     .stats{display:flex;gap:2.5rem;margin:1.5rem 0 .5rem}
     .stat b{display:block;font:700 2.1rem/1.1 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-    .stat span{color:var(--muted);font:600 .72rem/1.6 system-ui;text-transform:uppercase;letter-spacing:.1em}
+    .stat span{color:var(--ink-3);font:600 .72rem/1.6 system-ui;text-transform:uppercase;letter-spacing:.1em}
     .decision h2{font-size:2rem;color:var(--stamp)}
 
     .bar{position:fixed;bottom:0;left:0;right:0;background:var(--card);
@@ -362,8 +362,8 @@ defmodule GiTF.Major.DesignDeck do
       border-radius:4px;padding:.25rem .7rem;cursor:pointer;font-size:1rem}
     .bar button:hover{border-color:var(--stamp);color:var(--stamp)}
     #pos{font:600 .8rem/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-    .sect{font:600 .8rem/1 system-ui;color:var(--muted)}
-    .hint{color:var(--muted);font-size:.72rem;font-family:system-ui}
+    .sect{font:600 .8rem/1 system-ui;color:var(--ink-3)}
+    .hint{color:var(--ink-3);font-size:.72rem;font-family:system-ui}
 
     @media(max-width:52rem){
       .frame{flex-direction:column;gap:1.25rem;padding-top:1.5rem}

@@ -317,15 +317,15 @@ defmodule GiTF.Dashboard.ProvidersLive do
           class={"strategy-option #{if @fallback_strategy == "priority_chain", do: "selected"}"}
           phx-click="set_fallback" phx-value-strategy="priority_chain"
         >
-          <div style="font-weight:600; color:var(--text); margin-bottom:0.2rem">Priority Chain</div>
-          <div style="font-size:0.8rem; color:var(--muted)">Try next provider at same tier, then downgrade</div>
+          <div style="font-weight:600; color:var(--ink); margin-bottom:0.2rem">Priority Chain</div>
+          <div style="font-size:0.8rem; color:var(--ink-3)">Try next provider at same tier, then downgrade</div>
         </div>
         <div
           class={"strategy-option #{if @fallback_strategy == "tier_downgrade_first", do: "selected"}"}
           phx-click="set_fallback" phx-value-strategy="tier_downgrade_first"
         >
-          <div style="font-weight:600; color:var(--text); margin-bottom:0.2rem">Tier Downgrade First</div>
-          <div style="font-size:0.8rem; color:var(--muted)">Try cheaper model on same provider, then switch</div>
+          <div style="font-weight:600; color:var(--ink); margin-bottom:0.2rem">Tier Downgrade First</div>
+          <div style="font-size:0.8rem; color:var(--ink-3)">Try cheaper model on same provider, then switch</div>
         </div>
       </div>
     </div>
@@ -338,7 +338,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
           <span class="provider-glyph" style={"width:28px; height:28px; font-size:0.85rem; color:#{provider.color}; border-color:#{provider.color}55; background:#{provider.color}11"}>
             {provider.glyph}
           </span>
-          <span style="font-size:0.85rem; color:var(--muted)">{String.capitalize(provider.name)}</span>
+          <span style="font-size:0.85rem; color:var(--ink-3)">{String.capitalize(provider.name)}</span>
           <button class="btn btn-grey" style="font-size:0.7rem; padding:0.15rem 0.4rem" phx-click="add_provider" phx-value-provider={provider.name}>Add</button>
         </div>
       </div>
@@ -364,7 +364,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
 
           <div style="flex:1; min-width:0">
             <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem; flex-wrap:wrap">
-              <span style="font-weight:600; color:var(--text); font-size:0.95rem">{String.capitalize(name)}</span>
+              <span style="font-weight:600; color:var(--ink); font-size:0.95rem">{String.capitalize(name)}</span>
               <span class={"provider-status-#{status}"} style="font-size:0.75rem">
                 {case status do
                   :connected -> "● connected"
@@ -379,17 +379,17 @@ defmodule GiTF.Dashboard.ProvidersLive do
                 ◐ half-open
               </span>
             </div>
-            <div style="font-size:0.75rem; color:var(--muted); font-family:monospace; display:flex; gap:1rem">
+            <div style="font-size:0.75rem; color:var(--ink-3); font-family:monospace; display:flex; gap:1rem">
               <span>🧠 {shorten_model_name(provider.models.thinking)}</span>
               <span>◈ {shorten_model_name(provider.models.general)}</span>
               <span>⚡ {shorten_model_name(provider.models.fast)}</span>
             </div>
             <div :if={circuit.state == :open} style="font-size:0.72rem; margin-top:0.3rem; color:var(--crit); display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center">
-              <span style="color:var(--muted)">
+              <span style="color:var(--ink-3)">
                 {circuit_failure_label(circuit.failure_mode)}
               </span>
-              <span style="color:var(--line-strong)">|</span>
-              <span style="color:var(--muted)">
+              <span style="color:var(--line)">|</span>
+              <span style="color:var(--ink-3)">
                 next probe {circuit_next_probe_label(circuit.next_probe_in)}
               </span>
             </div>
@@ -411,7 +411,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
         </div>
 
         <%!-- Expanded config --%>
-        <div :if={expanded} id={"provider-config-#{name}"} style="background:var(--ground); border:1px solid var(--line-2); border-top:none; border-radius:0 0 8px 8px; padding:1rem; margin-top:-0.5rem; margin-bottom:0.5rem">
+        <div :if={expanded} id={"provider-config-#{name}"} style="background:var(--ground); border:1px solid var(--line-soft); border-top:none; border-radius:0 0 8px 8px; padding:1rem; margin-top:-0.5rem; margin-bottom:0.5rem">
           <form id={"provider-form-#{name}"} phx-change="update_provider_config" phx-submit="update_provider_config">
             <input type="hidden" name="provider" value={name} />
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
@@ -444,7 +444,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
             <%!-- Auth section --%>
             <div style="display:flex; gap:1rem; align-items:flex-end; margin-bottom:0.75rem">
               <div :if={provider.auth == :api_key} style="flex:1">
-                <label style="font-size:0.75rem; color:var(--muted); display:block; margin-bottom:0.2rem">API Key</label>
+                <label style="font-size:0.75rem; color:var(--ink-3); display:block; margin-bottom:0.2rem">API Key</label>
                 <input
                   class="form-input"
                   style="font-size:0.8rem; font-family:monospace"
@@ -456,7 +456,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
                 />
               </div>
               <div :if={provider.auth == :aws_profile} style="flex:1">
-                <label style="font-size:0.75rem; color:var(--muted); display:block; margin-bottom:0.2rem">AWS Profile Name</label>
+                <label style="font-size:0.75rem; color:var(--ink-3); display:block; margin-bottom:0.2rem">AWS Profile Name</label>
                 <input
                   class="form-input"
                   style="font-size:0.8rem; font-family:monospace"
@@ -467,7 +467,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
                 />
               </div>
               <div :if={provider.auth == :aws_profile} style="width:150px">
-                <label style="font-size:0.75rem; color:var(--muted); display:block; margin-bottom:0.2rem">AWS Region</label>
+                <label style="font-size:0.75rem; color:var(--ink-3); display:block; margin-bottom:0.2rem">AWS Region</label>
                 <select
                   class="form-select"
                   style="font-size:0.8rem; font-family:monospace"
@@ -522,7 +522,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
            <span class={"badge #{if @ollama_running, do: "badge-green", else: "badge-grey"}"}>
              {if @ollama_running, do: "Running", else: "Stopped"}
            </span>
-           <span :if={@ollama_running} style="font-size:0.8rem; color:var(--muted)">
+           <span :if={@ollama_running} style="font-size:0.8rem; color:var(--ink-3)">
              {@ollama_models |> length()} models available
            </span>
         </div>
@@ -535,7 +535,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
       <div :if={@ollama_running and @ollama_models != []} style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.5rem">
          <span :for={model <- @ollama_models} class="badge badge-grey" style="font-family:monospace; font-size:0.75rem">{model}</span>
       </div>
-      <div :if={@ollama_running and @ollama_models == []} style="margin-top:1rem; font-size:0.8rem; color:var(--muted)">
+      <div :if={@ollama_running and @ollama_models == []} style="margin-top:1rem; font-size:0.8rem; color:var(--ink-3)">
         No models found. Run <code style="color:var(--recon); background:var(--panel-2); padding:0.1rem 0.3rem; border-radius:3px">ollama pull &lt;model&gt;</code> in your terminal.
       </div>
     </div>
@@ -561,7 +561,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
             <td>{format_cost(stats.total_cost)}</td>
           </tr>
           <tr :if={@stats == []}>
-            <td colspan="3" style="color:var(--muted); text-align:center">No API calls recorded yet.</td>
+            <td colspan="3" style="color:var(--ink-3); text-align:center">No API calls recorded yet.</td>
           </tr>
         </tbody>
       </table>
@@ -693,7 +693,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
   defp model_input(assigns) do
     ~H"""
     <div>
-      <label style="font-size:0.75rem; color:var(--muted); display:block; margin-bottom:0.2rem">{@label}</label>
+      <label style="font-size:0.75rem; color:var(--ink-3); display:block; margin-bottom:0.2rem">{@label}</label>
       <%= if @provider_name == "ollama" and @ollama_running and @ollama_models != [] do %>
         <select
           class="form-select"

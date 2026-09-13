@@ -331,17 +331,17 @@ defmodule GiTF.Dashboard.MissionsLive do
                   </span></td>
                   <td>
                     <div style="display:flex; align-items:center; gap:0.3rem; min-width:60px">
-                      <div style="flex:1; height:4px; background:var(--line-2); border-radius:2px; overflow:hidden">
+                      <div style="flex:1; height:4px; background:var(--line-soft); border-radius:2px; overflow:hidden">
                         <div style={"height:100%; border-radius:2px; background:#{cond do
                           mission.budget_pct >= 90 -> "var(--crit)"
                           mission.budget_pct >= 70 -> "var(--warn)"
                           true -> "var(--ok)"
                         end}; width:#{min(mission.budget_pct, 100)}%"}></div>
                       </div>
-                      <span style="font-size:0.65rem; color:var(--muted)">{mission.budget_pct}%</span>
+                      <span style="font-size:0.65rem; color:var(--ink-3)">{mission.budget_pct}%</span>
                     </div>
                   </td>
-                  <td style="font-size:0.8rem; color:var(--muted)">{mission.duration}</td>
+                  <td style="font-size:0.8rem; color:var(--ink-3)">{mission.duration}</td>
                   <td>{job_count(mission)}</td>
                   <td>
                     <%= if Map.get(mission, :status) == "pending" do %>

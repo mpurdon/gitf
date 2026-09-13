@@ -113,7 +113,7 @@ defmodule GiTF.Dashboard.ProgressLive do
       <div class="panel" style="margin-bottom:1.5rem">
         <div class="panel-title">
           Active Ghosts ({length(@ghost_activities)})
-          <span style="color:var(--muted); font-size:0.8rem; margin-left:0.5rem">
+          <span style="color:var(--ink-3); font-size:0.8rem; margin-left:0.5rem">
             {if @idle_count > 0, do: "+ #{@idle_count} idle"}
           </span>
         </div>
@@ -136,21 +136,21 @@ defmodule GiTF.Dashboard.ProgressLive do
                     <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem">
                       <% {provider, _short, _tier} = parse_model(activity.model) %>
                       <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(activity.ghost_name, activity.model)}</span>
-                      <span style="color:var(--muted); font-size:0.75rem">{short_id(activity.ghost_id)}</span>
+                      <span style="color:var(--ink-3); font-size:0.75rem">{short_id(activity.ghost_id)}</span>
                     </div>
 
                     <!-- What it's working on -->
                     <%= if activity.op_title do %>
-                      <div style="color:var(--text-2); font-size:0.85rem; margin-bottom:0.35rem">
+                      <div style="color:var(--ink-2); font-size:0.85rem; margin-bottom:0.35rem">
                         <a href={"/dashboard/ops/#{activity.op_id}"} style="color:var(--accent)">{truncate(activity.op_title, 80)}</a>
                         <%= if activity.mission_id do %>
-                          <a href={"/dashboard/missions/#{activity.mission_id}"} style="color:var(--muted); font-size:0.75rem; margin-left:0.5rem">mission &rarr;</a>
+                          <a href={"/dashboard/missions/#{activity.mission_id}"} style="color:var(--ink-3); font-size:0.75rem; margin-left:0.5rem">mission &rarr;</a>
                         <% end %>
                       </div>
                     <% end %>
 
                     <!-- Current action -->
-                    <div style="display:flex; align-items:center; gap:0.5rem; color:var(--muted); font-size:0.8rem">
+                    <div style="display:flex; align-items:center; gap:0.5rem; color:var(--ink-3); font-size:0.8rem">
                       <%= if activity.tool do %>
                         <span class="badge badge-purple" style="font-size:0.7rem">{activity.tool}</span>
                       <% end %>
@@ -187,15 +187,15 @@ defmodule GiTF.Dashboard.ProgressLive do
         <% else %>
           <div style="display:flex; flex-direction:column; gap:0.25rem">
             <%= for event <- @recent_events do %>
-              <div style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0; border-bottom:1px solid var(--line-2); font-size:0.8rem">
+              <div style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0; border-bottom:1px solid var(--line-soft); font-size:0.8rem">
                 <span class={"badge #{event_badge(event.type)}"} style="font-size:0.65rem; min-width:60px; text-align:center">
                   {format_event_type(event.type)}
                 </span>
-                <span style="color:var(--muted); font-family:monospace; font-size:0.7rem; min-width:65px">
+                <span style="color:var(--ink-3); font-family:monospace; font-size:0.7rem; min-width:65px">
                   {short_id(event.entity_id)}
                 </span>
-                <span style="color:var(--text-2); flex:1">{event_summary(event)}</span>
-                <span style="color:var(--muted); font-size:0.7rem">{format_timestamp(event.timestamp)}</span>
+                <span style="color:var(--ink-2); flex:1">{event_summary(event)}</span>
+                <span style="color:var(--ink-3); font-size:0.7rem">{format_timestamp(event.timestamp)}</span>
               </div>
             <% end %>
           </div>

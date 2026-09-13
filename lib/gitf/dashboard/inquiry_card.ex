@@ -72,24 +72,24 @@ defmodule GiTF.Dashboard.InquiryCard do
               inherited
             </span>
           </div>
-          <div style="font-size:0.95rem; color:var(--text); white-space:pre-wrap">{@inquiry[:prompt]}</div>
+          <div style="font-size:0.95rem; color:var(--ink); white-space:pre-wrap">{@inquiry[:prompt]}</div>
         </div>
-        <div style="font-size:0.7rem; color:var(--muted); white-space:nowrap">
+        <div style="font-size:0.7rem; color:var(--ink-3); white-space:nowrap">
           asked {format_timestamp(@inquiry[:asked_at])}
         </div>
       </div>
 
       <%= case @inquiry[:status] do %>
         <% "answered" -> %>
-          <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
+          <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--ink-2)">
             <span class={"badge #{if @inquiry[:outcome] == "rejected", do: "badge-orange", else: "badge-green"}"}>
               {if @inquiry[:outcome] == "rejected", do: "rejected", else: "answered"}
             </span>
             <b style="margin-left:0.4rem">{@inquiry[:answer_label] || @inquiry[:answer]}</b>
-            <span style="color:var(--muted)">
+            <span style="color:var(--ink-3)">
               — {@inquiry[:answered_by]}{if @inquiry[:answered_at], do: ", #{format_timestamp(@inquiry[:answered_at])}"}
             </span>
-            <div :if={@inquiry[:direction]} style="margin-top:0.3rem; color:var(--muted); font-style:italic">
+            <div :if={@inquiry[:direction]} style="margin-top:0.3rem; color:var(--ink-3); font-style:italic">
               direction: {@inquiry[:direction]}
             </div>
           </div>
@@ -97,9 +97,9 @@ defmodule GiTF.Dashboard.InquiryCard do
           <%!-- Taken back before anyone answered it (a kill, an orphan sweep,
                 an operator reset). History: no controls, or the page invites
                 a vote on a question the factory no longer holds for. --%>
-          <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--text-2)">
+          <div style="margin-top:0.7rem; font-size:0.85rem; color:var(--ink-2)">
             <span class="badge badge-grey">withdrawn</span>
-            <span style="color:var(--muted); margin-left:0.4rem">
+            <span style="color:var(--ink-3); margin-left:0.4rem">
               {@inquiry[:withdrawn_reason]}{if @inquiry[:withdrawn_at], do: " — #{format_timestamp(@inquiry[:withdrawn_at])}"}
             </span>
           </div>
@@ -114,7 +114,7 @@ defmodule GiTF.Dashboard.InquiryCard do
   end
 
   defp edge_colour(%{status: "open"}), do: "var(--warn)"
-  defp edge_colour(%{status: "withdrawn"}), do: "var(--muted)"
+  defp edge_colour(%{status: "withdrawn"}), do: "var(--ink-3)"
   defp edge_colour(_), do: "var(--ok)"
 
   attr(:inquiry, :map, required: true)
@@ -205,7 +205,7 @@ defmodule GiTF.Dashboard.InquiryCard do
               image hides itself and the text underneath becomes visible,
               so the tile degrades to a labelled option in place. --%>
         <div style="position:relative; background:var(--ground); border:1px solid var(--line); border-radius:4px; aspect-ratio:16/10; overflow:hidden; display:flex; align-items:center; justify-content:center">
-          <span style="position:absolute; font-size:0.7rem; color:var(--muted); padding:0 0.5rem; text-align:center">
+          <span style="position:absolute; font-size:0.7rem; color:var(--ink-3); padding:0 0.5rem; text-align:center">
             {option[:preview_error] || "no preview"}
           </span>
           <img
@@ -219,10 +219,10 @@ defmodule GiTF.Dashboard.InquiryCard do
         </div>
         <div style="display:flex; gap:0.5rem; align-items:stretch; margin-top:0.45rem">
           <div style="flex:1; min-width:0">
-            <div style="font-weight:600; color:var(--text)">
+            <div style="font-weight:600; color:var(--ink)">
               <span class="badge badge-blue" style="margin-right:0.4rem">Option {n}</span>{option.label}
             </div>
-            <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
+            <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--ink-3); margin-top:0.2rem">
               {option.rationale}
             </div>
           </div>
@@ -253,7 +253,7 @@ defmodule GiTF.Dashboard.InquiryCard do
         aria-label={"#{title}: #{@option.label}"}
         aria-pressed={to_string(Map.get(@votes, @option.id, "neutral") == vote)}
         class="btn btn-grey"
-        style={"padding:0.25rem 0.5rem; font-size:0.95rem; line-height:1; #{if Map.get(@votes, @option.id, "neutral") == vote, do: "border-color:var(--accent); color:var(--text)", else: "opacity:0.55"}"}
+        style={"padding:0.25rem 0.5rem; font-size:0.95rem; line-height:1; #{if Map.get(@votes, @option.id, "neutral") == vote, do: "border-color:var(--accent); color:var(--ink)", else: "opacity:0.55"}"}
       >{glyph}</button>
     </div>
     """
@@ -269,14 +269,14 @@ defmodule GiTF.Dashboard.InquiryCard do
     ~H"""
     <form phx-submit="reject_inquiry" style="margin-top:0.9rem; border-top:1px dashed var(--line); padding-top:0.7rem">
       <input type="hidden" name="inquiry_id" value={@inquiry.id} />
-      <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.35rem">
+      <div style="font-size:0.8rem; color:var(--ink-3); margin-bottom:0.35rem">
         None of these? Vote beside each option, say where to go instead, and send the phase back for another round.
       </div>
       <textarea
         name="direction"
         rows="2"
         placeholder="Optional direction — refer to the proposals by number, e.g. option 2's weight with option 1's boundary"
-        style="display:block; width:100%; box-sizing:border-box; background:var(--ground); border:1px solid var(--line); border-radius:4px; color:var(--text); font-size:0.82rem; padding:0.4rem 0.5rem"
+        style="display:block; width:100%; box-sizing:border-box; background:var(--ground); border:1px solid var(--line); border-radius:4px; color:var(--ink); font-size:0.82rem; padding:0.4rem 0.5rem"
       ></textarea>
       <button type="submit" class="btn btn-red" style="margin-top:0.5rem">Try again</button>
     </form>
@@ -311,10 +311,10 @@ defmodule GiTF.Dashboard.InquiryCard do
         style="text-align:left; display:flex; gap:0.5rem; align-items:stretch; width:100%; padding:0.6rem 0.75rem; white-space:normal; cursor:pointer"
       >
         <div style="flex:1; min-width:0">
-          <div style="font-weight:600; color:var(--text)">
+          <div style="font-weight:600; color:var(--ink)">
             <span class="badge badge-blue" style="margin-right:0.4rem">Option {n}</span>{option.label}
           </div>
-          <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem">
+          <div :if={option[:rationale]} style="font-size:0.78rem; color:var(--ink-3); margin-top:0.2rem">
             {option.rationale}
           </div>
         </div>

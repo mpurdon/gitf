@@ -24,7 +24,7 @@ defmodule GiTF.Cabinet.Fleet do
       "Reservations[0].Instances[0].{state:State.Name,launched_at:LaunchTime}"
 
     with {out, 0} <-
-           runner().ec2([
+           safe_ec2([
              "describe-instances",
              "--instance-ids",
              id,
@@ -41,6 +41,15 @@ defmodule GiTF.Cabinet.Fleet do
   end
 
   def describe(_), do: @unknown_box
+
+  # `System.cmd` raises rather than returning an error when the binary is not
+  # on PATH, and that turned "we do not know the state" into a crash in every
+  # caller — including the Console's read path, and CI, where there is no `aws`.
+  defp safe_ec2(args) do
+    runner().ec2(args)
+  rescue
+    ErlangError -> {"", 1}
+  end
 
   @doc "EC2 state for the ministry: \"running\" | \"stopped\" | \"pending\" | … | :unknown."
   def instance_state(ministry), do: describe(ministry).state

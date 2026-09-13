@@ -190,17 +190,17 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
         .phase-card.selected { border-color:var(--accent); background:var(--panel-2) }
         .phase-card-ghost { opacity:0.4 }
         .phase-card-chosen { border-color:var(--accent) !important }
-        .drag-handle { cursor:grab; color:var(--muted); padding:0 0.5rem; user-select:none; font-size:1.1rem }
+        .drag-handle { cursor:grab; color:var(--ink-3); padding:0 0.5rem; user-select:none; font-size:1.1rem }
         .drag-handle:active { cursor:grabbing }
-        .pill { display:inline-block; padding:0.1rem 0.45rem; border-radius:9999px; font-size:0.7rem; background:var(--line-2); color:var(--muted); margin-left:0.5rem }
+        .pill { display:inline-block; padding:0.1rem 0.45rem; border-radius:9999px; font-size:0.7rem; background:var(--line-soft); color:var(--ink-3); margin-left:0.5rem }
         .pill-tier { background:var(--accent-soft); color:var(--accent) }
         .pill-warn { background:var(--crit)33; color:var(--crit) }
-        .arrow { color:var(--muted); padding:0 0.5rem; font-size:0.9rem }
+        .arrow { color:var(--ink-3); padding:0 0.5rem; font-size:0.9rem }
         .editor-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem }
         @media (max-width: 900px) { .editor-grid { grid-template-columns:1fr } }
         .field { margin-bottom:0.75rem }
-        .field label { display:block; color:var(--muted); font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase }
-        .field input, .field select { width:100%; background:var(--ground); border:1px solid var(--line); color:var(--text-2); padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem }
+        .field label { display:block; color:var(--ink-3); font-size:0.75rem; margin-bottom:0.25rem; text-transform:uppercase }
+        .field input, .field select { width:100%; background:var(--ground); border:1px solid var(--line); color:var(--ink-2); padding:0.4rem 0.6rem; border-radius:4px; font-size:0.85rem }
         .field input:focus, .field select:focus { outline:none; border-color:var(--accent) }
       </style>
 
@@ -213,13 +213,13 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
       </div>
 
       <%= if @workflow.description do %>
-        <p style="color:var(--muted); font-size:0.85rem; margin-bottom:1rem">{@workflow.description}</p>
+        <p style="color:var(--ink-3); font-size:0.85rem; margin-bottom:1rem">{@workflow.description}</p>
       <% end %>
 
       <%= if @validation_errors != [] do %>
         <div style="background:var(--crit)22; border:1px solid var(--crit); padding:0.75rem; margin-bottom:1rem; border-radius:6px">
           <strong style="color:var(--crit)">Validation errors:</strong>
-          <ul style="margin:0.5rem 0 0 1.25rem; color:var(--text-2); font-size:0.85rem">
+          <ul style="margin:0.5rem 0 0 1.25rem; color:var(--ink-2); font-size:0.85rem">
             <%= for err <- @validation_errors do %>
               <li>{inspect(err)}</li>
             <% end %>
@@ -231,7 +231,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
         <!-- Left: drag-drop phase list -->
         <div class="panel">
           <div class="panel-title">Phases ({length(@workflow.phases)})</div>
-          <p style="color:var(--muted); font-size:0.75rem; margin-bottom:0.75rem">
+          <p style="color:var(--ink-3); font-size:0.75rem; margin-bottom:0.75rem">
             Drag the <span class="drag-handle">≡</span> handle to reorder. Click a card to edit its config.
           </p>
 
@@ -239,7 +239,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
             class="btn add-phase-btn"
             phx-click="add_phase"
             phx-value-position="0"
-            style="display:block; width:100%; padding:0.4rem; margin-bottom:0.5rem; background:transparent; border:1px dashed var(--line); color:var(--muted); border-radius:6px; cursor:pointer; font-size:0.8rem"
+            style="display:block; width:100%; padding:0.4rem; margin-bottom:0.5rem; background:transparent; border:1px dashed var(--line); color:var(--ink-3); border-radius:6px; cursor:pointer; font-size:0.8rem"
           >
             + Add phase at top
           </button>
@@ -263,13 +263,13 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
                     phx-click="remove_phase"
                     phx-value-id={phase.id}
                     data-confirm={"Remove phase \"" <> phase.id <> "\"?"}
-                    style="background:none; border:none; color:var(--muted); cursor:pointer; padding:0 0.25rem; margin-left:0.25rem; font-size:1rem"
+                    style="background:none; border:none; color:var(--ink-3); cursor:pointer; padding:0 0.25rem; margin-left:0.25rem; font-size:1rem"
                     title="Remove phase"
                   >
                     ✕
                   </button>
                 </div>
-                <div style="margin-top:0.4rem; padding-left:1.75rem; color:var(--muted); font-size:0.75rem">
+                <div style="margin-top:0.4rem; padding-left:1.75rem; color:var(--ink-3); font-size:0.75rem">
                   <span class="arrow">→</span>{format_advance(phase)}
                   <%= if phase.timeout_minutes do %>
                     <span class="pill">{phase.timeout_minutes}m</span>
@@ -289,7 +289,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
             class="btn add-phase-btn"
             phx-click="add_phase"
             phx-value-position={length(@workflow.phases)}
-            style="display:block; width:100%; padding:0.4rem; margin-top:0.5rem; background:transparent; border:1px dashed var(--line); color:var(--muted); border-radius:6px; cursor:pointer; font-size:0.8rem"
+            style="display:block; width:100%; padding:0.4rem; margin-top:0.5rem; background:transparent; border:1px dashed var(--line); color:var(--ink-3); border-radius:6px; cursor:pointer; font-size:0.8rem"
           >
             + Add phase at bottom
           </button>
@@ -298,7 +298,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
             <button class="btn btn-blue" phx-click="save" disabled={@validation_errors != []}>
               Save
             </button>
-            <span style="color:var(--muted); font-size:0.75rem; align-self:center">
+            <span style="color:var(--ink-3); font-size:0.75rem; align-self:center">
               <%= if @dirty?, do: "• Unsaved changes", else: "" %>
             </span>
           </div>
@@ -314,7 +314,7 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
             <% end %>
           <% else %>
             <div class="panel-title">Phase configuration</div>
-            <p style="color:var(--muted); font-size:0.85rem">
+            <p style="color:var(--ink-3); font-size:0.85rem">
               Click a phase on the left to edit its config.
             </p>
           <% end %>
@@ -401,11 +401,11 @@ defmodule GiTF.Dashboard.WorkflowEditorLive do
       </div>
 
       <div style="display:flex; gap:1.25rem; margin-top:0.5rem">
-        <label style="display:flex; align-items:center; gap:0.4rem; color:var(--text-2); font-size:0.8rem">
+        <label style="display:flex; align-items:center; gap:0.4rem; color:var(--ink-2); font-size:0.8rem">
           <input type="checkbox" name="inject_knowledge" checked={@phase.inject_knowledge} value="true" />
           inject_knowledge
         </label>
-        <label style="display:flex; align-items:center; gap:0.4rem; color:var(--text-2); font-size:0.8rem">
+        <label style="display:flex; align-items:center; gap:0.4rem; color:var(--ink-2); font-size:0.8rem">
           <input type="checkbox" name="inject_skills" checked={@phase.inject_skills} value="true" />
           inject_skills
         </label>

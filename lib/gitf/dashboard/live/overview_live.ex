@@ -410,10 +410,10 @@ defmodule GiTF.Dashboard.OverviewLive do
         <div
           title={mini_phase_title(phase, @gate_state, @input_state)}
           style={"width:6px; height:6px; border-radius:50%; background:#{cond do
-            phase == "awaiting_approval" and @gate_state == :skipped -> "var(--muted)"
+            phase == "awaiting_approval" and @gate_state == :skipped -> "var(--ink-3)"
             phase == "awaiting_input" and @input_state == :held -> "var(--warn)"
             phase == "awaiting_input" and @input_state == :answered -> "var(--ok)"
-            phase == "awaiting_input" and @input_state == :skipped -> "var(--muted)"
+            phase == "awaiting_input" and @input_state == :skipped -> "var(--ink-3)"
             phase == "awaiting_input" -> "var(--line)"
             idx < @current_idx -> "var(--ok)"
             idx == @current_idx -> "var(--accent)"
@@ -490,11 +490,11 @@ defmodule GiTF.Dashboard.OverviewLive do
       String.contains?(name, "pro") or String.contains?(name, "opus") -> "var(--recon)"
       String.contains?(name, "flash") or String.contains?(name, "sonnet") -> "var(--accent)"
       String.contains?(name, "haiku") -> "var(--accent)"
-      true -> "var(--muted)"
+      true -> "var(--ink-3)"
     end
   end
 
-  defp model_bar_color(_), do: "var(--muted)"
+  defp model_bar_color(_), do: "var(--ink-3)"
 
   defp safe_active_count do
     GiTF.SectorSupervisor.active_count()
@@ -520,7 +520,7 @@ defmodule GiTF.Dashboard.OverviewLive do
         <% "plan_approval_needed" -> %><Heroicons.clipboard_document_check mini class="w-4 h-4" style="color:var(--warn);" />
         <% "pr_created" -> %><Heroicons.code_bracket mini class="w-4 h-4" style="color:var(--accent);" />
         <% "start_mission" -> %><Heroicons.rocket_launch mini class="w-4 h-4" style="color:var(--ok);" />
-        <% _ -> %><Heroicons.chat_bubble_left mini class="w-4 h-4" style="color:var(--muted);" />
+        <% _ -> %><Heroicons.chat_bubble_left mini class="w-4 h-4" style="color:var(--ink-3);" />
       <% end %>
     </span>
     """
@@ -540,12 +540,12 @@ defmodule GiTF.Dashboard.OverviewLive do
           end %>
           <a href="/dashboard/health" style={"display:inline-flex; align-items:center; gap:0.3rem; font-size:0.7rem; color:#{case health do
             :healthy -> "var(--ok)"
-            :loading -> "var(--muted)"
+            :loading -> "var(--ink-3)"
             _ -> "var(--crit)"
           end}; text-decoration:none"} title="System health">
             <span style={"width:6px; height:6px; border-radius:50%; background:#{case health do
               :healthy -> "var(--ok)"
-              :loading -> "var(--muted)"
+              :loading -> "var(--ink-3)"
               _ -> "var(--crit)"
             end}"}></span>
             {case health do
@@ -554,15 +554,15 @@ defmodule GiTF.Dashboard.OverviewLive do
               _ -> "degraded"
             end}
           </a>
-          <span style="font-size:0.7rem; color:var(--line-strong)" title="Auto-refreshes every 5s">
+          <span style="font-size:0.7rem; color:var(--line)" title="Auto-refreshes every 5s">
             &middot; updated {format_timestamp(@last_updated)}
           </span>
         </div>
         
         <div style="display:flex; align-items:center; gap:0.75rem; background:var(--panel-2); border:1px solid var(--line); padding:0.5rem 0.75rem; border-radius:6px">
           <div style="display:flex; flex-direction:column">
-            <span style="font-size:0.7rem; color:var(--muted); font-weight:500; text-transform:uppercase; letter-spacing:0.05em">Dark Factory</span>
-            <span style={"font-size:0.8rem; font-weight:600; color:#{if @dark_factory, do: "var(--ok)", else: "var(--muted)"}"}>
+            <span style="font-size:0.7rem; color:var(--ink-3); font-weight:500; text-transform:uppercase; letter-spacing:0.05em">Dark Factory</span>
+            <span style={"font-size:0.8rem; font-weight:600; color:#{if @dark_factory, do: "var(--ok)", else: "var(--ink-3)"}"}>
               {if @dark_factory, do: "Fully Autonomous", else: "Manual Review"}
             </span>
           </div>
@@ -586,15 +586,15 @@ defmodule GiTF.Dashboard.OverviewLive do
           <% else %>
             <div style="display:flex; flex-direction:column; gap:0.4rem; margin-top:0.5rem">
               <%= for sector <- @recent_sectors do %>
-                <div style={"display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0.2rem; border-bottom:1px solid var(--line-2); border-left:2px solid #{if Map.get(sector, :id) == @current_sector_id, do: "var(--accent)", else: "transparent"}; padding-left:0.4rem"}>
+                <div style={"display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0.2rem; border-bottom:1px solid var(--line-soft); border-left:2px solid #{if Map.get(sector, :id) == @current_sector_id, do: "var(--accent)", else: "transparent"}; padding-left:0.4rem"}>
                   <div style="display:flex; align-items:center; gap:0.4rem; overflow:hidden; flex:1">
-                    <span style="color:var(--text); font-weight:500; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{Map.get(sector, :name, "-")}</span>
+                    <span style="color:var(--ink); font-weight:500; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{Map.get(sector, :name, "-")}</span>
                     <%= if Map.get(sector, :id) == @current_sector_id do %>
                       <span class="badge badge-blue" style="font-size:0.55rem; flex-shrink:0">active</span>
                     <% end %>
                   </div>
                   <%= if Map.get(sector, :id) != @current_sector_id do %>
-                    <button phx-click="use_sector" phx-value-id={sector.id} style="background:none; border:1px solid var(--line); color:var(--muted); font-size:0.6rem; padding:0.1rem 0.4rem; border-radius:3px; cursor:pointer; flex-shrink:0">use</button>
+                    <button phx-click="use_sector" phx-value-id={sector.id} style="background:none; border:1px solid var(--line); color:var(--ink-3); font-size:0.6rem; padding:0.1rem 0.4rem; border-radius:3px; cursor:pointer; flex-shrink:0">use</button>
                   <% end %>
                 </div>
               <% end %>
@@ -613,9 +613,9 @@ defmodule GiTF.Dashboard.OverviewLive do
           <% else %>
             <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.5rem">
               <%= for mission <- @recent_missions do %>
-                <a href={"/dashboard/missions/#{mission.id}"} style="text-decoration:none; display:block; padding:0.4rem 0; border-bottom:1px solid var(--line-2)">
+                <a href={"/dashboard/missions/#{mission.id}"} style="text-decoration:none; display:block; padding:0.4rem 0; border-bottom:1px solid var(--line-soft)">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem">
-                    <span style="color:var(--text); font-weight:500; font-size:0.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%">
+                    <span style="color:var(--ink); font-weight:500; font-size:0.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%">
                       {Map.get(mission, :name) || String.slice(Map.get(mission, :goal, ""), 0, 30)}
                     </span>
                     <div style="display:flex; gap:0.25rem; align-items:center">
@@ -630,14 +630,14 @@ defmodule GiTF.Dashboard.OverviewLive do
                   <div style="display:flex; align-items:center; gap:6px">
                     <.mini_phase_pipeline phase={Map.get(mission, :current_phase, "pending")} mission={mission} />
                     <%!-- Budget micro-bar --%>
-                    <div style="flex:1; height:3px; background:var(--line-2); border-radius:2px; overflow:hidden; min-width:30px" title={"Budget: #{mission.budget_pct}%"}>
+                    <div style="flex:1; height:3px; background:var(--line-soft); border-radius:2px; overflow:hidden; min-width:30px" title={"Budget: #{mission.budget_pct}%"}>
                       <div style={"height:100%; border-radius:2px; background:#{cond do
                         mission.budget_pct >= 90 -> "var(--crit)"
                         mission.budget_pct >= 70 -> "var(--warn)"
                         true -> "var(--ok)"
                       end}; width:#{min(mission.budget_pct, 100)}%"}></div>
                     </div>
-                    <span style="font-size:0.6rem; color:var(--muted); white-space:nowrap">{mission.budget_pct}%</span>
+                    <span style="font-size:0.6rem; color:var(--ink-3); white-space:nowrap">{mission.budget_pct}%</span>
                   </div>
                 </a>
               <% end %>
@@ -645,7 +645,7 @@ defmodule GiTF.Dashboard.OverviewLive do
           <% end %>
           <div style="margin-top:auto; padding-top:0.75rem; display:flex; justify-content:space-between; align-items:center">
             <a href="/dashboard/missions" style="color:var(--accent); font-size:0.8rem">View all &rarr;</a>
-            <span style="color:var(--muted); font-size:0.75rem">{@quest_count} total</span>
+            <span style="color:var(--ink-3); font-size:0.75rem">{@quest_count} total</span>
           </div>
         </div>
 
@@ -660,20 +660,20 @@ defmodule GiTF.Dashboard.OverviewLive do
             <div class="card-value green">{format_cost(costs.total_cost)}</div>
             <div class="card-label" style="margin-top:0.25rem">{format_tokens(costs.total_input_tokens + costs.total_output_tokens)} tokens</div>
           <% else %>
-            <div class="card-value" style="color:var(--muted)">loading...</div>
+            <div class="card-value" style="color:var(--ink-3)">loading...</div>
           <% end %>
           <%!-- Per-model cost bar chart --%>
           <%= if costs && costs.by_model != %{} do %>
-            <div style="margin-top:0.75rem; border-top:1px solid var(--line-2); padding-top:0.75rem">
-              <div style="font-size:0.7rem; color:var(--muted); margin-bottom:0.5rem">Cost by Model</div>
+            <div style="margin-top:0.75rem; border-top:1px solid var(--line-soft); padding-top:0.75rem">
+              <div style="font-size:0.7rem; color:var(--ink-3); margin-bottom:0.5rem">Cost by Model</div>
               <% max_cost = costs.by_model |> Map.values() |> Enum.map(& &1.cost) |> Enum.max(fn -> 0.001 end) %>
               <%= for {model, data} <- Enum.sort_by(costs.by_model, fn {_, d} -> -d.cost end) do %>
                 <div style="margin-bottom:0.5rem">
                   <div style="display:flex; justify-content:space-between; font-size:0.7rem; margin-bottom:2px">
-                    <span style="color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%">{short_model_name(model)}</span>
+                    <span style="color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%">{short_model_name(model)}</span>
                     <span style="color:var(--ok)">{format_cost(data.cost)}</span>
                   </div>
-                  <div style="height:4px; background:var(--line-2); border-radius:2px; overflow:hidden">
+                  <div style="height:4px; background:var(--line-soft); border-radius:2px; overflow:hidden">
                     <div style={"height:100%; border-radius:2px; background:#{model_bar_color(model)}; width:#{Float.round(data.cost / max_cost * 100, 1)}%"}></div>
                   </div>
                 </div>
@@ -712,7 +712,7 @@ defmodule GiTF.Dashboard.OverviewLive do
           <div style="display:flex; justify-content:center; padding:0.5rem 0">
             <svg viewBox="0 0 120 70" width="120" height="70">
               <%!-- Background arc --%>
-              <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="var(--line-2)" stroke-width="8" stroke-linecap="round" />
+              <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="var(--line-soft)" stroke-width="8" stroke-linecap="round" />
               <%!-- Fuel arc — colored by level --%>
               <% fuel = @fuel_remaining %>
               <% arc_pct = fuel / 100.0 %>
@@ -741,12 +741,12 @@ defmodule GiTF.Dashboard.OverviewLive do
               <text x="60" y="55" text-anchor="middle" fill={color} font-size="16" font-weight="bold">
                 {Float.round(fuel, 0) |> trunc()}%
               </text>
-              <text x="60" y="67" text-anchor="middle" fill="var(--muted)" font-size="8">
+              <text x="60" y="67" text-anchor="middle" fill="var(--ink-3)" font-size="8">
                 remaining
               </text>
             </svg>
           </div>
-          <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--muted); padding:0 0.25rem">
+          <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--ink-3); padding:0 0.25rem">
             <span>peak: {Float.round(@peak_context, 1)}%</span>
             <span>{length(@active_ghost_list)} active</span>
           </div>
@@ -770,7 +770,7 @@ defmodule GiTF.Dashboard.OverviewLive do
       <!-- Quick Run -->
       <div class="panel" style="margin-bottom:1.5rem">
         <div class="panel-title">Quick Run</div>
-        <p style="color:var(--muted); font-size:0.8rem; margin-bottom:0.75rem">
+        <p style="color:var(--ink-3); font-size:0.8rem; margin-bottom:0.75rem">
           Run a focused task (bug fix, single feature) — skips the full pipeline, spawns one ghost immediately.
         </p>
         <form phx-submit="quick_run" style="display:flex; gap:0.5rem; align-items:flex-end">
@@ -794,26 +794,26 @@ defmodule GiTF.Dashboard.OverviewLive do
       </div>
 
       <%!-- Factory operations bar --%>
-      <div style="display:flex; gap:1.5rem; margin-bottom:1.5rem; padding:0.6rem 1rem; background:var(--panel); border:1px solid var(--line-2); border-radius:6px; font-size:0.8rem; flex-wrap:wrap">
+      <div style="display:flex; gap:1.5rem; margin-bottom:1.5rem; padding:0.6rem 1rem; background:var(--panel); border:1px solid var(--line-soft); border-radius:6px; font-size:0.8rem; flex-wrap:wrap">
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <.dot color="var(--ok)" /> <span style="color:var(--ok); font-weight:600">{@active_ghosts}</span> <span style="color:var(--muted)">ghosts working</span>
+          <.dot color="var(--ok)" /> <span style="color:var(--ok); font-weight:600">{@active_ghosts}</span> <span style="color:var(--ink-3)">ghosts working</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <.dot color="var(--accent)" /> <span style="color:var(--accent); font-weight:600">{@active_quests}</span> <span style="color:var(--muted)">missions active</span>
+          <.dot color="var(--accent)" /> <span style="color:var(--accent); font-weight:600">{@active_quests}</span> <span style="color:var(--ink-3)">missions active</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <.dot color="var(--warn)" /> <span style="color:var(--warn); font-weight:600">{@pending_approvals}</span> <span style="color:var(--muted)">approvals waiting</span>
+          <.dot color="var(--warn)" /> <span style="color:var(--warn); font-weight:600">{@pending_approvals}</span> <span style="color:var(--ink-3)">approvals waiting</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <span style="color:var(--muted)">Today:</span>
+          <span style="color:var(--ink-3)">Today:</span>
           <span style="color:var(--ok); font-weight:600">{@completed_today}</span>
-          <span style="color:var(--muted)">done</span>
+          <span style="color:var(--ink-3)">done</span>
           <%= if @failed_today > 0 do %>
             <span style="color:var(--crit); font-weight:600">{@failed_today}</span>
-            <span style="color:var(--muted)">failed</span>
+            <span style="color:var(--ink-3)">failed</span>
           <% end %>
-          <span style="color:var(--line-strong)">&middot;</span>
-          <span style="color:var(--muted)">{@ops_completed_today} ops</span>
+          <span style="color:var(--line)">&middot;</span>
+          <span style="color:var(--ink-3)">{@ops_completed_today} ops</span>
         </div>
       </div>
 
@@ -832,19 +832,19 @@ defmodule GiTF.Dashboard.OverviewLive do
                   "failed" -> "var(--crit)"
                   "paused" -> "var(--warn)"
                   "paused_budget" -> "var(--warn)"
-                  _ -> "var(--line-2)"
+                  _ -> "var(--line-soft)"
                 end}; transition:transform 0.1s"}
                 onmouseover="this.style.transform='scale(1.3)'"
                 onmouseout="this.style.transform='scale(1)'"
               ></a>
             <% end %>
           </div>
-          <div style="display:flex; gap:1rem; font-size:0.65rem; color:var(--muted); margin-top:0.25rem">
+          <div style="display:flex; gap:1rem; font-size:0.65rem; color:var(--ink-3); margin-top:0.25rem">
             <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:var(--accent); vertical-align:middle; margin-right:3px"></span>active</span>
             <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:var(--ok); vertical-align:middle; margin-right:3px"></span>completed</span>
             <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:var(--crit); vertical-align:middle; margin-right:3px"></span>failed</span>
             <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:var(--warn); vertical-align:middle; margin-right:3px"></span>paused</span>
-            <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:var(--line-2); vertical-align:middle; margin-right:3px"></span>pending</span>
+            <span><span style="display:inline-block; width:8px; height:8px; border-radius:1px; background:var(--line-soft); vertical-align:middle; margin-right:3px"></span>pending</span>
           </div>
         </div>
       <% end %>

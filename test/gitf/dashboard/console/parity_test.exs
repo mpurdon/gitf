@@ -207,7 +207,7 @@ defmodule GiTF.Dashboard.Console.ParityTest do
     # phx-value-* params, and a <button> with no value attribute reports "".
     # The Catwalk shipped every inquiry answer as "" that way (e5fd106); the
     # Console must not rediscover it.
-    for file <- [@pages, "lib/gitf/dashboard/console/components.ex"] do
+    for file <- [@pages, "lib/gitf/dashboard/surface/components.ex"] do
       # Comments may name the attribute; only a live one is a bug.
       source = String.replace(File.read!(file), ~r/<%!--.*?--%>/s, "")
 

@@ -49,9 +49,21 @@ defmodule GiTF.Cabinet.RemoteTest do
     test "not knowing the state is a reason to ask, not a reason to say asleep" do
       # A ministry the Cabinet has never observed has no :box at all. Claiming
       # it is asleep would be a guess presented as a fact.
-      m = ministry!(%{url: "https://127.0.0.1:1", instance_id: "i-1"})
+      m = ministry!(%{url: "http://127.0.0.1:1", instance_id: "i-1"})
 
       refute Remote.get(m.slug, "/sectors", timeout_ms: 200) == {:error, :asleep}
+    end
+
+    test "the read path never shells out to AWS" do
+      # It did, through Fleet.instance_state, and `System.cmd` raises rather
+      # than returning an error when the binary is absent — so reading a page
+      # crashed on any host without the CLI, CI included. The Cabinet's watcher
+      # already records the state; the reader looks it up.
+      src = File.read!("lib/gitf/cabinet/remote.ex")
+
+      for call <- ["Fleet.", "System.cmd", "System.shell"] do
+        refute src =~ call, "#{call} on the read path: a page render is not the place for it"
+      end
     end
   end
 

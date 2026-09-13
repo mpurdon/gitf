@@ -18,7 +18,7 @@ defmodule GiTF.Cabinet.Remote do
   expanding a row in a tree.
   """
 
-  alias GiTF.Cabinet.{Fleet, Registry}
+  alias GiTF.Cabinet.Registry
 
   # Reading is not doing. A factory that cannot answer a GET in a few seconds
   # is one whose tree can say so and offer a retry, which beats a rail that
@@ -73,14 +73,16 @@ defmodule GiTF.Cabinet.Remote do
   defp list_or_empty({:ok, list}) when is_list(list), do: list
   defp list_or_empty(_), do: []
 
-  # The Cabinet already watches instance state, so this is a lookup rather than
-  # a probe. `:unknown` is treated as awake: not knowing is a reason to ask the
-  # factory, not a reason to tell the operator it is asleep.
+  # A lookup, never a probe: the Cabinet's watcher already records instance
+  # state, and asking EC2 here would put an `aws` subprocess on the read path of
+  # every page — slow where the CLI exists and a crash where it does not.
+  #
+  # A state we have not recorded is treated as awake, because not knowing is a
+  # reason to ask the factory, not a reason to tell the operator it is asleep.
   defp awake?(ministry) do
-    case ministry[:box][:state] || Fleet.instance_state(ministry) do
+    case ministry[:box][:state] do
       "running" -> :ok
-      :unknown -> :ok
-      nil -> :ok
+      state when state in [nil, :unknown] -> :ok
       _ -> {:error, :asleep}
     end
   end

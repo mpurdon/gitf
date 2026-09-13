@@ -170,7 +170,7 @@ defmodule GiTF.Dashboard.AppLayout do
               <span style="flex:1">{toast.message}</span>
               <button
                 phx-click={JS.hide(to: "#toast-#{toast.id}", transition: {"transition-opacity duration-200", "opacity-100", "opacity-0"})}
-                style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:0; line-height:1"
+                style="background:none; border:none; color:var(--ink-3); cursor:pointer; font-size:1rem; padding:0; line-height:1"
               >&times;</button>
             </div>
           <% end %>

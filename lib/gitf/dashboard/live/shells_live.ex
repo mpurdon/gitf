@@ -196,16 +196,16 @@ defmodule GiTF.Dashboard.ShellsLive do
                     <span style="color:var(--accent); font-family:monospace; font-size:0.8rem" title={shell.id}>
                       {short_id(shell.id)}
                     </span>
-                    <div style="font-size:0.7rem; color:var(--muted); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title={shell[:worktree_path]}>
+                    <div style="font-size:0.7rem; color:var(--ink-3); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title={shell[:worktree_path]}>
                       {shell[:worktree_path] && Path.basename(shell.worktree_path)}
                     </div>
                   </td>
-                  <td style="font-size:0.8rem; color:var(--muted)">{short_id(shell[:sector_id] || "-")}</td>
+                  <td style="font-size:0.8rem; color:var(--ink-3)">{short_id(shell[:sector_id] || "-")}</td>
                   <td>
                     <%= if shell.ghost do %>
                       <a href={"/dashboard/ghosts"} style="color:var(--accent); font-size:0.8rem">{short_id(shell.ghost.id)}</a>
                     <% else %>
-                      <span style="color:var(--muted); font-size:0.8rem">-</span>
+                      <span style="color:var(--ink-3); font-size:0.8rem">-</span>
                     <% end %>
                   </td>
                   <td>
@@ -214,7 +214,7 @@ defmodule GiTF.Dashboard.ShellsLive do
                         {String.slice(shell.op.title || "", 0, 25)}
                       </a>
                     <% else %>
-                      <span style="color:var(--muted); font-size:0.8rem">-</span>
+                      <span style="color:var(--ink-3); font-size:0.8rem">-</span>
                     <% end %>
                   </td>
                   <td>
@@ -223,7 +223,7 @@ defmodule GiTF.Dashboard.ShellsLive do
                     </span>
                   </td>
                   <td>
-                    <span style="font-family:monospace; font-size:0.75rem; color:var(--muted)">
+                    <span style="font-family:monospace; font-size:0.75rem; color:var(--ink-3)">
                       {String.slice(shell[:base_commit_sha] || "-", 0, 7)}
                     </span>
                   </td>

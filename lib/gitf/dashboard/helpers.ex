@@ -400,9 +400,9 @@ defmodule GiTF.Dashboard.Helpers do
           <% {label, href} when is_binary(href) -> %>
             <a href={href} style="color:var(--accent)">{label}</a>
           <% {label, _} -> %>
-            <span style="color:var(--text-2); font-weight:500">{label}</span>
+            <span style="color:var(--ink-2); font-weight:500">{label}</span>
           <% label when is_binary(label) -> %>
-            <span style="color:var(--text-2); font-weight:500">{label}</span>
+            <span style="color:var(--ink-2); font-weight:500">{label}</span>
         <% end %>
       <% end %>
     </nav>

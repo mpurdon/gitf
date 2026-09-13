@@ -31,7 +31,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
   # Cabinet's.
   use Phoenix.LiveView
 
-  import GiTF.Dashboard.Console.Components
+  import GiTF.Dashboard.Surface.Components
 
   alias GiTF.Cabinet.{Activity, Fleet, Gate, Prefs, Registry, Remote, Ruleset, Snapshot}
   alias GiTF.Dashboard.Console.{Events, Format, Pages, Scope, Tree}

@@ -101,7 +101,7 @@ defmodule GiTF.Dashboard.HealthLive do
   defp check_color(:ok), do: "var(--ok)"
   defp check_color(:warning), do: "var(--warn)"
   defp check_color(:error), do: "var(--crit)"
-  defp check_color(_), do: "var(--muted)"
+  defp check_color(_), do: "var(--ink-3)"
 
   defp check_icon(:ok), do: "&#10003;"
   defp check_icon(:warning), do: "&#9888;"
@@ -111,8 +111,8 @@ defmodule GiTF.Dashboard.HealthLive do
   defp severity_color(:critical), do: "var(--crit)"
   defp severity_color(:high), do: "var(--warn)"
   defp severity_color(:medium), do: "var(--warn)"
-  defp severity_color(:low), do: "var(--muted)"
-  defp severity_color(_), do: "var(--muted)"
+  defp severity_color(:low), do: "var(--ink-3)"
+  defp severity_color(_), do: "var(--ink-3)"
 
   @impl true
   def render(assigns) do
@@ -149,7 +149,7 @@ defmodule GiTF.Dashboard.HealthLive do
             <tbody>
               <%= for {name, status} <- Enum.sort(@health.checks) do %>
                 <tr>
-                  <td style="color:var(--text-2)">{name |> to_string() |> String.replace("_", " ") |> String.capitalize()}</td>
+                  <td style="color:var(--ink-2)">{name |> to_string() |> String.replace("_", " ") |> String.capitalize()}</td>
                   <td style={"text-align:center; color:#{check_color(status)}"}>
                     <span style="font-size:1rem">{raw(check_icon(status))}</span>
                     <span style="font-size:0.75rem; margin-left:0.25rem">{status}</span>
@@ -186,21 +186,21 @@ defmodule GiTF.Dashboard.HealthLive do
             </div>
             <div class="card">
               <div class="card-label">BEAM</div>
-              <div style="color:var(--text-2); font-size:0.85rem; margin-top:0.25rem">
+              <div style="color:var(--ink-2); font-size:0.85rem; margin-top:0.25rem">
                 {@memory_mb} MB &middot; {@process_count} procs
               </div>
             </div>
           </div>
 
           <%!-- Provider circuits --%>
-          <div style="margin-top:1rem; border-top:1px solid var(--line-2); padding-top:0.75rem">
-            <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.5rem">Provider Circuits</div>
+          <div style="margin-top:1rem; border-top:1px solid var(--line-soft); padding-top:0.75rem">
+            <div style="font-size:0.75rem; color:var(--ink-3); margin-bottom:0.5rem">Provider Circuits</div>
             <%= if @open_circuits == [] do %>
               <div style="color:var(--ok); font-size:0.8rem">All circuits closed</div>
             <% else %>
               <%= for provider <- @open_circuits do %>
                 <div style="display:flex; justify-content:space-between; padding:0.25rem 0; font-size:0.8rem">
-                  <span style="color:var(--text-2)">{provider}</span>
+                  <span style="color:var(--ink-2)">{provider}</span>
                   <span class="badge badge-red">open</span>
                 </div>
               <% end %>
@@ -221,13 +221,13 @@ defmodule GiTF.Dashboard.HealthLive do
               <%= for {type, message} <- @alerts do %>
                 <% sev = GiTF.Observability.Alerts.severity(type) %>
                 <tr>
-                  <td style="color:var(--text-2); font-weight:500">{type}</td>
+                  <td style="color:var(--ink-2); font-weight:500">{type}</td>
                   <td>
                     <span style={"color:#{severity_color(sev)}; font-weight:600; font-size:0.8rem; text-transform:uppercase"}>
                       {sev}
                     </span>
                   </td>
-                  <td style="color:var(--muted); font-size:0.85rem">{message}</td>
+                  <td style="color:var(--ink-3); font-size:0.85rem">{message}</td>
                 </tr>
               <% end %>
             </tbody>

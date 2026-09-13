@@ -107,4 +107,23 @@ defmodule GiTF.Cabinet.FleetTest do
   test "await_healthy gives up at the deadline", %{ministry: m} do
     assert {:error, :wake_timeout} = Fleet.await_healthy(m, 0)
   end
+
+  describe "a missing aws CLI" do
+    test "describe/1 returns unknown rather than raising" do
+      # System.cmd raises :enoent when the binary is not on PATH. Every caller
+      # of describe/1 treated a failure as \"unknown\" already — except that it
+      # never got the chance, because the raise went straight through them.
+      runner = Application.get_env(:gitf, :cabinet_ec2_runner)
+
+      Application.put_env(:gitf, :cabinet_ec2_runner, GiTF.Cabinet.FleetTest.NoAws)
+      on_exit(fn -> Application.put_env(:gitf, :cabinet_ec2_runner, runner) end)
+
+      assert %{state: :unknown} = GiTF.Cabinet.Fleet.describe(%{instance_id: "i-1"})
+      assert GiTF.Cabinet.Fleet.instance_state(%{instance_id: "i-1"}) == :unknown
+    end
+  end
+
+  defmodule NoAws do
+    def ec2(_args), do: raise(ErlangError, original: :enoent)
+  end
 end
