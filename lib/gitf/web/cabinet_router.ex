@@ -85,7 +85,15 @@ defmodule GiTF.Web.CabinetRouter do
     live_session :cabinet, on_mount: GiTF.Web.TailnetAuth do
       live("/", CabinetLive)
       live("/wake/:slug", CabinetLive, :wake)
+    end
 
+    # The Console brings its own document — own tokens, own hooks, own
+    # LiveSocket — so it needs its own root layout. Nested inside the Cabinet's,
+    # both roots' scripts land in one page and the second `const csrfToken`
+    # throws a SyntaxError that takes the whole block with it.
+    live_session :console,
+      on_mount: GiTF.Web.TailnetAuth,
+      root_layout: {GiTF.Dashboard.Console.Layouts, :root} do
       # One LiveView for every scope: the console patches between objects
       # rather than remounting, so the tree and the workspace stay put.
       live("/console", ConsoleLive)

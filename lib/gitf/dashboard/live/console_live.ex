@@ -26,7 +26,10 @@ defmodule GiTF.Dashboard.ConsoleLive do
   clicked is asleep.
   """
 
-  use Phoenix.LiveView, layout: {GiTF.Dashboard.Console.Layouts, :root}
+  # The root layout is set by the router's `live_session` — declaring it here as
+  # an inner layout is what nested the Console's whole document inside the
+  # Cabinet's.
+  use Phoenix.LiveView
 
   import GiTF.Dashboard.Console.Components
 

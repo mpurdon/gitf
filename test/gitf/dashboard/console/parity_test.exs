@@ -18,6 +18,7 @@ defmodule GiTF.Dashboard.Console.ParityTest do
   @old "lib/gitf/dashboard/live/cabinet_live.ex"
   @new "lib/gitf/dashboard/live/console_live.ex"
   @pages "lib/gitf/dashboard/console/pages.ex"
+  @console_layouts "lib/gitf/dashboard/console/layouts.ex"
   @format "lib/gitf/dashboard/console/format.ex"
 
   # Every event the Cabinet Console handles, and what covers it now.
@@ -141,6 +142,24 @@ defmodule GiTF.Dashboard.Console.ParityTest do
 
     refute src =~ ~r/spend_line.*spend_usd/s,
            "spend_line must not reach for the lifetime total again"
+  end
+
+  test "the Console's document is not nested inside the Cabinet's" do
+    # The Console brings its own root layout. Declared as the LiveView's inner
+    # layout while the pipeline still forced the Cabinet's root, the page
+    # shipped two <html> documents and two `const csrfToken` — and the second
+    # declaration threw a SyntaxError that killed that whole script block.
+    router = File.read!("lib/gitf/web/cabinet_router.ex")
+
+    assert router =~
+             ~r/live_session :console,.*root_layout:\s*\{GiTF\.Dashboard\.Console\.Layouts, :root\}/s,
+           "the Console's root layout has to come from its own live_session"
+
+    refute File.read!(@new) =~ ~r/use Phoenix\.LiveView,\s*layout:/,
+           "and not also from the LiveView, which would nest it again"
+
+    # Each root declares the token once; two roots in one document is the bug.
+    assert length(Regex.scan(~r/(?:const|let|var) csrfToken/, File.read!(@console_layouts))) == 1
   end
 
   test "nothing sends a value on the one attribute the browser overwrites" do
