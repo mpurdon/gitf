@@ -7,6 +7,7 @@ defmodule GiTF.Dashboard.CostsLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Page
 
   @heartbeat_interval :timer.seconds(20)
 
@@ -382,23 +383,17 @@ defmodule GiTF.Dashboard.CostsLive do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div id="costs-session" phx-hook="SessionStore" data-store-key="costs_range"></div>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
-        <h1 class="page-title" style="margin-bottom:0">Cost Tracking</h1>
-        <div style="display:flex; align-items:center; gap:0.5rem">
-          <div style="display:flex; gap:2px">
-            <%= for label <- @range_options do %>
-              <button
-                phx-click="set_range"
-                phx-value-range={label}
-                style={"padding:0.25rem 0.6rem; font-size:0.7rem; border-radius:4px; border:1px solid #{if @trend_range == label, do: "var(--accent)", else: "var(--line)"}; background:#{if @trend_range == label, do: "var(--accent-soft)", else: "transparent"}; color:#{if @trend_range == label, do: "var(--accent)", else: "var(--ink-3)"}; cursor:pointer"}
-              >
-                {label}
-              </button>
-            <% end %>
-          </div>
-          <button phx-click="refresh" class="btn btn-grey" style="font-size:0.8rem">Refresh</button>
-        </div>
-      </div>
+      <.object kind="Investigate" name="Costs" sub="what the factory spent, and on what">
+        <:actions>
+          <button
+            :for={label <- @range_options}
+            phx-click="set_range"
+            phx-value-range={label}
+            class={["chip", @trend_range == label && "on"]}
+          >{label}</button>
+          <button phx-click="refresh" class="btn sm">Refresh</button>
+        </:actions>
+      </.object>
 
       <%!-- Row 1: Gauges + Key Metrics --%>
       <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:0.75rem; margin-bottom:0.75rem">

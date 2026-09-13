@@ -270,11 +270,17 @@ defmodule GiTF.Dashboard.Surface.Components do
     """
   end
 
-  @doc "The expert view of whatever is above it. The simplified UI is never a dead end."
+  @doc """
+  The expert view of whatever is above it. The simplified UI is never a dead end.
+
+  Named `record` rather than `raw` because `Phoenix.HTML.raw/1` has that name
+  everywhere, and an import clash is decided at the call site by whichever page
+  happens to need both.
+  """
   attr(:term, :any, required: true)
   attr(:note, :string, default: nil)
 
-  def raw(assigns) do
+  def record(assigns) do
     ~H"""
     <p :if={@note} class="note" style="margin:0 0 12px">{@note}</p>
     <pre class="raw">{inspect(@term, pretty: true, limit: :infinity, printable_limit: 8_192)}</pre>

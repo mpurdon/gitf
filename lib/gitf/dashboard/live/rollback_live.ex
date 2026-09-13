@@ -9,6 +9,8 @@ defmodule GiTF.Dashboard.RollbackLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   @heartbeat_interval :timer.seconds(20)
 
@@ -92,12 +94,15 @@ defmodule GiTF.Dashboard.RollbackLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <h1 class="page-title">Rollback Management</h1>
-
-      <p style="color:var(--ink-3); font-size:0.85rem; margin-bottom:1.5rem">
-        Safely revert merged missions via <code style="color:var(--ink-2)">git revert -m 1</code>.
-        This creates a new commit that undoes the merge — no force push, no history rewrite.
-      </p>
+      <.object
+        kind="Resources"
+        name="Rollback"
+        sub="undo a merged mission with git revert -m 1 — a new commit, no force push, no rewritten history"
+      >
+        <:metrics>
+          <.metric label="Revertible" value={length(@revertible)} />
+        </:metrics>
+      </.object>
 
       <%= if @revertible == [] do %>
         <div class="panel"><div class="empty">No merged missions found.</div></div>

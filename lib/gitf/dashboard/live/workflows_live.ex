@@ -11,6 +11,8 @@ defmodule GiTF.Dashboard.WorkflowsLive do
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
+  import GiTF.Dashboard.Surface.Page
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -61,17 +63,17 @@ defmodule GiTF.Dashboard.WorkflowsLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
-        <div>
-          <h1 class="page-title" style="margin:0">Workflows</h1>
-          <p style="color:var(--ink-3); font-size:0.85rem; margin:0.5rem 0 0 0">
-            Declarative mission pipelines. Edit phases, branching, and gates without touching code.
-          </p>
-        </div>
-        <button class="btn btn-blue" phx-click="toggle_new">
-          <%= if @show_new_form, do: "× Cancel", else: "+ New workflow" %>
-        </button>
-      </div>
+      <.object
+        kind="Automation"
+        name="Workflows"
+        sub="declarative mission pipelines — phases, branching and gates, without touching code"
+      >
+        <:actions>
+          <button class="btn pri sm" phx-click="toggle_new">
+            {if @show_new_form, do: "Cancel", else: "New workflow"}
+          </button>
+        </:actions>
+      </.object>
 
       <%= if @show_new_form do %>
         <div class="panel" style="margin-bottom:1.5rem">

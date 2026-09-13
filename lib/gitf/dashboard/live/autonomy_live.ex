@@ -4,6 +4,9 @@ defmodule GiTF.Dashboard.AutonomyLive do
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
+
   @impl true
   def mount(_params, _session, socket) do
     sectors =
@@ -92,11 +95,31 @@ defmodule GiTF.Dashboard.AutonomyLive do
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
   def handle_info(_msg, socket), do: {:noreply, socket}
 
+  # The scaling curve pulls the ghost cap back as the budget fills, so the
+  # thresholds are the fact worth colouring.
+  defp pressure_tone(pct) when pct >= 85, do: :crit
+  defp pressure_tone(pct) when pct >= 70, do: :warn
+  defp pressure_tone(_), do: :ok
+
   @impl true
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <h1 class="page-title">Autonomy</h1>
+      <.object
+        kind="Automation"
+        name="Autonomy"
+        sub="how much the factory is allowed to do on its own, and what pulls that back"
+      >
+        <:metrics>
+          <.metric
+            label="Ghost cap"
+            value={"#{@scaling.effective_max} / #{@scaling.max_ghosts}"}
+            tone={if @scaling.effective_max < @scaling.max_ghosts, do: :warn}
+          />
+          <.metric label="Working" value={@scaling.active_ghosts} />
+          <.metric label="Budget used" value={"#{@budget_util}%"} tone={pressure_tone(@budget_util)} />
+        </:metrics>
+      </.object>
 
       <%!-- Scaling status --%>
       <div class="panel" style="margin-bottom:1rem">

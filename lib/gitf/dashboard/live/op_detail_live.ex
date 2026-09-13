@@ -263,7 +263,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
 
         <.overview :if={@tab == "overview"} op={@op} ghost={@ghost} shell={@shell} failed?={@failed?} />
         <.evidence :if={@tab == "evidence"} op={@op} retry_chain={@retry_chain} />
-        <.raw
+        <.record
           :if={@tab == "raw"}
           term={@op}
           note="The op record as the Archive holds it."
@@ -413,7 +413,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
     </.section>
 
     <.section :if={Map.get(@op, :verification_result)} title="Verification">
-      <.raw term={@op.verification_result} />
+      <.record term={@op.verification_result} />
     </.section>
 
     <.section :if={Map.get(@op, :audit_result)} title="Audit">
@@ -421,7 +421,7 @@ defmodule GiTF.Dashboard.OpDetailLive do
     </.section>
 
     <.section :if={Map.get(@op, :failure_info)} title="Failure analysis">
-      <.raw term={@op.failure_info} />
+      <.record term={@op.failure_info} />
     </.section>
 
     <p :if={nothing_to_show?(@op, @retry_chain)} class="empty">

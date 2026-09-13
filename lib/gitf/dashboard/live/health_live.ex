@@ -7,6 +7,9 @@ defmodule GiTF.Dashboard.HealthLive do
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
+
   import Phoenix.HTML, only: [raw: 1]
 
   @heartbeat_interval :timer.seconds(20)
@@ -118,27 +121,29 @@ defmodule GiTF.Dashboard.HealthLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <h1 class="page-title">System Health</h1>
-
-      <%!-- Status banner --%>
-      <div style={"padding:0.75rem 1rem; border-radius:6px; margin-bottom:1.5rem; border:1px solid #{if @health.status == :healthy, do: "var(--ok)", else: "var(--crit)"}; background:#{if @health.status == :healthy, do: "var(--ground)", else: "var(--crit-bg)"}"}>
-        <div style="display:flex; justify-content:space-between; align-items:center">
-          <div style="display:flex; align-items:center; gap:0.5rem">
-            <div style={"width:12px; height:12px; border-radius:50%; background:#{if @health.status == :healthy, do: "var(--ok)", else: "var(--crit)"}"}></div>
-            <span style={"font-size:1.1rem; font-weight:600; color:#{if @health.status == :healthy, do: "var(--ok)", else: "var(--crit)"}"}>
-              {if @health.status == :healthy, do: "All Systems Operational", else: "System Degraded"}
-            </span>
-          </div>
-          <div style="display:flex; gap:0.5rem; align-items:center">
-            <span class={"badge #{if @alive, do: "badge-green", else: "badge-red"}"}>
-              {if @alive, do: "alive", else: "zombie"}
-            </span>
-            <span class={"badge #{if @ready, do: "badge-green", else: "badge-red"}"}>
-              {if @ready, do: "ready", else: "not ready"}
-            </span>
-          </div>
-        </div>
-      </div>
+      <%!-- The verdict was a banner under the title, saying in a sentence what
+            the badges beside it already said. It is the head's business. --%>
+      <.object
+        kind="Systems"
+        name="Health"
+        sub={
+          if @health.status == :healthy,
+            do: "every check is passing",
+            else: "something is failing — the checks below say which"
+        }
+      >
+        <:badges>
+          <.pill tone={if @health.status == :healthy, do: :ok, else: :crit}>
+            {if @health.status == :healthy, do: "healthy", else: "degraded"}
+          </.pill>
+          <.pill tone={if @alive, do: :ok, else: :crit}>
+            {if @alive, do: "alive", else: "zombie"}
+          </.pill>
+          <.pill tone={if @ready, do: :ok, else: :crit}>
+            {if @ready, do: "ready", else: "not ready"}
+          </.pill>
+        </:badges>
+      </.object>
 
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem">
         <%!-- Health Checks --%>

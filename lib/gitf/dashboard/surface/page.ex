@@ -38,7 +38,10 @@ defmodule GiTF.Dashboard.Surface.Page do
   slot(:badges)
   slot(:metrics)
   slot(:actions)
-  slot(:inner_block, required: true)
+  # Optional: a page being converted keeps its existing body outside the frame
+  # until that body is converted too, and a head with nothing under it is a
+  # legitimate shape rather than a half-finished one.
+  slot(:inner_block)
 
   def object(assigns) do
     ~H"""
@@ -52,7 +55,7 @@ defmodule GiTF.Dashboard.Surface.Page do
 
     <.tabs :if={@tabs != []} tabs={@tabs} link={@link} />
 
-    <div class="objbody">{render_slot(@inner_block)}</div>
+    <div :if={@inner_block != []} class="objbody">{render_slot(@inner_block)}</div>
     """
   end
 

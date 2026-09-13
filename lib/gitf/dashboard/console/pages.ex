@@ -27,7 +27,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   def cabinet(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
-    <.raw term={@cabinet} note="The Cabinet as it knows itself." />
+    <.record term={@cabinet} note="The Cabinet as it knows itself." />
     """
   end
 
@@ -115,7 +115,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   def ministry(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
-    <.raw
+    <.record
       term={Map.drop(@ministry, [:__struct__])}
       note="The registry record. Secrets appear as the NAMES of environment variables — the Cabinet never stores a value."
     />
@@ -242,7 +242,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   def registration(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
-    <.raw
+    <.record
       term={Map.drop(@ministry, [:__struct__])}
       note="The registry record as stored. A leak of this leaks the NAMES of the secrets, which is the point of the design."
     />
@@ -398,7 +398,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   def ruleset(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
-    <.raw
+    <.record
       term={Ruleset.to_jdm(@rules)}
       note={
         if @draft?,
@@ -892,7 +892,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   def sector(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
-    <.raw term={@object} note="The sector record as the factory serves it." />
+    <.record term={@object} note="The sector record as the factory serves it." />
     """
   end
 
@@ -964,7 +964,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   def mission(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
-    <.raw term={@object} note="The mission as the factory serves it." />
+    <.record term={@object} note="The mission as the factory serves it." />
     """
   end
 
@@ -1064,7 +1064,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   def op(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
-    <.raw term={@object} note="The op as the factory serves it." />
+    <.record term={@object} note="The op as the factory serves it." />
     """
   end
 

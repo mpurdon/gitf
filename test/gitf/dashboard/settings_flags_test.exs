@@ -32,6 +32,9 @@ defmodule GiTF.Dashboard.SettingsFlagsTest do
         "config" => %{"features" => %{"outcomes_enabled" => "true"}}
       })
 
-    assert html =~ "Save Changes"
+    # What matters is that the page went dirty and offers a save, not the
+    # button's capitalisation.
+    assert html =~ ~s(phx-click="save")
+    assert html =~ "unsaved changes"
   end
 end

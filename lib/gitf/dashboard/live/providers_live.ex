@@ -4,6 +4,8 @@ defmodule GiTF.Dashboard.ProvidersLive do
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   alias GiTF.Runtime.{ProviderManager, ProviderCircuit}
 
@@ -300,14 +302,20 @@ defmodule GiTF.Dashboard.ProvidersLive do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
-      <h1 class="page-title">LLM Fleet Control</h1>
-      <button
-        phx-click="save"
-        class={"btn #{if @dirty, do: "btn-green", else: "btn-grey"}"}
-        disabled={not @dirty}
-      >{if @saving, do: "Saving...", else: "Save Changes"}</button>
-    </div>
+    <.object
+      kind="Systems"
+      name="Providers"
+      sub="which models the factory may use, in what order, and what it does when one refuses"
+    >
+      <:badges>
+        <.pill :if={@dirty} tone={:warn}>unsaved changes</.pill>
+      </:badges>
+      <:actions>
+        <button phx-click="save" class="btn pri sm" disabled={not @dirty}>
+          {if @saving, do: "Saving…", else: "Save changes"}
+        </button>
+      </:actions>
+    </.object>
 
     <%!-- Fallback Strategy --%>
     <div class="panel" style="margin-bottom:1rem">

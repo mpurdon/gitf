@@ -12,6 +12,7 @@ defmodule GiTF.Dashboard.MissionsLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Page
 
   # Longer heartbeat — PubSub handles real-time updates
   @heartbeat_interval :timer.seconds(15)
@@ -249,13 +250,12 @@ defmodule GiTF.Dashboard.MissionsLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
-        <h1 class="page-title" style="margin-bottom:0">Missions</h1>
-        <div style="display:flex; gap:0.5rem">
-          <a href="/dashboard/missions/new" class="btn btn-green">New Mission</a>
-          <button phx-click="refresh" class="btn btn-blue">Refresh</button>
-        </div>
-      </div>
+      <.object kind="Operations" name="Missions" sub="every piece of work the factory has been given">
+        <:actions>
+          <.link navigate="/dashboard/missions/new" class="btn pri sm">New mission</.link>
+          <button phx-click="refresh" class="btn sm">Refresh</button>
+        </:actions>
+      </.object>
 
       <%!-- Search + status filter --%>
       <div style="display:flex; gap:0.75rem; margin-bottom:1rem; align-items:center; flex-wrap:wrap">

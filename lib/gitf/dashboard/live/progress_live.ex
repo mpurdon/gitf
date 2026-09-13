@@ -5,6 +5,8 @@ defmodule GiTF.Dashboard.ProgressLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   require GiTF.Ghost.Status, as: GhostStatus
 
@@ -107,7 +109,21 @@ defmodule GiTF.Dashboard.ProgressLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <h1 class="page-title">Factory Activity</h1>
+      <.object
+        kind="Fleet"
+        name="Activity"
+        sub="what every ghost is doing right now, and what the factory has been doing lately"
+      >
+        <:badges>
+          <.pill tone={if @ghost_activities == [], do: nil, else: :recon}>
+            {if @ghost_activities == [], do: "nothing running", else: "#{length(@ghost_activities)} working"}
+          </.pill>
+        </:badges>
+        <:metrics>
+          <.metric label="Working" value={length(@ghost_activities)} />
+          <.metric label="Idle" value={@idle_count} />
+        </:metrics>
+      </.object>
 
       <!-- Active Ghosts -->
       <div class="panel" style="margin-bottom:1.5rem">

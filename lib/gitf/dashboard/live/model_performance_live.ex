@@ -8,6 +8,8 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   @heartbeat_interval :timer.seconds(20)
 
@@ -50,10 +52,18 @@ defmodule GiTF.Dashboard.ModelPerformanceLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
-        <h1 class="page-title" style="margin-bottom:0">Model Performance</h1>
-        <button phx-click="refresh" class="btn btn-grey" style="font-size:0.8rem">Refresh</button>
-      </div>
+      <.object
+        kind="Investigate"
+        name="Model performance"
+        sub="which models finish the work, and what they cost to find out"
+      >
+        <:metrics>
+          <.metric label="Models seen" value={length(@models)} />
+        </:metrics>
+        <:actions>
+          <button phx-click="refresh" class="btn sm">Refresh</button>
+        </:actions>
+      </.object>
 
       <%!-- Model Leaderboard --%>
       <div class="panel" style="margin-bottom:1.5rem">

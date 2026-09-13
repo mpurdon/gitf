@@ -4,6 +4,9 @@ defmodule GiTF.Dashboard.SettingsLive do
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
+
   @impl true
   def mount(_params, _session, socket) do
     config = load_config()
@@ -168,15 +171,21 @@ defmodule GiTF.Dashboard.SettingsLive do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="max-width:640px">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem">
-          <h1 class="page-title" style="margin:0">Settings</h1>
-          <div style="display:flex; gap:0.5rem">
-            <button phx-click="reload" class="btn btn-grey" style="font-size:0.8rem">Reload</button>
-            <button phx-click="save" class="btn btn-green" style="font-size:0.8rem" disabled={not @dirty}>
-              {if @dirty, do: "Save Changes", else: "Saved"}
+        <.object
+          kind="Admin"
+          name="Settings"
+          sub="what is switched on. Most of the intelligence layer is default-off, and this is the one place that says so."
+        >
+          <:badges>
+            <.pill :if={@dirty} tone={:warn}>unsaved changes</.pill>
+          </:badges>
+          <:actions>
+            <button phx-click="reload" class="btn sm">Reload</button>
+            <button phx-click="save" class="btn pri sm" disabled={not @dirty}>
+              {if @dirty, do: "Save changes", else: "Saved"}
             </button>
-          </div>
-        </div>
+          </:actions>
+        </.object>
 
         <form phx-change="update">
           <%!-- Feature flags. Most of the intelligence layer is default-off;

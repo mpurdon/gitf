@@ -4,6 +4,8 @@ defmodule GiTF.Dashboard.SectorsLive do
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
+  import GiTF.Dashboard.Surface.Page
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -251,7 +253,11 @@ defmodule GiTF.Dashboard.SectorsLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <h1 class="page-title">Sectors</h1>
+      <.object
+        kind="Resources"
+        name="Sectors"
+        sub="the repositories the factory works on — one checkout, one validation command, one place its work lands"
+      />
 
       <!-- Add sector panel with mode tabs -->
       <div class="panel" style="margin-bottom:1.5rem">

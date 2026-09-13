@@ -5,6 +5,8 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   @heartbeat_interval :timer.seconds(15)
 
@@ -263,10 +265,20 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
-        <h1 class="page-title" style="margin-bottom:0">Approvals</h1>
-        <button phx-click="refresh" class="btn btn-blue">Refresh</button>
-      </div>
+      <.object
+        kind="Operations"
+        name="Approvals"
+        sub="missions holding for a person — nothing here resolves itself"
+      >
+        <:badges>
+          <.pill tone={if @approvals == [], do: :ok, else: :warn}>
+            {if @approvals == [], do: "nothing waiting", else: "#{length(@approvals)} waiting"}
+          </.pill>
+        </:badges>
+        <:actions>
+          <button phx-click="refresh" class="btn sm">Refresh</button>
+        </:actions>
+      </.object>
 
       <%= if @approvals == [] do %>
         <div class="panel">
