@@ -107,12 +107,19 @@ defmodule GiTF.Dashboard.ConsoleLive do
   defp browse_if_needed(%{assigns: %{scope: %{level: :wake}}} = socket), do: socket
 
   defp browse_if_needed(%{assigns: %{scope: %{ministry: slug}, depth: depth}} = socket) do
-    if Map.has_key?(depth, slug) do
-      socket
-    else
-      socket
-      |> assign(:depth, Map.put(depth, slug, :loading))
-      |> start_async({:browse, slug}, fn -> Remote.browse(slug) end)
+    cond do
+      Map.has_key?(depth, slug) ->
+        socket
+
+      # We watched it stop. Spawning a task to be told what we already know
+      # would show "asking the factory…" for a beat about a box that is off.
+      socket.assigns.ministry && Remote.asleep?(socket.assigns.ministry) ->
+        assign(socket, :depth, Map.put(depth, slug, {:error, :asleep}))
+
+      true ->
+        socket
+        |> assign(:depth, Map.put(depth, slug, :loading))
+        |> start_async({:browse, slug}, fn -> Remote.browse(slug) end)
     end
   end
 
@@ -344,14 +351,10 @@ defmodule GiTF.Dashboard.ConsoleLive do
           <.pill tone={:ok}>● live</.pill>
         </.scopebar>
 
-        <.head
-          scope={@scope}
-          ministry={@ministry}
-          ministries={@ministries}
-          cabinet={@cabinet}
-          inbox={@inbox}
-          opening={@opening}
-        />
+        <%!-- The whole assigns, as `<.page>` already takes them: heads for the
+              factory-side objects need `depth`, and enumerating attributes here
+              means a new head crashes the page instead of missing a field. --%>
+        <.head {assigns} />
         <.tabs scope={@scope} />
 
         <div class="body">

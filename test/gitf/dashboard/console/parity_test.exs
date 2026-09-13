@@ -144,6 +144,20 @@ defmodule GiTF.Dashboard.Console.ParityTest do
            "spend_line must not reach for the lifetime total again"
   end
 
+  test "the head and the page both receive the whole assigns" do
+    # `<.head>` was called with an enumerated attribute list. The heads for the
+    # factory-side objects needed one key more than the list carried, so a deep
+    # link 500'd on the box while every page-level test passed — the crash was
+    # in the dispatch, and nothing tested the dispatch.
+    src = File.read!(@new)
+
+    for component <- ["head", "page"] do
+      assert src =~ "<.#{component} {assigns} />",
+             "<.#{component}> must take {assigns}: enumerating attributes means a new " <>
+               "clause crashes the page instead of missing a field"
+    end
+  end
+
   test "the render path does no I/O, including for the deep tree" do
     src = File.read!(@new)
 

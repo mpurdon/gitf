@@ -73,19 +73,30 @@ defmodule GiTF.Cabinet.Remote do
   defp list_or_empty({:ok, list}) when is_list(list), do: list
   defp list_or_empty(_), do: []
 
-  # A lookup, never a probe: the Cabinet's watcher already records instance
-  # state, and asking EC2 here would put an `aws` subprocess on the read path of
-  # every page — slow where the CLI exists and a crash where it does not.
-  #
-  # A state we have not recorded is treated as awake, because not knowing is a
-  # reason to ask the factory, not a reason to tell the operator it is asleep.
-  defp awake?(ministry) do
+  @doc """
+  Whether this ministry's box is known to be stopped.
+
+  A lookup, never a probe: the Cabinet's watcher already records instance
+  state, and asking EC2 here would put an `aws` subprocess on the read path of
+  every page — slow where the CLI exists and a crash where it does not.
+
+  A state we have not recorded is *not* asleep, because not knowing is a reason
+  to ask the factory, not a reason to tell the operator it is off.
+
+  Public because a caller that already knows the answer should not have to
+  spawn a task to be told it: showing "asking the factory…" about a box the
+  Cabinet watched stop is a flicker that states something false.
+  """
+  @spec asleep?(map()) :: boolean()
+  def asleep?(ministry) do
     case ministry[:box][:state] do
-      "running" -> :ok
-      state when state in [nil, :unknown] -> :ok
-      _ -> {:error, :asleep}
+      "running" -> false
+      state when state in [nil, :unknown] -> false
+      _ -> true
     end
   end
+
+  defp awake?(ministry), do: if(asleep?(ministry), do: {:error, :asleep}, else: :ok)
 
   defp request(ministry, url, path, opts) do
     headers =
