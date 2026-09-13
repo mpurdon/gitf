@@ -30,8 +30,8 @@ defmodule GiTF.Dashboard.ConsoleLive do
 
   import GiTF.Dashboard.Console.Components
 
-  alias GiTF.Cabinet.{Activity, Fleet, Gate, Registry, Ruleset, Snapshot}
-  alias GiTF.Dashboard.Console.{Format, Pages, Scope, Tree}
+  alias GiTF.Cabinet.{Activity, Fleet, Gate, Prefs, Registry, Ruleset, Snapshot}
+  alias GiTF.Dashboard.Console.{Events, Format, Pages, Scope, Tree}
 
   @activity_limit 40
   @inbox_limit 200
@@ -56,6 +56,8 @@ defmodule GiTF.Dashboard.ConsoleLive do
        editing: nil,
        editing_rule: -1,
        opening: nil,
+       needs_open: true,
+       needs_config_open: false,
        page_title: "GiTF Console"
      )
      |> load()}
@@ -64,7 +66,15 @@ defmodule GiTF.Dashboard.ConsoleLive do
   @impl true
   def handle_params(params, _uri, socket) do
     scope = Scope.from_params(params)
-    socket = socket |> assign(scope: scope) |> assign_object()
+
+    # Filters live in the query string, so a filtered view is a link — which is
+    # what makes an "investigation" a name attached to a URL rather than a
+    # feature that needs its own machinery.
+    socket =
+      socket
+      |> assign(scope: scope, filters: Events.from_params(params))
+      |> assign_object()
+      |> assign_stream()
 
     # /console/wake/<slug> is the cold bookmark: it is an act, not a place, so
     # it starts the wake and settles on the ministry rather than rendering a
@@ -141,7 +151,26 @@ defmodule GiTF.Dashboard.ConsoleLive do
       cabinet: cabinet_facts()
     )
     |> assign_object()
+    |> assign_stream()
   end
+
+  # The stream is derived, never stored: two ETS reads and a sort, which is
+  # cheaper than keeping a third copy of the truth in sync with the other two.
+  defp assign_stream(%{assigns: %{scope: scope}} = socket) do
+    events = Events.build(socket.assigns.inbox, socket.assigns.activity, scope)
+    kinds = Prefs.needs_kinds()
+
+    socket
+    |> assign(
+      events: events,
+      visible: Events.filter(events, socket.assigns[:filters] || Events.blank()),
+      needs: Enum.filter(events, &(&1.needs && to_string(&1.kind) in kinds)),
+      needs_kinds: kinds,
+      investigations: saved_investigations(scope)
+    )
+  end
+
+  defp assign_stream(socket), do: socket
 
   defp cabinet_facts do
     %{
@@ -181,7 +210,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
       |> assign(:crumbs, Scope.crumbs(assigns.scope, &ministry_name(assigns.ministries, &1)))
 
     ~H"""
-    <div class="console">
+    <div class={["console", @scope.level == :activity && "facets-on"]}>
       <nav class="icons" aria-label="Sections">
         <.link
           patch={Scope.path(@scope, :cabinet)}
@@ -226,6 +255,13 @@ defmodule GiTF.Dashboard.ConsoleLive do
           <.page {assigns} />
         </div>
       </div>
+
+      <Pages.facets
+        :if={@scope.level == :activity}
+        events={@events}
+        filters={@filters}
+        investigations={@investigations}
+      />
     </div>
 
     <div :if={Phoenix.Flash.get(@flash, :info)} class="flash">
@@ -393,7 +429,16 @@ defmodule GiTF.Dashboard.ConsoleLive do
 
   defp page(%{scope: %{level: :activity}} = assigns) do
     ~H"""
-    <Pages.activity scope={@scope} activity={@activity} inbox={@inbox} filter={@filter} />
+    <Pages.activity
+      scope={@scope}
+      events={@events}
+      visible={@visible}
+      needs={@needs}
+      filters={@filters}
+      needs_open={@needs_open}
+      needs_config_open={@needs_config_open}
+      needs_kinds={@needs_kinds}
+    />
     """
   end
 
@@ -488,8 +533,73 @@ defmodule GiTF.Dashboard.ConsoleLive do
   # Events — every capability the Cabinet Console had
   # ==========================================================================
 
+  # -- reading the log -------------------------------------------------------
+  #
+  # Every filter change is a patch to a new URL rather than a socket assign, so
+  # the view you are looking at is always the view you can send to someone.
+
   @impl true
-  def handle_event("filter", %{"filter" => f}, socket), do: {:noreply, assign(socket, filter: f)}
+  def handle_event("toggle_facet", %{"field" => field, "v" => value}, socket) do
+    {:noreply,
+     patch_filters(socket, Events.toggle(socket.assigns.filters, facet_field(field), value))}
+  end
+
+  def handle_event("clear_facet", %{"field" => field}, socket) do
+    {:noreply, patch_filters(socket, Map.put(socket.assigns.filters, facet_field(field), []))}
+  end
+
+  def handle_event("set_window", %{"window" => window}, socket) do
+    {:noreply, patch_filters(socket, %{socket.assigns.filters | when: window})}
+  end
+
+  def handle_event("search", %{"q" => q}, socket) do
+    {:noreply, patch_filters(socket, %{socket.assigns.filters | q: q})}
+  end
+
+  def handle_event("clear_filters", _params, socket) do
+    {:noreply, patch_filters(socket, Events.blank())}
+  end
+
+  def handle_event("set_needs_open", %{"open" => open}, socket) do
+    {:noreply, assign(socket, needs_open: open == true or open == "true")}
+  end
+
+  def handle_event("toggle_needs_config", _params, socket) do
+    {:noreply, assign(socket, needs_config_open: !socket.assigns.needs_config_open)}
+  end
+
+  def handle_event("toggle_needs_kind", %{"kind" => kind}, socket) do
+    Prefs.toggle_needs_kind(kind)
+    {:noreply, load(socket)}
+  end
+
+  def handle_event("save_investigation", _params, socket) do
+    name = default_investigation_name(socket.assigns.filters)
+
+    case Prefs.save_investigation(name, Events.to_query(socket.assigns.filters)) do
+      {:ok, inv} ->
+        {:noreply, socket |> put_flash(:info, "Saved as “#{inv.name}”.") |> load()}
+
+      {:error, :blank_name} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Filter the log first — an investigation is a question, not everything."
+         )}
+
+      {:error, :duplicate_name} ->
+        {:noreply, put_flash(socket, :error, "There is already an investigation called that.")}
+
+      other ->
+        {:noreply, put_flash(socket, :error, "Not saved: #{describe(other)}")}
+    end
+  end
+
+  def handle_event("delete_investigation", %{"id" => id}, socket) do
+    Prefs.delete_investigation(id)
+    {:noreply, socket |> put_flash(:info, "Forgotten.") |> load()}
+  end
 
   def handle_event("wake", %{"id" => id}, socket) do
     with_ministry(socket, id, fn m, socket ->
@@ -615,7 +725,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
      assign(socket, editing_rule: if(socket.assigns.editing_rule == index, do: -1, else: index))}
   end
 
-  def handle_event("toggle_rule", %{"index" => i, "field" => f, "value" => v}, socket) do
+  def handle_event("toggle_rule", %{"index" => i, "field" => f, "v" => v}, socket) do
     edit(socket, &Ruleset.toggle(&1, String.to_integer(i), field(f), v))
   end
 
@@ -623,11 +733,11 @@ defmodule GiTF.Dashboard.ConsoleLive do
     edit(socket, &Ruleset.put(&1, String.to_integer(i), field(f), []))
   end
 
-  def handle_event("set_rule", %{"index" => i, "field" => "cap", "value" => v}, socket) do
+  def handle_event("set_rule", %{"index" => i, "field" => "cap", "v" => v}, socket) do
     edit(socket, &Ruleset.put(&1, String.to_integer(i), :cap, cap(v)))
   end
 
-  def handle_event("set_rule", %{"index" => i, "field" => "action", "value" => v}, socket) do
+  def handle_event("set_rule", %{"index" => i, "field" => "action", "v" => v}, socket) do
     edit(socket, &Ruleset.put(&1, String.to_integer(i), :action, v))
   end
 
@@ -772,6 +882,37 @@ defmodule GiTF.Dashboard.ConsoleLive do
 
   defp current_rules(%{assigns: %{ministry: m}}), do: Ruleset.effective(m)
 
+  defp patch_filters(socket, filters) do
+    push_patch(socket,
+      to: Scope.path(socket.assigns.scope, :activity) <> Events.to_query(filters)
+    )
+  end
+
+  defp facet_field("kind"), do: :kind
+  defp facet_field("ministry"), do: :ministry
+  defp facet_field("actor"), do: :actor
+  defp facet_field("result"), do: :result
+
+  # The name describes what is being asked, from the filters themselves. An
+  # unfiltered log is not a question, so it does not get a name.
+  defp default_investigation_name(filters) do
+    parts =
+      [
+        filters.q != "" && "“#{filters.q}”",
+        filters.kind != [] &&
+          Enum.map_join(filters.kind, ", ", &Events.kind_label(String.to_existing_atom(&1))),
+        filters.ministry != [] && Enum.join(filters.ministry, ", "),
+        filters.actor != [] && "by #{Enum.join(filters.actor, ", ")}",
+        filters.result != [] && Enum.join(filters.result, ", ")
+      ]
+      |> Enum.filter(&is_binary/1)
+
+    case parts do
+      [] -> ""
+      list -> Enum.join(list, " · ")
+    end
+  end
+
   defp field("class"), do: :class
   defp field("mode"), do: :mode
 
@@ -812,6 +953,14 @@ defmodule GiTF.Dashboard.ConsoleLive do
       %{login: login} when is_binary(login) -> login
       _ -> "console"
     end
+  end
+
+  # An investigation is a name and a query string; the path is built here so
+  # the rail links straight to the filtered view.
+  defp saved_investigations(scope) do
+    Enum.map(Prefs.investigations(), fn inv ->
+      %{id: inv.id, name: inv.name, path: Scope.path(scope, :activity) <> (inv[:query] || "")}
+    end)
   end
 
   defp for_ministry(inbox, %{slug: slug}), do: Enum.filter(inbox, &(&1[:ministry_slug] == slug))

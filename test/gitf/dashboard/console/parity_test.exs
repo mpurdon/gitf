@@ -27,7 +27,7 @@ defmodule GiTF.Dashboard.Console.ParityTest do
     "view" => {:structural, "scope in the URL"},
     "select" => {:structural, "scope in the URL"},
     "itab" => {:structural, "the tab is part of the address"},
-    "ifilter" => {:event, "filter"},
+    "ifilter" => {:event, "toggle_facet"},
     "wake" => {:event, "wake"},
     "wake_open" => {:event, "open_factory"},
     "cancel_open" => {:event, "cancel_open"},
@@ -143,14 +143,46 @@ defmodule GiTF.Dashboard.Console.ParityTest do
            "spend_line must not reach for the lifetime total again"
   end
 
-  test "the inbox filter that could never match is gone, and knowingly" do
-    src = File.read!(@format)
-    filters = Regex.scan(~r/def filter_inbox\(inbox, "([a-z]+)"\)/, src) |> Enum.map(&List.last/1)
+  test "nothing sends a value on the one attribute the browser overwrites" do
+    # LiveView copies a clicked element's native `el.value` over the
+    # phx-value-* params, and a <button> with no value attribute reports "".
+    # The Catwalk shipped every inquiry answer as "" that way (e5fd106); the
+    # Console must not rediscover it.
+    for file <- [@pages, "lib/gitf/dashboard/console/components.ex"] do
+      # Comments may name the attribute; only a live one is a bug.
+      source = String.replace(File.read!(file), ~r/<%!--.*?--%>/s, "")
 
-    refute "dropped" in filters,
-           "nothing writes status \"dropped\"; a filter that cannot match reads as proof of absence"
+      refute source =~ ~r/phx-value-value\s*=/,
+             "#{file}: a <button>'s own value clobbers this param — use phx-value-v"
+    end
+  end
 
-    assert "waiting" in filters and "woke" in filters
+  test "no filter is offered that could never match" do
+    events = File.read!("lib/gitf/dashboard/console/events.ex")
+
+    refute events =~ ~s(:sector),
+           "sectors live on the factory; a sector facet here could only ever be empty"
+
+    assert events =~ "no sector facet",
+           "and the absence has to be explained, not merely left out"
+
+    # `dropped` is the same mistake: Gate.handle writes no record for a drop.
+    gate = File.read!("lib/gitf/cabinet/gate.ex")
+    refute gate =~ ~s(status: "dropped")
+  end
+
+  test "the log can be filtered, searched, and the filtered view shared" do
+    src = File.read!(@pages)
+
+    assert src =~ ~s(phx-click="toggle_facet"), "facets replace the four fixed inbox filters"
+    assert src =~ ~s(phx-click="set_window")
+    assert src =~ ~s(phx-change="search")
+    assert src =~ ~s(phx-click="save_investigation")
+
+    live = File.read!(@new)
+
+    assert live =~ "push_patch",
+           "a filter change must be a new URL, or the view you see is not one you can send"
   end
 
   test "nothing is left deferred" do

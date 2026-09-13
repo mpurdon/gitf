@@ -12,7 +12,7 @@ defmodule GiTF.Dashboard.Console.RenderTest do
 
   import Phoenix.LiveViewTest, only: [rendered_to_string: 1]
 
-  alias GiTF.Dashboard.Console.{Format, Pages, Scope}
+  alias GiTF.Dashboard.Console.{Events, Format, Pages, Scope}
 
   defp render(fun, assigns), do: apply(Pages, fun, [assigns]) |> rendered_to_string()
 
@@ -116,6 +116,23 @@ defmodule GiTF.Dashboard.Console.RenderTest do
   end
 
   describe "activity" do
+    defp activity_assigns(inbox, activity \\ []) do
+      scope = %Scope{level: :activity}
+      events = Events.build(inbox, activity, scope)
+      kinds = ["activation"]
+
+      %{
+        scope: scope,
+        events: events,
+        visible: Events.filter(events, Events.blank()),
+        needs: Enum.filter(events, &(&1.needs && to_string(&1.kind) in kinds)),
+        filters: Events.blank(),
+        needs_open: true,
+        needs_config_open: false,
+        needs_kinds: kinds
+      }
+    end
+
     test "a queued activation offers both a yes and a no" do
       inbox = [
         %{
@@ -129,17 +146,12 @@ defmodule GiTF.Dashboard.Console.RenderTest do
         }
       ]
 
-      html =
-        render(:activity, %{
-          scope: %Scope{level: :activity},
-          activity: [],
-          inbox: inbox,
-          filter: "all"
-        })
+      html = render(:activity, activity_assigns(inbox))
 
-      assert html =~ "Start this"
+      assert html =~ "Start"
       assert html =~ "Dismiss"
       assert html =~ "rule 4"
+      assert html =~ "1 thing needs a person"
     end
 
     test "\"waiting on you\" means queued — not every activation ever seen" do
@@ -168,16 +180,12 @@ defmodule GiTF.Dashboard.Console.RenderTest do
       refute html =~ "issue #23"
     end
 
-    test "an empty inbox is a sentence, not a blank box" do
-      html =
-        render(:activity, %{
-          scope: %Scope{level: :activity},
-          activity: [],
-          inbox: [],
-          filter: "all"
-        })
+    test "nothing waiting says so, and says what would appear there" do
+      html = render(:activity, activity_assigns([]))
 
-      assert html =~ "Nothing is waiting on you."
+      assert html =~ "Nothing needs a person"
+      assert html =~ "running unattended"
+      assert html =~ "Queued activations and deliveries the Cabinet"
     end
   end
 

@@ -208,6 +208,36 @@ defmodule GiTF.Dashboard.Console.Layouts do
           .banner.crit{background:var(--crit-bg);color:var(--crit)}
           .banner.acc{background:var(--accent-soft);color:var(--accent)}
 
+          /* -------- facets -------- */
+          .console.facets-on{grid-template-columns:var(--rail-w) var(--tree-w) minmax(0,1fr) var(--facet-w)}
+          .facets{background:var(--panel);border-left:1px solid var(--line);padding:var(--s4) 0 var(--s6)}
+          .facet{padding:0 var(--s4) var(--s4)}
+          .facet h4{font-size:var(--t-xs);letter-spacing:.09em;text-transform:uppercase;
+            color:var(--ink-3);font-weight:600;margin:0 0 7px;display:flex;align-items:center;gap:var(--s3)}
+          .facet h4 .clr{margin-left:auto;font-size:var(--t-sm);color:var(--accent);
+            letter-spacing:0;text-transform:none;font-weight:500}
+          .fopt{display:flex;align-items:center;gap:var(--s3);width:100%;padding:3px var(--s2);
+            border-radius:var(--r);font-size:var(--t-md)}
+          .fopt:hover{background:var(--panel-2)}
+          .fopt .box{width:13px;height:13px;border:1px solid var(--line);border-radius:3px;
+            flex:0 0 auto;display:grid;place-items:center;font-size:9px;color:var(--accent-ink)}
+          .fopt[aria-pressed="true"] .box{background:var(--accent);border-color:var(--accent)}
+          .fopt[aria-pressed="true"]{color:var(--accent);font-weight:500}
+          .fopt .n{margin-left:auto;font-family:var(--mono);font-size:var(--t-sm);color:var(--ink-3)}
+          .fopt.zero{opacity:.42}
+          .fsep{height:1px;background:var(--line);margin:0 var(--s4) var(--s4)}
+          .needs{display:grid;grid-template-columns:18px minmax(0,1.8fr) 1fr 88px auto;gap:var(--s4);
+            align-items:center;padding:var(--s4);border-bottom:1px solid var(--line-soft);width:100%;
+            font-size:var(--t-md)}
+          .needs:last-child{border-bottom:0}
+          .needs:hover{background:var(--panel-2)}
+          summary{cursor:pointer;list-style:none}
+          summary::-webkit-details-marker{display:none}
+          .dsum{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);
+            background:var(--panel);border:1px solid var(--line);border-radius:var(--r2);
+            font-size:var(--t-md);font-weight:500}
+          details[open] .dsum{border-radius:var(--r2) var(--r2) 0 0;border-bottom:0}
+
           /* -------- the rule editor -------- */
           .rule{display:grid;grid-template-columns:22px 28px minmax(0,1fr) auto;gap:var(--s3);
             align-items:start;padding:var(--s3) var(--s4);border-bottom:1px solid var(--line-soft);
@@ -303,6 +333,15 @@ defmodule GiTF.Dashboard.Console.Layouts do
           // the server), because a control only a mouse can reach is a control
           // half the operators do not have.
           const Hooks = {
+            // The needs-you band remembers whether it is open, because an
+            // operator who collapsed it does not want it back on every push.
+            NeedsToggle: {
+              mounted() {
+                this.el.addEventListener("toggle", () =>
+                  this.pushEvent("set_needs_open", { open: this.el.open })
+                );
+              }
+            },
             RuleDrag: {
               mounted() { this.bind(); },
               updated() { this.bind(); },

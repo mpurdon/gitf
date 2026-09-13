@@ -13,7 +13,7 @@ defmodule GiTF.Dashboard.Console.Pages do
   import GiTF.Dashboard.Console.Components
 
   alias GiTF.Cabinet.Ruleset
-  alias GiTF.Dashboard.Console.{Format, Scope}
+  alias GiTF.Dashboard.Console.{Events, Format, Scope}
 
   # ==========================================================================
   # Cabinet
@@ -540,6 +540,12 @@ defmodule GiTF.Dashboard.Console.Pages do
     <div class="editor">
       <.chips label="Class" index={@index} field="class" selected={@rule.class} options={Ruleset.classes()} />
       <.chips label="Mode" index={@index} field="mode" selected={@rule.mode} options={Ruleset.modes()} />
+      <%!-- Every value below rides on `phx-value-v`, never `phx-value-value`.
+            LiveView's click extractor copies the element's native `el.value`
+            into the params *after* the phx-value-* attributes, and a <button>
+            with no value attribute reports "" — so `phx-value-value` always
+            arrives empty. Every answer path on the Catwalk was broken that way
+            until e5fd106. Do not rename it back. --%>
       <div class="fieldrow">
         <span class="lbl">Cost cap</span>
         <button
@@ -548,7 +554,7 @@ defmodule GiTF.Dashboard.Console.Pages do
           phx-click="set_rule"
           phx-value-index={@index}
           phx-value-field="cap"
-          phx-value-value={cap}
+          phx-value-v={cap}
         >{cap}</button>
       </div>
       <div class="fieldrow">
@@ -559,7 +565,7 @@ defmodule GiTF.Dashboard.Console.Pages do
           phx-click="set_rule"
           phx-value-index={@index}
           phx-value-field="action"
-          phx-value-value={action}
+          phx-value-v={action}
         >{action}</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px">
@@ -593,7 +599,7 @@ defmodule GiTF.Dashboard.Console.Pages do
         phx-click="toggle_rule"
         phx-value-index={@index}
         phx-value-field={@field}
-        phx-value-value={option}
+        phx-value-v={option}
       >{option}</button>
     </div>
     """
@@ -734,67 +740,220 @@ defmodule GiTF.Dashboard.Console.Pages do
   # ==========================================================================
 
   attr(:scope, :map, required: true)
-  attr(:activity, :list, required: true)
-  attr(:inbox, :list, required: true)
-  attr(:filter, :string, default: "all")
+  attr(:events, :list, required: true)
+  attr(:visible, :list, required: true)
+  attr(:needs, :list, required: true)
+  attr(:filters, :map, required: true)
+  attr(:needs_open, :boolean, default: true)
+  attr(:needs_config_open, :boolean, default: false)
+  attr(:needs_kinds, :list, required: true)
 
   def activity(assigns) do
     ~H"""
-    <.section title="Waiting on you">
-      <:hint>queued activations — nothing here starts itself</:hint>
-      <.rows empty={Format.queued(@inbox) == [] && "Nothing is waiting on you."}>
-        <div :for={e <- Format.queued(@inbox)} class="row" style="grid-template-columns:86px minmax(0,1fr) 92px auto">
-          <.pill>{e[:class]}</.pill>
-          <.identity name={e[:summary]} id={"#{e[:ministry_slug]} · #{Format.decision_line(e)}"} />
-          <span class="dim">{Format.hhmm(e[:inserted_at])}</span>
-          <span style="display:inline-flex;gap:6px">
-            <button class="btn pri sm" phx-click="start_entry" phx-value-id={e[:id]}>Start this</button>
-            <button class="btn sm" phx-click="dismiss_entry" phx-value-id={e[:id]}>Dismiss</button>
+    <details open={@needs_open} id="needs-section" phx-hook="NeedsToggle">
+      <summary>
+        <div class="dsum">
+          <.dot tone={if @needs == [], do: :ok, else: :warn} />
+          <span>
+            {if @needs == [],
+              do: "Nothing needs a person",
+              else: "#{length(@needs)} #{if length(@needs) == 1, do: "thing needs", else: "things need"} a person"}
+          </span>
+          <span class="note">
+            {if @needs == [],
+              do: "— the Cabinet is running unattended",
+              else: "— nothing here resolves itself"}
+          </span>
+          <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <span class="btn sm" phx-click="toggle_needs_config">What counts? ▾</span>
           </span>
         </div>
-      </.rows>
-    </.section>
+      </summary>
 
-    <.section title="Activations">
-      <:hint>
-        <span class="seg">
+      <div class="rows" style="border-radius:0 0 var(--r2) var(--r2)">
+        <div :if={@needs == []} class="empty">
+          Nothing is waiting on you. Queued activations and deliveries the Cabinet
+          could not hand over would appear here.
+        </div>
+        <div :for={e <- @needs} class="needs">
+          <.dot tone={e.tone || :warn} />
+          <span>
+            <span class="nm">{e.needs.what}</span>
+            <br /><span class="note">{e.target}</span>
+          </span>
+          <span class="note">{e.ministry} · {e.detail}</span>
+          <span class="dim">{Format.ago(e.at)} ago</span>
+          <span style="display:inline-flex;gap:6px">
+            <button class="btn pri sm" phx-click="start_entry" phx-value-id={e.id}>{e.needs.act}</button>
+            <button :if={e.needs.dismissable} class="btn sm" phx-click="dismiss_entry" phx-value-id={e.id}>
+              Dismiss
+            </button>
+          </span>
+        </div>
+      </div>
+
+      <div
+        :if={@needs_config_open}
+        style="border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r2) var(--r2);padding:var(--s4);background:var(--stage)"
+      >
+        <div class="lbl" style="margin-bottom:8px">Surface an event here when its kind is</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button
-            :for={{id, label} <- Format.inbox_filters()}
-            phx-click="filter"
-            phx-value-filter={id}
-            aria-current={if @filter == id, do: "true"}
+            :for={{kind, label} <- Events.kinds()}
+            class={["chip", to_string(kind) in @needs_kinds && "on"]}
+            phx-click="toggle_needs_kind"
+            phx-value-kind={kind}
           >{label}</button>
-        </span>
-      </:hint>
-      <.rows empty={Format.filter_inbox(@inbox, @filter) == [] && "Nothing here under “#{@filter}”."}>
-        <.row
-          :for={e <- Format.filter_inbox(@inbox, @filter)}
-          cols="86px minmax(0,1fr) 130px 92px 110px"
-        >
-          <.pill>{e[:class]}</.pill>
-          <.identity name={e[:summary]} id={e[:ministry_slug]} />
-          <span class="dim">{Format.decision_line(e)}</span>
-          <span class="dim">{Format.hhmm(e[:inserted_at])}</span>
-          <.pill tone={Format.status_tone(e[:status])}>{e[:status]}</.pill>
-        </.row>
-      </.rows>
-    </.section>
+        </div>
+        <p class="note" style="margin:9px 0 0">
+          A small, inspectable policy rather than a hard-coded list — the same shape as the
+          activation ruleset. An event only appears if it is <em>also</em> unresolved: turning a
+          kind on cannot surface something the Cabinet has already dealt with.
+        </p>
+      </div>
+    </details>
 
-    <.section title="Acts">
-      <:hint>actor · action · target · result</:hint>
-      <div :if={@activity == []}><.rows empty="Nothing yet."></.rows></div>
-      <div :for={{day, rows} <- Format.by_day(@activity)} style="margin-bottom:14px">
+    <div style="height:var(--s5)"></div>
+
+    <.section title="Log">
+      <:hint>
+        {length(@visible)} of {length(@events)} events
+        <span :if={Events.active_count(@filters) > 0}>
+          · <button class="chip" phx-click="clear_filters">clear {Events.active_count(@filters)} filters</button>
+        </span>
+        · <button class="chip" phx-click="save_investigation">save as investigation</button>
+      </:hint>
+
+      <div :if={@visible == []}>
+        <.rows empty="No events match these filters."></.rows>
+      </div>
+
+      <div :for={{day, rows} <- Format.by_day(@visible)} style="margin-bottom:var(--s4)">
         <div class="lbl" style="margin-bottom:6px">{day}</div>
         <.rows>
-          <.row :for={a <- rows} cols="66px 140px minmax(0,1fr) auto">
-            <span class="dim">{Format.hhmm(a[:at])}</span>
-            <span class="dim">{a[:actor]}</span>
-            <span class="nm">{a[:action]} <span style="color:var(--accent)">{a[:target]}</span></span>
-            <span class="dim">{a[:result]}</span>
+          <.row
+            :for={e <- rows}
+            cols="60px 104px 132px minmax(0,1fr) 112px"
+            to={e.to}
+          >
+            <span class="dim">{Format.hhmm(e.at)}</span>
+            <span><.pill>{Events.kind_label(e.kind)}</.pill></span>
+            <span class="dim">{e.actor}</span>
+            <span>
+              <span class="nm">{e.what} <span style="color:var(--accent)">{e.target}</span></span>
+              <br :if={e.detail} /><span :if={e.detail} class="note">{e.detail}</span>
+            </span>
+            <span style="justify-self:end"><.pill tone={e.tone}>{e.result}</.pill></span>
           </.row>
         </.rows>
       </div>
+
+      <p class="note" style="margin-top:6px">
+        Activations and acts in one stream: a bug arrives, a rule wakes a factory, a person holds it
+        awake. Told across two screens it had to be reassembled by eye.
+      </p>
     </.section>
+    """
+  end
+
+  attr(:events, :list, required: true)
+  attr(:filters, :map, required: true)
+  attr(:investigations, :list, default: [])
+
+  def facets(assigns) do
+    ~H"""
+    <aside class="pane facets" aria-label="Filters">
+      <div class="facet">
+        <h4>Search</h4>
+        <form phx-change="search" phx-submit="search">
+          <input name="q" value={@filters.q} placeholder="in any field…" style="width:100%" phx-debounce="250" />
+        </form>
+      </div>
+      <div class="fsep"></div>
+
+      <div class="facet">
+        <h4>When</h4>
+        <button
+          :for={{id, label, count} <- Events.window_counts(@events, @filters)}
+          class={["fopt", count == 0 && "zero"]}
+          aria-pressed={to_string(@filters.when == id)}
+          phx-click="set_window"
+          phx-value-window={id}
+        >
+          <span class="box">{if @filters.when == id, do: "✓"}</span>
+          <span>{label}</span>
+          <span class="n">{count}</span>
+        </button>
+      </div>
+      <div class="fsep"></div>
+
+      <.facet_group events={@events} filters={@filters} field={:kind} title="Event kind" />
+      <div class="fsep"></div>
+      <.facet_group events={@events} filters={@filters} field={:ministry} title="Ministry" />
+      <div class="fsep"></div>
+      <.facet_group events={@events} filters={@filters} field={:actor} title="Actor" />
+      <div class="fsep"></div>
+      <.facet_group events={@events} filters={@filters} field={:result} title="Result" />
+
+      <div class="fsep"></div>
+      <div class="facet">
+        <h4>Sector</h4>
+        <p class="note" style="margin:0">
+          Sectors live on the factory, not the Cabinet — a control here could only ever be empty.
+          It arrives with the rest of the tree.
+        </p>
+      </div>
+
+      <div :if={@investigations != []} class="fsep"></div>
+      <div :if={@investigations != []} class="facet">
+        <h4>Investigations</h4>
+        <div :for={inv <- @investigations} style="display:flex;align-items:center;gap:6px">
+          <.link patch={inv.path} class="fopt" style="flex:1">
+            <span class="box">⌕</span><span>{inv.name}</span>
+          </.link>
+          <button class="iconbtn" phx-click="delete_investigation" phx-value-id={inv.id} title="Forget this">
+            ✕
+          </button>
+        </div>
+      </div>
+    </aside>
+    """
+  end
+
+  attr(:events, :list, required: true)
+  attr(:filters, :map, required: true)
+  attr(:field, :atom, required: true)
+  attr(:title, :string, required: true)
+
+  defp facet_group(assigns) do
+    assigns =
+      assign(assigns, :options, Events.facet(assigns.events, assigns.filters, assigns.field))
+
+    ~H"""
+    <div class="facet">
+      <h4>
+        {@title}
+        <button
+          :if={Map.get(@filters, @field) != []}
+          class="clr"
+          phx-click="clear_facet"
+          phx-value-field={@field}
+        >clear</button>
+      </h4>
+      <p :if={@options == []} class="note" style="margin:0">nothing recorded yet</p>
+      <button
+        :for={{value, label, count} <- @options}
+        class={["fopt", count == 0 && "zero"]}
+        aria-pressed={to_string(to_string(value) in Map.get(@filters, @field))}
+        phx-click="toggle_facet"
+        phx-value-field={@field}
+        phx-value-v={value}
+      >
+        <span class="box">{if to_string(value) in Map.get(@filters, @field), do: "✓"}</span>
+        <span>{label}</span>
+        <span class="n">{count}</span>
+      </button>
+    </div>
     """
   end
 end
