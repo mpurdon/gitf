@@ -11,6 +11,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
 
   require GiTF.Ghost.Status, as: GhostStatus
 
@@ -796,13 +797,13 @@ defmodule GiTF.Dashboard.OverviewLive do
       <%!-- Factory operations bar --%>
       <div style="display:flex; gap:1.5rem; margin-bottom:1.5rem; padding:0.6rem 1rem; background:var(--panel); border:1px solid var(--line-soft); border-radius:6px; font-size:0.8rem; flex-wrap:wrap">
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <.dot color="var(--ok)" /> <span style="color:var(--ok); font-weight:600">{@active_ghosts}</span> <span style="color:var(--ink-3)">ghosts working</span>
+          <.dot tone={:ok} /> <span style="color:var(--ok); font-weight:600">{@active_ghosts}</span> <span style="color:var(--ink-3)">ghosts working</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <.dot color="var(--accent)" /> <span style="color:var(--accent); font-weight:600">{@active_quests}</span> <span style="color:var(--ink-3)">missions active</span>
+          <.dot tone={:acc} /> <span style="color:var(--accent); font-weight:600">{@active_quests}</span> <span style="color:var(--ink-3)">missions active</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.3rem">
-          <.dot color="var(--warn)" /> <span style="color:var(--warn); font-weight:600">{@pending_approvals}</span> <span style="color:var(--ink-3)">approvals waiting</span>
+          <.dot tone={:warn} /> <span style="color:var(--warn); font-weight:600">{@pending_approvals}</span> <span style="color:var(--ink-3)">approvals waiting</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.3rem">
           <span style="color:var(--ink-3)">Today:</span>

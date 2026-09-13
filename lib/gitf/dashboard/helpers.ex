@@ -513,16 +513,4 @@ defmodule GiTF.Dashboard.Helpers do
     </svg>
     """
   end
-
-  @doc """
-  Renders a small colored dot indicator.
-  """
-  attr(:color, :string, required: true)
-  attr(:size, :integer, default: 8)
-
-  def dot(assigns) do
-    ~H"""
-    <span style={"display:inline-block; width:#{@size}px; height:#{@size}px; border-radius:50%; background:#{@color}; flex-shrink:0"}></span>
-    """
-  end
 end

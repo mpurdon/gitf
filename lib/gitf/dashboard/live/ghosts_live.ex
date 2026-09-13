@@ -11,6 +11,8 @@ defmodule GiTF.Dashboard.GhostsLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   require GiTF.Ghost.Status, as: GhostStatus
 
@@ -131,152 +133,93 @@ defmodule GiTF.Dashboard.GhostsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <h1 class="page-title">Ghost Agents</h1>
+    <.live_component
+      module={GiTF.Dashboard.AppLayout}
+      id="layout"
+      current_path={@current_path}
+      flash={@flash}
+      toasts={@toasts}
+    >
+      <.object
+        kind="Fleet"
+        name="Ghosts"
+        sub="the processes doing the work — one per op the Major has assigned"
+      >
+        <:badges>
+          <.pill tone={if @ghosts_working > 0, do: :recon, else: nil}>
+            {if @ghosts_working > 0, do: "#{@ghosts_working} working", else: "all quiet"}
+          </.pill>
+        </:badges>
 
-      <%!-- Summary counters --%>
-      <div style="display:flex; gap:1rem; margin-bottom:1rem">
-        <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="var(--ok)" /><span style="color:var(--ok); font-weight:600">{@ghosts_working}</span><span style="color:var(--ink-3)">working</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="var(--ink-3)" /><span style="color:var(--ink-3)">{@ghosts_total - @ghosts_working - @ghosts_stopped}</span><span style="color:var(--ink-3)">idle</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:0.35rem; font-size:0.85rem">
-          <.dot color="var(--crit)" /><span style="color:var(--crit)">{@ghosts_stopped}</span><span style="color:var(--ink-3)">stopped</span>
-        </div>
-      </div>
+        <:metrics>
+          <.metric label="Working" value={@ghosts_working} tone={if @ghosts_working > 0, do: :ok} />
+          <.metric label="Idle" value={@ghosts_total - @ghosts_working - @ghosts_stopped} />
+          <.metric label="Stopped" value={@ghosts_stopped} tone={if @ghosts_stopped > 0, do: :crit} />
+          <.metric label="Ever" value={@ghosts_total} />
+        </:metrics>
 
-      <div class="panel">
-        <%= if @ghosts_empty? do %>
-          <div class="empty">No ghosts deployed yet. Ghosts are created when the Major assigns ops.</div>
-        <% else %>
-          <table id="ghosts-table" phx-update="stream">
-            <thead id="ghosts-thead">
-              <tr>
-                <th></th>
-                <th></th>
-                <th>ID</th>
-                <th>Ghost</th>
-                <th>Status</th>
-                <th>Op</th>
-                <th>Mission</th>
-                <th>Context</th>
-                <th>Drift</th>
-                <th></th>
-              </tr>
-            </thead>
-            <%= for {dom_id, ghost} <- @streams.ghosts do %>
-              <tbody id={dom_id}>
-                <tr class="detail-toggle" phx-click="toggle" phx-value-id={ghost.id}>
-                  <td style="width:1.5rem">{if MapSet.member?(Map.get(assigns, :expanded, MapSet.new()), ghost.id), do: "v", else: ">"}</td>
-                  <td style="width:1rem">
-                    <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(ghost, :status, "unknown"))}"} class={if Map.get(ghost, :status) == GhostStatus.working(), do: "pulse"}></span>
-                  </td>
-                  <td style="font-family:monospace; font-size:0.8rem">{short_id(ghost.id)}</td>
-                  <td>
-                    <% {provider, _short, _tier} = parse_model(Map.get(ghost, :assigned_model)) %>
-                    <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(Map.get(ghost, :name, "-"), ghost[:assigned_model])}</span>
-                  </td>
-                  <td><span class={"badge #{status_badge(Map.get(ghost, :status, "unknown"))}"}>{Map.get(ghost, :status, "unknown")}</span></td>
-                  <td style="font-size:0.8rem">
-                    <%= if ghost.op do %>
-                      <a href={"/dashboard/ops/#{ghost.op.id}"} style="color:var(--accent)" title={ghost.op[:title]}>
-                        {String.slice(ghost.op[:title] || short_id(ghost.op.id), 0, 25)}
-                      </a>
-                    <% else %>
-                      <span style="color:var(--ink-3)">-</span>
-                    <% end %>
-                  </td>
-                  <td style="font-size:0.8rem">
-                    <%= if ghost.mission do %>
-                      <a href={"/dashboard/missions/#{ghost.mission.id}"} style="color:var(--ink-3)">
-                        {Map.get(ghost.mission, :name) || short_id(ghost.mission.id)}
-                      </a>
-                    <% else %>
-                      <span style="color:var(--ink-3)">-</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <%= if Map.has_key?(ghost, :context_percentage) do %>
-                      <span class={"badge #{context_badge(ghost.context_percentage)}"}>
-                        {Float.round(ghost.context_percentage / 1, 1)}%
-                      </span>
-                    <% else %>
-                      <span class="badge badge-grey">-</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <%= if ghost.drift do %>
-                      <span class={"badge #{case ghost.drift do
-                        d when d in [:clean, "clean"] -> "badge-green"
-                        d when d in [:behind, "behind"] -> "badge-yellow"
-                        d when d in [:risky, "risky"] -> "badge-orange"
-                        d when d in [:conflicted, "conflicted"] -> "badge-red"
-                        _ -> "badge-grey"
-                      end}"} style="font-size:0.65rem">{ghost.drift}</span>
-                    <% else %>
-                      <span style="color:var(--ink-3); font-size:0.75rem">-</span>
-                    <% end %>
-                  </td>
-                  <td>
-                    <%= if Map.get(ghost, :status) == GhostStatus.working() do %>
-                      <button phx-click="stop" phx-value-id={ghost.id} class="btn btn-red" style="padding:0.2rem 0.6rem; font-size:0.75rem">
-                        Stop
-                      </button>
-                    <% end %>
-                  </td>
-                </tr>
-                <%= if MapSet.member?(Map.get(assigns, :expanded, MapSet.new()), ghost.id) do %>
-                  <tr>
-                    <td colspan="10" style="padding:0">
-                      <div class="detail-content">
-                        <dl class="metadata-grid">
-                          <dt>Full ID</dt><dd style="font-family:monospace; font-size:0.8rem">{ghost.id}</dd>
-                          <dt>Shell</dt><dd style="font-family:monospace; font-size:0.8rem">{Map.get(ghost, :shell_path, "-")}</dd>
-                          <dt>Model</dt><dd>{Map.get(ghost, :assigned_model, "-")}</dd>
-                          <dt>Op</dt>
-                          <dd>
-                            <%= if Map.get(ghost, :op_id) do %>
-                              <a href={"/dashboard/ops/#{ghost.op_id}"} style="font-family:monospace; font-size:0.8rem">{ghost.op_id}</a>
-                            <% else %>
-                              -
-                            <% end %>
-                          </dd>
-                          <dt>Context</dt>
-                          <dd>
-                            <%= if Map.has_key?(ghost, :context_percentage) do %>
-                              <div class="cost-bar" style="width:120px; margin-top:0.25rem">
-                                <div class="cost-bar-fill" style={"width:#{min(ghost.context_percentage, 100)}%; background:#{if ghost.context_percentage > 40, do: "var(--crit)", else: "var(--ok)"}"}></div>
-                              </div>
-                              <span style="font-size:0.8rem">{Float.round(ghost.context_percentage / 1, 1)}%</span>
-                            <% else %>
-                              -
-                            <% end %>
-                          </dd>
-                        </dl>
-                      </div>
-                    </td>
-                  </tr>
-                <% end %>
-              </tbody>
-            <% end %>
-          </table>
-        <% end %>
-      </div>
+        <.section title="Ghosts">
+          <:hint>a full context window is why a ghost hands off — watch that column</:hint>
+
+          <div :if={@ghosts_empty?} class="empty">
+            No ghosts deployed yet. One is created whenever the Major assigns an op.
+          </div>
+
+          <div :if={!@ghosts_empty?} class="rows" id="ghosts-table" phx-update="stream">
+            <div :for={{dom_id, ghost} <- @streams.ghosts} id={dom_id}>
+              <div class="row" style="grid-template-columns:18px 150px 120px minmax(0,1fr) 96px 90px 70px">
+                <.dot tone={tone(Map.get(ghost, :status))} />
+                <.identity
+                  name={ghost_badge_label(Map.get(ghost, :name, "-"), ghost[:assigned_model])}
+                  id={short_id(ghost.id)}
+                />
+                <span><.pill tone={tone(Map.get(ghost, :status))}>{Map.get(ghost, :status, "unknown")}</.pill></span>
+                <span>
+                  <.link :if={ghost.op} navigate={"/dashboard/ops/#{ghost.op.id}"}>
+                    {ghost.op[:title] || short_id(ghost.op.id)}
+                  </.link>
+                  <span :if={!ghost.op} class="note">no op</span>
+                  <br :if={ghost.mission} /><.link
+                    :if={ghost.mission}
+                    navigate={"/dashboard/missions/#{ghost.mission.id}"}
+                    class="note"
+                  >{Map.get(ghost.mission, :name) || short_id(ghost.mission.id)}</.link>
+                </span>
+                <%!-- A ghost that never ran has 0% context, and 0% in green
+                      reads as "healthy" for something that did nothing. Only a
+                      window that has been used says anything. --%>
+                <span>
+                  <.pill :if={used_context?(ghost)} tone={context_tone(ghost.context_percentage)}>
+                    {Float.round(ghost.context_percentage / 1, 1)}%
+                  </.pill>
+                  <span :if={!used_context?(ghost)} class="note">—</span>
+                </span>
+                <span>
+                  <.pill :if={ghost.drift} tone={tone(ghost.drift)}>{ghost.drift}</.pill>
+                  <span :if={!ghost.drift} class="note">—</span>
+                </span>
+                <span style="justify-self:end">
+                  <button
+                    :if={Map.get(ghost, :status) == GhostStatus.working()}
+                    phx-click="stop"
+                    phx-value-id={ghost.id}
+                    class="btn sm danger"
+                  >Stop</button>
+                </span>
+              </div>
+            </div>
+          </div>
+        </.section>
+      </.object>
     </.live_component>
     """
   end
 
-  defp status_dot_color(GhostStatus.working()), do: "var(--ok)"
-  defp status_dot_color(GhostStatus.starting()), do: "var(--accent)"
-  defp status_dot_color(GhostStatus.idle()), do: "var(--ink-3)"
-  defp status_dot_color("paused"), do: "var(--warn)"
-  defp status_dot_color(GhostStatus.stopped()), do: "var(--line-strong)"
-  defp status_dot_color(GhostStatus.crashed()), do: "var(--crit)"
-  defp status_dot_color(_), do: "var(--line-strong)"
+  defp used_context?(ghost), do: (ghost[:context_percentage] || 0) > 0
 
-  defp context_badge(percentage) when percentage >= 45, do: "badge-red"
-  defp context_badge(percentage) when percentage >= 40, do: "badge-yellow"
-  defp context_badge(_), do: "badge-green"
+  # A ghost hands off when its window fills, so the threshold is the fact worth
+  # colouring — not the percentage itself.
+  defp context_tone(percentage) when percentage >= 45, do: :crit
+  defp context_tone(percentage) when percentage >= 40, do: :warn
+  defp context_tone(_), do: :ok
 end

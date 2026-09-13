@@ -7,6 +7,8 @@ defmodule GiTF.Dashboard.MergeQueueLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
 
   @heartbeat_interval :timer.seconds(15)
 
@@ -115,102 +117,89 @@ defmodule GiTF.Dashboard.MergeQueueLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
-        <h1 class="page-title" style="margin-bottom:0">Merge Queue</h1>
-        <span style="color:var(--ink-3); font-size:0.85rem">{@pending_count} pending</span>
-      </div>
+    <.live_component
+      module={GiTF.Dashboard.AppLayout}
+      id="layout"
+      current_path={@current_path}
+      flash={@flash}
+      toasts={@toasts}
+    >
+      <.object
+        kind="Fleet"
+        name="Merge queue"
+        sub="finished ops waiting their turn at the trunk — one at a time, in order"
+      >
+        <:badges>
+          <.pill tone={if @active, do: :recon, else: :ok}>
+            {if @active, do: "merging", else: "idle"}
+          </.pill>
+        </:badges>
 
-      <%!-- Active merge --%>
-      <div class="panel" style="margin-bottom:1rem">
-        <div class="panel-title">Currently Merging</div>
-        <%= if @active do %>
-          <div style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0">
-            <div class="loading-spinner" style="width:16px; height:16px; border-width:2px"></div>
-            <div>
-              <a href={"/dashboard/ops/#{@active.op_id}"} style="color:var(--accent); font-size:0.9rem">
-                {@active.op_title || short_id(@active.op_id)}
-              </a>
-              <%= if @active.mission_name do %>
-                <span style="color:var(--ink-3); font-size:0.8rem"> &mdash;
-                  <a href={"/dashboard/missions/#{@active.mission_id}"} style="color:var(--ink-3)">{@active.mission_name}</a>
-                </span>
-              <% end %>
-            </div>
-          </div>
-        <% else %>
-          <div class="empty" style="padding:0.5rem 0">No active merge</div>
-        <% end %>
-      </div>
+        <:metrics>
+          <.metric label="Merging" value={if @active, do: 1, else: 0} />
+          <.metric
+            label="Waiting"
+            value={@pending_count}
+            tone={if @pending_count > 0, do: :warn}
+          />
+          <.metric label="Done recently" value={length(@completed)} />
+        </:metrics>
 
-      <%!-- Pending --%>
-      <div class="panel" style="margin-bottom:1rem">
-        <div class="panel-title">Pending ({length(@pending)})</div>
-        <%= if @pending == [] do %>
-          <div class="empty" style="padding:0.5rem 0">Queue is empty</div>
-        <% else %>
-          <table class="table" style="width:100%">
-            <thead><tr><th>#</th><th>Op</th><th>Mission</th><th>Shell</th></tr></thead>
-            <tbody>
-              <%= for {entry, idx} <- Enum.with_index(@pending) do %>
-                <tr>
-                  <td style="color:var(--ink-3)">{idx + 1}</td>
-                  <td>
-                    <a href={"/dashboard/ops/#{entry.op_id}"} style="color:var(--accent); font-size:0.85rem">
-                      {entry.op_title || short_id(entry.op_id)}
-                    </a>
-                  </td>
-                  <td>
-                    <%= if entry.mission_id do %>
-                      <a href={"/dashboard/missions/#{entry.mission_id}"} style="color:var(--ink-3); font-size:0.8rem">{entry.mission_name}</a>
-                    <% else %>
-                      <span style="color:var(--ink-3)">-</span>
-                    <% end %>
-                  </td>
-                  <td style="font-family:monospace; font-size:0.75rem; color:var(--ink-3)">{short_id(entry.shell_id || "-")}</td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        <% end %>
-      </div>
+        <.section title="Merging now">
+          <.rows empty={is_nil(@active) && "Nothing is merging. The queue is not blocked."}>
+            <.row
+              :if={@active}
+              cols="minmax(0,1fr) 200px"
+              to={"/dashboard/ops/#{@active.op_id}"}
+              link={:navigate}
+            >
+              <.identity
+                name={@active.op_title || short_id(@active.op_id)}
+                id={@active.mission_name}
+              />
+              <span style="justify-self:end"><.pill tone={:recon}>in progress</.pill></span>
+            </.row>
+          </.rows>
+        </.section>
 
-      <%!-- Recent completed --%>
-      <div class="panel">
-        <div class="panel-title">Recent Merges</div>
-        <%= if @completed == [] do %>
-          <div class="empty" style="padding:0.5rem 0">No completed merges yet</div>
-        <% else %>
-          <table class="table" style="width:100%">
-            <thead><tr><th>Op</th><th>Mission</th><th>Outcome</th><th>Completed</th></tr></thead>
-            <tbody>
-              <%= for entry <- @completed do %>
-                <tr>
-                  <td>
-                    <a href={"/dashboard/ops/#{entry.op_id}"} style="color:var(--accent); font-size:0.85rem">
-                      {entry.op_title || short_id(entry.op_id)}
-                    </a>
-                  </td>
-                  <td>
-                    <%= if entry.mission_id do %>
-                      <a href={"/dashboard/missions/#{entry.mission_id}"} style="color:var(--ink-3); font-size:0.8rem">{entry.mission_name}</a>
-                    <% end %>
-                  </td>
-                  <td>
-                    <span class={"badge #{case entry[:outcome] do
-                      :ok -> "badge-green"
-                      :error -> "badge-red"
-                      _ -> "badge-grey"
-                    end}"}>{entry[:outcome] || "?"}</span>
-                  </td>
-                  <td style="font-size:0.8rem; color:var(--ink-3)">{format_timestamp(entry[:completed_at])}</td>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        <% end %>
-      </div>
+        <.section title="Waiting">
+          <:hint>in order — the next one merges when the current one lands</:hint>
+          <.rows empty={@pending == [] && "Nothing is waiting."}>
+            <.row
+              :for={{entry, idx} <- Enum.with_index(@pending)}
+              cols="36px minmax(0,1fr) 200px 110px"
+              to={"/dashboard/ops/#{entry.op_id}"}
+              link={:navigate}
+            >
+              <span class="dim">{idx + 1}</span>
+              <.identity name={entry.op_title || short_id(entry.op_id)} id={entry.op_id} />
+              <span class="dim">{entry.mission_name || "—"}</span>
+              <span class="dim">{short_id(entry.shell_id || "—")}</span>
+            </.row>
+          </.rows>
+        </.section>
+
+        <.section title="Recently merged">
+          <.rows empty={@completed == [] && "Nothing has merged yet."}>
+            <.row
+              :for={entry <- @completed}
+              cols="minmax(0,1fr) 200px 110px 150px"
+              to={"/dashboard/ops/#{entry.op_id}"}
+              link={:navigate}
+            >
+              <.identity name={entry.op_title || short_id(entry.op_id)} id={entry.op_id} />
+              <span class="dim">{entry.mission_name || "—"}</span>
+              <span><.pill tone={outcome_tone(entry[:outcome])}>{entry[:outcome] || "?"}</.pill></span>
+              <span class="dim">{format_timestamp(entry[:completed_at])}</span>
+            </.row>
+          </.rows>
+        </.section>
+      </.object>
     </.live_component>
     """
   end
+
+  defp outcome_tone(:ok), do: :ok
+  defp outcome_tone(:error), do: :crit
+  defp outcome_tone(_), do: nil
 end
