@@ -17,11 +17,27 @@ defmodule GiTF.Dashboard.Console.TreeTest do
     instance_id: "i-0593ef62313cab7a1",
     mode: "normal",
     cost_cap_usd: nil,
-    ruleset_version: 3,
-    sectors: [%{name: "cora"}, %{name: "hello-factory"}]
+    ruleset_version: 3
   }
 
-  @tj %{slug: "trajector", name: "Trajector", state: nil, sectors: []}
+  @tj %{slug: "trajector", name: "Trajector", state: nil, instance_id: nil}
+
+  # What the factory answered. Sectors, missions and ops live on the box, so
+  # they reach the tree as a separate fact from the registry record.
+  @depth %{
+    "home-affairs" => %{
+      sectors: [%{id: "cora", name: "cora"}, %{id: "hf", name: "hello-factory"}],
+      missions: [
+        %{id: "msn-1", name: "six-level-priority", status: "running", sector_id: "cora"},
+        %{id: "msn-2", name: "dark mode", status: "completed", sector_id: "cora"}
+      ],
+      ops: [
+        %{id: "op-1", title: "plan it", status: "done", mission_id: "msn-1"},
+        %{id: "op-2", title: "build it", status: "running", mission_id: "msn-1"},
+        %{id: "op-9", title: "elsewhere", status: "done", mission_id: "msn-2"}
+      ]
+    }
+  }
 
   defp ids(nodes), do: Enum.map(nodes, & &1.id)
   defp find(nodes, id), do: Enum.find(nodes, &(&1.id == id))
@@ -37,14 +53,15 @@ defmodule GiTF.Dashboard.Console.TreeTest do
   end
 
   test "the ministry in scope is the one that opens" do
-    nodes = Tree.build([@ha, @tj], %Scope{level: :ministry, ministry: "home-affairs"})
+    nodes =
+      Tree.build([@ha, @tj], %Scope{level: :ministry, ministry: "home-affairs"}, %{}, @depth)
 
     assert "sector:home-affairs:cora" in ids(nodes)
     refute Enum.any?(ids(nodes), &String.starts_with?(&1, "sector:trajector"))
   end
 
   test "sectors and configuration are separated, each under its own heading" do
-    nodes = Tree.build([@ha], %Scope{level: :ruleset, ministry: "home-affairs"})
+    nodes = Tree.build([@ha], %Scope{level: :ruleset, ministry: "home-affairs"}, %{}, @depth)
     groups = Enum.filter(nodes, &(&1.kind == :group))
 
     assert Enum.map(groups, & &1.label) == ["Sectors", "Configuration"]
@@ -61,7 +78,8 @@ defmodule GiTF.Dashboard.Console.TreeTest do
   end
 
   test "configuration is the same four things for every ministry" do
-    nodes = Tree.build([@ha], %Scope{level: :ministry, ministry: "home-affairs"})
+    nodes =
+      Tree.build([@ha], %Scope{level: :ministry, ministry: "home-affairs"}, %{}, @depth)
 
     assert labels_at(nodes, 2) |> Enum.filter(&(&1 in ~w(Mode Budget Registration))) ==
              ~w(Mode Budget Registration)
@@ -128,5 +146,85 @@ defmodule GiTF.Dashboard.Console.TreeTest do
     assert find(quiet, "activity").tone == nil
     assert find(busy, "activity").tail == "4 need you"
     assert find(busy, "activity").tone == :warn
+  end
+
+  describe "depth belongs to the factory" do
+    defp ha_nodes(scope, depth), do: Tree.build([@ha], scope, %{}, depth)
+    defp in_scope, do: %Scope{level: :ministry, ministry: "home-affairs"}
+
+    test "the four reasons a ministry lists no sectors read differently" do
+      asleep = ha_nodes(in_scope(), %{"home-affairs" => {:error, :asleep}})
+      assert find(asleep, "wake:home-affairs").label =~ "asleep"
+
+      assert find(asleep, "wake:home-affairs").path == "/console/wake/home-affairs",
+             "the row that states the fact has to offer the wake, not perform it"
+
+      # Not asked yet, and asked-but-unanswered, are the same to an operator.
+      for depth <- [%{}, %{"home-affairs" => :loading}] do
+        assert find(ha_nodes(in_scope(), depth), "sectors-loading:home-affairs").label =~
+                 "asking the factory"
+      end
+
+      empty = ha_nodes(in_scope(), %{"home-affairs" => %{sectors: []}})
+      assert find(empty, "sectors-none:home-affairs").label == "none yet"
+
+      broken = ha_nodes(in_scope(), %{"home-affairs" => {:error, {:status, 502}}})
+      assert find(broken, "sectors-error:home-affairs").label =~ "HTTP 502"
+      assert find(broken, "sectors-error:home-affairs").tone == :crit
+
+      never = Tree.build([@tj], %Scope{level: :ministry, ministry: "trajector"}, %{}, %{})
+      assert find(never, "no-factory:trajector").label == "no factory yet"
+    end
+
+    test "expanding a ministry never wakes it" do
+      # Every node the asleep subtree offers is a link the operator chooses to
+      # follow. A tree that fetched on expand would spend a minute and a bill
+      # on a click that meant "show me what you already know".
+      nodes = ha_nodes(in_scope(), %{"home-affairs" => {:error, :asleep}})
+
+      for n <- nodes, n.path do
+        assert String.starts_with?(n.path, "/console"),
+               "a tree node is a destination, never an action"
+      end
+    end
+
+    test "missions hang off their own sector, and only the open mission lists ops" do
+      nodes = ha_nodes(in_scope(), @depth)
+
+      assert find(nodes, "sector:home-affairs:cora").tail == "2 missions"
+      assert find(nodes, "mission:home-affairs:msn-1").depth == 3
+
+      refute Enum.any?(ids(nodes), &String.starts_with?(&1, "op:")),
+             "no mission is open, so no ops are listed"
+
+      open = ha_nodes(%Scope{level: :mission, ministry: "home-affairs", id: "msn-1"}, @depth)
+
+      assert "op:home-affairs:op-1" in ids(open)
+      assert find(open, "op:home-affairs:op-1").depth == 4
+
+      refute "op:home-affairs:op-9" in ids(open),
+             "op-9 belongs to the other mission; expanding everything is how a rail stops being usable"
+    end
+
+    test "an op in scope keeps its mission open above it" do
+      nodes = ha_nodes(%Scope{level: :op, ministry: "home-affairs", id: "op-2"}, @depth)
+
+      assert "mission:home-affairs:msn-1" in ids(nodes)
+      assert find(nodes, "op:home-affairs:op-2").current?
+      refute find(nodes, "mission:home-affairs:msn-1").current?
+    end
+
+    test "status carries a tone, so the rail reads at a glance" do
+      nodes = ha_nodes(%Scope{level: :mission, ministry: "home-affairs", id: "msn-1"}, @depth)
+
+      assert find(nodes, "mission:home-affairs:msn-1").tail_tone == :recon
+      assert find(nodes, "mission:home-affairs:msn-2").tail_tone == :ok
+      assert find(nodes, "op:home-affairs:op-1").tail_tone == :ok
+    end
+
+    test "a sector with no missions says nothing rather than \"0 missions\"" do
+      nodes = ha_nodes(in_scope(), %{"home-affairs" => %{sectors: [%{id: "hf", name: "hf"}]}})
+      assert find(nodes, "sector:home-affairs:hf").tail == nil
+    end
   end
 end

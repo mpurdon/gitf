@@ -331,4 +331,34 @@ defmodule GiTF.Dashboard.Console.Format do
 
   def until(%DateTime{} = dt), do: dur(max(DateTime.diff(dt, DateTime.utc_now()), 0))
   def until(_), do: "—"
+
+  @doc """
+  The tone for a unit of work's status — a mission's or an op's.
+
+  One mapping, used by the rail and by every page, because a mission that reads
+  green in the tree and grey on its own page is two different claims about the
+  same fact.
+  """
+  @spec work_tone(String.t() | nil) :: atom() | nil
+  def work_tone(status) when is_binary(status) do
+    cond do
+      status in ~w(completed done closed merged) -> :ok
+      status in ~w(failed killed rejected) -> :crit
+      status in ~w(running active planning executing validating starting) -> :recon
+      status in ~w(awaiting_approval held blocked) -> :warn
+      true -> nil
+    end
+  end
+
+  def work_tone(_), do: nil
+
+  @doc "A failure reason as something an operator can read."
+  @spec reason(term()) :: String.t()
+  def reason({:error, r}), do: reason(r)
+  def reason(:asleep), do: "the box is asleep"
+  def reason(:unknown_ministry), do: "no such ministry"
+  def reason(:no_url), do: "it has no URL registered"
+  def reason({:status, code}), do: "the factory answered HTTP #{code}"
+  def reason(%{__exception__: true} = e), do: Exception.message(e)
+  def reason(other), do: inspect(other)
 end

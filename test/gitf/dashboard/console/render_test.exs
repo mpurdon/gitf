@@ -285,4 +285,122 @@ defmodule GiTF.Dashboard.Console.RenderTest do
       assert Format.rule_rows(%{rules: "nonsense"}) == []
     end
   end
+
+  describe "the factory's own objects" do
+    @sector %{
+      id: "cora",
+      name: "cora",
+      path: "/srv/cora",
+      repo_url: "git@github.com:mpurdon/cora.git",
+      github_owner: "mpurdon",
+      github_repo: "cora",
+      sync_strategy: "scratch-worktree",
+      validation_command: "npm test",
+      validation_timeout_ms: 600_000
+    }
+
+    @mission %{
+      id: "msn-7683ac",
+      name: "six-level-priority",
+      status: "running",
+      goal: "Group the PR list by author",
+      sector_id: "cora",
+      current_phase: "implementation",
+      priority: "normal",
+      effective_priority: "high",
+      priority_source: "project",
+      inserted_at: "2026-09-13 01:00:00Z"
+    }
+
+    @op %{
+      id: "op-2",
+      title: "build the grouping",
+      status: "running",
+      mission_id: "msn-7683ac",
+      ghost_id: "gh-11",
+      description: "Group by author in the list view",
+      inserted_at: "2026-09-13 01:05:00Z"
+    }
+
+    @contents %{sectors: [@sector], missions: [@mission], ops: [@op]}
+
+    # These pages derive a little from their assigns, so they are rendered the
+    # way the LiveView renders them rather than called by hand.
+    defp deep(level, id, object, depth \\ @contents) do
+      Phoenix.LiveViewTest.render_component(Function.capture(Pages, level, 1),
+        scope: %Scope{level: level, ministry: "home-affairs", id: id},
+        ministry: %{slug: "home-affairs", name: "Home Affairs"},
+        object: object,
+        depth: depth
+      )
+    end
+
+    test "a sector shows the repository, how work lands, and its missions" do
+      html = deep(:sector, "cora", @sector)
+
+      assert html =~ "/srv/cora"
+      assert html =~ "mpurdon/cora"
+      assert html =~ "scratch-worktree"
+      assert html =~ "npm test"
+      assert html =~ "six-level-priority"
+      assert html =~ "/console/m/home-affairs/msn/msn-7683ac", "a mission is reachable from here"
+    end
+
+    test "a mission shows its goal, where it is, and links to its sector" do
+      html = deep(:mission, "msn-7683ac", @mission)
+
+      assert html =~ "Group the PR list by author"
+      assert html =~ "implementation"
+      assert html =~ "high"
+      assert html =~ "via project", "an effective priority has to say where it came from"
+      assert html =~ "/console/m/home-affairs/s/cora"
+      assert html =~ "/console/m/home-affairs/op/op-2"
+    end
+
+    test "an op names the ghost doing it and the mission it belongs to" do
+      html = deep(:op, "op-2", @op)
+
+      assert html =~ "gh-11"
+      assert html =~ "/console/m/home-affairs/msn/msn-7683ac"
+    end
+
+    test "an unplanned mission says why there are no ops" do
+      html = deep(:mission, "msn-7683ac", @mission, %{sectors: [], missions: [], ops: []})
+      assert html =~ "has not been planned"
+    end
+
+    test "raw is never a dead end" do
+      html =
+        Phoenix.LiveViewTest.render_component(&Pages.mission/1,
+          scope: %Scope{level: :mission, ministry: "home-affairs", id: "msn-7683ac", tab: "raw"},
+          ministry: %{slug: "home-affairs"},
+          object: @mission,
+          depth: @contents
+        )
+
+      assert html =~ "msn-7683ac"
+      assert html =~ "as the factory serves it"
+    end
+
+    test "a cold link to a sleeping factory explains itself and offers the wake" do
+      # This is the case that matters: a mission link opened from a phone at
+      # midnight must not render a blank page, and must not wake the box on its
+      # own — that is a minute and a bill.
+      html = deep(:mission, "msn-7683ac", {:error, :asleep}, nil)
+
+      assert html =~ "is asleep"
+      assert html =~ "bills by the hour", "the cost of the answer is part of the answer"
+      assert html =~ "/console/wake/home-affairs"
+    end
+
+    test "waiting, missing and broken are three different sentences" do
+      assert deep(:op, "op-2", :loading, nil) =~ "Asking home-affairs"
+
+      gone = deep(:op, "op-2", :gone)
+      assert gone =~ "awake and has no op called"
+      assert gone =~ "op-2"
+
+      assert deep(:sector, "cora", {:error, {:status, 502}}, nil) =~ "HTTP 502"
+    end
+  end
 end

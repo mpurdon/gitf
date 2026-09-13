@@ -33,7 +33,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
 
   import GiTF.Dashboard.Console.Components
 
-  alias GiTF.Cabinet.{Activity, Fleet, Gate, Prefs, Registry, Ruleset, Snapshot}
+  alias GiTF.Cabinet.{Activity, Fleet, Gate, Prefs, Registry, Remote, Ruleset, Snapshot}
   alias GiTF.Dashboard.Console.{Events, Format, Pages, Scope, Tree}
 
   @activity_limit 40
@@ -64,6 +64,9 @@ defmodule GiTF.Dashboard.ConsoleLive do
        opening: nil,
        needs_open: true,
        needs_config_open: false,
+       # What each ministry's factory answered about its own contents, keyed by
+       # slug. Absent = never asked; :loading = in flight; {:error, _} = said so.
+       depth: %{},
        page_title: "GiTF Console"
      )
      |> load()}
@@ -81,6 +84,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
       |> assign(scope: scope, filters: Events.from_params(params))
       |> assign_object()
       |> assign_stream()
+      |> browse_if_needed()
 
     # /console/wake/<slug> is the cold bookmark: it is an act, not a place, so
     # it starts the wake and settles on the ministry rather than rendering a
@@ -91,6 +95,24 @@ defmodule GiTF.Dashboard.ConsoleLive do
       {:noreply, wake_and_open(socket)}
     else
       {:noreply, socket}
+    end
+  end
+
+  # Opening a ministry asks its factory what it holds, once. The ask is async so
+  # the rail renders immediately and fills in; it is skipped entirely when the
+  # box is not running, because `Remote` answers :asleep from what the Cabinet
+  # already knows rather than by waiting out a connect.
+  defp browse_if_needed(%{assigns: %{scope: %{ministry: nil}}} = socket), do: socket
+
+  defp browse_if_needed(%{assigns: %{scope: %{level: :wake}}} = socket), do: socket
+
+  defp browse_if_needed(%{assigns: %{scope: %{ministry: slug}, depth: depth}} = socket) do
+    if Map.has_key?(depth, slug) do
+      socket
+    else
+      socket
+      |> assign(:depth, Map.put(depth, slug, :loading))
+      |> start_async({:browse, slug}, fn -> Remote.browse(slug) end)
     end
   end
 
@@ -142,6 +164,20 @@ defmodule GiTF.Dashboard.ConsoleLive do
   def handle_async(:open, {:exit, reason}, socket) do
     {:noreply,
      socket |> assign(opening: nil) |> put_flash(:error, "Wake cancelled: #{describe(reason)}")}
+  end
+
+  def handle_async({:browse, slug}, {:ok, {:ok, contents}}, socket) do
+    {:noreply, assign(socket, :depth, Map.put(socket.assigns.depth, slug, contents))}
+  end
+
+  def handle_async({:browse, slug}, {:ok, {:error, reason}}, socket) do
+    {:noreply, assign(socket, :depth, Map.put(socket.assigns.depth, slug, {:error, reason}))}
+  end
+
+  # The task itself crashed. That is still an answer the tree can render, and a
+  # rail stuck on "asking the factory…" for ever is the worst of the options.
+  def handle_async({:browse, slug}, {:exit, reason}, socket) do
+    {:noreply, assign(socket, :depth, Map.put(socket.assigns.depth, slug, {:error, reason}))}
   end
 
   # ==========================================================================
@@ -203,6 +239,62 @@ defmodule GiTF.Dashboard.ConsoleLive do
   defp assign_object(socket), do: socket
 
   # ==========================================================================
+  # The factory's own objects
+  # ==========================================================================
+
+  @doc false
+  # A sector, mission or op out of what the ministry's factory last told us.
+  # Returns `:loading`, `{:error, reason}` or `:gone` rather than nil, because
+  # "we have not asked yet" and "it is not there" are different sentences and
+  # the page has to say which.
+  def deep_object(%Scope{level: level, ministry: slug, id: id}, depth)
+      when level in [:sector, :mission, :op] and is_binary(id) do
+    case Map.get(depth, slug) do
+      %{} = contents -> find_deep(contents, level, id)
+      :loading -> :loading
+      {:error, reason} -> {:error, reason}
+      _ -> :loading
+    end
+  end
+
+  def deep_object(_scope, _depth), do: nil
+
+  defp find_deep(contents, level, id) do
+    {key, id_key} =
+      case level do
+        :sector -> {:sectors, :id}
+        :mission -> {:missions, :id}
+        :op -> {:ops, :id}
+      end
+
+    case Enum.find(List.wrap(contents[key]), &(to_string(&1[id_key]) == id)) do
+      nil -> :gone
+      object -> object
+    end
+  end
+
+  defp deep_kind(:sector), do: "Sector"
+  defp deep_kind(:mission), do: "Mission"
+  defp deep_kind(:op), do: "Op"
+
+  defp deep_sub(%{goal: goal}, _scope) when is_binary(goal) and goal != "", do: goal
+  defp deep_sub(%{description: d}, _scope) when is_binary(d) and d != "", do: d
+  defp deep_sub(%{path: path}, _scope) when is_binary(path), do: path
+  defp deep_sub(:loading, scope), do: "asking #{scope.ministry}…"
+  defp deep_sub({:error, :asleep}, scope), do: "#{scope.ministry} is asleep"
+  defp deep_sub(:gone, _scope), do: "not on the factory"
+  defp deep_sub({:error, reason}, _scope), do: Format.reason(reason)
+  defp deep_sub(_object, scope), do: scope.id
+
+  # The crumb for a deep object, once we know what it is called.
+  defp deep_label(%{scope: scope, depth: depth}) do
+    case deep_object(scope, depth) do
+      %{} = object -> object[:name] || object[:title]
+      _ -> nil
+    end
+  end
+
+  # ==========================================================================
   # Render
   # ==========================================================================
 
@@ -210,8 +302,18 @@ defmodule GiTF.Dashboard.ConsoleLive do
   def render(assigns) do
     assigns =
       assigns
-      |> assign(:nodes, Tree.build(assigns.ministries, assigns.scope, tree_counts(assigns)))
-      |> assign(:crumbs, Scope.crumbs(assigns.scope, &ministry_name(assigns.ministries, &1)))
+      |> assign(
+        :nodes,
+        Tree.build(assigns.ministries, assigns.scope, tree_counts(assigns), assigns.depth)
+      )
+      |> assign(
+        :crumbs,
+        Scope.crumbs(
+          assigns.scope,
+          &ministry_name(assigns.ministries, &1),
+          deep_label(assigns)
+        )
+      )
 
     ~H"""
     <div class={["console", @scope.level == :activity && "facets-on"]}>
@@ -385,6 +487,32 @@ defmodule GiTF.Dashboard.ConsoleLive do
     """
   end
 
+  # The three factory-side objects share a head, because the interesting fact
+  # about all three is the same one: whether we can see it at all. A name that
+  # falls back to the id keeps a cold link from rendering a heading-shaped gap.
+  defp head(%{scope: %{level: level}} = assigns) when level in [:sector, :mission, :op] do
+    assigns =
+      assigns
+      |> assign(:object, deep_object(assigns.scope, assigns.depth))
+      |> then(&assign(&1, :kind, deep_kind(&1.scope.level)))
+
+    ~H"""
+    <.object_head
+      kind={"#{@ministry[:name] || @scope.ministry} · #{@kind}"}
+      name={(is_map(@object) && (@object[:name] || @object[:title])) || @scope.id}
+      sub={deep_sub(@object, @scope)}
+    >
+      <:badges>
+        <.pill :if={is_map(@object)} tone={Format.work_tone(@object[:status])}>
+          {@object[:status] || "—"}
+        </.pill>
+        <.pill :if={@object == :loading} tone={:recon}>reading…</.pill>
+        <.pill :if={@object == {:error, :asleep}} tone={:muted}>factory asleep</.pill>
+      </:badges>
+    </.object_head>
+    """
+  end
+
   # Every action the old console had, labelled once. Which appear depends on
   # the state — the cold-start path is the one an operator needs most and the
   # easiest to lose, so Wake and Wake & open are first when a box is asleep.
@@ -453,6 +581,39 @@ defmodule GiTF.Dashboard.ConsoleLive do
 
   defp page(%{ministry: nil} = assigns) do
     ~H"""
+    """
+  end
+
+  defp page(%{scope: %{level: :sector}} = assigns) do
+    ~H"""
+    <Pages.sector
+      scope={@scope}
+      ministry={@ministry}
+      object={deep_object(@scope, @depth)}
+      depth={Map.get(@depth, @scope.ministry)}
+    />
+    """
+  end
+
+  defp page(%{scope: %{level: :mission}} = assigns) do
+    ~H"""
+    <Pages.mission
+      scope={@scope}
+      ministry={@ministry}
+      object={deep_object(@scope, @depth)}
+      depth={Map.get(@depth, @scope.ministry)}
+    />
+    """
+  end
+
+  defp page(%{scope: %{level: :op}} = assigns) do
+    ~H"""
+    <Pages.op
+      scope={@scope}
+      ministry={@ministry}
+      object={deep_object(@scope, @depth)}
+      depth={Map.get(@depth, @scope.ministry)}
+    />
     """
   end
 

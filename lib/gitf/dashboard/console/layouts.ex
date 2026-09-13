@@ -84,6 +84,7 @@ defmodule GiTF.Dashboard.Console.Layouts do
           .pill.warn{background:var(--warn-bg);color:var(--warn)}
           .pill.crit{background:var(--crit-bg);color:var(--crit)}
           .pill.recon{background:var(--recon-bg);color:var(--recon)}
+          .pill.muted{background:var(--stage);color:var(--ink-3);border-color:var(--line)}
           .pill.acc{background:var(--accent-soft);color:var(--accent)}
           .lbl{font-size:var(--t-xs);font-weight:600;letter-spacing:.09em;
             text-transform:uppercase;color:var(--ink-3)}

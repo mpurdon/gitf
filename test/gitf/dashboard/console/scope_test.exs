@@ -43,15 +43,40 @@ defmodule GiTF.Dashboard.Console.ScopeTest do
              "/console/m/ha?t=raw"
   end
 
-  test "a stale or malformed path lands on the Cabinet rather than raising" do
-    for params <- [
-          %{"path" => ["m"]},
-          %{"path" => ["nonsense"]},
-          %{"path" => ["m", "ha", "sectors", "cora"]},
-          %{}
-        ] do
+  test "a stale or malformed path lands somewhere useful rather than raising" do
+    for params <- [%{"path" => ["m"]}, %{"path" => ["nonsense"]}, %{}] do
       assert %Scope{level: :cabinet} = Scope.from_params(params)
     end
+
+    # A link into a ministry whose shape changed still knows which ministry it
+    # meant, and that is a better landing than the root.
+    assert %Scope{level: :ministry, ministry: "ha"} =
+             Scope.from_params(%{"path" => ["m", "ha", "sectors", "cora"]})
+
+    assert %Scope{level: :ministry, ministry: "ha"} =
+             Scope.from_params(%{"path" => ["m", "ha", "bogus"]})
+  end
+
+  test "the deep levels round-trip, so a mission is a link" do
+    for {level, seg} <- [sector: "s", mission: "msn", op: "op"] do
+      scope = %Scope{level: level, ministry: "ha", id: "msn-7683ac"}
+
+      assert Scope.to_path(scope) == "/console/m/ha/#{seg}/msn-7683ac"
+      assert Scope.from_params(%{"path" => ["m", "ha", seg, "msn-7683ac"]}) == scope
+      assert Scope.deep?(scope)
+    end
+
+    refute Scope.deep?(%Scope{level: :ruleset, ministry: "ha"})
+  end
+
+  test "a deep crumb trail names the object, falling back to its id" do
+    scope = %Scope{level: :mission, ministry: "ha", id: "msn-7683ac"}
+
+    assert [_cabinet, _ministry, {"msn-7683ac", path}] = Scope.crumbs(scope)
+    assert path == "/console/m/ha/msn/msn-7683ac"
+
+    assert [_, _, {"six-level-priority", _}] =
+             Scope.crumbs(scope, & &1, "six-level-priority")
   end
 
   test "an unknown ministry child falls back to the ministry, keeping the slug" do

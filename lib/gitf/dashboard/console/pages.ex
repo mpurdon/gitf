@@ -871,6 +871,302 @@ defmodule GiTF.Dashboard.Console.Pages do
     """
   end
 
+  # ==========================================================================
+  # The factory's own objects — a sector, a mission, an op
+  # ==========================================================================
+  #
+  # These three live on the ministry's box, so every one of them has to render
+  # before the answer arrives, and has to render when the answer is "the box is
+  # asleep". `object` carries either the thing or the reason there isn't one,
+  # and `unavailable/1` is the single place that turns a reason into a sentence
+  # — so a mission link sent to a phone at midnight lands on an explanation
+  # instead of a blank page.
+
+  attr(:scope, :map, required: true)
+  attr(:ministry, :map, required: true)
+  attr(:object, :any, required: true)
+  attr(:depth, :any, default: nil)
+
+  def sector(%{object: object} = assigns) when not is_map(object),
+    do: unavailable(assigns)
+
+  def sector(%{scope: %{tab: "raw"}} = assigns) do
+    ~H"""
+    <.raw term={@object} note="The sector record as the factory serves it." />
+    """
+  end
+
+  def sector(assigns) do
+    assigns = assign(assigns, :missions, missions_of(assigns))
+
+    ~H"""
+    <.section title="Repository">
+      <.rows>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Path" id="where the factory checks it out" />
+          <span class="dim">{@object[:path] || "—"}</span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Remote" id="what it pushes to" />
+          <span class="dim">{@object[:repo_url] || "—"}</span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="GitHub" id="owner / repo" />
+          <span class="dim">
+            {if @object[:github_owner],
+              do: "#{@object[:github_owner]}/#{@object[:github_repo]}",
+              else: "—"}
+          </span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.section title="How work lands">
+      <.rows>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Sync strategy" id="how a finished mission reaches the trunk" />
+          <span class="dim">{@object[:sync_strategy] || "default"}</span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Validation" id="what must pass before it does" />
+          <span class="dim">{@object[:validation_command] || "none set"}</span>
+        </.row>
+        <.row :if={@object[:validation_timeout_ms]} cols="170px minmax(0,1fr)">
+          <.identity name="Validation timeout" id="how long that is given" />
+          <span class="dim">{Format.dur(div(@object[:validation_timeout_ms], 1000))}</span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.section title="Missions">
+      <:hint>{length(@missions)} on this sector</:hint>
+      <.rows empty={@missions == [] && "No missions on this sector."}>
+        <.row
+          :for={m <- @missions}
+          cols="minmax(0,1fr) 132px"
+          to={Scope.path(@scope, :mission, id: to_string(m[:id]))}
+        >
+          <.identity name={m[:name] || m[:id]} id={m[:goal]} />
+          <span style="justify-self:end"><.pill tone={Format.work_tone(m[:status])}>{m[:status]}</.pill></span>
+        </.row>
+      </.rows>
+    </.section>
+    """
+  end
+
+  attr(:scope, :map, required: true)
+  attr(:ministry, :map, required: true)
+  attr(:object, :any, required: true)
+  attr(:depth, :any, default: nil)
+
+  def mission(%{object: object} = assigns) when not is_map(object),
+    do: unavailable(assigns)
+
+  def mission(%{scope: %{tab: "raw"}} = assigns) do
+    ~H"""
+    <.raw term={@object} note="The mission as the factory serves it." />
+    """
+  end
+
+  def mission(%{scope: %{tab: "evidence"}} = assigns) do
+    assigns = assign(assigns, :ops, ops_of(assigns))
+
+    ~H"""
+    <.section title="Ops">
+      <:hint>{length(@ops)} in this mission · newest last</:hint>
+      <.rows empty={@ops == [] && "No ops yet — the mission has not been planned."}>
+        <.row
+          :for={o <- @ops}
+          cols="minmax(0,1fr) 128px 110px"
+          to={Scope.path(@scope, :op, id: to_string(o[:id]))}
+        >
+          <.identity name={o[:title] || o[:id]} id={o[:description]} />
+          <span class="dim">{o[:ghost_id] || "no ghost"}</span>
+          <span style="justify-self:end"><.pill tone={Format.work_tone(o[:status])}>{o[:status]}</.pill></span>
+        </.row>
+      </.rows>
+    </.section>
+    """
+  end
+
+  def mission(assigns) do
+    assigns = assign(assigns, :ops, ops_of(assigns))
+
+    ~H"""
+    <.section title="Goal">
+      <p style="margin:0;font-size:var(--t-md);line-height:1.65">
+        {@object[:goal] || "No goal recorded."}
+      </p>
+    </.section>
+
+    <.section title="Where it is">
+      <.rows>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Status" id="what the Major last decided" />
+          <span><.pill tone={Format.work_tone(@object[:status])}>{@object[:status]}</.pill></span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Phase" id="where in the pipeline" />
+          <span class="dim">{@object[:current_phase] || "—"}</span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Priority" id="effective, after inheritance" />
+          <span class="dim">
+            {@object[:effective_priority] || @object[:priority]}
+            <span :if={@object[:priority_source]} class="note">
+              via {@object[:priority_source]}
+            </span>
+          </span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Started" id="when it was created" />
+          <span class="dim">{@object[:inserted_at] || "—"}</span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.section title="Ops">
+      <:hint>
+        <.link patch={Scope.with_tab(@scope, "evidence") |> Scope.to_path()} class="chip">
+          all {length(@ops)} ›
+        </.link>
+      </:hint>
+      <.rows empty={@ops == [] && "No ops yet — the mission has not been planned."}>
+        <.row
+          :for={o <- Enum.take(@ops, 6)}
+          cols="minmax(0,1fr) 110px"
+          to={Scope.path(@scope, :op, id: to_string(o[:id]))}
+        >
+          <.identity name={o[:title] || o[:id]} id={o[:id]} />
+          <span style="justify-self:end"><.pill tone={Format.work_tone(o[:status])}>{o[:status]}</.pill></span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.relations>
+      <:rel verb="works on" to={sector_path(@scope, @object)}>
+        {@object[:sector_id] || "no sector"}
+      </:rel>
+      <:rel verb="runs on" to={Scope.path(@scope, :ministry)}>
+        {@ministry[:name] || @scope.ministry}
+      </:rel>
+    </.relations>
+    """
+  end
+
+  attr(:scope, :map, required: true)
+  attr(:ministry, :map, required: true)
+  attr(:object, :any, required: true)
+  attr(:depth, :any, default: nil)
+
+  def op(%{object: object} = assigns) when not is_map(object),
+    do: unavailable(assigns)
+
+  def op(%{scope: %{tab: "raw"}} = assigns) do
+    ~H"""
+    <.raw term={@object} note="The op as the factory serves it." />
+    """
+  end
+
+  def op(assigns) do
+    ~H"""
+    <.section :if={@object[:description]} title="What it is for">
+      <p style="margin:0;font-size:var(--t-md);line-height:1.65">{@object[:description]}</p>
+    </.section>
+
+    <.section title="State">
+      <.rows>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Status" id="where this unit of work stands" />
+          <span><.pill tone={Format.work_tone(@object[:status])}>{@object[:status]}</.pill></span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Ghost" id="who is doing it, if anyone" />
+          <span class="dim">{@object[:ghost_id] || "unassigned"}</span>
+        </.row>
+        <.row cols="170px minmax(0,1fr)">
+          <.identity name="Created" id="when it was cut" />
+          <span class="dim">{@object[:inserted_at] || "—"}</span>
+        </.row>
+      </.rows>
+    </.section>
+
+    <.relations>
+      <:rel
+        verb="part of"
+        to={@object[:mission_id] && Scope.path(@scope, :mission, id: to_string(@object[:mission_id]))}
+      >
+        {@object[:mission_id] || "no mission"}
+      </:rel>
+      <:rel verb="runs on" to={Scope.path(@scope, :ministry)}>
+        {@ministry[:name] || @scope.ministry}
+      </:rel>
+    </.relations>
+    """
+  end
+
+  # One place turns "we don't have it" into a sentence, so a sector, a mission
+  # and an op all explain themselves the same way.
+  defp unavailable(%{object: :loading} = assigns) do
+    ~H"""
+    <.banner tone={:acc}>Asking {@scope.ministry} what it has…</.banner>
+    """
+  end
+
+  defp unavailable(%{object: {:error, :asleep}} = assigns) do
+    ~H"""
+    <.banner tone={:acc}>
+      <strong>{@scope.ministry} is asleep.</strong>
+      This page is a link to something on its factory, and reading it means starting
+      the box — about a minute, and it bills by the hour.
+    </.banner>
+    <div style="margin-top:var(--s4)">
+      <.link patch={Scope.path(@scope, :wake, ministry: @scope.ministry)} class="btn pri">
+        Wake it and open this
+      </.link>
+    </div>
+    """
+  end
+
+  defp unavailable(%{object: :gone} = assigns) do
+    ~H"""
+    <.banner tone={:warn}>
+      {@scope.ministry} is awake and has no {kind_word(@scope.level)} called
+      <code>{@scope.id}</code>. It may have been closed, or this link may predate a
+      rebuild of the sector.
+    </.banner>
+    """
+  end
+
+  defp unavailable(assigns) do
+    ~H"""
+    <.banner tone={:crit}>
+      Could not read {@scope.ministry}: {Format.reason(@object)}
+    </.banner>
+    """
+  end
+
+  defp kind_word(:sector), do: "sector"
+  defp kind_word(:mission), do: "mission"
+  defp kind_word(:op), do: "op"
+  defp kind_word(_), do: "object"
+
+  defp missions_of(%{depth: %{missions: missions}, scope: %{id: id}}),
+    do: Enum.filter(missions, &(to_string(&1[:sector_id]) == id))
+
+  defp missions_of(_assigns), do: []
+
+  defp ops_of(%{object: %{ops: ops}}) when is_list(ops) and ops != [], do: ops
+
+  defp ops_of(%{depth: %{ops: ops}, scope: %{id: id}}),
+    do: Enum.filter(ops, &(to_string(&1[:mission_id]) == id))
+
+  defp ops_of(_assigns), do: []
+
+  defp sector_path(_scope, %{sector_id: nil}), do: nil
+  defp sector_path(scope, %{sector_id: id}), do: Scope.path(scope, :sector, id: to_string(id))
+  defp sector_path(_scope, _object), do: nil
+
   attr(:events, :list, required: true)
   attr(:filters, :map, required: true)
   attr(:investigations, :list, default: [])

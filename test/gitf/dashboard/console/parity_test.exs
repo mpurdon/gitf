@@ -144,6 +144,46 @@ defmodule GiTF.Dashboard.Console.ParityTest do
            "spend_line must not reach for the lifetime total again"
   end
 
+  test "the render path does no I/O, including for the deep tree" do
+    src = File.read!(@new)
+
+    [_, render] = Regex.run(~r/def render\(assigns\) do(.*?)\n  end\n/s, src)
+
+    for call <- ["Remote.", "Registry.list", "Fleet.", "Req.", "Archive."] do
+      refute render =~ call,
+             "#{call} in render: a rail that fetches while it draws is a rail that hangs"
+    end
+
+    assert src =~ "start_async({:browse",
+           "the factory is asked asynchronously, or the first paint waits on a box"
+
+    assert src =~ "handle_async({:browse", "and the answer has somewhere to land"
+  end
+
+  test "expanding a ministry never starts its box" do
+    src = File.read!(@new)
+
+    browse =
+      src
+      |> String.split("defp browse_if_needed")
+      |> Enum.drop(1)
+      |> Enum.map_join("\n", &(&1 |> String.split("\n  defp ") |> hd()))
+
+    assert browse =~ "start_async", "the scan found the wrong thing"
+
+    # The word appears — one clause exists precisely to skip the wake route.
+    # What must not appear is anything that starts a box.
+    for verb <- ["Fleet.wake", "wake_and_open", "start_open", "wake: true"] do
+      refute browse =~ verb,
+             "#{verb} on expand: opening a row in a tree must not spend a minute and a bill"
+    end
+
+    # And the fetch itself reads only; `Remote` has no verb that changes anything.
+    remote = File.read!("lib/gitf/cabinet/remote.ex")
+    refute remote =~ "Req.post"
+    refute remote =~ "Fleet.wake"
+  end
+
   test "the Console's document is not nested inside the Cabinet's" do
     # The Console brings its own root layout. Declared as the LiveView's inner
     # layout while the pipeline still forced the Cabinet's root, the page
