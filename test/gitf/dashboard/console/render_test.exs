@@ -49,6 +49,32 @@ defmodule GiTF.Dashboard.Console.RenderTest do
 
   @scope %Scope{level: :ministry, ministry: "home-affairs"}
 
+  describe "cabinet" do
+    test "an act is described the same way here as in the activity log" do
+      act = %{
+        action: "ruleset.discard",
+        actor: "matthew@purdonmoi.com",
+        target: "home-affairs",
+        result: "ok",
+        at: DateTime.utc_now()
+      }
+
+      cabinet =
+        render(:cabinet, %{
+          scope: %Scope{level: :cabinet},
+          ministries: [],
+          activity: [act],
+          inbox: [],
+          cabinet: %{host: "h", release: "v", ingress: "i"}
+        })
+
+      assert cabinet =~ "discarded a ruleset draft for"
+
+      refute cabinet =~ "ruleset.discard",
+             "the raw action name is a field name, not a sentence"
+    end
+  end
+
   describe "ministry" do
     test "configuration is presented as configuration, not as more content" do
       html = render(:ministry, %{scope: @scope, ministry: @running, inbox: []})

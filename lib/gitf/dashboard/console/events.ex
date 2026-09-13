@@ -25,7 +25,10 @@ defmodule GiTF.Dashboard.Console.Events do
 
   alias GiTF.Dashboard.Console.Scope
 
-  @kinds %{
+  # A list, not a map: this is the order the kinds are offered in, and it runs
+  # from what an operator acts on to what they merely audit. A map would have
+  # ordered them however the atoms happened to sort.
+  @kinds [
     activation: "Activation",
     wake: "Wake",
     sleep: "Sleep",
@@ -33,7 +36,7 @@ defmodule GiTF.Dashboard.Console.Events do
     policy: "Policy change",
     registry: "Registry change",
     other: "Other"
-  }
+  ]
 
   @windows [
     {"24h", "Last 24 hours"},
@@ -51,7 +54,7 @@ defmodule GiTF.Dashboard.Console.Events do
   it resolves by string rather than converting, because `to_existing_atom` on
   an unrecognised param crashes the view.
   """
-  def kind_label(kind) when is_atom(kind), do: Map.get(@kinds, kind, "Other")
+  def kind_label(kind) when is_atom(kind), do: Keyword.get(@kinds, kind, "Other")
 
   def kind_label(kind) when is_binary(kind) do
     Enum.find_value(@kinds, "Other", fn {k, label} -> to_string(k) == kind && label end)

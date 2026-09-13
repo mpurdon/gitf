@@ -86,12 +86,19 @@ defmodule GiTF.Dashboard.Console.Pages do
 
     <.section title="Recent activity">
       <:hint><.link patch={Scope.path(@scope, :activity)} class="chip">see all ›</.link></:hint>
+      <%!-- The same stream the Activity view reads, so an act is described the
+            same way wherever it appears — this list said "ruleset.discard"
+            where Activity said "discarded a ruleset draft for". --%>
       <.rows empty={@activity == [] && "Nothing yet."}>
-        <.row :for={a <- Enum.take(@activity, 5)} cols="66px 128px minmax(0,1fr) auto">
-          <span class="dim">{Format.hhmm(a[:at])}</span>
-          <span class="dim">{a[:actor]}</span>
-          <span class="nm">{a[:action]} <span style="color:var(--accent)">{a[:target]}</span></span>
-          <span class="dim">{a[:result]}</span>
+        <.row
+          :for={e <- Enum.take(Events.build([], @activity, @scope), 5)}
+          cols="66px 150px minmax(0,1fr) auto"
+          to={e.to}
+        >
+          <span class="dim">{Format.hhmm(e.at)}</span>
+          <span class="dim">{e.actor}</span>
+          <span class="nm">{e.what} <span style="color:var(--accent)">{e.target}</span></span>
+          <span style="justify-self:end"><.pill tone={e.tone}>{e.result}</.pill></span>
         </.row>
       </.rows>
     </.section>
