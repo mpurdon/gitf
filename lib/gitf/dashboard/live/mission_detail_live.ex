@@ -5,6 +5,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   use GiTF.Dashboard.Toastable
 
   import GiTF.Dashboard.Helpers
+  import GiTF.Dashboard.Surface.Components
+  import GiTF.Dashboard.Surface.Page
   import GiTF.Dashboard.InquiryCard
 
   @heartbeat_interval :timer.seconds(15)
@@ -949,6 +951,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
+  defp budget_tone(pct) when pct >= 90, do: :crit
+  defp budget_tone(pct) when pct >= 70, do: :warn
+  defp budget_tone(_), do: :ok
+
   @impl true
   def render(assigns) do
     assigns =
@@ -959,59 +965,105 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
 
-      <%!-- Header (full width) --%>
-      <.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {Map.get(@mission, :name, "Mission"), nil}]} />
-      <div style="margin-bottom:1.25rem">
-          <h1 class="page-title" style="margin-bottom:0.25rem">
-            {Map.get(@mission, :name, "Mission")}
-          </h1>
-          <div class={"goal-text #{if @show_full_goal, do: "goal-text-full"}"}>
+      <%!-- The head: what it is, where it stands, what you can do to it. The
+            numbers were in a sidebar panel six scroll-lines below the fold, and
+            "how is this mission going" is the question the page exists to
+            answer — so they are the first thing on it. --%>
+      <.object
+        kind="Mission"
+        name={Map.get(@mission, :name, "Mission")}
+        crumbs={[
+          {"Missions", "/dashboard/missions"},
+          {Map.get(@mission, :name, "Mission"), "/dashboard/missions/#{@mission.id}"}
+        ]}
+      >
+        <:badges>
+          <.pill tone={tone(Map.get(@mission, :status))}>
+            {Map.get(@mission, :status, "unknown")}
+          </.pill>
+          <.pill tone={phase_tone(Map.get(@mission, :current_phase))}>
+            {Map.get(@mission, :current_phase, "pending")}
+          </.pill>
+          <.pill
+            :if={Map.get(@mission, :pipeline_mode) not in [nil, "", "pending"]}
+            tone={if Map.get(@mission, :pipeline_mode) == "fast", do: :warn, else: :recon}
+          >{@mission.pipeline_mode} pipeline</.pill>
+          <.pill :if={Map.get(@mission, :review_plan)} tone={:recon}>review</.pill>
+          <span class="mono" style="font-size:var(--t-sm);color:var(--ink-3)">
+            {short_id(@mission.id)}
+          </span>
+          <span :if={@duration} class="note">· {@duration}</span>
+        </:badges>
+
+        <%!-- These five count *implementation* ops; phase ops are counted
+              separately and the two sum to Ops. Shown without that last pair,
+              a mission of three triage ops reads "Done 0 … Total 3", which
+              looks like a contradiction and is really a scope. --%>
+        <:metrics>
+          <.metric label="Done" value={@counts.done} tone={if @counts.done > 0, do: :ok} />
+          <.metric
+            label="Running"
+            value={@counts.running}
+            tone={if @counts.running > 0, do: :recon}
+          />
+          <.metric
+            label="Blocked"
+            value={@counts.blocked}
+            tone={if @counts.blocked > 0, do: :warn}
+          />
+          <.metric
+            label="Failed"
+            value={@counts.failed}
+            tone={if @counts.failed > 0, do: :crit}
+          />
+          <.metric label="Pending" value={@counts.pending} />
+          <.metric label="Phase" value={@phase_op_count} />
+          <.metric label="Ops" value={@total_ops} />
+          <.metric
+            label="Spent"
+            value={"#{format_cost(@budget_info.spent)} / #{format_cost(@budget_info.budget)}"}
+            tone={budget_tone(@budget_info.pct)}
+          />
+        </:metrics>
+
+        <:actions>
+          <a
+            :if={@pr_url}
+            href={@pr_url}
+            target="_blank"
+            rel="noopener"
+            class="btn sm"
+            title="Open the pull request this mission published"
+          >PR {pr_label(@pr_url)} ↗</a>
+          <.link
+            :if={is_binary(Map.get(@mission, :workflow_id)) and Map.get(@mission, :workflow_id) != ""}
+            navigate={"/dashboard/workflows/" <> @mission.workflow_id}
+            class="btn sm"
+          >workflow: {@mission.workflow_id}</.link>
+          <span
+            :if={is_map(get_in(@mission, [:artifacts, "workflow_inference"]))}
+            class="chip"
+            title={get_in(@mission, [:artifacts, "workflow_inference"])["rationale"] || ""}
+          >
+            auto-classified · {Float.round(
+              (get_in(@mission, [:artifacts, "workflow_inference"])["confidence"] || 0) * 1.0,
+              2
+            )}
+          </span>
+        </:actions>
+
+        <.section title="Goal">
+          <p class={["goal-text", @show_full_goal && "goal-text-full"]} style="margin:0">
             {Map.get(@mission, :goal, "")}
-          </div>
-          <%= if String.length(Map.get(@mission, :goal, "")) > 120 do %>
-            <button phx-click="toggle_goal" class="goal-toggle">
-              {if @show_full_goal, do: "Show less", else: "Show more"}
-            </button>
-          <% end %>
-          <div style="margin-top:0.5rem; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
-            <span class={"badge #{status_badge(Map.get(@mission, :status, "unknown"))}"}>
-              {Map.get(@mission, :status, "unknown")}
-            </span>
-            <span class={"badge #{phase_badge(Map.get(@mission, :current_phase, "pending"))}"}>
-              {Map.get(@mission, :current_phase, "pending")}
-            </span>
-            <span class={"badge #{if Map.get(@mission, :pipeline_mode) == "fast", do: "badge-yellow", else: "badge-purple"}"} style="font-size:0.65rem">
-              {Map.get(@mission, :pipeline_mode, "pending") |> to_string() |> String.upcase()}
-            </span>
-            <%= if Map.get(@mission, :review_plan) do %>
-              <span class="badge badge-purple" style="font-size:0.55rem">REVIEW</span>
-            <% end %>
-            <span style="font-family:monospace; font-size:0.75rem; color:var(--ink-3)">
-              {short_id(@mission.id)}
-            </span>
-            <%= if @duration do %>
-              <span style="font-size:0.75rem; color:var(--ink-3)">&middot; {@duration}</span>
-            <% end %>
-            <% workflow_id = Map.get(@mission, :workflow_id) %>
-            <%= if is_binary(workflow_id) and workflow_id != "" do %>
-              <.link navigate={"/dashboard/workflows/" <> workflow_id} style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:var(--accent-soft); color:var(--accent); text-decoration:none">
-                workflow: {workflow_id}
-              </.link>
-            <% end %>
-            <% pr = @pr_url %>
-            <%= if pr do %>
-              <a href={pr} target="_blank" rel="noopener" style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:var(--ok)33; color:var(--ok); text-decoration:none; font-weight:600" title="Open the pull request this mission published">
-                PR {pr_label(pr)} &#8599;
-              </a>
-            <% end %>
-            <% inf = get_in(@mission, [:artifacts, "workflow_inference"]) %>
-            <%= if is_map(inf) do %>
-              <span style="font-size:0.7rem; padding:0.1rem 0.5rem; border-radius:9999px; background:var(--line-soft); color:var(--ink-3)" title={inf["rationale"] || ""}>
-                auto-classified · {Float.round((inf["confidence"] || 0) * 1.0, 2)}
-              </span>
-            <% end %>
-          </div>
-        </div>
+          </p>
+          <button
+            :if={String.length(Map.get(@mission, :goal, "")) > 120}
+            phx-click="toggle_goal"
+            class="lnk"
+            style="margin-top:6px"
+          >{if @show_full_goal, do: "Show less", else: "Show more"}</button>
+        </.section>
+      </.object>
 
       <%!-- Phase Stepper (full width) --%>
       <div class="panel">
@@ -1350,33 +1402,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
       <%!-- ═══ SIDEBAR ═══ --%>
       <div class="mission-sidebar">
-        <%!-- Stats --%>
-        <div class="panel" style="padding:0.85rem 1rem">
-          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="done">
-            <span class="sidebar-stat-label">Done</span>
-            <span class="sidebar-stat-value green">{@counts.done}</span>
-          </div>
-          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="running">
-            <span class="sidebar-stat-label">Running</span>
-            <span class={"sidebar-stat-value #{if @counts.running > 0, do: "blue", else: ""}"}>{@counts.running}</span>
-          </div>
-          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="blocked">
-            <span class="sidebar-stat-label">Blocked</span>
-            <span class={"sidebar-stat-value #{if @counts.blocked > 0, do: "yellow", else: ""}"}>{@counts.blocked}</span>
-          </div>
-          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="failed">
-            <span class="sidebar-stat-label">Failed</span>
-            <span class={"sidebar-stat-value #{if @counts.failed > 0, do: "red", else: ""}"}>{@counts.failed}</span>
-          </div>
-          <div class="sidebar-stat-row" style="cursor:pointer" phx-click="filter_ops" phx-value-filter="pending">
-            <span class="sidebar-stat-label">Pending</span>
-            <span class="sidebar-stat-value">{@counts.pending}</span>
-          </div>
-          <div class="sidebar-stat-row" style="border-top:1px solid var(--line); margin-top:0.25rem; padding-top:0.5rem; cursor:pointer" phx-click="filter_ops" phx-value-filter="all">
-            <span class="sidebar-stat-label" style="font-weight:600; color:var(--ink)">Total</span>
-            <span class="sidebar-stat-value">{@total_ops}</span>
-          </div>
-        </div>
+        <%!-- The op counts moved into the head, where the question "how is
+              this going" is actually asked. They were here, below the fold. --%>
 
         <%!-- Budget & Status --%>
         <div class="panel" style="padding:0.85rem 1rem">
