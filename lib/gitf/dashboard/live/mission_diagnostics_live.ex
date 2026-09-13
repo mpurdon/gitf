@@ -370,7 +370,7 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
                     <span class={"badge #{phase_badge(Map.get(t, :to_phase, "?"))}"}>
                       {Map.get(t, :to_phase, "?")}
                     </span>
-                    <span style="font-size:0.75rem; color:var(--line)">
+                    <span style="font-size:0.75rem; color:var(--line-strong)">
                       {format_timestamp(Map.get(t, :inserted_at))}
                     </span>
                   </div>

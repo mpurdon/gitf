@@ -339,7 +339,7 @@ defmodule GiTF.Dashboard.SettingsLive do
           </div>
         </form>
 
-        <div style="text-align:center; color:var(--line); font-size:0.75rem; margin-top:1rem">
+        <div style="text-align:center; color:var(--line-strong); font-size:0.75rem; margin-top:1rem">
           Config file: <code>.gitf/config.toml</code>
         </div>
       </div>

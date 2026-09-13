@@ -215,7 +215,7 @@ defmodule GiTF.Dashboard.PlanLive do
       </div>
       <div style="display:flex; gap:0.9rem; overflow-x:auto; align-items:stretch; padding-bottom:0.25rem">
         <%= for {{depth, items}, i} <- Enum.with_index(@lanes) do %>
-          <div :if={i > 0} style="align-self:center; color:var(--line); font-size:1.1rem">&rarr;</div>
+          <div :if={i > 0} style="align-self:center; color:var(--line-strong); font-size:1.1rem">&rarr;</div>
           <div style="flex:1; min-width:14rem; display:flex; flex-direction:column; gap:0.5rem">
             <div style="font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-3)">
               stage {depth + 1}
@@ -323,7 +323,7 @@ defmodule GiTF.Dashboard.PlanLive do
                     <div :for={c <- criteria} class="criteria-item">
                       <span :if={item[:verification_status] == "passed"} class="coverage-ok">✓</span>
                       <span :if={item[:verification_status] == "failed"} class="coverage-gap">✗</span>
-                      <span :if={item[:verification_status] not in ["passed", "failed"]} style="color:var(--line)">○</span>
+                      <span :if={item[:verification_status] not in ["passed", "failed"]} style="color:var(--line-strong)">○</span>
                       <span>{c}</span>
                     </div>
                   </div>
@@ -458,7 +458,7 @@ defmodule GiTF.Dashboard.PlanLive do
       "done" -> "var(--ok)"
       "failed" -> "var(--crit)"
       "blocked" -> "var(--warn)"
-      _ -> "var(--line)"
+      _ -> "var(--line-strong)"
     end
   end
 

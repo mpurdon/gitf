@@ -41,8 +41,8 @@ defmodule GiTF.Dashboard.Console.Layouts do
   gap:3px;padding:var(--s3) 0}
   .icons a{width:38px;height:36px;border-radius:5px;color:var(--rail-text);
   display:grid;place-items:center;font-size:15px}
-  .icons a:hover{background:rgba(255,255,255,.07);color:var(--rail-on)}
-  .icons a[aria-current="page"]{background:rgba(255,255,255,.11);color:var(--rail-on)}
+  .icons a:hover{background:var(--rail-hover);color:var(--rail-on)}
+  .icons a[aria-current="page"]{background:var(--rail-sel);color:var(--rail-on)}
   .icons .spacer{margin-top:auto}
   .icons .badge{position:relative}
   .icons .badge::after{content:attr(data-n);position:absolute;top:2px;right:1px;

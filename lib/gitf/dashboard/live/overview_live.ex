@@ -554,7 +554,7 @@ defmodule GiTF.Dashboard.OverviewLive do
               _ -> "degraded"
             end}
           </a>
-          <span style="font-size:0.7rem; color:var(--line)" title="Auto-refreshes every 5s">
+          <span style="font-size:0.7rem; color:var(--line-strong)" title="Auto-refreshes every 5s">
             &middot; updated {format_timestamp(@last_updated)}
           </span>
         </div>
@@ -812,7 +812,7 @@ defmodule GiTF.Dashboard.OverviewLive do
             <span style="color:var(--crit); font-weight:600">{@failed_today}</span>
             <span style="color:var(--ink-3)">failed</span>
           <% end %>
-          <span style="color:var(--line)">&middot;</span>
+          <span style="color:var(--line-strong)">&middot;</span>
           <span style="color:var(--ink-3)">{@ops_completed_today} ops</span>
         </div>
       </div>

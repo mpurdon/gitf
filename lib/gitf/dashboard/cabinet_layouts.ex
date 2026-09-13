@@ -33,7 +33,7 @@ defmodule GiTF.Dashboard.CabinetLayouts do
   .rail .logo{width:40px;height:40px;border-radius:10px;background:var(--accent);color:#fff;display:grid;place-items:center;margin-bottom:14px}
   .rail button{width:64px;padding:9px 0 7px;border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;letter-spacing:.02em;color:var(--rail-text)}
   .rail button:hover{color:var(--rail-on)}
-  .rail button.on{background:var(--rail-on);color:var(--rail-on)}
+  .rail button.on{background:var(--rail-sel);color:var(--rail-on)}
   .rail button .badge-anchor{position:relative}
   .rail button .count{position:absolute;top:-5px;right:-10px;background:var(--warn);color:#fff;font-family:var(--mono);font-size:9px;line-height:1;padding:2px 4px;border-radius:8px}
   .rail .spacer{flex:1}

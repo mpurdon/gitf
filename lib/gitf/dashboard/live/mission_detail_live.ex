@@ -895,7 +895,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     assigns = %{entries: entries, depth: depth}
 
     ~H"""
-    <div style={if @depth > 0, do: "border-left:2px solid var(--line, var(--line)); padding-left:0.7rem; margin:0.3rem 0"}>
+    <div style={if @depth > 0, do: "border-left:2px solid var(--line, var(--line-strong)); padding-left:0.7rem; margin:0.3rem 0"}>
       <div :for={{k, v} <- @entries} style="margin-bottom:0.45rem">
         <span style="font-size:0.68rem; letter-spacing:0.06em; text-transform:uppercase; opacity:0.6">{humanize_key(k)}</span>
         {render_term(v, @depth + 1)}
@@ -1399,7 +1399,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <%= if @budget_info.estimated_remaining > 0 do %>
             <div style="margin-top:0.4rem; font-size:0.7rem; color:var(--ink-3); border-top:1px solid var(--line-soft); padding-top:0.3rem">
               Est. {format_cost(@budget_info.estimated_remaining)} more
-              <span style="color:var(--line)">({@budget_info.pending_ops} ops @ {format_cost(if @budget_info.done_ops > 0, do: @budget_info.spent / @budget_info.done_ops, else: 0)}/op)</span>
+              <span style="color:var(--line-strong)">({@budget_info.pending_ops} ops @ {format_cost(if @budget_info.done_ops > 0, do: @budget_info.spent / @budget_info.done_ops, else: 0)}/op)</span>
             </div>
           <% end %>
           <div style="display:flex; gap:0.4rem; margin-top:0.5rem; align-items:center">

@@ -388,7 +388,7 @@ defmodule GiTF.Dashboard.ProvidersLive do
               <span style="color:var(--ink-3)">
                 {circuit_failure_label(circuit.failure_mode)}
               </span>
-              <span style="color:var(--line)">|</span>
+              <span style="color:var(--line-strong)">|</span>
               <span style="color:var(--ink-3)">
                 next probe {circuit_next_probe_label(circuit.next_probe_in)}
               </span>

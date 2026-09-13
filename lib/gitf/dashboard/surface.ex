@@ -21,8 +21,15 @@ defmodule GiTF.Dashboard.Surface do
     :root{
       /* surfaces */
       --ground:#12161C; --stage:#0D1116; --panel:#191E26; --panel-2:#1F252E;
-      --line:#272E39; --line-soft:#212832;
-      --rail:#0B0F14; --rail-text:#8892A2; --rail-on:#FFFFFF;
+      /* three border weights, because the Catwalk genuinely uses three: a soft
+     divider inside a panel, the standard edge, and a strong one that separates
+     regions. Collapsing strong into standard is a rename that loses a role. */
+  --line:#272E39; --line-soft:#212832; --line-strong:#3A4452;
+      /* the rail: its ground, its resting ink, the ink when selected, and the two
+     washes that mark hover and selection. `--rail-on` is ink — using it as a
+     background paints white on white, which is what a rename once did. */
+  --rail:#0B0F14; --rail-text:#8892A2; --rail-on:#FFFFFF;
+  --rail-hover:rgba(255,255,255,.07); --rail-sel:rgba(255,255,255,.11);
       /* ink */
       --ink:#E8EDF3; --ink-2:#AAB4C2; --ink-3:#78838F;
       /* one accent, kept away from the semantic set */

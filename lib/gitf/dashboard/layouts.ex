@@ -41,7 +41,7 @@ defmodule GiTF.Dashboard.Layouts do
   cursor: pointer; text-decoration: none;
   }
   .rail a.rail-item:hover, .rail button.rail-item:hover { color: var(--rail-on); text-decoration: none; }
-  .rail a.rail-item.active { background: var(--rail-on); color: var(--rail-on); }
+  .rail a.rail-item.active { background: var(--rail-sel); color: var(--rail-on); }
   .rail-ico { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
   .rail-badge-anchor { position: relative; }
   .rail-count {
@@ -52,7 +52,7 @@ defmodule GiTF.Dashboard.Layouts do
   .rail-version { font-size: 0.58rem; color: var(--rail-text); opacity: 0.7; padding: 6px 0; }
   .rail-stop { color: var(--crit); }
   .rail-stop-confirm { display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 0.6rem; color: var(--rail-on); padding: 4px 0; }
-  .rail-stop-confirm button { border: 1px solid var(--line); border-radius: 6px; background: none; color: inherit; font-size: 0.62rem; padding: 2px 8px; cursor: pointer; }
+  .rail-stop-confirm button { border: 1px solid var(--line-strong); border-radius: 6px; background: none; color: inherit; font-size: 0.62rem; padding: 2px 8px; cursor: pointer; }
   .rail-stop-confirm button.yes { border-color: var(--crit); color: var(--crit); }
   .subnav {
   display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
@@ -219,8 +219,8 @@ defmodule GiTF.Dashboard.Layouts do
   .btn-red:hover { background: var(--crit)55; }
   .btn-blue { background: var(--accent-soft); color: var(--accent); border-color: var(--accent)55; }
   .btn-blue:hover { background: var(--accent)55; }
-  .btn-grey { background: var(--line); color: var(--ink-3); border-color: var(--line); }
-  .btn-grey:hover { background: var(--line); }
+  .btn-grey { background: var(--line); color: var(--ink-3); border-color: var(--line-strong); }
+  .btn-grey:hover { background: var(--line-strong); }
   .btn-purple { background: var(--recon)33; color: var(--recon); border-color: var(--recon)55; }
   .btn-purple:hover { background: var(--recon)55; }
   .btn-orange { background: var(--warn)33; color: var(--warn); border-color: var(--warn)55; }
@@ -281,7 +281,7 @@ defmodule GiTF.Dashboard.Layouts do
   .step-done .step-label { color: var(--ok); }
   .step-active .step-circle { background: var(--accent)55; color: var(--accent); border: 2px solid var(--accent); }
   .step-active .step-label { color: var(--accent); font-weight: 600; }
-  .step-future .step-circle { background: var(--line); color: var(--ink-3); border: 2px solid var(--line); }
+  .step-future .step-circle { background: var(--line); color: var(--ink-3); border: 2px solid var(--line-strong); }
   .step-line {
   flex: 1;
   height: 2px;
@@ -464,7 +464,7 @@ defmodule GiTF.Dashboard.Layouts do
   padding: 0.35rem 0.5rem;
   }
   .retry-node-current { border-color: var(--crit); }
-  .retry-arrow { color: var(--line); font-size: 0.9rem; padding: 0 0.15rem; }
+  .retry-arrow { color: var(--line-strong); font-size: 0.9rem; padding: 0 0.15rem; }
 
   /* -- Card value red ------------------------------------------------- */
   .card-value.red { color: var(--crit); }
@@ -543,7 +543,7 @@ defmodule GiTF.Dashboard.Layouts do
   .plan-desc-bullet { padding: 0.2rem 0 0.2rem 1rem; position: relative; color: var(--ink-2); }
   .plan-desc-bullet::before { content: "•"; position: absolute; left: 0.25rem; color: var(--accent); font-weight: 700; }
   .plan-desc-sub-bullet { padding: 0.15rem 0 0.15rem 2.25rem; position: relative; color: var(--ink-3); font-size: 0.82rem; }
-  .plan-desc-sub-bullet::before { content: "›"; position: absolute; left: 1.5rem; color: var(--line); }
+  .plan-desc-sub-bullet::before { content: "›"; position: absolute; left: 1.5rem; color: var(--line-strong); }
   .plan-desc-para { margin: 0.4rem 0; color: var(--ink-2); }
   .plan-inline-code { background: var(--line-soft); padding: 0.1rem 0.35rem; border-radius: 3px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: var(--warn); }
 
@@ -557,7 +557,7 @@ defmodule GiTF.Dashboard.Layouts do
   .model-unknown { color: var(--ink-3); border-color: var(--line)55; background: linear-gradient(135deg, #16161622, #16161644); text-shadow: 0 0 6px var(--ink-3)44; }
   /* Provider config page */
   .provider-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 1rem; transition: border-color 0.15s; }
-  .provider-card:hover { border-color: var(--line); }
+  .provider-card:hover { border-color: var(--line-strong); }
   .provider-card-disabled { opacity: 0.5; }
   .provider-glyph { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.1rem; border: 1px solid; flex-shrink: 0; }
   .provider-status-connected { color: var(--ok); }
@@ -618,7 +618,7 @@ defmodule GiTF.Dashboard.Layouts do
   /* -- Op filter chips ------------------------------------------------ */
   .op-filters { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line-soft); }
   .op-filter-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 500; border: 1px solid var(--line); background: transparent; color: var(--ink-3); cursor: pointer; transition: all 0.15s; }
-  .op-filter-chip:hover { border-color: var(--line); color: var(--ink-2); }
+  .op-filter-chip:hover { border-color: var(--line-strong); color: var(--ink-2); }
   .op-filter-active { background: var(--accent-soft); border-color: var(--accent)55; color: var(--accent); }
   .op-filter-green.op-filter-active { background: var(--ok)22; border-color: var(--ok)55; color: var(--ok); }
   .op-filter-blue.op-filter-active { background: var(--accent)22; border-color: var(--accent)55; color: var(--accent); }
@@ -649,7 +649,7 @@ defmodule GiTF.Dashboard.Layouts do
   .triage-item-label { font-size: 0.75rem; font-family: monospace; color: var(--ink-3); }
   .triage-requirement { font-size: 0.85rem; color: var(--ink); margin-top: 0.15rem; }
   .triage-priority { font-size: 0.62rem; margin-left: 0.35rem; vertical-align: middle; }
-  .triage-item-kind { font-size: 0.7rem; color: var(--line); font-family: monospace; margin-left: 0.35rem; }
+  .triage-item-kind { font-size: 0.7rem; color: var(--line-strong); font-family: monospace; margin-left: 0.35rem; }
   .triage-criteria { margin: 0.35rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; color: var(--ink-3); }
   .triage-criteria li { margin-bottom: 0.2rem; }
   .triage-coverage { font-size: 0.72rem; color: var(--ink-3); font-family: monospace; white-space: nowrap; }
@@ -921,7 +921,7 @@ defmodule GiTF.Dashboard.Layouts do
           <button id="sleep-hold" class="btn btn-grey" style="font-size:0.8rem">Keep awake 1 h</button>
         </div>
         <div id="asleep-overlay" hidden style="position:fixed; inset:0; z-index:9500; background:rgba(13,18,24,0.88); display:flex; align-items:center; justify-content:center">
-          <div style="background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:1.5rem 1.75rem; max-width:420px; box-shadow:0 8px 24px rgba(0,0,0,0.5); text-align:center">
+          <div style="background:var(--panel); border:1px solid var(--line-strong); border-radius:8px; padding:1.5rem 1.75rem; max-width:420px; box-shadow:0 8px 24px rgba(0,0,0,0.5); text-align:center">
             <div style="font-size:1.05rem; font-weight:600; color:var(--ink)">The factory is asleep</div>
             <div id="asleep-text" style="font-size:0.85rem; color:var(--ink-3); margin-top:0.5rem">
               The box powered itself off while idle. Nothing is lost — missions and questions are on the data volume.

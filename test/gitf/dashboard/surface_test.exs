@@ -57,6 +57,25 @@ defmodule GiTF.Dashboard.SurfaceTest do
     end
   end
 
+  test "no token is used as both ink and ground" do
+    # `--rail-active` (a wash) was renamed onto `--rail-on` (#FFFFFF, ink), and
+    # the Catwalk's selected rail item became white on white — a rename that
+    # kept the name and lost the role. Ink tokens are for `color`, never for a
+    # background.
+    # Not every ink token: `--ink-2` legitimately paints a small solid shape (a
+    # toggle knob). These four are ink that only ever sits *on* something —
+    # `--rail-on` and `--accent-ink` are defined by the ground they contrast
+    # with, so painting a ground with one is white on white by construction.
+    ink = ~w(--ink --rail-on --rail-text --accent-ink)
+
+    for {name, fun} <- @surfaces, token <- ink do
+      sheet = page(fun)
+
+      refute sheet =~ ~r/background(?:-color)?\s*:\s*var\(#{token}\)/,
+             "#{name} paints a background with #{token}, which is ink"
+    end
+  end
+
   test "each surface ships one complete stylesheet" do
     for {name, fun} <- @surfaces do
       html = page(fun)

@@ -272,9 +272,9 @@ defmodule GiTF.Dashboard.GhostsLive do
   defp status_dot_color(GhostStatus.starting()), do: "var(--accent)"
   defp status_dot_color(GhostStatus.idle()), do: "var(--ink-3)"
   defp status_dot_color("paused"), do: "var(--warn)"
-  defp status_dot_color(GhostStatus.stopped()), do: "var(--line)"
+  defp status_dot_color(GhostStatus.stopped()), do: "var(--line-strong)"
   defp status_dot_color(GhostStatus.crashed()), do: "var(--crit)"
-  defp status_dot_color(_), do: "var(--line)"
+  defp status_dot_color(_), do: "var(--line-strong)"
 
   defp context_badge(percentage) when percentage >= 45, do: "badge-red"
   defp context_badge(percentage) when percentage >= 40, do: "badge-yellow"

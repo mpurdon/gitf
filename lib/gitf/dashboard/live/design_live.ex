@@ -405,7 +405,7 @@ defmodule GiTF.Dashboard.DesignLive do
               <td style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.82rem">{file}</td>
               <td :for={s <- @present_strategies} style="text-align:center">
                 <span :if={s in touched} class="coverage-ok">✓</span>
-                <span :if={s not in touched} style="color:var(--line)">—</span>
+                <span :if={s not in touched} style="color:var(--line-strong)">—</span>
               </td>
             </tr>
           </tbody>
