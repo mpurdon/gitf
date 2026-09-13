@@ -12,7 +12,7 @@ defmodule GiTF.Dashboard.Console.Pages do
 
   import GiTF.Dashboard.Console.Components
 
-  alias GiTF.Cabinet.JDM
+  alias GiTF.Cabinet.Ruleset
   alias GiTF.Dashboard.Console.{Format, Scope}
 
   # ==========================================================================
@@ -374,18 +374,30 @@ defmodule GiTF.Dashboard.Console.Pages do
   end
 
   # ==========================================================================
-  # Ruleset — the grid and its coverage. The editor lands in the next phase.
+  # Ruleset — the editor, its coverage, and what publishing would change
   # ==========================================================================
 
   attr(:scope, :map, required: true)
   attr(:ministry, :map, required: true)
   attr(:inbox, :list, default: [])
+  attr(:rules, :list, required: true)
+  attr(:published, :list, required: true)
+  attr(:draft?, :boolean, required: true)
+  attr(:version, :integer, required: true)
+  attr(:coverage, :map, required: true)
+  attr(:diff, :list, required: true)
+  attr(:replay, :map, required: true)
+  attr(:editing_rule, :integer, default: -1)
 
   def ruleset(%{scope: %{tab: "raw"}} = assigns) do
     ~H"""
     <.raw
-      term={assigns.ministry[:rules] || JDM.default_rules()}
-      note="The JDM document the grid reads. Simple mode and expert mode are two views of one thing."
+      term={Ruleset.to_jdm(@rules)}
+      note={
+        if @draft?,
+          do: "The document the grid edits — showing your unsaved draft. Simple mode and expert mode are two views of one thing.",
+          else: "The document the Gate is running. Simple mode and expert mode are two views of one thing."
+      }
     />
     """
   end
@@ -402,32 +414,318 @@ defmodule GiTF.Dashboard.Console.Pages do
           <span class="dim">{Format.hhmm(e[:inserted_at])}</span>
         </.row>
       </.rows>
+    </.section>
+
+    <.section title="Rule usage">
+      <:hint>published v{@version}</:hint>
+      <.rows>
+        <.row :for={{rule, i} <- Enum.with_index(@published)} cols="30px minmax(0,1fr) auto">
+          <span class="dim">{i + 1}</span>
+          <span class="sentence">{Phoenix.HTML.raw(Format.sentence(rule))}</span>
+          <.pill tone={if Format.rule_fired(@inbox, i + 1) > 0, do: :ok, else: :warn}>
+            {Format.fired_label(Format.rule_fired(@inbox, i + 1))}
+          </.pill>
+        </.row>
+      </.rows>
       <p class="note" style="margin-top:8px">
-        A rule is an object with a history, not a line of configuration.
+        A rule is an object with a history, not a line of configuration. A rule that has never
+        fired is not necessarily wrong — but it is worth knowing which ones carry the traffic.
       </p>
     </.section>
     """
   end
 
   def ruleset(assigns) do
-    assigns = assign(assigns, :rules, Format.rule_rows(assigns.ministry))
-
     ~H"""
+    <.banner :if={@draft?} tone={:acc}>
+      You are editing a <b>draft</b>. The Cabinet is still running published
+      <b>v{@version}</b> — nothing here takes effect until you publish it.
+    </.banner>
+
     <.section title="Rules">
-      <:hint>first hit wins · {length(@rules)} rules</:hint>
-      <.rows empty={@rules == [] && "This ministry's ruleset cannot be read as a decision table."}>
-        <.row :for={r <- @rules} cols="30px 1fr 1.2fr .8fr 92px">
-          <span class="dim">{r.n}</span>
-          <span class="nm">{r.class}</span>
-          <span class="dim">{r.mode}</span>
-          <span class="dim">{r.cap}</span>
-          <.pill tone={Format.action_tone(r.action)}>{r.action}</.pill>
-        </.row>
-      </.rows>
+      <:hint>first hit wins · drag ⠿ to reorder · {length(@rules)} rules</:hint>
+      <div class="rows" id="rules" phx-hook="RuleDrag">
+        <div
+          :for={{rule, i} <- Enum.with_index(@rules)}
+          class={["rule", i + 1 in @coverage.dead && "dead"]}
+          draggable="true"
+          data-idx={i}
+          id={"rule-#{i}"}
+        >
+          <div
+            class="grip"
+            tabindex="0"
+            role="button"
+            aria-label={"Reorder rule #{i + 1}. Use arrow keys."}
+            phx-keydown="reorder_key"
+            phx-value-index={i}
+          >⠿</div>
+          <div class="rn">{i + 1}</div>
+          <div>
+            <button style="width:100%" phx-click="edit_rule" phx-value-index={i}>
+              <span class="sentence">{Phoenix.HTML.raw(Format.sentence(rule))}</span>
+            </button>
+            <.dead_rule :if={i + 1 in @coverage.dead} rules={@rules} index={i} />
+            <.rule_editor :if={@editing_rule == i} rule={rule} index={i} />
+          </div>
+          <div class="ractions">
+            <button class="iconbtn" phx-click="edit_rule" phx-value-index={i} title="Edit">✎</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+        <button class="btn" phx-click="add_rule">+ Add a rule</button>
+        <span class="note">
+          A new rule lands above the last one, because the last one should be the catch-all.
+        </span>
+      </div>
+    </.section>
+
+    <.section title="Coverage">
+      <:hint>
+        {30 - length(@coverage.undecided)} of 30 decided ·
+        {@coverage.tally["wake"] || 0} wake · {@coverage.tally["queue"] || 0} queue ·
+        {@coverage.tally["drop"] || 0} drop
+      </:hint>
+      <.banner :if={@coverage.undecided != []} tone={:crit}>
+        <b>{length(@coverage.undecided)} combinations are undecided.</b>
+        The Cabinet queues what its rules cannot decide — it never wakes — but you should
+        say so on purpose rather than by omission.
+      </.banner>
+      <.matrix coverage={@coverage} diff={@diff} />
       <p class="note" style="margin-top:8px">
-        Wakes are gated by the monthly cap; anything the rules cannot decide queues — it never wakes.
+        Every class × mode × cap the Cabinet can ever be asked about, and which rule decides it.{" "}
+        <span :if={@diff != []} style="color:var(--accent)">Ringed cells differ from what is published.</span>
       </p>
     </.section>
+
+    <.draft_bar :if={@draft?} diff={@diff} coverage={@coverage} version={@version} replay={@replay} />
+    """
+  end
+
+  attr(:rules, :list, required: true)
+  attr(:index, :integer, required: true)
+
+  defp dead_rule(assigns) do
+    assigns = assign(assigns, :shadowers, Ruleset.shadowers(assigns.rules, assigns.index))
+
+    ~H"""
+    <div class="banner warn" style="margin:8px 0 0">
+      <.dot tone={:warn} />
+      <span>
+        This rule can never fire —
+        <%= if length(@shadowers) == 1 do %>
+          <b>rule {hd(@shadowers)}</b> already decides
+        <% else %>
+          rules <b>{Enum.join(@shadowers, ", ")}</b> already decide
+        <% end %>
+        every case it covers.
+      </span>
+      <button
+        class="btn sm"
+        style="margin-left:auto"
+        phx-click="move_rule"
+        phx-value-from={@index}
+        phx-value-to={hd(@shadowers) - 1}
+      >Move above rule {hd(@shadowers)}</button>
+    </div>
+    """
+  end
+
+  attr(:rule, :map, required: true)
+  attr(:index, :integer, required: true)
+
+  defp rule_editor(assigns) do
+    ~H"""
+    <div class="editor">
+      <.chips label="Class" index={@index} field="class" selected={@rule.class} options={Ruleset.classes()} />
+      <.chips label="Mode" index={@index} field="mode" selected={@rule.mode} options={Ruleset.modes()} />
+      <div class="fieldrow">
+        <span class="lbl">Cost cap</span>
+        <button
+          :for={cap <- [:any, :under, :over]}
+          class={["chip", @rule.cap == cap && "on"]}
+          phx-click="set_rule"
+          phx-value-index={@index}
+          phx-value-field="cap"
+          phx-value-value={cap}
+        >{cap}</button>
+      </div>
+      <div class="fieldrow">
+        <span class="lbl">Then</span>
+        <button
+          :for={action <- Ruleset.actions()}
+          class={["chip", @rule.action == action && "on"]}
+          phx-click="set_rule"
+          phx-value-index={@index}
+          phx-value-field="action"
+          phx-value-value={action}
+        >{action}</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn sm" phx-click="edit_rule" phx-value-index="-1">Done</button>
+        <button class="btn sm" phx-click="duplicate_rule" phx-value-index={@index}>Duplicate</button>
+        <button class="btn sm danger" phx-click="delete_rule" phx-value-index={@index}>Delete rule</button>
+      </div>
+    </div>
+    """
+  end
+
+  attr(:label, :string, required: true)
+  attr(:index, :integer, required: true)
+  attr(:field, :string, required: true)
+  attr(:selected, :list, required: true)
+  attr(:options, :list, required: true)
+
+  defp chips(assigns) do
+    ~H"""
+    <div class="fieldrow">
+      <span class="lbl">{@label}</span>
+      <button
+        class={["chip", @selected == [] && "on"]}
+        phx-click="clear_rule_field"
+        phx-value-index={@index}
+        phx-value-field={@field}
+      >any</button>
+      <button
+        :for={option <- @options}
+        class={["chip", option in @selected && "on"]}
+        phx-click="toggle_rule"
+        phx-value-index={@index}
+        phx-value-field={@field}
+        phx-value-value={option}
+      >{option}</button>
+    </div>
+    """
+  end
+
+  attr(:coverage, :map, required: true)
+  attr(:diff, :list, default: [])
+
+  defp matrix(assigns) do
+    changed = MapSet.new(assigns.diff, &{&1.class, &1.mode, &1.cap})
+
+    assigns =
+      assign(assigns,
+        changed: changed,
+        by_key: Map.new(assigns.coverage.cells, &{{&1.class, &1.mode, &1.cap}, &1})
+      )
+
+    ~H"""
+    <div class="matrix">
+      <table class="mx">
+        <thead>
+          <tr>
+            <th class="rowh" rowspan="2" style="vertical-align:bottom">class</th>
+            <th :for={mode <- Ruleset.modes()} colspan="2">{mode}</th>
+          </tr>
+          <tr>
+            <%= for _mode <- Ruleset.modes(), cap <- Ruleset.caps() do %>
+              <th>{cap} cap</th>
+            <% end %>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={class <- Ruleset.classes()}>
+            <th class="rowh">{class}</th>
+            <%= for mode <- Ruleset.modes(), cap <- Ruleset.caps() do %>
+              <% cell = @by_key[{class, mode, cap}] %>
+              <td>
+                <button
+                  class={[
+                    "cell",
+                    cell.action || "none",
+                    MapSet.member?(@changed, {class, mode, cap}) && "changed"
+                  ]}
+                  phx-click="trace"
+                  phx-value-class={class}
+                  phx-value-mode={mode}
+                  phx-value-cap={cap}
+                  title={if cell.rule, do: "decided by rule #{cell.rule}", else: "no rule matches"}
+                >
+                  {cell.action || "none"}<small>{if cell.rule, do: "rule #{cell.rule}", else: "—"}</small>
+                </button>
+              </td>
+            <% end %>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    """
+  end
+
+  attr(:diff, :list, required: true)
+  attr(:coverage, :map, required: true)
+  attr(:version, :integer, required: true)
+  attr(:replay, :map, required: true)
+
+  defp draft_bar(assigns) do
+    ~H"""
+    <div class="draftbar">
+      <div style="display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap">
+        <b style="font-size:14px">Draft from v{@version}</b>
+        <.pill tone={:acc}>{length(@diff)} of 30 combinations change</.pill>
+        <.pill :if={Ruleset.newly_waking(@diff) > 0} tone={:warn}>
+          {Ruleset.newly_waking(@diff)} newly wake a factory
+        </.pill>
+        <.pill :if={@replay.changed != []} tone={:warn}>
+          {length(@replay.changed)} past activations would differ
+        </.pill>
+        <.pill :if={@replay.changed == [] and @replay.total > 0} tone={:ok}>
+          no past activation would differ
+        </.pill>
+        <span style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn" phx-click="discard_draft">Discard draft</button>
+          <button class="btn pri" phx-click="publish" disabled={@coverage.undecided != []}>
+            Publish v{@version + 1}
+          </button>
+        </span>
+      </div>
+
+      <div :if={@coverage.undecided != []} class="banner crit" style="margin:0">
+        <.dot tone={:crit} />
+        <span>Cannot publish while {length(@coverage.undecided)} combinations are undecided.</span>
+      </div>
+
+      <div :if={@diff != []} class="diffgrid">
+        <div :for={d <- Enum.take(@diff, 8)} class="diffitem">
+          <div class="k">{d.class} · {d.mode} · {d.cap} cap</div>
+          <div class="v">
+            <.pill tone={Format.action_tone(d.from)}>{d.from || "none"}</.pill>
+            <span style="color:var(--ink-3)">→</span>
+            <.pill tone={Format.action_tone(d.to)}>{d.to || "none"}</.pill>
+            <span class="note" style="margin-left:auto">
+              rule {d.from_rule || "—"} → {d.to_rule || "—"}
+            </span>
+          </div>
+          <div :if={d.newly_wakes} class="note" style="margin-top:5px;color:var(--warn)">
+            starts a factory and spends money without asking
+          </div>
+        </div>
+        <div :if={length(@diff) > 8} class="diffitem">
+          <div class="note">…and {length(@diff) - 8} more</div>
+        </div>
+      </div>
+      <div :if={@diff == []} class="note">
+        No combination changes — the rules read differently but behave identically.
+      </div>
+
+      <div :if={@replay.changed != []}>
+        <div class="lbl" style="margin-bottom:7px">
+          Replayed against the {@replay.total} activations this ministry has actually seen
+        </div>
+        <.rows>
+          <.row :for={r <- Enum.take(@replay.changed, 6)} cols="minmax(0,1fr) auto">
+            <.identity name={r.summary} id={"#{r.class} · #{r.mode} · #{r.cap} cap"} />
+            <span style="display:flex;align-items:center;gap:7px">
+              <.pill tone={Format.action_tone(r.was)}>{r.was || "none"}</.pill>
+              <span style="color:var(--ink-3)">→</span>
+              <.pill tone={Format.action_tone(r.would)}>{r.would || "none"}</.pill>
+            </span>
+          </.row>
+        </.rows>
+      </div>
+    </div>
     """
   end
 

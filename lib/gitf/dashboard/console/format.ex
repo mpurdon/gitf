@@ -182,6 +182,59 @@ defmodule GiTF.Dashboard.Console.Format do
 
   # -- ruleset ---------------------------------------------------------------
 
+  @doc """
+  A rule as a sentence, because that is how a person reads a policy.
+
+  Returns HTML — the emphasised parts are the ones that decide, and bolding
+  them is what makes six rules scannable instead of six rows of cells.
+  """
+  @spec sentence(map()) :: String.t()
+  def sentence(rule) do
+    class =
+      case rule.class do
+        [] -> "<b>anything</b>"
+        list -> "<b>" <> joined(Enum.map(list, &class_phrase/1)) <> "</b>"
+      end
+
+    mode =
+      case rule.mode do
+        [] -> "in <b>any mode</b>"
+        list -> "the mode is <b>" <> joined(list) <> "</b>"
+      end
+
+    cap =
+      case rule.cap do
+        :any -> ""
+        other -> ", spend is <b>#{other} the cap</b>"
+      end
+
+    "When #{class} arrives, #{mode}#{cap} → #{action_phrase(rule.action)}"
+  end
+
+  defp class_phrase("bug"), do: "a bug"
+  defp class_phrase("pr_review"), do: "a pull-request review"
+  defp class_phrase("feature"), do: "a feature request"
+  defp class_phrase("ci"), do: "a CI event"
+  defp class_phrase("noise"), do: "noise"
+  defp class_phrase(other), do: other
+
+  defp action_phrase("wake"), do: tinted("ok", "wake the factory")
+  defp action_phrase("queue"), do: tinted("warn", "queue it for you")
+  defp action_phrase("drop"), do: tinted("off", "drop it")
+  defp action_phrase(other), do: "<b>#{other}</b>"
+
+  defp tinted(token, text), do: "<b style=\"color:var(--#{token})\">#{text}</b>"
+
+  defp joined([one]), do: one
+  defp joined(list), do: Enum.join(Enum.drop(list, -1), ", ") <> " or " <> List.last(list)
+
+  @doc "How many recorded activations a rule actually decided."
+  def rule_fired(inbox, n), do: Enum.count(inbox, &(get_in(&1, [:decision, :rule]) == n))
+
+  def fired_label(0), do: "never fired"
+  def fired_label(1), do: "fired once"
+  def fired_label(n), do: "fired #{n}×"
+
   def ruleset_summary(m) do
     rows = rule_rows(m)
     wake = Enum.count(rows, &(&1.action == "wake"))

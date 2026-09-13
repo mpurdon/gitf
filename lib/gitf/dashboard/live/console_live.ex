@@ -30,7 +30,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
 
   import GiTF.Dashboard.Console.Components
 
-  alias GiTF.Cabinet.{Activity, Fleet, Gate, Registry, Snapshot}
+  alias GiTF.Cabinet.{Activity, Fleet, Gate, Registry, Ruleset, Snapshot}
   alias GiTF.Dashboard.Console.{Format, Pages, Scope, Tree}
 
   @activity_limit 40
@@ -54,6 +54,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
        actor: actor(socket),
        filter: "all",
        editing: nil,
+       editing_rule: -1,
        opening: nil,
        page_title: "GiTF Console"
      )
@@ -413,8 +414,37 @@ defmodule GiTF.Dashboard.ConsoleLive do
   end
 
   defp page(%{scope: %{level: :ruleset}} = assigns) do
+    inbox = for_ministry(assigns.inbox, assigns.ministry)
+    published = Ruleset.published(assigns.ministry)
+    rules = Ruleset.effective(assigns.ministry)
+
+    assigns =
+      assigns
+      |> assign(
+        inbox: inbox,
+        rules: rules,
+        published: published,
+        draft?: Ruleset.draft?(assigns.ministry),
+        version: Ruleset.version(assigns.ministry),
+        coverage: Ruleset.coverage(rules),
+        diff: Ruleset.diff(published, rules),
+        replay: replay(inbox, published, rules)
+      )
+
     ~H"""
-    <Pages.ruleset scope={@scope} ministry={@ministry} inbox={for_ministry(@inbox, @ministry)} />
+    <Pages.ruleset
+      scope={@scope}
+      ministry={@ministry}
+      inbox={@inbox}
+      rules={@rules}
+      published={@published}
+      draft?={@draft?}
+      version={@version}
+      coverage={@coverage}
+      diff={@diff}
+      replay={@replay}
+      editing_rule={@editing_rule}
+    />
     """
   end
 
@@ -422,6 +452,36 @@ defmodule GiTF.Dashboard.ConsoleLive do
     ~H"""
     <Pages.registration scope={@scope} ministry={@ministry} editing={editing?(assigns)} />
     """
+  end
+
+  @doc false
+  # Replays the activations this ministry has actually seen through the draft.
+  # A coverage matrix says what COULD change; this says what WOULD have, on the
+  # traffic that really arrived — which is the difference between a rule you
+  # believe is safe and one you have evidence about.
+  def replay(inbox, published, draft) do
+    entries =
+      inbox
+      |> Enum.filter(&(&1[:decision] && &1[:class]))
+      |> Enum.map(fn e ->
+        class = to_string(e[:class])
+        mode = to_string(get_in(e, [:decision, :mode]) || "normal")
+        cap = if get_in(e, [:decision, :over_cap]) == true, do: :over, else: :under
+
+        was = Ruleset.decide(published, class, mode, cap)
+        would = Ruleset.decide(draft, class, mode, cap)
+
+        %{
+          summary: e[:summary] || class,
+          class: class,
+          mode: mode,
+          cap: cap,
+          was: was && elem(was, 0),
+          would: would && elem(would, 0)
+        }
+      end)
+
+    %{total: length(entries), changed: Enum.reject(entries, &(&1.was == &1.would))}
   end
 
   # ==========================================================================
@@ -542,6 +602,121 @@ defmodule GiTF.Dashboard.ConsoleLive do
     end
   end
 
+  # -- the rule editor -------------------------------------------------------
+  #
+  # Every mutation goes through the draft. There is deliberately no path from
+  # this LiveView to `:rules`: the only thing that replaces what the Gate reads
+  # is `publish`, which will not accept an incomplete ruleset.
+
+  def handle_event("edit_rule", %{"index" => i}, socket) do
+    index = String.to_integer(i)
+
+    {:noreply,
+     assign(socket, editing_rule: if(socket.assigns.editing_rule == index, do: -1, else: index))}
+  end
+
+  def handle_event("toggle_rule", %{"index" => i, "field" => f, "value" => v}, socket) do
+    edit(socket, &Ruleset.toggle(&1, String.to_integer(i), field(f), v))
+  end
+
+  def handle_event("clear_rule_field", %{"index" => i, "field" => f}, socket) do
+    edit(socket, &Ruleset.put(&1, String.to_integer(i), field(f), []))
+  end
+
+  def handle_event("set_rule", %{"index" => i, "field" => "cap", "value" => v}, socket) do
+    edit(socket, &Ruleset.put(&1, String.to_integer(i), :cap, cap(v)))
+  end
+
+  def handle_event("set_rule", %{"index" => i, "field" => "action", "value" => v}, socket) do
+    edit(socket, &Ruleset.put(&1, String.to_integer(i), :action, v))
+  end
+
+  def handle_event("move_rule", %{"from" => from, "to" => to}, socket) do
+    edit(socket, &Ruleset.move(&1, String.to_integer(from), String.to_integer(to)))
+  end
+
+  # Drag is the primary way to reorder, but a grip that only responds to a
+  # mouse is a control half the operators cannot use.
+  def handle_event("reorder_key", %{"key" => key, "index" => i}, socket)
+      when key in ["ArrowUp", "ArrowDown"] do
+    index = String.to_integer(i)
+    to = if key == "ArrowUp", do: index - 1, else: index + 1
+    edit(socket, &Ruleset.move(&1, index, to))
+  end
+
+  def handle_event("reorder_key", _params, socket), do: {:noreply, socket}
+
+  def handle_event("add_rule", _params, socket) do
+    rules = current_rules(socket)
+    at = max(length(rules) - 1, 0)
+    socket = assign(socket, editing_rule: at)
+    edit(socket, &Ruleset.insert(&1, at))
+  end
+
+  def handle_event("duplicate_rule", %{"index" => i}, socket) do
+    edit(socket, &Ruleset.duplicate(&1, String.to_integer(i)))
+  end
+
+  def handle_event("delete_rule", %{"index" => i}, socket) do
+    socket = assign(socket, editing_rule: -1)
+    edit(socket, &Ruleset.delete(&1, String.to_integer(i)))
+  end
+
+  def handle_event("trace", %{"class" => c, "mode" => m, "cap" => cap}, socket) do
+    rules = current_rules(socket)
+
+    message =
+      case Ruleset.decide(rules, c, m, cap(cap)) do
+        {action, n} -> "#{c} · #{m} · #{cap} cap → #{action}, decided by rule #{n}."
+        nil -> "#{c} · #{m} · #{cap} cap matches no rule — the Cabinet would queue it."
+      end
+
+    {:noreply, put_flash(socket, :info, message)}
+  end
+
+  def handle_event("discard_draft", _params, socket) do
+    with %{} = m <- socket.assigns.ministry, {:ok, _} <- Ruleset.discard(m.id) do
+      record(socket, "ruleset.discard", m.slug, "ok")
+
+      {:noreply,
+       socket
+       |> assign(editing_rule: -1)
+       |> put_flash(:info, "Draft discarded. Nothing changed.")
+       |> load()}
+    else
+      _ -> {:noreply, put_flash(socket, :error, "Could not discard the draft.")}
+    end
+  end
+
+  def handle_event("publish", _params, socket) do
+    m = socket.assigns.ministry
+
+    case Ruleset.publish(m.id, socket.assigns.actor) do
+      {:ok, published} ->
+        record(socket, "ruleset.publish", m.slug, "v#{published.rules_version}")
+
+        {:noreply,
+         socket
+         |> assign(editing_rule: -1)
+         |> put_flash(
+           :info,
+           "Published v#{published.rules_version}. The Cabinet is running it now."
+         )
+         |> load()}
+
+      {:error, {:undecided, n}} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "#{n} combinations are still undecided — the ruleset has to cover everything."
+         )}
+
+      other ->
+        {:noreply, put_flash(socket, :error, "Not published: #{describe(other)}")}
+    end
+  end
+
   def handle_event("edit", %{"id" => id}, socket), do: {:noreply, assign(socket, editing: id)}
   def handle_event("edit", _params, socket), do: {:noreply, assign(socket, editing: "new")}
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, editing: nil)}
@@ -579,6 +754,30 @@ defmodule GiTF.Dashboard.ConsoleLive do
   # ==========================================================================
   # Internals
   # ==========================================================================
+
+  # One path for every rule edit: read what the editor is showing, apply the
+  # change, save it as a draft. The draft is the only thing that moves.
+  defp edit(socket, fun) do
+    m = socket.assigns.ministry
+    rules = fun.(current_rules(socket))
+
+    case Ruleset.save_draft(m.id, rules) do
+      {:ok, _} ->
+        {:noreply, load(socket)}
+
+      other ->
+        {:noreply, put_flash(socket, :error, "Could not save the draft: #{describe(other)}")}
+    end
+  end
+
+  defp current_rules(%{assigns: %{ministry: m}}), do: Ruleset.effective(m)
+
+  defp field("class"), do: :class
+  defp field("mode"), do: :mode
+
+  defp cap("over"), do: :over
+  defp cap("under"), do: :under
+  defp cap(_), do: :any
 
   defp with_ministry(socket, id, fun) do
     case Registry.get(id) do

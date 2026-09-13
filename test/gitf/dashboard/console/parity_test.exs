@@ -4,15 +4,14 @@ defmodule GiTF.Dashboard.Console.ParityTest do
   on the way. This holds the new LiveView against the old one, capability by
   capability, and fails if the old console grows one the new one lacks.
 
-  Two capabilities are deliberately *not* carried over, and the test says so
-  rather than staying silent:
+  One capability is deliberately *not* carried over, and the test says so
+  rather than staying silent: the `dropped` inbox filter. `Gate.handle` returns
+  `{:drop, class}` without writing a record, so nothing anywhere sets that
+  status, and a filter that can never match reads as proof that nothing was
+  dropped.
 
-    * `cycle_rule` — clicking an action cell to cycle wake→queue→drop. The rule
-      editor supersedes it; until that lands the ruleset is read-only, which is
-      a real (temporary) reduction and is asserted as such.
-    * the `dropped` inbox filter — `Gate.handle` returns `{:drop, class}`
-      without writing a record, so nothing anywhere sets that status. A filter
-      that can never match reads as proof that nothing was dropped.
+  `cycle_rule` — clicking a cell to cycle wake→queue→drop — is carried by the
+  rule editor, which can do that and rather more besides.
   """
   use ExUnit.Case, async: true
 
@@ -40,8 +39,7 @@ defmodule GiTF.Dashboard.Console.ParityTest do
     "edit" => {:event, "edit"},
     "cancel_edit" => {:event, "cancel_edit"},
     "save_ministry" => {:event, "save_ministry"},
-    "cycle_rule" =>
-      {:deferred, "the rule editor supersedes it; the ruleset is read-only until then"}
+    "cycle_rule" => {:event, "set_rule"}
   }
 
   defp events(file) do
@@ -155,11 +153,32 @@ defmodule GiTF.Dashboard.Console.ParityTest do
     assert "waiting" in filters and "woke" in filters
   end
 
-  test "deferred capabilities are named, so the gap is a decision rather than an oversight" do
+  test "nothing is left deferred" do
     deferred = for {old, {:deferred, why}} <- @capabilities, do: {old, why}
+    assert deferred == [], "still deferred: #{inspect(deferred)}"
+  end
 
-    assert deferred == [
-             {"cycle_rule", "the rule editor supersedes it; the ruleset is read-only until then"}
-           ]
+  test "the ruleset is editable, ordered by dragging, and published deliberately" do
+    src = File.read!(@pages)
+
+    assert src =~ ~s(phx-click="toggle_rule"), "a rule's conditions must be editable"
+
+    assert src =~ ~s(phx-click="set_rule"),
+           "a rule's action must be changeable — cycle_rule's job"
+
+    assert src =~ ~s(draggable="true"), "order is the semantics of a first-hit-wins table"
+    assert src =~ ~s(phx-keydown="reorder_key"), "and reordering must not require a mouse"
+    assert src =~ ~s(phx-click="publish")
+    assert src =~ ~s(phx-click="discard_draft")
+  end
+
+  test "nothing in the editor can write the ruleset the Gate reads" do
+    src = File.read!(@new)
+
+    refute src =~ ~r/Registry\.update\([^)]*:rules[^_]/,
+           "only Ruleset.publish/2 may replace :rules"
+
+    assert src =~ "Ruleset.save_draft", "edits go to the draft"
+    assert src =~ "Ruleset.publish", "and only publishing promotes it"
   end
 end

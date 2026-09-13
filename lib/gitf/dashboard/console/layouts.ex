@@ -208,6 +208,69 @@ defmodule GiTF.Dashboard.Console.Layouts do
           .banner.crit{background:var(--crit-bg);color:var(--crit)}
           .banner.acc{background:var(--accent-soft);color:var(--accent)}
 
+          /* -------- the rule editor -------- */
+          .rule{display:grid;grid-template-columns:22px 28px minmax(0,1fr) auto;gap:var(--s3);
+            align-items:start;padding:var(--s3) var(--s4);border-bottom:1px solid var(--line-soft);
+            background:var(--panel)}
+          .rule:last-child{border-bottom:0}
+          .rule.dead{background:var(--warn-bg)}
+          .rule.dragging{opacity:.35}
+          .rule.over-above{box-shadow:inset 0 2px 0 var(--accent)}
+          .rule.over-below{box-shadow:inset 0 -2px 0 var(--accent)}
+          .grip{cursor:grab;color:var(--ink-3);font-size:13px;padding-top:3px;width:22px;
+            text-align:center;border-radius:var(--r);line-height:1.6}
+          .grip:hover{background:var(--panel-2);color:var(--ink)}
+          .grip:active{cursor:grabbing}
+          .rn{font-family:var(--mono);font-size:var(--t-md);color:var(--ink-3);padding-top:4px}
+          .sentence{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);
+            font-size:var(--t-md);color:var(--ink-2);line-height:1.9}
+          .sentence b{color:var(--ink);font-weight:500}
+          .ractions{display:flex;gap:3px;align-items:center;padding-top:2px}
+          .iconbtn{width:26px;height:26px;border-radius:var(--r);display:grid;place-items:center;
+            color:var(--ink-3);font-size:var(--t-md);border:1px solid transparent}
+          .iconbtn:hover{background:var(--panel-2);color:var(--ink);border-color:var(--line)}
+          .editor{margin-top:var(--s3);padding:var(--s4);border:1px solid var(--line);
+            border-radius:var(--r2);background:var(--stage)}
+          .fieldrow{display:flex;align-items:baseline;gap:var(--s3);padding:var(--s1) 0;flex-wrap:wrap}
+          .fieldrow .lbl{min-width:76px}
+
+          .matrix{border:1px solid var(--line);border-radius:var(--r2);overflow:auto;background:var(--panel)}
+          table.mx{border-collapse:collapse;width:100%;font-size:var(--t-md)}
+          table.mx th{font-weight:600;font-size:var(--t-xs);letter-spacing:.07em;
+            text-transform:uppercase;color:var(--ink-3);padding:7px var(--s2);text-align:center;
+            border-bottom:1px solid var(--line);white-space:nowrap}
+          table.mx th.rowh{text-align:left;font-family:var(--mono);text-transform:none;
+            letter-spacing:0;font-size:var(--t-md);color:var(--ink);font-weight:500;
+            border-right:1px solid var(--line)}
+          table.mx td{padding:0;border-bottom:1px solid var(--line-soft);
+            border-right:1px solid var(--line-soft)}
+          table.mx td:last-child{border-right:0}
+          table.mx tr:last-child td{border-bottom:0}
+          .cell{width:100%;padding:7px var(--s2);display:flex;flex-direction:column;
+            align-items:center;gap:2px;font-family:var(--mono);font-size:var(--t-sm);font-weight:600}
+          .cell small{font-weight:400;font-size:9.5px;opacity:.75}
+          .cell.wake{background:var(--ok-bg);color:var(--ok)}
+          .cell.queue{background:var(--warn-bg);color:var(--warn)}
+          .cell.drop{background:var(--off-bg);color:var(--off)}
+          .cell.none{background:var(--crit-bg);color:var(--crit)}
+          .cell.changed{box-shadow:inset 0 0 0 2px var(--accent)}
+
+          .draftbar{position:sticky;bottom:0;margin:0 calc(-1 * var(--s5)) -70px;
+            padding:var(--s4) var(--s5) var(--s5);background:var(--panel);
+            border-top:1px solid var(--accent);box-shadow:0 -6px 18px rgba(0,0,0,.35);
+            display:flex;flex-direction:column;gap:var(--s3)}
+          .diffgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(264px,1fr));gap:var(--s2)}
+          .diffitem{border:1px solid var(--line);border-radius:var(--r);padding:var(--s3) var(--s4);
+            background:var(--stage);font-size:var(--t-md)}
+          .diffitem .k{font-family:var(--mono);font-size:var(--t-sm);color:var(--ink-2)}
+          .diffitem .v{margin-top:4px;display:flex;align-items:center;gap:7px;
+            font-family:var(--mono);font-size:var(--t-sm)}
+          .vs{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+            border:1px solid var(--line);border-radius:var(--r2);overflow:hidden}
+          .vs>div{background:var(--panel);padding:var(--s4)}
+          .vs .hd{font-size:var(--t-xs);letter-spacing:.09em;text-transform:uppercase;
+            color:var(--ink-3);font-weight:600;margin-bottom:7px}
+
           .flash{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
             background:var(--panel);border:1px solid var(--line);border-radius:var(--r2);
             padding:var(--s3) var(--s5);font-size:var(--t-md);z-index:50;
@@ -233,7 +296,53 @@ defmodule GiTF.Dashboard.Console.Layouts do
         </script>
         <script>
           const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+
+          // Reordering rules by dragging. Order is the whole semantics of a
+          // first-hit-wins table, so dragging is the natural gesture — but the
+          // grip is also focusable and answers the arrow keys (phx-keydown on
+          // the server), because a control only a mouse can reach is a control
+          // half the operators do not have.
+          const Hooks = {
+            RuleDrag: {
+              mounted() { this.bind(); },
+              updated() { this.bind(); },
+              bind() {
+                const rows = Array.from(this.el.querySelectorAll(".rule[draggable]"));
+                const clear = () =>
+                  rows.forEach((r) => r.classList.remove("dragging", "over-above", "over-below"));
+
+                rows.forEach((row) => {
+                  row.ondragstart = (e) => {
+                    this.from = Number(row.dataset.idx);
+                    row.classList.add("dragging");
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", row.dataset.idx);
+                  };
+                  row.ondragend = () => { this.from = null; clear(); };
+                  row.ondragover = (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const to = Number(row.dataset.idx);
+                    if (this.from === null || to === this.from) return;
+                    rows.forEach((r) => r.classList.remove("over-above", "over-below"));
+                    row.classList.add(to < this.from ? "over-above" : "over-below");
+                  };
+                  row.ondrop = (e) => {
+                    e.preventDefault();
+                    const to = Number(row.dataset.idx);
+                    if (this.from !== null && to !== this.from) {
+                      this.pushEvent("move_rule", { from: String(this.from), to: String(to) });
+                    }
+                    this.from = null;
+                    clear();
+                  };
+                });
+              }
+            }
+          };
+
           const liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
+            hooks: Hooks,
             params: { _csrf_token: csrfToken }
           });
           liveSocket.connect();
