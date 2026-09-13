@@ -764,9 +764,6 @@ defmodule GiTF.Dashboard.Console.Pages do
               do: "— the Cabinet is running unattended",
               else: "— nothing here resolves itself"}
           </span>
-          <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
-            <span class="btn sm" phx-click="toggle_needs_config">What counts? ▾</span>
-          </span>
         </div>
       </summary>
 
@@ -789,6 +786,12 @@ defmodule GiTF.Dashboard.Console.Pages do
               Dismiss
             </button>
           </span>
+        </div>
+
+        <div class="needs-foot">
+          <button class="lnk" phx-click="toggle_needs_config">
+            What counts as needing a person? {if @needs_config_open, do: "▴", else: "▾"}
+          </button>
         </div>
       </div>
 
@@ -819,7 +822,12 @@ defmodule GiTF.Dashboard.Console.Pages do
       <:hint>
         {length(@visible)} of {length(@events)} events
         <span :if={Events.active_count(@filters) > 0}>
-          · <button class="chip" phx-click="clear_filters">clear {Events.active_count(@filters)} filters</button>
+          ·
+          <button class="chip" phx-click="clear_filters">
+            clear {Events.active_count(@filters)} {if Events.active_count(@filters) == 1,
+              do: "filter",
+              else: "filters"}
+          </button>
         </span>
         · <button class="chip" phx-click="save_investigation">save as investigation</button>
       </:hint>
@@ -909,7 +917,7 @@ defmodule GiTF.Dashboard.Console.Pages do
         <h4>Investigations</h4>
         <div :for={inv <- @investigations} style="display:flex;align-items:center;gap:6px">
           <.link patch={inv.path} class="fopt" style="flex:1">
-            <span class="box">⌕</span><span>{inv.name}</span>
+            <span class="box lens">⌕</span><span>{inv.name}</span>
           </.link>
           <button class="iconbtn" phx-click="delete_investigation" phx-value-id={inv.id} title="Forget this">
             ✕

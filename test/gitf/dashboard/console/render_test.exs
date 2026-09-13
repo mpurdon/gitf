@@ -133,6 +133,18 @@ defmodule GiTF.Dashboard.Console.RenderTest do
       }
     end
 
+    test "no control lives inside the summary that a click on it would collapse" do
+      # A <button> inside <summary> activates the disclosure: the "what counts?"
+      # toggle closed the band instead of opening the panel, and the panel was
+      # nested inside the band, so it could never have shown either way.
+      html = render(:activity, activity_assigns([]))
+
+      [_, summary] = Regex.run(~r|<summary.*?>(.*?)</summary>|s, html)
+
+      refute summary =~ "phx-click",
+             "a click here toggles the disclosure, not the handler you meant"
+    end
+
     test "a queued activation offers both a yes and a no" do
       inbox = [
         %{

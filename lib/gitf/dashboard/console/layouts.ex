@@ -226,6 +226,12 @@ defmodule GiTF.Dashboard.Console.Layouts do
           .fopt[aria-pressed="true"]{color:var(--accent);font-weight:500}
           .fopt .n{margin-left:auto;font-family:var(--mono);font-size:var(--t-sm);color:var(--ink-3)}
           .fopt.zero{opacity:.42}
+          /* An investigation is a saved question, not a checkbox: the lens has
+             to carry its own colour rather than the ink meant for an accent fill. */
+          .fopt .box.lens{border-color:transparent;color:var(--ink-3);font-size:12px}
+          .needs-foot{padding:var(--s3) var(--s4);border-top:1px solid var(--line-soft)}
+          .lnk{font-size:var(--t-sm);color:var(--ink-3)}
+          .lnk:hover{color:var(--accent)}
           .fsep{height:1px;background:var(--line);margin:0 var(--s4) var(--s4)}
           .needs{display:grid;grid-template-columns:18px minmax(0,1.8fr) 1fr 88px auto;gap:var(--s4);
             align-items:center;padding:var(--s4);border-bottom:1px solid var(--line-soft);width:100%;
