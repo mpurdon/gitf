@@ -43,7 +43,20 @@ defmodule GiTF.Dashboard.Console.Events do
   ]
 
   def kinds, do: @kinds
-  def kind_label(kind), do: Map.get(@kinds, kind, "Other")
+
+  @doc """
+  The label for a kind, given either the atom or the string a URL carries.
+
+  Filters arrive as query params, so this is reachable from a hand-typed URL;
+  it resolves by string rather than converting, because `to_existing_atom` on
+  an unrecognised param crashes the view.
+  """
+  def kind_label(kind) when is_atom(kind), do: Map.get(@kinds, kind, "Other")
+
+  def kind_label(kind) when is_binary(kind) do
+    Enum.find_value(@kinds, "Other", fn {k, label} -> to_string(k) == kind && label end)
+  end
+
   def windows, do: @windows
 
   @doc """

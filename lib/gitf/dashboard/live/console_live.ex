@@ -52,7 +52,10 @@ defmodule GiTF.Dashboard.ConsoleLive do
      socket
      |> assign(
        actor: actor(socket),
-       filter: "all",
+       # handle_params replaces both a beat later; they exist here so `load/1`
+       # has one code path rather than a clause that silently skips assigns.
+       scope: %Scope{level: :cabinet},
+       filters: Events.blank(),
        editing: nil,
        editing_rule: -1,
        opening: nil,
@@ -163,14 +166,12 @@ defmodule GiTF.Dashboard.ConsoleLive do
     socket
     |> assign(
       events: events,
-      visible: Events.filter(events, socket.assigns[:filters] || Events.blank()),
+      visible: Events.filter(events, socket.assigns.filters),
       needs: Enum.filter(events, &(&1.needs && to_string(&1.kind) in kinds)),
       needs_kinds: kinds,
       investigations: saved_investigations(scope)
     )
   end
-
-  defp assign_stream(socket), do: socket
 
   defp cabinet_facts do
     %{
@@ -900,7 +901,7 @@ defmodule GiTF.Dashboard.ConsoleLive do
       [
         filters.q != "" && "“#{filters.q}”",
         filters.kind != [] &&
-          Enum.map_join(filters.kind, ", ", &Events.kind_label(String.to_existing_atom(&1))),
+          Enum.map_join(filters.kind, ", ", &Events.kind_label/1),
         filters.ministry != [] && Enum.join(filters.ministry, ", "),
         filters.actor != [] && "by #{Enum.join(filters.actor, ", ")}",
         filters.result != [] && Enum.join(filters.result, ", ")
