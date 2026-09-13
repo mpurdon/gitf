@@ -237,6 +237,36 @@ defmodule GiTF.Dashboard.Console.Format do
   def hhmm(%DateTime{} = dt), do: Calendar.strftime(dt, "%H:%M") <> "Z"
   def hhmm(_), do: "—"
 
+  @doc """
+  Groups events into days, newest first, so a time-of-day column is readable.
+
+  Without this a list spanning midnight reads as out of order — `01:53Z` sits
+  above `04:48Z` and looks wrong, when it is simply the next day. The fix is a
+  date heading rather than a longer timestamp on every row: the date is the
+  same for a whole run of rows, so repeating it on each one is noise.
+  """
+  @spec by_day([map()], atom()) :: [{String.t(), [map()]}]
+  def by_day(events, key \\ :at) do
+    events
+    |> Enum.reject(&is_nil(Map.get(&1, key)))
+    |> Enum.group_by(&(Map.get(&1, key) |> DateTime.to_date() |> Date.to_iso8601()))
+    |> Enum.sort_by(fn {day, _} -> day end, :desc)
+    |> Enum.map(fn {day, rows} ->
+      {day_label(day), Enum.sort_by(rows, &Map.get(&1, key), {:desc, DateTime})}
+    end)
+  end
+
+  defp day_label(iso) do
+    today = Date.utc_today() |> Date.to_iso8601()
+    yesterday = Date.utc_today() |> Date.add(-1) |> Date.to_iso8601()
+
+    case iso do
+      ^today -> "#{iso} · today"
+      ^yesterday -> "#{iso} · yesterday"
+      _ -> iso
+    end
+  end
+
   def dur(s) when is_integer(s) and s < 60, do: "#{s}s"
   def dur(s) when is_integer(s) and s < 3_600, do: "#{div(s, 60)}m"
   def dur(s) when is_integer(s) and s < 86_400, do: "#{div(s, 3_600)}h #{rem(div(s, 60), 60)}m"

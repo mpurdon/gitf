@@ -182,6 +182,24 @@ defmodule GiTF.Dashboard.Console.RenderTest do
   end
 
   describe "format" do
+    test "a log spanning midnight groups by day, so a time column is not misread" do
+      events = [
+        %{at: ~U[2026-09-13 01:53:00Z], actor: "a", action: "wake", target: "t", result: "ok"},
+        %{at: ~U[2026-09-12 04:48:00Z], actor: "b", action: "wake", target: "t", result: "ok"},
+        %{at: ~U[2026-09-12 03:33:00Z], actor: "c", action: "observed", target: "t", result: "ok"}
+      ]
+
+      assert [{d1, [_]}, {d2, [x, y]}] = Format.by_day(events)
+      assert d1 =~ "2026-09-13"
+      assert d2 =~ "2026-09-12"
+      assert x.at == ~U[2026-09-12 04:48:00Z], "within a day, newest first"
+      assert y.at == ~U[2026-09-12 03:33:00Z]
+    end
+
+    test "grouping survives a record with no timestamp" do
+      assert Format.by_day([%{at: nil}, %{at: ~U[2026-09-13 01:00:00Z]}]) |> length() == 1
+    end
+
     test "a running factory reports its own uptime, an asleep one when it stopped" do
       assert Format.state_for(@running) =~ "up 42m"
       assert Format.state_for(@asleep) =~ "asleep"

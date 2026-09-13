@@ -484,14 +484,18 @@ defmodule GiTF.Dashboard.Console.Pages do
 
     <.section title="Acts">
       <:hint>actor · action · target · result</:hint>
-      <.rows empty={@activity == [] && "Nothing yet."}>
-        <.row :for={a <- @activity} cols="66px 140px minmax(0,1fr) auto">
-          <span class="dim">{Format.hhmm(a[:at])}</span>
-          <span class="dim">{a[:actor]}</span>
-          <span class="nm">{a[:action]} <span style="color:var(--accent)">{a[:target]}</span></span>
-          <span class="dim">{a[:result]}</span>
-        </.row>
-      </.rows>
+      <div :if={@activity == []}><.rows empty="Nothing yet."></.rows></div>
+      <div :for={{day, rows} <- Format.by_day(@activity)} style="margin-bottom:14px">
+        <div class="lbl" style="margin-bottom:6px">{day}</div>
+        <.rows>
+          <.row :for={a <- rows} cols="66px 140px minmax(0,1fr) auto">
+            <span class="dim">{Format.hhmm(a[:at])}</span>
+            <span class="dim">{a[:actor]}</span>
+            <span class="nm">{a[:action]} <span style="color:var(--accent)">{a[:target]}</span></span>
+            <span class="dim">{a[:result]}</span>
+          </.row>
+        </.rows>
+      </div>
     </.section>
     """
   end
