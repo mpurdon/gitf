@@ -16,6 +16,7 @@ defmodule GiTF.Cabinet.Discord.Actions do
 
   require Logger
 
+  alias GiTF.Cabinet.Discord.Proposal
   alias GiTF.Cabinet.{Fleet, Gate, Proxy, Registry}
 
   @type parsed ::
@@ -29,6 +30,7 @@ defmodule GiTF.Cabinet.Discord.Actions do
           | {:wake, String.t()}
           | {:inbox_start, String.t()}
           | {:inbox_drop, String.t()}
+          | {:proposal, String.t()}
 
   @doc "Parses a custom_id (and the select values, if any) back into an action."
   @spec parse(String.t(), [String.t()]) :: {:ok, parsed} | {:error, :unknown_action}
@@ -44,6 +46,7 @@ defmodule GiTF.Cabinet.Discord.Actions do
       ["hold", slug, minutes] -> parse_hold(slug, minutes)
       ["sleep", slug] -> {:ok, {:sleep, slug}}
       ["wake", slug] -> {:ok, {:wake, slug}}
+      ["propose", id] -> {:ok, {:proposal, id}}
       ["inbox_start", id] -> {:ok, {:inbox_start, id}}
       ["inbox_drop", id] -> {:ok, {:inbox_drop, id}}
       _ -> {:error, :unknown_action}
@@ -124,6 +127,31 @@ defmodule GiTF.Cabinet.Discord.Actions do
           {:ok, "woken by #{who}"}
         end
 
+      # An agent's proposal: the tool and its arguments were parked when
+      # proposed, so the tap performs what was offered, not what the
+      # conversation has since drifted to. Spent first — a button in the
+      # scrollback must not be re-runnable.
+      {:proposal, id} ->
+        case Proposal.spend(id) do
+          {:ok, %{tool: name, args: args, slug: slug}} ->
+            case perform_proposed(name, args, slug, actor, who) do
+              {:ok, _} = ok ->
+                ok
+
+              {:error, _} = err ->
+                # The act failed, so the offer stands: give the button back
+                # rather than stranding the operator with a dead proposal.
+                Proposal.reopen(id)
+                err
+            end
+
+          {:error, :already_spent} ->
+            {:error, "already done"}
+
+          {:error, :not_found} ->
+            {:error, "that proposal has expired"}
+        end
+
       {:inbox_start, id} ->
         with :ok <- Gate.start_queued(id) do
           GiTF.Cabinet.Activity.record(actor, "start_queued", id, "ok", ministry_of(id))
@@ -137,6 +165,40 @@ defmodule GiTF.Cabinet.Discord.Actions do
         end
     end
   end
+
+  # A proposed write runs exactly where it was proposed: a ministry tool
+  # on that ministry, a Cabinet tool here. The slug comes off the stored
+  # record, never off the tap.
+  defp perform_proposed(name, args, slug, actor, who) when is_binary(slug) do
+    slug |> tool(name, args, actor) |> outcome("#{label(name)} by #{who}")
+  end
+
+  defp perform_proposed("start_inbox_entry", args, _slug, actor, _who) do
+    perform({:inbox_start, args["id"]}, actor)
+  end
+
+  defp perform_proposed("dismiss_inbox_entry", args, _slug, actor, _who) do
+    perform({:inbox_drop, args["id"]}, actor)
+  end
+
+  defp perform_proposed(name, _args, _slug, _actor, _who) do
+    {:error, "#{name} cannot be performed from the Cabinet"}
+  end
+
+  defp label("answer_question"), do: "answered"
+  defp label("reject_question"), do: "all options rejected"
+  defp label("approve_mission"), do: "approved"
+  defp label("reject_mission"), do: "rejected"
+  defp label("kill_mission"), do: "killed"
+  defp label("start_mission"), do: "started"
+  defp label("resume_mission"), do: "resumed"
+  defp label("close_mission"), do: "closed"
+  defp label("create_mission"), do: "mission created"
+  defp label("approve_project"), do: "project approved"
+  defp label("pause_project"), do: "project paused"
+  defp label("resume_project"), do: "project resumed"
+  defp label("update_project_roadmap"), do: "roadmap updated"
+  defp label(name), do: "#{name} run"
 
   # An inbox id says nothing about which ministry it was headed for; the entry
   # does, and the Console groups by it.

@@ -130,7 +130,18 @@ defmodule GiTF.Cabinet.Discord do
     with token when is_binary(token) <- token(cfg) || {:error, :no_token},
          :ok <- load_app() do
       Application.put_env(:nostrum, :token, token)
-      Application.put_env(:nostrum, :gateway_intents, [:guilds, :guild_messages])
+      # :message_content is what makes M2 possible — without it Discord
+      # delivers every message with an empty `content`, so the bot would
+      # see that it was mentioned and have no words to read. It is also a
+      # PRIVILEGED intent: it must be enabled for the application in the
+      # Discord developer portal (Bot → Privileged Gateway Intents) or the
+      # gateway refuses the identify outright.
+      Application.put_env(:nostrum, :gateway_intents, [
+        :guilds,
+        :guild_messages,
+        :message_content
+      ])
+
       Application.put_env(:nostrum, :ffmpeg, nil)
       Application.put_env(:nostrum, :youtubedl, nil)
       Application.put_env(:nostrum, :streamlink, nil)

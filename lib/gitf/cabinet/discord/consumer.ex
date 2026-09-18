@@ -11,8 +11,16 @@ defmodule GiTF.Cabinet.Discord.Consumer do
 
   Who may act: the configured `operators` (Discord user ids), or, when
   none are configured, the guild's owner. Anyone else gets a private
-  "not an operator here" and nothing happens. Free text is ignored in M1;
-  the agent that reads it is M2 (`docs/plans/discord.md` D3).
+  "not an operator here" and nothing happens.
+
+  `MESSAGE_CREATE` is the M2 half: an operator mentioning the bot in a
+  channel a persona owns gets an answer from
+  `GiTF.Cabinet.Discord.Agent`. Three gates before a model ever sees the
+  text — the author must not be a bot (or two personas could talk each
+  other in a circle), must be an operator, and must have mentioned us;
+  and the channel must map to a persona. A message failing any of them is
+  ignored in silence, not refused out loud: a busy channel is not a place
+  to argue with people.
   """
 
   use Nostrum.Consumer
@@ -20,7 +28,7 @@ defmodule GiTF.Cabinet.Discord.Consumer do
   require Logger
 
   alias GiTF.Cabinet.Discord
-  alias GiTF.Cabinet.Discord.{Actions, Bot, Guild, Render}
+  alias GiTF.Cabinet.Discord.{Actions, Agent, Bot, Guild, Proposal, Render}
   alias Nostrum.Api
 
   # Interaction types and response types (Discord constants).
@@ -63,7 +71,146 @@ defmodule GiTF.Cabinet.Discord.Consumer do
     end
   end
 
+  def handle_event({:MESSAGE_CREATE, message, _ws}) do
+    if answerable?(message) do
+      # Off the gateway process at once: an agent turn is seconds of model
+      # time and may wake a box, and a blocked consumer stops every other
+      # event in the guild.
+      Task.Supervisor.start_child(GiTF.TaskSupervisor, fn -> answer(message) end)
+    end
+
+    :noop
+  end
+
   def handle_event(_), do: :noop
+
+  # -- Free text -------------------------------------------------------------
+
+  defp answerable?(%{author: %{bot: true}}), do: false
+
+  defp answerable?(%{author: author, guild_id: guild_id} = message) do
+    operator?(author && author.id, guild_id) and mentions_us?(message) and
+      presence(message.content) != nil
+  end
+
+  defp answerable?(_), do: false
+
+  # Only when spoken to. Without this the bot answers every line in a
+  # ministry channel, including the operator thinking out loud.
+  defp mentions_us?(%{mentions: mentions}) when is_list(mentions) do
+    case Nostrum.Cache.Me.get() do
+      %{id: me} -> Enum.any?(mentions, &(&1.id == me))
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp mentions_us?(_), do: false
+
+  defp answer(message) do
+    channel_id = message.channel_id
+    ministry = Bot.ministry_for_channel(channel_id)
+    kind = Guild.kind_for_channel(channel_id)
+    username = (message.author && message.author.username) || "unknown"
+    actor = "discord:#{username}"
+    text = strip_mentions(message.content)
+
+    Api.Channel.start_typing(channel_id)
+
+    case Agent.answer(channel_id, kind, ministry, text, actor) do
+      {:ok, result} ->
+        # Relayed exchanges first: by the time Kayabuki's summary lands in
+        # #cabinet, the conversation she is summarising is already visible
+        # in the ministry's own channel.
+        Enum.each(result.cross_posts, &post_exchange(&1, actor))
+
+        proposals = park(result.proposals, ministry, actor, channel_id)
+        Bot.say(channel_id, Render.agent_reply(result.persona, result.reply, proposals))
+
+      {:error, :no_persona} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Cabinet Discord: agent failed in #{channel_id}: #{inspect(reason)}")
+
+        Bot.say(channel_id, %{
+          content: "I could not answer that one — the model call failed. Try again?",
+          embeds: [],
+          components: []
+        })
+    end
+  rescue
+    e ->
+      Logger.error("Cabinet Discord: answering raised: #{Exception.message(e)}")
+  end
+
+  # Kayabuki asked a ministry's Major something: both halves are posted in
+  # that ministry's channel, so the exchange is a permanent record where it
+  # belongs rather than a hidden call behind a summary.
+  defp post_exchange(%{channel_id: nil}, _actor), do: :ok
+
+  defp post_exchange(exchange, actor) do
+    who = String.replace_prefix(actor, "discord:", "@")
+
+    Bot.say(exchange.channel_id, %{
+      content: nil,
+      embeds: [
+        %{
+          author: %{name: "Kayabuki"},
+          description: "Major — #{who} asks from #cabinet: #{exchange.question}"
+        }
+      ],
+      components: []
+    })
+
+    proposals =
+      park(
+        exchange.proposals,
+        %{slug: exchange.slug},
+        actor,
+        exchange.channel_id
+      )
+
+    Bot.say(
+      exchange.channel_id,
+      Render.agent_reply(exchange.persona, exchange.reply, proposals)
+    )
+  end
+
+  # Each proposed write is parked before it is rendered, so the button
+  # carries an id and the tap performs what was actually offered.
+  defp park(proposals, ministry, actor, channel_id) do
+    Enum.flat_map(proposals, fn %{tool: tool, args: args} ->
+      case Proposal.create(%{
+             tool: tool,
+             args: args,
+             slug: ministry && ministry[:slug],
+             actor: actor,
+             channel_id: channel_id
+           }) do
+        {:ok, proposal} -> [proposal]
+        _ -> []
+      end
+    end)
+  end
+
+  # "<@1234> what is running" → "what is running". The mention is
+  # addressing, not content, and leaving the raw id in confuses the model.
+  defp strip_mentions(content) when is_binary(content) do
+    content |> String.replace(~r/<@!?\d+>/, "") |> String.trim()
+  end
+
+  defp strip_mentions(_), do: ""
+
+  defp presence(text) when is_binary(text) do
+    case String.trim(text) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_), do: nil
 
   # -- internals ---------------------------------------------------------------
 
@@ -96,9 +243,30 @@ defmodule GiTF.Cabinet.Discord.Consumer do
   defp operator?(nil, _guild_id), do: false
 
   defp operator?(user_id, guild_id) do
-    case Discord.operators(Discord.config() || %{}) do
-      [] -> user_id == Guild.owner_id(guild_id)
-      ids -> to_string(user_id) in ids
+    cfg = Discord.config() || %{}
+
+    # The guild gate comes first and is not negotiable. The application is
+    # installable by anyone while "Public Bot" is on, so without this a
+    # stranger could add the bot to a server they own and — through the
+    # owner fallback below — be treated as this factory's operator, able to
+    # wake boxes and tap proposals that spend money. The bot answers in
+    # exactly one guild: the one it was configured for.
+    with true <- our_guild?(cfg, guild_id) do
+      case Discord.operators(cfg) do
+        # No operators configured: the owner of OUR guild, and only because
+        # the guild has already been checked above.
+        [] -> user_id == Guild.owner_id(guild_id)
+        ids -> to_string(user_id) in ids
+      end
+    else
+      _ -> false
+    end
+  end
+
+  defp our_guild?(cfg, guild_id) do
+    case Discord.guild_id(cfg) do
+      nil -> false
+      configured -> to_string(configured) == to_string(guild_id)
     end
   end
 

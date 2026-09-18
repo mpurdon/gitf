@@ -50,6 +50,63 @@ defmodule GiTF.Cabinet.Discord.Render do
     }
   end
 
+  @doc """
+  An agent's reply, spoken by a persona, with a button for each write it
+  proposed.
+
+  The persona's identity rides in the embed's `author` — its name — rather
+  than as a webhook's `username`. Discord does let an application-owned
+  webhook post under an arbitrary name, but interactive components then
+  require `with_components=true` on the request, which Nostrum's
+  `Webhook.execute/4` has no way to pass (`webhook.ex:184`). Rather than
+  bypass the library's API for cosmetics, the persona is named in the
+  embed and the message stays an ordinary bot message — so the buttons,
+  and the `INTERACTION_CREATE` path M1 already built, work untouched.
+
+  `proposals` are stored `GiTF.Cabinet.Discord.Proposal` records. Each
+  button carries only `propose:<id>`, so a proposed `create_mission` with
+  a sentence-long goal fits the same 100-char `custom_id` as an approval.
+  """
+  @spec agent_reply(map(), String.t(), [map()]) :: %{
+          content: String.t() | nil,
+          embeds: [map()],
+          components: [map()]
+        }
+  def agent_reply(persona, reply, proposals \\ []) do
+    %{
+      content: nil,
+      embeds: [
+        %{
+          author: %{name: persona.display_name},
+          description: String.slice(reply, 0, 4096),
+          color: @colors["ok"]
+        }
+      ],
+      components: proposal_buttons(proposals)
+    }
+  end
+
+  # Discord allows five buttons per row; a reply proposing more than that
+  # is already past what an operator should be asked to tap at once.
+  defp proposal_buttons([]), do: []
+
+  defp proposal_buttons(proposals) do
+    specs =
+      proposals
+      |> Enum.flat_map(fn proposal ->
+        case GiTF.Cabinet.Discord.Proposal.button(proposal.tool) do
+          nil -> []
+          {label, style} -> [{label, custom_id(["propose", proposal.id]), style}]
+        end
+      end)
+      |> Enum.take(5)
+
+    case specs do
+      [] -> []
+      specs -> [buttons(specs)]
+    end
+  end
+
   @doc "A row of `[label, custom_id, style]` triples → one action row of buttons."
   def buttons(specs) do
     %{

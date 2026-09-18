@@ -229,6 +229,15 @@ defmodule GiTF.Cabinet.Discord.Bot do
       false
   end
 
+  @doc """
+  Posts a ready-made message (an agent's reply) to a channel.
+
+  Goes through the same `send_now/2` as every alert, so a reply is
+  rate-limited, nil-stripped and crash-guarded exactly like the rest.
+  """
+  @spec say(term(), map()) :: boolean()
+  def say(channel_id, message), do: send_now(channel_id, message)
+
   @doc false
   def ministry_for_channel(channel_id) do
     Enum.find(Registry.list(), &(&1[:discord_channel_id] == channel_id))

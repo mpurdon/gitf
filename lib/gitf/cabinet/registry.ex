@@ -23,6 +23,104 @@ defmodule GiTF.Cabinet.Registry do
   end
 
   @doc """
+  Resolves prose to a ministry: `"home affairs"` → the `home-affairs` record.
+
+  Every other lookup in the codebase is exact-slug, which is right for a
+  webhook path and wrong for a person typing a sentence. Tried in order,
+  stopping at the first that matches exactly one ministry:
+
+    1. the slug, verbatim
+    2. the display name, case-insensitively
+    3. slug-ified input — trimmed, lowercased, runs of spaces/underscores
+       collapsed to a single hyphen
+    4. `String.jaro_distance/2` against both slug and name, best score
+       above `@fuzzy_floor`
+
+  Returns `{:ok, ministry}`, or `{:ambiguous, [ministry]}` when more than
+  one is equally plausible, or `{:error, :no_match}`. Ambiguity is
+  returned rather than broken by a coin flip so the caller can ask —
+  picking a ministry for someone is how you wake the wrong box.
+  """
+  @spec resolve(term()) ::
+          {:ok, map()} | {:ambiguous, [map()]} | {:error, :no_match}
+  def resolve(input) when is_binary(input) do
+    trimmed = String.trim(input)
+
+    if trimmed == "" do
+      {:error, :no_match}
+    else
+      ministries = list()
+      down = String.downcase(trimmed)
+
+      exact_slug(ministries, trimmed) ||
+        exact_name(ministries, down) ||
+        exact_slug(ministries, slugify(down)) ||
+        fuzzy(ministries, down) ||
+        {:error, :no_match}
+    end
+  end
+
+  def resolve(_), do: {:error, :no_match}
+
+  # Below this, a "match" is a guess. 0.85 keeps "home-affars" (0.94) and
+  # loses "trajector" against "home affairs" (0.46).
+  @fuzzy_floor 0.85
+
+  defp exact_slug(ministries, candidate) do
+    case Enum.find(ministries, &(&1.slug == candidate)) do
+      nil -> nil
+      m -> {:ok, m}
+    end
+  end
+
+  defp exact_name(ministries, down) do
+    ministries
+    |> Enum.filter(&(String.downcase(&1[:name] || "") == down))
+    |> one_or_ambiguous()
+  end
+
+  defp fuzzy(ministries, down) do
+    scored =
+      ministries
+      |> Enum.map(&{&1, score(&1, down)})
+      |> Enum.filter(fn {_m, s} -> s >= @fuzzy_floor end)
+
+    case scored do
+      [] ->
+        nil
+
+      _ ->
+        best = scored |> Enum.map(&elem(&1, 1)) |> Enum.max()
+
+        scored
+        |> Enum.filter(fn {_m, s} -> s == best end)
+        |> Enum.map(&elem(&1, 0))
+        |> one_or_ambiguous()
+    end
+  end
+
+  # The best of slug-vs-input and name-vs-input: a ministry may be typed
+  # either way, and losing on one spelling should not sink the other.
+  defp score(ministry, down) do
+    slugged = slugify(down)
+
+    max(
+      String.jaro_distance(ministry.slug, slugged),
+      String.jaro_distance(String.downcase(ministry[:name] || ""), down)
+    )
+  end
+
+  defp one_or_ambiguous([]), do: nil
+  defp one_or_ambiguous([one]), do: {:ok, one}
+  defp one_or_ambiguous(many), do: {:ambiguous, many}
+
+  defp slugify(str) do
+    str
+    |> String.replace(~r/[\s_]+/, "-")
+    |> String.trim("-")
+  end
+
+  @doc """
   Registers a ministry. Requires `slug` (path-safe, unique), `name`, and
   `url` (the Section's base URL). Optional: `instance_id`,
   `webhook_secret_env`, `api_key_env`, `cost_cap_usd`, `rules` (a JDM

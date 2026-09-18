@@ -93,6 +93,17 @@ defmodule GiTF.Cabinet.Discord.Guild do
   def channel(name) when name in @fixed_channels, do: get_in(state(), [:channels, name])
 
   @doc """
+  Which fixed channel an id is, or nil. The inverse of `channel/1`, used to
+  pick the persona that speaks in a channel.
+  """
+  @spec kind_for_channel(term()) :: String.t() | nil
+  def kind_for_channel(channel_id) do
+    state()
+    |> Map.get(:channels, %{})
+    |> Enum.find_value(fn {name, id} -> if id == channel_id, do: name end)
+  end
+
+  @doc """
   The thread for a mission inside its ministry's channel, created on first
   use. Threads keep a busy factory from flooding the channel and give
   every mission a transcript a human can scroll.

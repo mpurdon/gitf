@@ -145,6 +145,34 @@ data "aws_iam_policy_document" "cabinet" {
     ]
     resources = ["*"]
   }
+
+  # The Discord personas (docs/plans/discord.md M2) are the only thing on
+  # the Cabinet that calls a model. They run through the instance role
+  # rather than a key in /etc/gitf/cabinet.env, so the box still holds no
+  # model *credential* — it holds permission, which is revocable from here
+  # and leaves a CloudTrail record.
+  #
+  # Scoped to the fast-tier models the agent actually resolves: an agent
+  # loop that cannot reach an expensive model cannot accidentally spend on
+  # one, and a bug in tier resolution fails closed instead of billing.
+  statement {
+    sid = "InvokeFastTierModels"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream"
+    ]
+    # Haiku 4.5 is INFERENCE_PROFILE-only on Bedrock — there is no
+    # on-demand throughput for the bare foundation-model id. Invoking
+    # through a cross-region profile (`us.anthropic.claude-haiku-…`)
+    # requires InvokeModel on BOTH the profile and the underlying
+    # foundation model *in every region the profile can route to*, which
+    # is why the foundation-model ARN is not pinned to var.region. Still
+    # narrow: Haiku only, so a tier-resolution bug cannot reach Opus.
+    resources = [
+      "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-*",
+      "arn:aws:bedrock:${var.region}:*:inference-profile/*claude-haiku-*"
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "cabinet" {

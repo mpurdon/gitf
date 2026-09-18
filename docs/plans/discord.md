@@ -231,11 +231,78 @@ first sleep warning rendered end to end (factory → Cabinet → embed with
 buttons, 3 ms). Lesson: Discord drops `Manage Channels` from an invite
 unless granted explicitly — set it on the bot's role in Server Settings.
 
+Two more portal landmines, found 2026-09-17 while opening M2's gates:
+
+- **`Message Content Intent` must be ON** (Bot → Privileged Gateway Intents)
+  or the gateway rejects the identify outright — the bot never connects,
+  which reads as a crash rather than a permissions problem.
+- **Making the app private is a two-step in a fixed order.** Turning off
+  `Public Bot` fails with *"Private application cannot have a default
+  authorization link"* until Installation → Install Link is set to **None**
+  first. Existing installs survive both changes; you lose only the generated
+  "Add to Server" link, and a manual re-invite via OAuth2 → URL Generator
+  hits the `Manage Channels` trap above.
+
+  Worth doing: with `Public Bot` on, anyone holding the client id can install
+  the bot into a server they own, and the operator fallback (`operators: []`
+  → the guild owner) would have treated *that* server's owner as this
+  factory's operator — able to wake boxes and tap proposals that spend money.
+  Closed in code at M2 (`Consumer.operator?/2` checks the configured guild
+  before any operator logic), but the toggle removes the class outright.
+
 **There is no LLM in M1.** Outbound is deterministic rendering, inbound is
 a `custom_id` → tool lookup. Free text in a channel is ignored until M2.
-Not yet: M2 (free text → agent), M3 (mockup images, slash commands, quiet
-hours), M4 (voice), `#plan` / `#aramaki` content (channels exist, nothing
-posts there yet).
+
+**M2 BUILT 2026-09-17** (`GiTF.Cabinet.Discord.{Agent,Toolbelt,Personas,
+Conversation,Proposal}`, `MESSAGE_CREATE` in `Consumer`,
+`Registry.resolve/1`, `Render.agent_reply/3`, `:message_content` intent).
+Not yet deployed — two operator gates below.
+
+Decisions taken during the build, which differ from the design above:
+
+- **Three personas, not four.** `aramaki.ex:5-7` and `project.ex:3` put
+  admission *and* the project roadmap under Aramaki, so `#plan` is her
+  second hat rather than a fourth character. The cast is now
+  **Kayabuki** (Cabinet) → **Aramaki** (commander's intent: what and when)
+  → **Batou** (the plan: ops, deps, verification — today `Major.Planner`,
+  rename pending) → **the Major** (the run). Batou gets no channel: you do
+  not converse with the planner.
+- **The persona is named in the embed author, not a webhook username.**
+  Discord does allow an application-owned webhook to post under an
+  arbitrary name, but interactive components then need
+  `with_components=true`, which Nostrum's `Webhook.execute/4` cannot pass
+  (`webhook.ex:184`). Naming the persona in the embed keeps buttons and
+  the M1 interaction path working untouched.
+- **Writes are tiered, not uniformly confirmed.** Reads, `wake`, `sleep`
+  and `idle_stop_override` happen on the sentence — cheap and reversible,
+  and the operator asked for one round trip. Everything that moves mission
+  or project state is still a button.
+- **Proposals are stored, not encoded in the `custom_id`.** A proposed
+  `create_mission` carries a goal sentence, which would never fit 100
+  characters. `GiTF.Cabinet.Discord.Proposal` parks the tool, args,
+  ministry and actor; the button carries `propose:<id>`; the tap spends it
+  once, and hands it back if the act itself fails.
+- **Cross-ministry questions cost a second model call.** Kayabuki's
+  `ask_ministry` resolves prose to a slug, runs that ministry's Major with
+  *only* the question and who asked, and posts both halves in the
+  ministry's channel. The Major has no `ask_ministry`, so one hop is the
+  structural maximum.
+
+**Blocked on the operator before this can run:**
+
+1. **Spend.** A tool-using agent cannot run on the `claude` CLI
+   subscription — `CLIClient` drops `tools:` silently
+   (`cli_client.ex:71-74`). M2 needs API mode, i.e. metered tokens.
+   Recommended: Bedrock via the Cabinet's instance role (no credential at
+   rest), which needs `bedrock:InvokeModel` added to `infra/aws/cabinet.tf`.
+   Not done — it raises a real bill.
+2. **`:message_content`** enabled for the application in the Discord
+   developer portal (Bot → Privileged Gateway Intents). Without it the
+   gateway refuses the identify outright.
+
+Not yet: M3 (mockup images, slash commands, quiet hours), M4 (voice),
+`#plan` / `#aramaki` outbound content (channels exist, nothing posts there
+yet).
 
 ## Milestones
 
