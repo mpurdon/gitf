@@ -143,6 +143,28 @@ defmodule GiTF.Cabinet.Discord.Consumer do
   rescue
     e ->
       Logger.error("Cabinet Discord: answering raised: #{Exception.message(e)}")
+      apologise(message.channel_id)
+  catch
+    # An `exit` is NOT caught by rescue, and the agent turn runs inside
+    # Task-wrapped code that can exit rather than return — a missing
+    # supervisor did exactly that on the first live message after M2,
+    # leaving the operator watching a typing indicator that never became a
+    # message. Silence is the one outcome this must never produce: say
+    # something, and leave the reason in the log.
+    kind, reason ->
+      Logger.error(
+        "Cabinet Discord: answering #{kind}: #{inspect(reason, limit: 8, printable_limit: 500)}"
+      )
+
+      apologise(message.channel_id)
+  end
+
+  defp apologise(channel_id) do
+    Bot.say(channel_id, %{
+      content: "Something broke while I was working on that — it's in the log.",
+      embeds: [],
+      components: []
+    })
   end
 
   # Kayabuki asked a ministry's Major something: both halves are posted in

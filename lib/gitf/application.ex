@@ -267,7 +267,21 @@ defmodule GiTF.Application do
       if GiTF.Cabinet.mode?() do
         Logger.info("CABINET MODE — factory supervision skipped")
         discord = if GiTF.Cabinet.Discord.enabled?(), do: [GiTF.Cabinet.Discord], else: []
-        foundation ++ [interface, GiTF.Cabinet.Watch] ++ discord
+
+        # The one piece of `core` a Cabinet genuinely needs. Since M2 the
+        # Discord personas make in-process LLM calls, and every call goes
+        # through GiTF.Runtime.ProviderCircuit, which asks
+        # ProviderLimiter.acquire/1 to start a per-provider RateLimiter
+        # under this supervisor. Without it the call exits with
+        # `no process` and the operator sees the bot start typing and then
+        # say nothing at all — which is how this was found, on the first
+        # live message after M2 shipped (2026-09-18).
+        limiter = [
+          {DynamicSupervisor,
+           name: GiTF.Runtime.ProviderLimiter.Supervisor, strategy: :one_for_one}
+        ]
+
+        foundation ++ [interface, GiTF.Cabinet.Watch] ++ limiter ++ discord
       else
         foundation ++ [core, interface, plugins] ++ background_children()
       end
