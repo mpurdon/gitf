@@ -209,6 +209,51 @@ defmodule GiTF.MajorTest do
       assert Process.alive?(Process.whereis(GiTF.Major))
     end
 
+    test "a fatal failure is not retried at all" do
+      {op, ghost} = failed_op_with_ghost("sh: claude: command not found")
+
+      send_job_failed(ghost, op)
+
+      # The missing binary does not heal between attempts. Before this,
+      # the op burned three retries and ~40 minutes of backoff on it.
+      refute retry_scheduled?(op)
+      assert Process.alive?(Process.whereis(GiTF.Major))
+    end
+
+    test "a provider fault is retried even when the capability budget is spent" do
+      # The whole point of the two budgets: this op has already used every
+      # "the work came back wrong" attempt, and a provider 503 still gets
+      # another try instead of being abandoned for the provider's bad day.
+      {op, ghost} =
+        failed_op_with_ghost("API error: overloaded_error",
+          retry_count: GiTF.Ops.max_retries()
+        )
+
+      send_job_failed(ghost, op)
+
+      assert retry_scheduled?(op)
+    end
+
+    test "a provider fault stops once ITS own budget is spent" do
+      {op, ghost} =
+        failed_op_with_ghost("API error: overloaded_error",
+          provider_retry_count: GiTF.Ops.max_provider_retries()
+        )
+
+      send_job_failed(ghost, op)
+
+      # Finite, or a permanently broken provider retries forever.
+      refute retry_scheduled?(op)
+    end
+
+    test "an ordinary failure still retries against the capability budget" do
+      {op, ghost} = failed_op_with_ghost("Exit code 1: cargo build failed")
+
+      send_job_failed(ghost, op)
+
+      assert retry_scheduled?(op)
+    end
+
     test "updates mission status to completed on job_complete" do
       # Create records: sector, mission, op (done), ghost
       {:ok, sector} =
@@ -489,5 +534,67 @@ defmodule GiTF.MajorTest do
         1000 -> :ok
       end
     end
+  end
+
+  # -- helpers for the retry-classification tests ----------------------------
+
+  defp failed_op_with_ghost(reason, attrs \\ []) do
+    {:ok, sector} =
+      Archive.insert(:sectors, %{name: "fc-sector-#{:erlang.unique_integer([:positive])}"})
+
+    {:ok, mission} =
+      Archive.insert(:missions, %{
+        name: "fc-mission-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
+
+    {:ok, op} =
+      GiTF.Ops.create(
+        Map.merge(
+          %{
+            title: "Failure-class op #{:erlang.unique_integer([:positive])}",
+            mission_id: mission.id,
+            sector_id: sector.id
+          },
+          Map.new(attrs)
+        )
+      )
+
+    {:ok, ghost} =
+      Archive.insert(:ghosts, %{
+        name: "fc-ghost-#{:erlang.unique_integer([:positive])}",
+        status: "starting",
+        op_id: op.id
+      })
+
+    {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
+    {:ok, _} = GiTF.Ops.start(op.id)
+    {:ok, _} = GiTF.Ops.fail(op.id, reason)
+
+    Major.start_session()
+    {op, ghost}
+  end
+
+  defp send_job_failed(ghost, op) do
+    send(
+      Process.whereis(GiTF.Major),
+      {:link_received,
+       %{
+         id: "lnk-fc-#{:erlang.unique_integer([:positive])}",
+         from: ghost.id,
+         to: "major",
+         subject: "job_failed",
+         body: "Job #{op.id} failed",
+         read: false
+       }}
+    )
+
+    Process.sleep(50)
+  end
+
+  # A scheduled retry is a timer plus an entry in retry_pending; the
+  # backoff is >=30s, so nothing has executed yet when we look.
+  defp retry_scheduled?(op) do
+    MapSet.member?(:sys.get_state(Process.whereis(GiTF.Major)).retry_pending, op.id)
   end
 end

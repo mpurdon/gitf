@@ -20,6 +20,12 @@ defmodule GiTF.Ops do
   alias GiTF.Archive
 
   @max_retries 3
+
+  # Provider faults get their own, more generous budget. They are charged
+  # separately from @max_retries because a 503 says nothing about whether
+  # the op is doable — but the budget still has to be finite, or a
+  # permanently broken provider retries an op forever.
+  @max_provider_retries 6
   require GiTF.Ghost.Status, as: GhostStatus
 
   # -- Valid transitions -------------------------------------------------------
@@ -172,8 +178,14 @@ defmodule GiTF.Ops do
         verified_at: nil,
         # Risk level for adaptive permissions (always normalized to atom)
         risk_level: normalize_risk(classification[:risk_level] || attrs[:risk_level] || :low),
-        # Retry tracking (persisted, survives Major restarts)
+        # Retry tracking (persisted, survives Major restarts). The two
+        # budgets are separate: retry_count is "the work came back wrong",
+        # provider_retry_count is "the provider was down". See
+        # GiTF.Ghost.FailureClass.
         retry_count: attrs[:retry_count] || 0,
+        provider_retry_count: attrs[:provider_retry_count] || 0,
+        failure_classification: attrs[:failure_classification],
+        last_failure_reason: attrs[:last_failure_reason],
         # Per-op verification contract
         verification_contract: attrs[:verification_contract],
         # Recon fields
@@ -233,6 +245,40 @@ defmodule GiTF.Ops do
   @spec fail(String.t()) :: {:ok, map()} | {:error, atom()}
   def fail(op_id), do: transition(op_id, :fail)
 
+  @doc """
+  Fails an op, recording WHY.
+
+  The reason is classified once, here — the only moment the raw provider
+  or CLI text is still in hand. Everything downstream (the retry decision
+  in `GiTF.Major`, the diagnostics log, model-performance reporting)
+  reads the stored class rather than re-sniffing a formatted string.
+
+  Transitions: pending | running | assigned -> failed.
+  """
+  @spec fail(String.t(), term()) :: {:ok, map()} | {:error, atom()}
+  def fail(op_id, nil), do: transition(op_id, :fail)
+
+  def fail(op_id, reason) do
+    class = GiTF.Ghost.FailureClass.classify(reason)
+    text = if is_binary(reason), do: reason, else: inspect(reason)
+
+    Archive.update(:ops, op_id, fn op ->
+      case validate_transition(op.status, :fail) do
+        {:ok, next_status} ->
+          # Map.put, not %{op | ...}: ops written before these fields
+          # existed are still in the Archive and have no such keys.
+          {:ok,
+           op
+           |> Map.put(:status, next_status)
+           |> Map.put(:failure_classification, class)
+           |> Map.put(:last_failure_reason, String.slice(text, 0, 2000))}
+
+        {:error, _} = err ->
+          err
+      end
+    end)
+  end
+
   @doc "Blocks a op. Transitions: pending | running -> blocked."
   @spec block(String.t()) :: {:ok, map()} | {:error, atom()}
   def block(op_id), do: transition(op_id, :block)
@@ -262,9 +308,21 @@ defmodule GiTF.Ops do
   so the op can be assigned to a fresh ghost.
 
   Optionally appends feedback to the op description.
+
+  ## Options
+
+    * `:charge` — which budget this attempt is charged to.
+      `:capability` (default) increments `retry_count`, the op's "we tried
+      and the work came back wrong" budget. `:provider` increments
+      `provider_retry_count` instead, leaving the capability budget
+      untouched — see `GiTF.Ghost.FailureClass.provider_fault?/1`.
+
+  `retry_count` therefore keeps its original meaning (capability attempts
+  only), which is what every existing reader — `retry_pending?/1`, the
+  orchestrator's exhaustion check, the dashboards — already assumes.
   """
-  @spec reset(String.t(), String.t() | nil) :: {:ok, map()} | {:error, atom()}
-  def reset(op_id, feedback \\ nil) do
+  @spec reset(String.t(), String.t() | nil, keyword()) :: {:ok, map()} | {:error, atom()}
+  def reset(op_id, feedback \\ nil, opts \\ []) do
     # Peek to capture ghost_id for cleanup (cleanup has side effects on
     # other collections — kept outside the atomic op update).
     case get(op_id) do
@@ -284,16 +342,27 @@ defmodule GiTF.Ops do
                     op.description
                   end
 
-                retry_count = Map.get(op, :retry_count, 0) + 1
+                {retry_count, provider_retry_count} =
+                  case Keyword.get(opts, :charge, :capability) do
+                    :provider ->
+                      {Map.get(op, :retry_count, 0), Map.get(op, :provider_retry_count, 0) + 1}
+
+                    _ ->
+                      {Map.get(op, :retry_count, 0) + 1, Map.get(op, :provider_retry_count, 0)}
+                  end
 
                 {:ok,
-                 %{
-                   op
-                   | status: next_status,
-                     ghost_id: nil,
-                     retry_count: retry_count,
-                     description: new_description
-                 }}
+                 op
+                 |> Map.put(:status, next_status)
+                 |> Map.put(:ghost_id, nil)
+                 |> Map.put(:retry_count, retry_count)
+                 |> Map.put(:provider_retry_count, provider_retry_count)
+                 |> Map.put(:description, new_description)
+                 # Cleared so the stored class always describes the most
+                 # recent failure. A stale one would mis-route the next
+                 # retry decision if that failure arrived via fail/1.
+                 |> Map.put(:failure_classification, nil)
+                 |> Map.put(:last_failure_reason, nil)}
 
               {:error, _} = err ->
                 err
@@ -732,6 +801,18 @@ defmodule GiTF.Ops do
   @doc "Returns the max retry count an op may accumulate before exhausting."
   @spec max_retries() :: pos_integer()
   def max_retries, do: @max_retries
+
+  @doc "Cap on attempts charged to the provider-fault budget."
+  @spec max_provider_retries() :: pos_integer()
+  def max_provider_retries, do: @max_provider_retries
+
+  @doc "Attempts charged against the op's capability budget."
+  @spec capability_attempts(map()) :: non_neg_integer()
+  def capability_attempts(op), do: Map.get(op, :retry_count, 0) || 0
+
+  @doc "Attempts charged against the op's provider-fault budget."
+  @spec provider_attempts(map()) :: non_neg_integer()
+  def provider_attempts(op), do: Map.get(op, :provider_retry_count, 0) || 0
 
   # Retry chains can be MORE than one generation: original → retry →
   # retry-of-retry. Checking only direct children stalled msn-6be1ba for

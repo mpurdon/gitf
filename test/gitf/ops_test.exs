@@ -33,6 +33,94 @@ defmodule GiTF.OpsTest do
     ghost
   end
 
+  describe "fail/2 and the two retry budgets" do
+    defp failed_op(mission, sector, reason) do
+      {:ok, op} = create_job(mission, sector)
+      ghost = create_bee()
+      {:ok, _} = Ops.assign(op.id, ghost.id)
+      {:ok, _} = Ops.start(op.id)
+      {:ok, _} = Ops.fail(op.id, reason)
+      {:ok, op} = Ops.get(op.id)
+      op
+    end
+
+    test "fail/2 stores the classification and the reason", %{mission: m, sector: s} do
+      op = failed_op(m, s, "sh: claude: command not found")
+
+      assert op.status == "failed"
+      assert op.failure_classification == :fatal
+      assert op.last_failure_reason =~ "command not found"
+    end
+
+    test "fail/1 still works and records no classification", %{mission: m, sector: s} do
+      {:ok, op} = create_job(m, s)
+      ghost = create_bee()
+      {:ok, _} = Ops.assign(op.id, ghost.id)
+      {:ok, _} = Ops.start(op.id)
+
+      assert {:ok, _} = Ops.fail(op.id)
+      {:ok, op} = Ops.get(op.id)
+      assert op.status == "failed"
+      assert Map.get(op, :failure_classification) == nil
+    end
+
+    test "a provider-charged reset spares the capability budget", %{mission: m, sector: s} do
+      op = failed_op(m, s, "API error: overloaded_error")
+      assert Ops.capability_attempts(op) == 0
+
+      {:ok, _} = Ops.reset(op.id, "retrying", charge: :provider)
+      {:ok, op} = Ops.get(op.id)
+
+      assert Ops.provider_attempts(op) == 1
+      # The point of the whole change: a 503 did not spend an attempt the
+      # op needs for "the work came back wrong".
+      assert Ops.capability_attempts(op) == 0
+      assert Ops.retry_pending?(op)
+    end
+
+    test "an ordinary reset charges the capability budget, as it always did",
+         %{mission: m, sector: s} do
+      op = failed_op(m, s, "Exit code 1: cargo build failed")
+
+      {:ok, _} = Ops.reset(op.id, "retrying")
+      {:ok, op} = Ops.get(op.id)
+
+      assert Ops.capability_attempts(op) == 1
+      assert Ops.provider_attempts(op) == 0
+    end
+
+    test "capability exhaustion still trips at max_retries", %{mission: m, sector: s} do
+      {:ok, op} = create_job(m, s)
+
+      op =
+        Enum.reduce(1..Ops.max_retries(), op, fn _, op ->
+          ghost = create_bee()
+          {:ok, _} = Ops.assign(op.id, ghost.id)
+          {:ok, _} = Ops.start(op.id)
+          {:ok, _} = Ops.fail(op.id, "Exit code 1: wrong output")
+          {:ok, _} = Ops.reset(op.id, "again")
+          {:ok, op} = Ops.get(op.id)
+          op
+        end)
+
+      assert Ops.capability_attempts(op) == Ops.max_retries()
+      refute Ops.retry_pending?(op)
+    end
+
+    test "a reset clears the previous failure's classification", %{mission: m, sector: s} do
+      op = failed_op(m, s, "sh: claude: command not found")
+      assert op.failure_classification == :fatal
+
+      {:ok, _} = Ops.reset(op.id, "retrying")
+      {:ok, op} = Ops.get(op.id)
+
+      # Otherwise the NEXT failure — if it arrived via fail/1 — would be
+      # judged against this stale class and refused a retry.
+      assert Map.get(op, :failure_classification) == nil
+      assert Map.get(op, :last_failure_reason) == nil
+    end
+  end
+
   describe "manifest_violations/2 — the fix ghost's scope fence" do
     test "a manifest the task never targeted is a violation; targeted ones and source files are not" do
       op = %{target_files: ["src/styles.css", "src-tauri/Cargo.toml"]}

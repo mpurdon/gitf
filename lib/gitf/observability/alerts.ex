@@ -59,6 +59,11 @@ defmodule GiTF.Observability.Alerts do
     # for unattended operation these must always reach the operator.
     factory_paused: :critical,
     approval_escalation_failed: :critical,
+    # No retry will fix this one: a missing CLI binary or bad credentials.
+    # It needs an operator to touch the box, and until one does, every op
+    # in the mission will hit the same wall — so it outranks a single
+    # failed mission.
+    fatal_failure: :critical,
     quest_failed: :high,
     sector_baseline_broken: :high,
     approval_timed_out: :high,

@@ -2239,7 +2239,12 @@ defmodule GiTF.Ghost.Worker do
     record_costs_from_events(state)
 
     update_ghost_status(state.ghost_id, GhostStatus.crashed())
-    GiTF.Ops.fail(state.op_id)
+
+    # fail/2, not fail/1: the raw reason is classified and stored on the op
+    # here, because this is the last point at which it exists. Major's retry
+    # decision reads that stored class — it cannot re-derive it from the
+    # formatted link message below.
+    GiTF.Ops.fail(state.op_id, reason)
 
     mission_id =
       case GiTF.Ops.get(state.op_id) do

@@ -456,6 +456,10 @@ defmodule GiTF.Major do
   end
 
   def handle_info({:delayed_retry, op_id, feedback}, state) do
+    handle_info({:delayed_retry, op_id, feedback, :capability}, state)
+  end
+
+  def handle_info({:delayed_retry, op_id, feedback, charge}, state) do
     Logger.info("Executing delayed retry for op #{op_id}")
     state = %{state | retry_pending: MapSet.delete(state.retry_pending, op_id)}
 
@@ -464,6 +468,14 @@ defmodule GiTF.Major do
       {:noreply, state}
     else
       case GiTF.Ops.get(op_id) do
+        # A provider fault goes straight to a plain re-run. Intel.Retry
+        # picks a NEW STRATEGY for the op, which is the right response to
+        # work that came back wrong and the wrong response to a 503 — the
+        # plan was fine, the provider was not. Skipping it also saves an
+        # LLM call per outage blip.
+        {:ok, %{status: "failed"}} when charge == :provider ->
+          {:noreply, simple_retry(op_id, feedback, state, charge: :provider)}
+
         {:ok, %{status: "failed"}} ->
           case try_intelligent_retry(op_id, feedback, state) do
             {:ok, _} -> {:noreply, state}
@@ -1069,36 +1081,123 @@ defmodule GiTF.Major do
     end
   end
 
+  # Not every failure deserves the same answer. `GiTF.Ops.fail/2` stamped
+  # the op with a `FailureClass` at the moment the raw provider text was
+  # still in hand; this is where that classification is finally spent:
+  #
+  #   :fatal          — no retry at all. Bad credentials and a missing CLI
+  #                     binary do not heal between attempts, and retrying
+  #                     spends the op's budget (and 40 minutes of backoff)
+  #                     against a wall — once per op, across the whole DAG.
+  #   :provider_error — retry, charged to the provider budget. A 503 says
+  #                     nothing about whether the op is doable.
+  #   everything else — retry, charged to the capability budget, exactly
+  #                     as before.
   defp maybe_retry_job_inner(op_id, feedback, state) do
-    attempts =
+    op =
       case GiTF.Ops.get(op_id) do
-        {:ok, op} -> Map.get(op, :retry_count, 0)
-        _ -> 0
+        {:ok, op} -> op
+        _ -> %{}
       end
 
-    if attempts < state.max_retries do
+    class = stored_failure_class(op)
+
+    cond do
+      not GiTF.Ghost.FailureClass.retryable?(class) ->
+        abandon_fatal(op_id, op, state)
+
+      GiTF.Ghost.FailureClass.provider_fault?(class) ->
+        schedule_retry(op_id, feedback, state,
+          charge: :provider,
+          attempts: GiTF.Ops.provider_attempts(op),
+          max: GiTF.Ops.max_provider_retries(),
+          label: "provider fault"
+        )
+
+      true ->
+        schedule_retry(op_id, feedback, state,
+          charge: :capability,
+          attempts: GiTF.Ops.capability_attempts(op),
+          max: state.max_retries,
+          label: "attempt"
+        )
+    end
+  end
+
+  # Only a class written by `Ops.fail/2` is trusted. When it is absent —
+  # an op failed through `fail/1`, or predates the field — the answer is
+  # `:unknown`, which retries exactly as the factory always did. The
+  # feedback body is deliberately NOT sniffed as a fallback: several
+  # `maybe_retry_job/2` call sites carry bodies that are not failure
+  # reasons at all, and a false `:fatal` there would cost an op its
+  # retries.
+  defp stored_failure_class(op) do
+    case Map.get(op, :failure_classification) do
+      nil -> :unknown
+      class when is_atom(class) -> class
+      class when is_binary(class) -> String.to_existing_atom(class)
+    end
+  rescue
+    ArgumentError -> :unknown
+  end
+
+  defp schedule_retry(op_id, feedback, state, opts) do
+    attempts = Keyword.fetch!(opts, :attempts)
+    max = Keyword.fetch!(opts, :max)
+    charge = Keyword.fetch!(opts, :charge)
+    label = Keyword.fetch!(opts, :label)
+
+    if attempts < max do
       delay_ms = retry_backoff_ms(attempts)
 
       Logger.info(
-        "Scheduling retry for op #{op_id} in #{div(delay_ms, 1000)}s (attempt #{attempts + 1}/#{state.max_retries})"
+        "Scheduling retry for op #{op_id} in #{div(delay_ms, 1000)}s " <>
+          "(#{label} #{attempts + 1}/#{max})"
       )
 
-      Process.send_after(self(), {:delayed_retry, op_id, feedback}, delay_ms)
+      Process.send_after(self(), {:delayed_retry, op_id, feedback, charge}, delay_ms)
       %{state | retry_pending: MapSet.put(state.retry_pending, op_id)}
     else
-      Logger.warning("Job #{op_id} exhausted #{state.max_retries} retries")
+      Logger.warning("Job #{op_id} exhausted #{max} retries (#{label})")
 
       GiTF.Observability.Alerts.dispatch_webhook(
         :retries_exhausted,
-        "Op #{op_id} exhausted #{state.max_retries} retries and will not be reattempted",
+        "Op #{op_id} exhausted #{max} retries (#{label}) and will not be reattempted",
         dedup_key: "retries_exhausted:#{op_id}"
       )
 
-      GiTF.Ops.unblock_dependents(op_id)
-      unblock_scout_parent(op_id)
-      best_effort_update_quest_status(op_id)
-      state
+      abandon_op(op_id, state)
     end
+  end
+
+  # A fatal failure is an OPERATOR problem, not a mission problem: the box
+  # is missing a binary, or a key is wrong. The op is abandoned without
+  # retrying, but the mission is NOT sealed — it proceeds through the
+  # normal failed-op path (fallback plan and all). That bounds the cost of
+  # a misclassification to one op's retries instead of a whole run.
+  defp abandon_fatal(op_id, op, state) do
+    reason = Map.get(op, :last_failure_reason) || "unknown"
+
+    Logger.error(
+      "Job #{op_id} failed fatally — not retrying. No number of attempts " <>
+        "fixes this: #{String.slice(to_string(reason), 0, 300)}"
+    )
+
+    GiTF.Observability.Alerts.dispatch_webhook(
+      :fatal_failure,
+      "Op #{op_id} hit a fatal error and will NOT be retried — this needs an " <>
+        "operator, not another attempt: #{String.slice(to_string(reason), 0, 300)}",
+      dedup_key: "fatal_failure:#{op_id}"
+    )
+
+    abandon_op(op_id, state)
+  end
+
+  defp abandon_op(op_id, state) do
+    GiTF.Ops.unblock_dependents(op_id)
+    unblock_scout_parent(op_id)
+    best_effort_update_quest_status(op_id)
+    state
   end
 
   # Exponential backoff: 30s * 4^attempt with jitter, capped at 10min
@@ -1138,8 +1237,7 @@ defmodule GiTF.Major do
     {mission_id, retry_count, classified} =
       case GiTF.Ops.get(op_id) do
         {:ok, op} ->
-          {op[:mission_id], Map.get(op, :retry_count, 0),
-           Map.get(op, :last_failure_reason) || Map.get(op, :failure_classification)}
+          {op[:mission_id], Map.get(op, :retry_count, 0), Map.get(op, :failure_classification)}
 
         _ ->
           {nil, nil, nil}
@@ -1158,8 +1256,8 @@ defmodule GiTF.Major do
     )
   end
 
-  defp simple_retry(op_id, feedback, state) do
-    case GiTF.Ops.reset(op_id, feedback) do
+  defp simple_retry(op_id, feedback, state, opts \\ []) do
+    case GiTF.Ops.reset(op_id, feedback, Keyword.take(opts, [:charge])) do
       {:ok, op} ->
         case check_quest_budget(op.mission_id) do
           :ok ->
