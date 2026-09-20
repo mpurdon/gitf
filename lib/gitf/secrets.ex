@@ -225,40 +225,93 @@ defmodule GiTF.Secrets do
       read_value(body)
     else
       {:error, :unavailable} ->
-        # No credentials at all. Normal off EC2; not worth a log line per
-        # secret, and the negative cache keeps it from repeating.
+        # No credentials at all. Normal off EC2; not worth a line per secret,
+        # and the negative cache stops it repeating.
+        Logger.debug("secret #{@prefix}#{path}: no AWS credentials on this host")
         :error
 
-      {:ok, %{status: 400}} ->
-        # ParameterNotFound arrives as a 400. Expected for any secret this
-        # deployment does not use.
+      {:ok, %{status: 400} = resp} ->
+        # ParameterNotFound arrives as a 400 and is entirely expected for a
+        # secret this deployment does not use. Any OTHER 400 is a real fault
+        # and must not hide behind it.
+        if not_found?(resp) do
+          Logger.debug("secret #{@prefix}#{path}: no such parameter")
+        else
+          warn(path, resp)
+        end
+
         :error
 
-      other ->
-        Logger.debug("secret lookup #{@prefix}#{path} failed: #{inspect(other, limit: 5)}")
+      {:ok, resp} ->
+        # 403 is the one that cost an afternoon: a SigV4 signature computed
+        # over different bytes or a different header set than were sent looks
+        # exactly like a missing secret from the outside. `absent` in
+        # health_check with nothing in the journal is not a diagnosis, so
+        # anything unexpected is a warning, loudly, with the status.
+        warn(path, resp)
+        :error
+
+      {:error, reason} ->
+        Logger.warning("secret #{@prefix}#{path}: SSM unreachable — #{inspect(reason, limit: 5)}")
         :error
     end
   rescue
     error ->
-      Logger.debug("secret lookup #{@prefix}#{path} raised: #{Exception.message(error)}")
+      Logger.warning("secret #{@prefix}#{path}: lookup raised — #{Exception.message(error)}")
       :error
   end
 
+  defp warn(path, %{status: status, body: body}) do
+    Logger.warning(
+      "secret #{@prefix}#{path}: SSM returned #{status} — #{error_code(body) || inspect(body, limit: 3)}. " <>
+        "Falling back to absent; check the instance role's ssm:GetParameter and kms:Decrypt."
+    )
+  end
+
+  defp not_found?(%{body: body}), do: error_code(body) == "ParameterNotFound"
+
+  defp error_code(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} -> error_code(decoded)
+      _ -> nil
+    end
+  end
+
+  defp error_code(%{"__type" => type}) when is_binary(type),
+    do: type |> String.split("#") |> List.last()
+
+  defp error_code(_), do: nil
+
   defp get_parameter(creds, region, path) do
     # The JSON protocol, not the query API: one POST, no URL encoding of a
-    # path that contains slashes.
+    # path full of slashes.
+    #
+    # Built the way GiTF.Runtime.BedrockDirect builds its signed request, and
+    # for the reason its comment gives: SigV4 signs the body hash and the
+    # exact header set, so anything that changes either between signing and
+    # sending invalidates the signature. Two specifics, both of which I got
+    # wrong first time and which fail as a silent 403:
+    #
+    #   * `body:` with a pre-serialized string, not `json:` — the signer must
+    #     hash the same bytes that go on the wire.
+    #   * `compressed: false` to suppress Req's accept-encoding step, so the
+    #     header set is deterministic.
+    body = Jason.encode!(%{"Name" => @prefix <> path, "WithDecryption" => true})
+
     Req.new(
       url: "https://ssm.#{region}.amazonaws.com/",
-      headers: [
-        {"content-type", "application/x-amz-json-1.1"},
-        {"x-amz-target", "AmazonSSM.GetParameter"}
-      ],
-      json: %{"Name" => @prefix <> path, "WithDecryption" => true},
+      method: :post,
+      body: body,
+      headers: %{
+        "content-type" => "application/x-amz-json-1.1",
+        "x-amz-target" => "AmazonSSM.GetParameter"
+      },
       receive_timeout: @timeout_ms,
+      compressed: false,
       retry: false
     )
     |> AWSAuth.Req.attach(credentials: creds, service: "ssm", region: region)
-    |> Req.post()
+    |> Req.request()
   end
 
   defp read_value(body) when is_binary(body) do
