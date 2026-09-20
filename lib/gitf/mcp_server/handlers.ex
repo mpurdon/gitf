@@ -92,11 +92,22 @@ defmodule GiTF.MCPServer.Handlers do
     # predate failure_class and report as unclassified.
     week_ago = DateTime.add(DateTime.utc_now(), -7, :day)
 
+    failures_7d = GiTF.EventStore.list(type: :ghost_failed, since: week_ago, limit: 1_000)
+
     reliability =
-      GiTF.EventStore.list(type: :ghost_failed, since: week_ago, limit: 1_000)
-      |> Enum.frequencies_by(fn event ->
+      Enum.frequencies_by(failures_7d, fn event ->
         to_string(get_in(event, [:data, :failure_class]) || "unclassified")
       end)
+
+    # What the failure judge said, which is a different question from the
+    # class: `factory_defect` and `bad_work` are never promoted into the
+    # taxonomy, so they appear here and nowhere else. Empty when the judge is
+    # off, which is the default — an empty map means "not asked", not "none".
+    judged =
+      failures_7d
+      |> Enum.map(&get_in(&1, [:data, :failure_verdict]))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.frequencies_by(&to_string/1)
 
     result = %{
       missions: %{
@@ -119,7 +130,8 @@ defmodule GiTF.MCPServer.Handlers do
       version: GiTF.version(),
       stuck_missions: stuck_count,
       recent_failures: recent_failures,
-      reliability_7d: reliability
+      reliability_7d: reliability,
+      judged_7d: judged
     }
 
     {:ok, json_text(result)}

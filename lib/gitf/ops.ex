@@ -259,8 +259,21 @@ defmodule GiTF.Ops do
   def fail(op_id, nil), do: transition(op_id, :fail)
 
   def fail(op_id, reason) do
-    class = GiTF.Ghost.FailureClass.classify(reason)
+    matched = GiTF.Ghost.FailureClass.classify(reason)
     text = if is_binary(reason), do: reason, else: inspect(reason)
+
+    # The judge runs BEFORE the Archive write, not inside it: an update
+    # function holds the collection's writer, and a network call in there
+    # would stall every other op's write behind a third party. It also runs
+    # only for `:unknown`, and only when switched on, so the common path is
+    # unchanged and costs nothing.
+    #
+    # The blocking is affordable because fail/2 has exactly one caller —
+    # GiTF.Ghost.Worker, in a process that is already dying. Calling it from
+    # the Major would put a third party's latency in front of the
+    # orchestrator, which is why nothing else calls it.
+    judgement = GiTF.Ghost.FailureClass.Judge.refine(matched, reason)
+    class = promoted_class(judgement, matched)
 
     Archive.update(:ops, op_id, fn op ->
       case validate_transition(op.status, :fail) do
@@ -271,13 +284,23 @@ defmodule GiTF.Ops do
            op
            |> Map.put(:status, next_status)
            |> Map.put(:failure_classification, class)
-           |> Map.put(:last_failure_reason, String.slice(text, 0, 2000))}
+           |> Map.put(:last_failure_reason, String.slice(text, 0, 2000))
+           |> put_judgement(judgement)}
 
         {:error, _} = err ->
           err
       end
     end)
   end
+
+  # The judgement is recorded whether or not it was promoted — that record is
+  # the whole point of running it as a pilot, since it is the only way to ask
+  # later whether the calibration held.
+  defp put_judgement(op, {:ok, judgement}), do: Map.put(op, :failure_judgement, judgement)
+  defp put_judgement(op, :skip), do: op
+
+  defp promoted_class({:ok, %{class: class}}, _matched) when not is_nil(class), do: class
+  defp promoted_class(_judgement, matched), do: matched
 
   @doc "Blocks a op. Transitions: pending | running -> blocked."
   @spec block(String.t()) :: {:ok, map()} | {:error, atom()}

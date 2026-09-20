@@ -2246,13 +2246,20 @@ defmodule GiTF.Ghost.Worker do
     # formatted link message below.
     GiTF.Ops.fail(state.op_id, reason)
 
-    mission_id =
+    # Read the class back off the op rather than classifying again. fail/2
+    # has already done it, and since the judge can promote a class there, a
+    # second local classify/1 would disagree with the stored one — and it is
+    # the stored one the Major acts on. The reliability report is fed from
+    # this telemetry, so re-deriving it here is how a promoted class would
+    # silently fail to appear in any number the operator sees.
+    {mission_id, failure_class, judgement} =
       case GiTF.Ops.get(state.op_id) do
-        {:ok, %{mission_id: mid}} -> mid
-        _ -> nil
-      end
+        {:ok, op} ->
+          {op[:mission_id], Map.get(op, :failure_classification), Map.get(op, :failure_judgement)}
 
-    failure_class = GiTF.Ghost.FailureClass.classify(reason)
+        _ ->
+          {nil, GiTF.Ghost.FailureClass.classify(reason), nil}
+      end
 
     GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
       labels: %{status: :failed, sector_id: state.sector_id},
@@ -2265,7 +2272,12 @@ defmodule GiTF.Ghost.Worker do
       op_id: state.op_id,
       mission_id: mission_id,
       error: reason,
-      failure_class: failure_class
+      failure_class: failure_class,
+      # The judge's own word, carried separately from the class it fed. This
+      # is where `factory_defect` and `bad_work` surface: they are never
+      # promoted into the taxonomy, so the event is the only place the
+      # question "how many of these were our own bug?" can be answered.
+      failure_verdict: judgement && judgement.verdict
     })
 
     GiTF.Progress.clear(state.ghost_id)

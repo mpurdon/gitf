@@ -195,6 +195,25 @@ config :gitf, :autonomy_alert_threshold_stddev, 2
 config :gitf, :workflow_dsl_enabled, true
 config :gitf, :workflow_inference_enabled, false
 
+# System One (TypeSafe's Jev): calibrated typed decisions, used where the
+# factory needs a choice from a fixed set rather than prose. Off by default
+# and deliberately NOT reachable from GiTF.Config.Settable — it is a metered
+# third-party API, and starting a spend line is not a thing a chat message
+# should be able to do. The key comes from the environment only.
+config :gitf, :system_one_enabled, false
+config :gitf, :system_one_model, "jev-latest"
+# Short on purpose: every caller has a conservative fallback and runs on a
+# path that has already failed. See GiTF.SystemOne.
+config :gitf, :system_one_timeout_ms, 2_000
+
+# The first System One consumer: a second opinion on failures the signature
+# matcher left as :unknown. Advisory unless confident — and `:fatal` needs
+# more confidence than the rest, because promoting it wrongly abandons an op
+# with its retries unspent. See GiTF.Ghost.FailureClass.Judge.
+config :gitf, :failure_judge_enabled, false
+config :gitf, :failure_judge_threshold, 0.75
+config :gitf, :failure_judge_fatal_threshold, 0.90
+
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:remission_id]
