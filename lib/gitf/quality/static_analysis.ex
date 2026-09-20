@@ -1,6 +1,14 @@
 defmodule GiTF.Quality.StaticAnalysis do
   @moduledoc """
   Runs static analysis tools on ghost worktrees.
+
+  `available: false` means no analyser actually ran — either the language has
+  no configured tool here, or the tool is missing, crashed, or timed out.
+  Empty issues from an analyser that never ran must NOT read as clean: `[]`
+  scores 100, so an unrecognised language used to score a perfect static
+  gate forever. This is the same defect the 2026-08-28 BEAM audit fixed in
+  `GiTF.Quality.Security`; the static path was missed. Callers treat
+  unavailable as inconclusive, never as clean.
   """
 
   @doc """
@@ -14,7 +22,9 @@ defmodule GiTF.Quality.StaticAnalysis do
       :typescript -> run_eslint(shell_path)
       :rust -> run_clippy(shell_path)
       :python -> run_pylint(shell_path)
-      _ -> {:ok, %{issues: [], score: 100, tool: "none", available: true}}
+      # No analyser for this language. The score is a placeholder, not a
+      # verdict — `available: false` is what stops it being read as a pass.
+      _ -> {:ok, %{issues: [], score: 100, tool: "none", available: false}}
     end
   end
 
@@ -106,10 +116,14 @@ defmodule GiTF.Quality.StaticAnalysis do
     case Jason.decode(output) do
       {:ok, %{"issues" => issues}} ->
         parsed = Enum.map(issues, &parse_credo_issue/1)
-        {:ok, %{issues: parsed, score: calculate_score(parsed), tool: "credo"}}
+        {:ok, %{issues: parsed, score: calculate_score(parsed), tool: "credo", available: true}}
 
       _ ->
-        {:ok, %{issues: [], score: 100, tool: "credo"}}
+        # Unparseable output is not a clean run. A credo that is absent, that
+        # failed to compile the project, or that printed a mix error produces
+        # exactly this — and it used to score 100 with the availability flag
+        # unset, which `Quality.analyze_static/3` defaults to true.
+        {:ok, %{issues: [], score: 100, tool: "credo", available: false}}
     end
   end
 
@@ -121,32 +135,40 @@ defmodule GiTF.Quality.StaticAnalysis do
             Enum.map(file["messages"] || [], &parse_eslint_issue(&1, file["filePath"]))
           end)
 
-        {:ok, %{issues: issues, score: calculate_score(issues), tool: "eslint"}}
+        {:ok, %{issues: issues, score: calculate_score(issues), tool: "eslint", available: true}}
 
       _ ->
-        {:ok, %{issues: [], score: 100, tool: "eslint"}}
+        {:ok, %{issues: [], score: 100, tool: "eslint", available: false}}
     end
   end
 
   defp parse_clippy(output) do
+    lines = String.split(output, "\n")
+
     issues =
-      output
-      |> String.split("\n")
+      lines
       |> Enum.filter(&String.contains?(&1, "\"reason\":\"compiler-message\""))
       |> Enum.map(&parse_clippy_line/1)
       |> Enum.reject(&is_nil/1)
 
-    {:ok, %{issues: issues, score: calculate_score(issues), tool: "clippy"}}
+    # `cargo clippy --message-format json` emits a JSON line per event even on
+    # a clean crate, so *no* JSON at all means cargo never really ran — a
+    # non-crate directory or a build failure, whose non-zero exit this call
+    # deliberately ignores. Zero issues then means "nothing measured", not
+    # "nothing wrong".
+    ran? = Enum.any?(lines, &String.contains?(&1, "\"reason\":"))
+
+    {:ok, %{issues: issues, score: calculate_score(issues), tool: "clippy", available: ran?}}
   end
 
   defp parse_pylint(output) do
     case Jason.decode(output) do
       {:ok, issues} when is_list(issues) ->
         parsed = Enum.map(issues, &parse_pylint_issue/1)
-        {:ok, %{issues: parsed, score: calculate_score(parsed), tool: "pylint"}}
+        {:ok, %{issues: parsed, score: calculate_score(parsed), tool: "pylint", available: true}}
 
       _ ->
-        {:ok, %{issues: [], score: 100, tool: "pylint"}}
+        {:ok, %{issues: [], score: 100, tool: "pylint", available: false}}
     end
   end
 

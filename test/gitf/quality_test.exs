@@ -122,6 +122,29 @@ defmodule GiTF.QualityTest do
     end
   end
 
+  # Builds a quality report that actually ran. These tests used to call
+  # `analyze_static(:unknown)` for a deterministic 100 — which, since the
+  # 2026-09-19 fix, means "no analyser ran" and is excluded from the
+  # composite. Constructing the report directly keeps them deterministic
+  # without depending on whether credo or eslint exist on the machine.
+  defp measured_report(op_id, type, score) do
+    {:ok, r} =
+      GiTF.Archive.insert(:quality_reports, %{
+        id: GiTF.ID.generate(:qr),
+        op_id: op_id,
+        analysis_type: type,
+        score: score,
+        issues: [],
+        tool: "test",
+        tool_available: true,
+        recommendations: [],
+        inserted_at: DateTime.utc_now(),
+        updated_at: DateTime.utc_now()
+      })
+
+    r
+  end
+
   describe "calculate_composite_score/1" do
     test "returns nil for op with no reports" do
       score = Quality.calculate_composite_score("nonexistent")
@@ -131,10 +154,19 @@ defmodule GiTF.QualityTest do
     test "returns static analysis score" do
       op_id = "op-score"
 
-      {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
+      measured_report(op_id, "static", 100)
 
       score = Quality.calculate_composite_score(op_id)
       assert score == 100
+    end
+
+    test "an analyser that never ran contributes nothing" do
+      op_id = "op-score-unavailable"
+
+      # :unknown has no configured analyser, so nothing measured this op.
+      {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
+
+      assert Quality.calculate_composite_score(op_id) == nil
     end
 
     test "returns weighted composite with both static and security" do
@@ -168,9 +200,18 @@ defmodule GiTF.QualityTest do
     test "passes when score meets threshold" do
       op_id = "op-gate-pass"
 
-      {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
+      measured_report(op_id, "static", 100)
 
       assert {:ok, 100} = Quality.check_quality_gate(op_id, 70)
+    end
+
+    test "an op nothing could analyse has no reports to gate on" do
+      op_id = "op-gate-unavailable"
+
+      {:ok, _} = Quality.analyze_static(op_id, "/tmp", :unknown)
+
+      # Not a pass and not a fail — there is nothing to judge.
+      assert {:error, :no_reports} = Quality.check_quality_gate(op_id, 70)
     end
 
     test "fails when no reports exist" do
@@ -224,7 +265,7 @@ defmodule GiTF.QualityTest do
         }
 
         Archive.insert(:ops, op)
-        {:ok, _} = Quality.analyze_static(op.id, "/tmp", :unknown)
+        measured_report(op.id, "static", 100)
       end
 
       stats = Quality.get_quality_stats(sector_id)
@@ -233,6 +274,27 @@ defmodule GiTF.QualityTest do
       assert stats.average == 100.0
       assert stats.min == 100
       assert stats.max == 100
+    end
+
+    test "ops nothing could analyse are not counted as perfect" do
+      sector_id = "sector-stats-unavailable"
+
+      for i <- 1..3 do
+        op = %{
+          id: "op-unmeasured-#{i}",
+          sector_id: sector_id,
+          status: "done",
+          updated_at: DateTime.utc_now()
+        }
+
+        Archive.insert(:ops, op)
+        {:ok, _} = Quality.analyze_static(op.id, "/tmp", :unknown)
+      end
+
+      # Before the 2026-09-19 fix these three would have reported a flawless
+      # sector average of 100 on the strength of an analyser that never ran.
+      stats = Quality.get_quality_stats(sector_id)
+      assert stats.total_jobs == 0
     end
   end
 end

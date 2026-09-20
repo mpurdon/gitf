@@ -154,7 +154,16 @@ defmodule GiTF.Quality do
   Returns score 0-100 based on all available reports.
   """
   def calculate_composite_score(op_id) do
-    reports = get_reports(op_id)
+    # A report whose tool never ran is dropped rather than averaged in. Its
+    # score is 100 by construction (no issues found, because nothing looked),
+    # so folding it into the weighted mean fabricates a verdict — a missing
+    # credo would have contributed 50% of a perfect static score. Dropping it
+    # means the composite reflects only what was actually measured, and an op
+    # where nothing ran scores `nil` ("not measured") rather than 100.
+    reports =
+      op_id
+      |> get_reports()
+      |> Enum.reject(&(Map.get(&1, :tool_available, true) == false))
 
     if Enum.empty?(reports) do
       nil

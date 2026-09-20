@@ -399,6 +399,18 @@ defmodule GiTF.Audit do
 
   defp quality_static(op_id, worktree_path, language) do
     case Quality.analyze_static(op_id, worktree_path, language) do
+      {:ok, %{tool_available: false} = report} ->
+        # No analyser ran — an unconfigured language, or a missing tool. Same
+        # reasoning as the security gate below: a numeric score from something
+        # that never executed is a fabricated verdict, so record nil.
+        Logger.warning("Static analysis unavailable for op #{op_id} — recording inconclusive")
+
+        %{
+          static_score: nil,
+          static_issues: length(report.issues),
+          static_inconclusive: true
+        }
+
       {:ok, report} ->
         %{static_score: report.score, static_issues: length(report.issues)}
 
