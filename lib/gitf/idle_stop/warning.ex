@@ -14,7 +14,9 @@ defmodule GiTF.IdleStop.Warning do
   construction rather than by two clocks staying in step.
 
   One warning per idle episode: the dedup key is `idle_since`, so a box
-  that stays quiet re-warns only when a new quiet begins. A hold set after
+  that stays quiet re-warns only when a new quiet begins — and the window
+  spans a whole descent, which is what actually makes that true (see
+  `dedup_window_seconds/0`; the key alone was not enough). A hold set after
   the warning moves `projected_stop_at` out of the window and the next
   tick simply finds nothing imminent.
   """

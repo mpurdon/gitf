@@ -286,7 +286,7 @@ defmodule GiTF.Cabinet.Discord.Render do
         _ -> ""
       end
 
-    "Idle since #{short_time(d[:idle_since])}. Powers off #{short_time(d[:stop_at], "R")}." <>
+    "Idle since #{short_time(d[:idle_since], "t")}. Powers off #{short_time(d[:stop_at], "R")}." <>
       held
   end
 
@@ -440,8 +440,9 @@ defmodule GiTF.Cabinet.Discord.Render do
   # `:t` is a wall-clock time, `:R` is relative. Neither works in an embed
   # title or footer — Discord only expands them in the description and in
   # fields — so nothing that needs a live time may live in a title.
-  defp short_time(iso, style \\ "t")
-
+  # The `:R` form carries its own preposition ("in 5 minutes"), so its
+  # fallback has to supply the "at" that the sentence around it does not.
+  defp short_time(nil, "R"), do: "at an unknown time"
   defp short_time(nil, _style), do: "an unknown time"
 
   defp short_time(iso, style) when is_binary(iso) do

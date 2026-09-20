@@ -860,7 +860,10 @@ defmodule GiTF.Dashboard.Layouts do
                   headers: { "content-type": "application/json", "x-csrf-token": csrf },
                   body: JSON.stringify({ minutes: 60 })
                 });
-                bannerText.textContent = res.ok ? "Awake for another hour" : "Could not hold the box";
+                // "at least", not "another": IdleStop.hold/2 replaces rather than
+                // accumulates, and keeps a longer existing hold — so a tap made
+                // while four hours are already held buys an hour of nothing.
+                bannerText.textContent = res.ok ? "Awake for at least an hour" : "Could not hold the box";
                 setTimeout(() => { banner.hidden = true; holdBtn.disabled = false; }, 4000);
               } catch (_e) { holdBtn.disabled = false; }
             });

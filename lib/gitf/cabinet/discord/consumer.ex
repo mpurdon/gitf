@@ -58,13 +58,13 @@ defmodule GiTF.Cabinet.Discord.Consumer do
       values = interaction.data.values || []
       actor = "discord:#{username}"
 
-      {outcome, action} =
+      {line, opts} =
         case Actions.parse(custom_id, values) do
-          {:ok, action} -> {Actions.perform(action, actor), action}
-          {:error, :unknown_action} -> {{:error, "unknown action #{custom_id}"}, nil}
+          {:ok, action} -> resolve(action, actor)
+          {:error, :unknown_action} -> {"could not: unknown action #{custom_id}", []}
         end
 
-      settle(interaction, outcome, action)
+      settle(interaction, line, opts)
     else
       Logger.info("Cabinet Discord: ignored a tap from non-operator #{user}")
 
@@ -261,24 +261,29 @@ defmodule GiTF.Cabinet.Discord.Consumer do
 
   # -- internals ---------------------------------------------------------------
 
-  defp settle(interaction, outcome, action) do
-    # No time in this line. It goes in an embed footer, which Discord renders
-    # inches from its own timestamp of the same moment — and that timestamp is
-    # in the reader's timezone while ours was in UTC, so the message showed
-    # one event as two times in two zones. Render.settled/3 moves the embed
-    # timestamp to now instead.
-    #
-    # No tick or cross glyph either: Discord renders U+2713 as an emoji and
-    # swallows the space after it, so "✓ kept awake" arrived as "✔kept awake".
-    # The words carry it.
-    {line, opts} =
-      case outcome do
-        {:ok, text} -> {text, Actions.resolved(action)}
-        # A failed act changes nothing, so the original heading and body are
-        # still the truth and must not be rewritten.
-        {:error, reason} -> {"could not: #{describe(reason)}", []}
-      end
+  # Performs the act and says how the message should read afterwards: the
+  # line written under it, and any rewrite of the heading and body the act
+  # just made false.
+  #
+  # No time in that line. It goes in an embed footer, which Discord renders
+  # inches from its own timestamp of the same moment — and that timestamp is
+  # in the reader's timezone while ours was in UTC, so the message showed one
+  # event as two times in two zones. `Render.settled/3` moves the embed
+  # timestamp to now instead.
+  #
+  # No tick or cross glyph either: Discord renders U+2713 as an emoji and
+  # swallows the space after it, so "✓ kept awake" arrived as "✔kept awake".
+  # The words carry it.
+  defp resolve(action, actor) do
+    case Actions.perform(action, actor) do
+      {:ok, text} -> {text, Actions.resolved(action)}
+      # A failed act changes nothing, so the original heading and body are
+      # still the truth and must not be rewritten.
+      {:error, reason} -> {"could not: #{describe(reason)}", []}
+    end
+  end
 
+  defp settle(interaction, line, opts) do
     message = interaction.message
     settled = Render.settled(message, line, opts)
 

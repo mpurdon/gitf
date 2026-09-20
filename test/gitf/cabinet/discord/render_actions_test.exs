@@ -289,8 +289,10 @@ defmodule GiTF.Cabinet.Discord.RenderActionsTest do
 
   test "resolved/1 only rewrites the acts that make the wording false" do
     assert Actions.resolved({:hold, "ha", 60})[:title] == "Staying awake"
-    assert Actions.resolved({:sleep, "ha"})[:title] == "Asleep"
-    assert Actions.resolved({:wake, "ha"})[:title] == "Awake"
+    # Both name the act, not the state: EC2 takes 30-90s to stop or start, so
+    # "Asleep" would be its own small lie a minute before it came true.
+    assert Actions.resolved({:sleep, "ha"})[:title] == "Powering off"
+    assert Actions.resolved({:wake, "ha"})[:title] == "Waking"
 
     # An approval's body is the mission goal — still true, still worth
     # reading, so nothing is replaced.

@@ -80,23 +80,25 @@ defmodule GiTF.Cabinet.Discord.Actions do
   def resolved({:hold, _slug, minutes}) do
     [
       title: "Staying awake",
-      # "for", not "for another": a hold replaces rather than accumulates,
-      # so two taps give the later of the two deadlines and not their sum.
-      # `GiTF.IdleStop.hold/2` refuses to shorten an existing hold, which is
-      # what makes the order of the taps stop mattering.
-      # "at least", because `IdleStop.hold/2` keeps a longer existing hold
-      # rather than replacing it. Naming the requested duration outright
-      # would be false in exactly the case that guard exists for — asking
-      # for an hour while four are already held.
+      # "at least", never a flat promise of the asked-for duration, and never
+      # "for another": `GiTF.IdleStop.hold/2` replaces rather than accumulates
+      # and refuses to shorten, so two taps give the later of the two
+      # deadlines. Naming the requested duration outright would be false in
+      # exactly the case that guard exists for — asking for an hour while
+      # four are already held.
       description: "Awake for at least #{duration(minutes)}. The idle timer restarts after that."
     ]
   end
 
+  # Both name the act, not the state. `Fleet.stop/1` and `Fleet.wake/1` return
+  # as soon as EC2 accepts the call, and the instance spends the next 30-90s
+  # stopping or pending — so "Asleep" here would be the same kind of untruth
+  # this function exists to delete, just a minute earlier.
   def resolved({:sleep, _slug}),
-    do: [title: "Asleep", description: "Powered off. Waking it takes about a minute."]
+    do: [title: "Powering off", description: "Going down now. Waking it takes about a minute."]
 
   def resolved({:wake, _slug}),
-    do: [title: "Awake", description: "Powered on and accepting work."]
+    do: [title: "Waking", description: "Powering on — it accepts work in about a minute."]
 
   # Everything else keeps its body: the question, the goal, the failure
   # reason. Those are the record of what was decided, and the footer already
@@ -105,13 +107,8 @@ defmodule GiTF.Cabinet.Discord.Actions do
 
   defp duration(minutes) when minutes < 60, do: "#{minutes} minutes"
   defp duration(60), do: "an hour"
-
-  defp duration(minutes) do
-    case {div(minutes, 60), rem(minutes, 60)} do
-      {h, 0} -> "#{h} hours"
-      {h, m} -> "#{h}h #{m}m"
-    end
-  end
+  defp duration(minutes) when rem(minutes, 60) == 0, do: "#{div(minutes, 60)} hours"
+  defp duration(minutes), do: "#{div(minutes, 60)}h #{rem(minutes, 60)}m"
 
   @doc """
   Performs a parsed action as `actor` (`"discord:<username>"`).

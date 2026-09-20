@@ -182,35 +182,46 @@ defmodule GiTF.IdleStop do
   """
   @spec hold(pos_integer(), keyword()) :: {:ok, t()} | {:error, term()}
   def hold(minutes, opts \\ []) when is_integer(minutes) do
-    elapsed =
-      DateTime.diff(DateTime.utc_now(), GiTF.Observability.Activity.last_activity_at(), :minute)
+    # One read of the override answers both questions asked of it below.
+    # Reading it a second time to return it risks finding it expired in
+    # between and answering `{:ok, nil}`, which every caller dereferences.
+    held = active()
 
-    case remaining_minutes() do
-      # A hold NEVER shortens an existing one. `set/3` overwrites, so
-      # without this, tapping "Keep awake 1h" while four hours were already
-      # held would take three of them away — a button labelled "keep awake"
-      # making the box sleep sooner, which nobody taps expecting.
-      #
-      # Extending is not the alternative: the labels say "keep awake 4h",
-      # not "add 4h", so the answer to two taps is the later of the two
-      # deadlines, and the order they are tapped in stops mattering.
+    # A hold NEVER shortens an existing one. `set/3` overwrites, so without
+    # this, tapping "Keep awake 1h" while four hours were already held would
+    # take three of them away — a button labelled "keep awake" making the box
+    # sleep sooner, which nobody taps expecting.
+    #
+    # Extending is not the alternative: the labels say "keep awake 4h", not
+    # "add 4h", so the answer to two taps is the later of the two deadlines,
+    # and the order they are tapped in stops mattering.
+    case minutes_left(held) do
       remaining when remaining >= minutes ->
         Logger.info("Idle-stop hold: #{minutes}m asked, #{remaining}m already held — keeping it")
-        {:ok, active()}
+        {:ok, held}
 
       _ ->
+        # The countdown runs from the last activity, so the threshold has to
+        # cover what has already elapsed plus the ask.
+        elapsed =
+          DateTime.diff(
+            DateTime.utc_now(),
+            GiTF.Observability.Activity.last_activity_at(),
+            :minute
+          )
+
         set(min(max(elapsed, 0) + minutes, @max_idle_minutes), minutes, opts)
     end
   end
 
   @doc "Minutes remaining on the active override, or 0."
   @spec remaining_minutes() :: non_neg_integer()
-  def remaining_minutes do
-    case active() do
-      nil -> 0
-      %{expires_at: exp} -> max(div(DateTime.diff(exp, DateTime.utc_now(), :second), 60), 0)
-    end
-  end
+  def remaining_minutes, do: minutes_left(active())
+
+  defp minutes_left(nil), do: 0
+
+  defp minutes_left(%{expires_at: exp}),
+    do: max(div(DateTime.diff(exp, DateTime.utc_now(), :second), 60), 0)
 
   defp write(override) do
     payload =
