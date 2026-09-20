@@ -127,6 +127,7 @@ defmodule GiTF.Dashboard.Console.Events do
   defp kind_of("ruleset.publish"), do: :policy
   defp kind_of("ruleset.discard"), do: :policy
   defp kind_of("idle_stop_override"), do: :policy
+  defp kind_of("set_config"), do: :policy
   defp kind_of("edit"), do: :registry
   defp kind_of("register"), do: :registry
   defp kind_of("start"), do: :activation
@@ -140,6 +141,7 @@ defmodule GiTF.Dashboard.Console.Events do
   defp humanise("dismiss"), do: "dismissed a queued activation"
   defp humanise("idle_stop_override"), do: "held awake"
   defp humanise("mode"), do: "set the mode of"
+  defp humanise("set_config"), do: "changed configuration"
   defp humanise("ruleset.publish"), do: "published a ruleset for"
   defp humanise("ruleset.discard"), do: "discarded a ruleset draft for"
   defp humanise("start_queued"), do: "started a queued activation"

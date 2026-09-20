@@ -136,9 +136,13 @@ defmodule GiTF.Cabinet.Discord do
       # PRIVILEGED intent: it must be enabled for the application in the
       # Discord developer portal (Bot → Privileged Gateway Intents) or the
       # gateway refuses the identify outright.
+      # :direct_messages carries DMs to the bot, which are treated as the
+      # Cabinet channel (Kayabuki). Unlike :message_content it is not a
+      # privileged intent, so it needs no developer-portal toggle.
       Application.put_env(:nostrum, :gateway_intents, [
         :guilds,
         :guild_messages,
+        :direct_messages,
         :message_content
       ])
 

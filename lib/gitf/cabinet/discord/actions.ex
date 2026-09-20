@@ -173,6 +173,20 @@ defmodule GiTF.Cabinet.Discord.Actions do
     slug |> tool(name, args, actor) |> outcome("#{label(name)} by #{who}")
   end
 
+  # Config lives on the box the change is for: a ministry persona's proposal
+  # carries its slug and is proxied there; Kayabuki's has none and applies to
+  # the Cabinet itself.
+  defp perform_proposed("set_config", args, nil, actor, who) do
+    case GiTF.MCPServer.Handlers.call("set_config", Map.put(args, "confirm", true), actor: actor) do
+      {:ok, _} ->
+        GiTF.Cabinet.Activity.record(actor, "set_config", args["key"] || "", "ok")
+        {:ok, "#{args["key"]} changed by #{who}"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp perform_proposed("start_inbox_entry", args, _slug, actor, _who) do
     perform({:inbox_start, args["id"]}, actor)
   end

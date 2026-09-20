@@ -117,6 +117,7 @@ defmodule GiTF.Cabinet.Discord.Proposal do
   def button("pause_project"), do: {"Pause project", :secondary}
   def button("resume_project"), do: {"Resume project", :primary}
   def button("update_project_roadmap"), do: {"Update roadmap", :primary}
+  def button("set_config"), do: {"Apply change", :primary}
   def button("start_inbox_entry"), do: {"Start", :success}
   def button("dismiss_inbox_entry"), do: {"Drop", :secondary}
   def button(_), do: nil

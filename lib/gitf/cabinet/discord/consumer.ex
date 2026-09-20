@@ -15,7 +15,11 @@ defmodule GiTF.Cabinet.Discord.Consumer do
 
   `MESSAGE_CREATE` is the M2 half: an operator mentioning the bot in a
   channel a persona owns gets an answer from
-  `GiTF.Cabinet.Discord.Agent`. Three gates before a model ever sees the
+  `GiTF.Cabinet.Discord.Agent`. A direct message is treated as the Cabinet
+  channel and answered by Kayabuki — a DM is already addressed to us, so no
+  mention is required, and it carries no guild, so the operator allow-list
+  is the only gate and the guild-owner fallback deliberately does not
+  apply. Three gates before a model ever sees the
   text — the author must not be a bot (or two personas could talk each
   other in a circle), must be an operator, and must have mentioned us;
   and the channel must map to a persona. A message failing any of them is
@@ -88,12 +92,32 @@ defmodule GiTF.Cabinet.Discord.Consumer do
 
   defp answerable?(%{author: %{bot: true}}), do: false
 
+  # A DM is already addressed to us — requiring a mention there would be
+  # absurd — and it has no guild to gate on, so the operator list does the
+  # whole job. See `dm_operator?/1`.
+  defp answerable?(%{author: author, guild_id: nil} = message) do
+    dm_operator?(author && author.id) and presence(message.content) != nil
+  end
+
   defp answerable?(%{author: author, guild_id: guild_id} = message) do
     operator?(author && author.id, guild_id) and mentions_us?(message) and
       presence(message.content) != nil
   end
 
   defp answerable?(_), do: false
+
+  # DMs require an EXPLICITLY configured operator. The guild-owner fallback
+  # that `operator?/2` allows cannot apply here — there is no guild, so there
+  # is no owner to be, and falling back to "anyone" is the whole attack. With
+  # `operators` unset the bot simply does not answer DMs.
+  defp dm_operator?(nil), do: false
+
+  defp dm_operator?(user_id) do
+    case Discord.operators(Discord.config() || %{}) do
+      [] -> false
+      ids -> to_string(user_id) in ids
+    end
+  end
 
   # Only when spoken to. Without this the bot answers every line in a
   # ministry channel, including the operator thinking out loud.
@@ -110,8 +134,9 @@ defmodule GiTF.Cabinet.Discord.Consumer do
 
   defp answer(message) do
     channel_id = message.channel_id
-    ministry = Bot.ministry_for_channel(channel_id)
-    kind = Guild.kind_for_channel(channel_id)
+    dm? = is_nil(message.guild_id)
+    ministry = if dm?, do: nil, else: Bot.ministry_for_channel(channel_id)
+    kind = if dm?, do: "dm", else: Guild.kind_for_channel(channel_id)
     username = (message.author && message.author.username) || "unknown"
     actor = "discord:#{username}"
     text = strip_mentions(message.content)

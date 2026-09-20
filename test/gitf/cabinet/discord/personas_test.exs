@@ -26,6 +26,12 @@ defmodule GiTF.Cabinet.Discord.PersonasTest do
       assert {:ok, %{id: :aramaki, slug: nil}} = Personas.for_channel("plan", nil)
     end
 
+    test "a direct message is answered by Kayabuki" do
+      # A DM has no channel to infer a persona from, and Kayabuki is the only
+      # one scoped to the whole fleet rather than a single Section.
+      assert {:ok, %{id: :kayabuki, slug: nil}} = Personas.for_channel("dm", nil)
+    end
+
     test "an unknown channel gets no persona at all" do
       # Silence is the safe direction: a channel nobody configured is not a
       # place the bot should start answering.
@@ -60,6 +66,19 @@ defmodule GiTF.Cabinet.Discord.PersonasTest do
       for persona <- [Personas.kayabuki(), Personas.aramaki(), Personas.major(@ministry)],
           name <- persona.local_tools do
         assert name in Personas.local_tool_names(), "#{persona.id} declares unknown #{name}"
+      end
+    end
+
+    test "only Kayabuki may change configuration, and only by proposal" do
+      kayabuki = Personas.kayabuki()
+      assert "set_config" in kayabuki.tools
+      assert "show_config" in kayabuki.tools
+      assert Personas.confirms?(kayabuki, "set_config")
+      # Reading what is settable is not a write.
+      refute Personas.confirms?(kayabuki, "show_config")
+
+      for persona <- [Personas.aramaki(), Personas.major(@ministry)] do
+        refute "set_config" in persona.tools, "#{persona.id} can rewrite config"
       end
     end
 

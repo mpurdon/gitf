@@ -790,6 +790,36 @@ defmodule GiTF.MCPServer.Tools do
         }
       },
       %{
+        name: "show_config",
+        description:
+          "Operator-settable configuration: every key that can be changed, its current " <>
+            "effective value, and what it does. Secrets are never included.",
+        inputSchema: %{type: "object", properties: %{}}
+      },
+      %{
+        name: "set_config",
+        description:
+          "Change one operator-settable configuration value. Only keys on the allow-list " <>
+            "can be written — secrets, spend caps, execution mode and anything governing " <>
+            "who may act are refused. Call show_config for the list. Requires confirm.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            key: %{
+              type: "string",
+              description: "Dotted config key, e.g. features.aramaki_enabled"
+            },
+            value: %{
+              description:
+                "New value. Booleans accept true/false; lists accept an array or a " <>
+                  "comma-separated string; maps accept an object of string => string."
+            },
+            confirm: %{type: "boolean", description: "Must be true"}
+          },
+          required: ["key", "value", "confirm"]
+        }
+      },
+      %{
         name: "set_approval_timeout",
         description:
           "[WRITE] Set the auto-approve timeout (hours) for pending approvals — config " <>

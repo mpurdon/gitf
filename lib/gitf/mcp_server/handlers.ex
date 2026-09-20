@@ -1018,6 +1018,70 @@ defmodule GiTF.MCPServer.Handlers do
   # Provider.reload(), the same path the dashboard's Settings page uses.
   # `Provider.put/2` alone would look identical and be silently reverted by
   # the next reload.
+  def call("show_config", _args) do
+    rows =
+      GiTF.Config.Settable.all()
+      |> Enum.map(fn {key, {kind, desc}} ->
+        %{key: key, kind: kind, description: desc, current: current_config_value(key)}
+      end)
+      |> Enum.sort_by(& &1.key)
+
+    {:ok, json_text(%{settable: rows, count: length(rows)})}
+  end
+
+  def call("set_config", %{"key" => key, "value" => value} = args) do
+    with :ok <- require_confirm(args),
+         {:ok, path, coerced} <- GiTF.Config.Settable.validate(key, value) do
+      previous = current_config_value(key)
+
+      case write_settable(path, coerced) do
+        :ok ->
+          # Re-read rather than echo: an env var outranks the file, so the
+          # effective value is the only honest receipt.
+          effective = current_config_value(key)
+          audit_write("config.set", key, %{from: previous, to: effective})
+
+          {:ok,
+           json_text(%{
+             key: key,
+             previous: previous,
+             requested: coerced,
+             effective: effective,
+             note:
+               if(effective != coerced,
+                 do: "An environment variable outranks the config file for this key.",
+                 else: nil
+               )
+           })}
+
+        {:error, {:unreadable_config, cfg_path, _reason}} ->
+          {:error,
+           "Config file #{cfg_path} exists but does not parse — refusing to overwrite it. " <>
+             "Fix the TOML by hand first."}
+
+        {:error, reason} ->
+          {:error, "Could not write config: #{inspect(reason)}"}
+      end
+    else
+      {:error, :secret_shaped} ->
+        {:error,
+         "#{key} looks like a secret. Secrets are never settable here — they live in the " <>
+           "box's env file, rendered from SSM Parameter Store at boot."}
+
+      {:error, :not_settable} ->
+        {:error, "#{key} is not operator-settable. Call show_config for the allow-list."}
+
+      {:error, {:bad_value, kind}} ->
+        {:error, "Value for #{key} must be a #{kind}."}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  def call("set_config", _),
+    do: {:error, "Missing required parameters: key, value, confirm"}
+
   def call("set_approval_timeout", %{"hours" => hours} = args) do
     with :ok <- require_confirm(args),
          :ok <- validate_approval_hours(hours) do
@@ -2432,6 +2496,25 @@ defmodule GiTF.MCPServer.Handlers do
   end
 
   # -- Serializers -------------------------------------------------------------
+
+  # A single config path, sectioned (`[features] x = true`) or top-level
+  # (`jira_project_to_sector = {...}`). Both go through GiTF.Config, which
+  # refuses to clobber a config file it cannot parse and reloads afterwards
+  # so the change takes effect without a restart.
+  defp write_settable([section, key], value),
+    do: GiTF.Config.update_config_section(to_string(section), %{to_string(key) => value})
+
+  defp write_settable([key], value),
+    do: GiTF.Config.update_config_key(to_string(key), value)
+
+  defp write_settable(_, _), do: {:error, :unsupported_path}
+
+  defp current_config_value(key) do
+    path = key |> String.split(".") |> Enum.map(&String.to_atom/1)
+    GiTF.Config.Provider.get(path)
+  rescue
+    _ -> nil
+  end
 
   defp json_text(data) do
     Jason.encode!(data, pretty: true)

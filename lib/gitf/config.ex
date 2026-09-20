@@ -171,6 +171,29 @@ defmodule GiTF.Config do
     end
   end
 
+  @doc """
+  Writes a single top-level (unsectioned) config key, e.g. the intake
+  routing maps. `update_config_section/2` covers `[section] key = value`;
+  this covers `key = value` at the root of the file.
+
+  Same guarantees: refuses to overwrite a config file it cannot parse, and
+  reloads so the change takes effect without a restart.
+  """
+  @spec update_config_key(String.t(), term()) :: :ok | {:error, term()}
+  def update_config_key(key, value) when is_binary(key) do
+    with {:ok, path} <- writable_config_path(),
+         {:ok, existing} <- read_existing_config(path) do
+      case write_config(path, Map.put(existing, key, value)) do
+        :ok ->
+          GiTF.Config.Provider.reload()
+          :ok
+
+        error ->
+          error
+      end
+    end
+  end
+
   defp writable_config_path do
     case GiTF.gitf_dir() do
       {:ok, root} -> {:ok, Path.join([root, ".gitf", "config.toml"])}

@@ -60,9 +60,10 @@ defmodule GiTF.Cabinet.Discord.Personas do
     cabinet_status cabinet_inbox costs_summary disk_usage provider_perf
     wake_ministry stop_ministry idle_stop_override
     start_inbox_entry dismiss_inbox_entry
+    show_config set_config
   )
 
-  @kayabuki_confirm ~w(start_inbox_entry dismiss_inbox_entry)
+  @kayabuki_confirm ~w(start_inbox_entry dismiss_inbox_entry set_config)
 
   @aramaki_tools ~w(
     list_projects show_project list_missions show_mission list_outcomes
@@ -102,6 +103,11 @@ defmodule GiTF.Cabinet.Discord.Personas do
     {:ok, major(ministry)}
   end
 
+  # A DM has no channel to infer a persona from, so it is the Cabinet by
+  # definition: Kayabuki is the only persona whose scope is the whole fleet
+  # rather than one Section, and the only one with `ask_ministry` to reach
+  # the others.
+  def for_channel("dm", _), do: {:ok, kayabuki()}
   def for_channel("cabinet", _), do: {:ok, kayabuki()}
   def for_channel(kind, _) when kind in ["aramaki", "plan"], do: {:ok, aramaki(kind)}
   def for_channel(_, _), do: {:error, :no_persona}
@@ -130,6 +136,13 @@ defmodule GiTF.Cabinet.Discord.Personas do
       those take effect immediately because they are cheap and reversible.
       Starting or dismissing a queued inbox entry is proposed to the
       operator as a button, never done on your own say-so.
+
+      You can change operator-settable configuration — feature flags,
+      admission policy, intake routing. Only the allow-list is reachable;
+      secrets, spend caps and execution mode are refused by construction, so
+      if the operator asks for one of those, say it belongs on the tailnet
+      dashboard rather than trying. Every config change is proposed as a
+      button, never applied on your own say-so.
 
       A box that is asleep is not broken. Waking one takes about a minute.
       If a question needs a ministry's own state, ask that ministry's Major
