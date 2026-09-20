@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>The Differentiators Are Switched Off</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground: #FAFAFB;
+    --panel: #F0F1F4;
+    --panel-2: #E7E9ED;
+    --ink: #14161A;
+    --muted: #5C6270;
+    --faint: #878D99;
+    --rule: #DCDEE4;
+    --rule-strong: #C3C7D0;
+    --signal: #8C6510;
+    --signal-bg: #F5EBD4;
+    --proven: #14665E;
+    --proven-bg: #DCEDEA;
+    --critical: #9A2B2B;
+    --critical-bg: #F6E2E2;
+    --shadow: 0 1px 2px rgba(20,22,26,.06), 0 8px 24px -12px rgba(20,22,26,.14);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101215;
+      --panel: #181B20;
+      --panel-2: #1F232A;
+      --ink: #E8EAED;
+      --muted: #949AA6;
+      --faint: #6E7480;
+      --rule: #262A31;
+      --rule-strong: #343942;
+      --signal: #D3A63C;
+      --signal-bg: #2A2314;
+      --proven: #4FB3A5;
+      --proven-bg: #122A28;
+      --critical: #E06A6A;
+      --critical-bg: #2C1818;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #101215;
+    --panel: #181B20;
+    --panel-2: #1F232A;
+    --ink: #E8EAED;
+    --muted: #949AA6;
+    --faint: #6E7480;
+    --rule: #262A31;
+    --rule-strong: #343942;
+    --signal: #D3A63C;
+    --signal-bg: #2A2314;
+    --proven: #4FB3A5;
+    --proven-bg: #122A28;
+    --critical: #E06A6A;
+    --critical-bg: #2C1818;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .col { max-width: 660px; }
+
+  h1, h2, h3, .ui {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    text-wrap: balance;
+  }
+
+  .mono, code, .tag, .date {
+    font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  /* ---------- masthead ---------- */
+  header.masthead {
+    border-bottom: 2px solid var(--ink);
+    padding: 56px 0 22px;
+    margin-bottom: 40px;
+  }
+  .kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    margin-bottom: 26px;
+  }
+  .kicker .sep { color: var(--rule-strong); }
+  h1 {
+    font-size: clamp(2.5rem, 6.2vw, 4.1rem);
+    line-height: 1.02;
+    letter-spacing: -.028em;
+    font-weight: 700;
+    margin: 0 0 20px;
+    max-width: 15ch;
+  }
+  h1 em {
+    font-style: normal;
+    color: var(--signal);
+  }
+  .standfirst {
+    font-size: 1.16rem;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .standfirst strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- structure ---------- */
+  section { margin: 0 0 64px; }
+
+  h2 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -.018em;
+    line-height: 1.16;
+    margin: 0 0 6px;
+    max-width: 24ch;
+  }
+  .h2note {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 22px;
+  }
+  h3 {
+    font-size: 1.06rem;
+    font-weight: 600;
+    letter-spacing: -.008em;
+    margin: 0 0 8px;
+  }
+  p { margin: 0 0 18px; }
+  .col > p:last-child { margin-bottom: 0; }
+
+  a { color: var(--ink); text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--signal); }
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 2px; }
+
+  code {
+    font-size: .86em;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    padding: .1em .36em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  blockquote {
+    margin: 0 0 20px;
+    padding: 0 0 0 20px;
+    border-left: 3px solid var(--signal);
+    color: var(--muted);
+    font-style: italic;
+  }
+  blockquote p:last-child { margin-bottom: 0; }
+
+  /* ---------- flag board ---------- */
+  .board {
+    border: 1px solid var(--rule-strong);
+    background: var(--panel);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .board-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-strong);
+    background: var(--panel-2);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .flags { display: grid; }
+  .flag {
+    display: grid;
+    grid-template-columns: 62px 1fr auto;
+    gap: 16px;
+    align-items: center;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .flag:last-child { border-bottom: 0; }
+
+  .sw {
+    width: 46px; height: 24px;
+    border-radius: 3px;
+    border: 1px solid var(--rule-strong);
+    background: var(--panel-2);
+    position: relative;
+    display: block;
+  }
+  .sw::after {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 19px; height: 18px;
+    border-radius: 2px;
+    background: var(--faint);
+  }
+  .sw.on { background: var(--proven-bg); border-color: var(--proven); }
+  .sw.on::after { left: auto; right: 2px; background: var(--proven); }
+
+  .flag-name {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .flag-desc {
+    display: block;
+    font-family: "Source Serif 4", serif;
+    font-size: 14.5px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .flag-state {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--signal);
+    white-space: nowrap;
+  }
+  .flag-state.on { color: var(--proven); }
+
+  .board-foot {
+    padding: 13px 18px;
+    border-top: 1px solid var(--rule-strong);
+    background: var(--panel-2);
+    font-size: 14.5px;
+    color: var(--muted);
+  }
+
+  /* ---------- timeline ---------- */
+  .tl { border-top: 1px solid var(--rule-strong); margin-top: 4px; }
+  .tl-row {
+    display: grid;
+    grid-template-columns: 108px 1fr;
+    gap: 20px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: baseline;
+  }
+  .tl-row .date {
+    font-size: 12.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .tl-row.hit .date { color: var(--critical); font-weight: 600; }
+  .tl-what { font-size: 15.5px; }
+  .tl-row.hit .tl-what { font-weight: 600; }
+  .tl-note {
+    display: block;
+    font-size: 13.5px;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+
+  /* ---------- scorecard ---------- */
+  .scroller { overflow-x: auto; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 620px;
+    font-size: 15px;
+  }
+  thead th {
+    font-family: Archivo, sans-serif;
+    font-size: 11.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    font-weight: 600;
+    padding: 0 14px 9px 0;
+    border-bottom: 1px solid var(--rule-strong);
+    vertical-align: bottom;
+  }
+  tbody td {
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td .sub { display: block; color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+
+  .tag {
+    display: inline-block;
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .tag.ship { color: var(--proven); background: var(--proven-bg); }
+  .tag.off  { color: var(--signal); background: var(--signal-bg); }
+  .tag.gap  { color: var(--critical); background: var(--critical-bg); }
+
+  /* ---------- deltas ---------- */
+  .delta {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 22px;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .delta:first-of-type { border-top: 1px solid var(--rule-strong); }
+  .d-id {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--signal);
+    padding-top: 1px;
+  }
+  .d-meta {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 9px;
+  }
+  .delta p { max-width: 62ch; }
+  .delta p:last-child { margin-bottom: 0; }
+
+  .callout {
+    background: var(--signal-bg);
+    border: 1px solid var(--signal);
+    border-radius: 4px;
+    padding: 18px 20px;
+    margin: 0 0 24px;
+  }
+  .callout p { margin: 0; max-width: 60ch; }
+  .callout .ui {
+    display: block;
+    font-size: 11.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--signal);
+    font-weight: 600;
+    margin-bottom: 7px;
+  }
+
+  ul.tight { margin: 0 0 18px; padding-left: 20px; max-width: 62ch; }
+  ul.tight li { margin-bottom: 9px; }
+
+  .two {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 20px;
+  }
+  .card {
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 17px 19px;
+    background: var(--panel);
+  }
+  .card h3 { margin-bottom: 6px; }
+  .card p { font-size: 14.5px; margin: 0; color: var(--muted); }
+  .card p + p { margin-top: 10px; }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    padding-top: 22px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  footer p { max-width: 68ch; }
+
+  @media (max-width: 620px) {
+    body { font-size: 16.5px; padding: 0 18px 72px; }
+    .flag { grid-template-columns: 54px 1fr; }
+    .flag-state { grid-column: 2; }
+    .delta { grid-template-columns: 1fr; gap: 8px; }
+    .tl-row { grid-template-columns: 1fr; gap: 2px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span>Competitive analysis</span><span class="sep">/</span>
+      <span>18 September 2026</span><span class="sep">/</span>
+      <span>GiTF v0.65.358 &middot; b5d5fd1</span><span class="sep">/</span>
+      <span>Successor to the 16 Aug benchmark</span>
+    </div>
+    <h1>Switched on, with <em>nothing to learn from</em></h1>
+    <p class="standfirst">
+      GiTF is not behind the 2026 dark-factory field on capability. It is behind on
+      <strong>proof</strong>. The field has converged on nine primitives; GiTF ships
+      seven. The learning loop came on eleven days ago and has roughly two merged
+      PRs to learn from; cross-model audit &mdash; the one August named by name &mdash;
+      is still off.
+    </p>
+  </header>
+
+  <section class="col">
+    <h2>A month ago, this document already existed</h2>
+    <p class="h2note">docs/research/dark-factory-benchmark-2026-08.md</p>
+    <p>
+      The August sweep reached a verdict that has not aged a day:
+    </p>
+    <blockquote>
+      <p>
+        Frontier-class harness, pre-industrial track record, with its most
+        differentiating machinery (tournaments, outcome learning) built but
+        default-off. The two capabilities nobody in the industry has shipped are
+        both sitting in this codebase behind flags.
+      </p>
+    </blockquote>
+    <p>
+      One clause of it has since been actioned and the rest has not, which turns out
+      to be the sharper finding. On <strong>9 September</strong> the learning loop was
+      switched on for real: <code>skills_enabled</code>, <code>outcomes_enabled</code>
+      and both refinement flags read <code>true</code> on the running factory,
+      verified live at v0.65.361 on 20 September. Eleven days. Against a ledger of
+      roughly two merged-quality PRs, an outcome learner has almost nothing to learn
+      from and a skill library has almost nothing to generalise from.
+      <strong>The flag was the easy half.</strong>
+    </p>
+    <p>
+      So the question is not <em>why are the differentiators off?</em> — two of them
+      are on. It is <em>why is there still nothing for them to eat?</em> That points
+      at the deferred prerequisite, volume, and not at any competitor feature in this
+      report.
+    </p>
+    <p>
+      The recommendation August made most specifically is the one still outstanding.
+      Finding&nbsp;2 asked that reviewers and judges run on a different model than the
+      implementer; <code>cross_model_audit</code> remains a per-sector boolean
+      defaulting false, unchanged in five weeks. Finding&nbsp;3 warned that <em>the
+      window is quarters, not years</em>. A third of one quarter is now gone.
+    </p>
+  </section>
+
+  <section>
+    <h2>The board</h2>
+    <p class="h2note">Differentiating machinery &middot; live on the factory, v0.65.361, 20 September</p>
+    <div class="board">
+      <div class="board-head">
+        <span>verified via <code>show_config</code> against the running box</span>
+        <span>7 of 12 on</span>
+      </div>
+      <div class="flags">
+        <div class="flag">
+          <span class="sw on" role="img" aria-label="on"></span>
+          <span><span class="flag-name">outcomes_enabled</span>
+            <span class="flag-desc">Learn from what merged, reverted, or was closed. The field's least-shipped capability. <strong>On since 9 Sep</strong> &mdash; eleven days, ~2 merged PRs to learn from.</span></span>
+          <span class="flag-state on">on</span>
+        </div>
+        <div class="flag">
+          <span class="sw on" role="img" aria-label="on"></span>
+          <span><span class="flag-name">skills_enabled</span>
+            <span class="flag-desc">Retrieve and install learned skills into the worktree per op. On since 9 Sep; retrieval is lexical, because the factory holds no API key for embeddings.</span></span>
+          <span class="flag-state on">on</span>
+        </div>
+        <div class="flag">
+          <span class="sw on" role="img" aria-label="on"></span>
+          <span><span class="flag-name">skill_refinement_enabled</span>
+            <span class="flag-desc">Propose new skills after validation. On; auto-commit deliberately left off until drafts are reviewed.</span></span>
+          <span class="flag-state on">on</span>
+        </div>
+        <div class="flag">
+          <span class="sw on" role="img" aria-label="on"></span>
+          <span><span class="flag-name">outcome_refinement_enabled</span>
+            <span class="flag-desc">Feed merge/revert outcomes back into the skill library.</span></span>
+          <span class="flag-state on">on</span>
+        </div>
+        <div class="flag">
+          <span class="sw on" role="img" aria-label="on"></span>
+          <span><span class="flag-name">aramaki_enabled</span>
+            <span class="flag-desc">Admit labelled issues, Jira tickets and Sentry alerts as missions. On, but both intake routing maps are unset, so Jira and Sentry route nowhere yet.</span></span>
+          <span class="flag-state on">on</span>
+        </div>
+        <div class="flag">
+          <span class="sw on" role="img" aria-label="on"></span>
+          <span><span class="flag-name">design tournament</span>
+            <span class="flag-desc">Three competing designs drawn in parallel; winner promoted. On by default, and the one LLM tournament that actually runs.</span></span>
+          <span class="flag-state on">on</span>
+        </div>
+        <div class="flag">
+          <span class="sw on" role="img" aria-label="on"></span>
+          <span><span class="flag-name">workflow_dsl_enabled</span>
+            <span class="flag-desc">Eight declarative YAML pipelines with conditional routing.</span></span>
+          <span class="flag-state on">on</span>
+        </div>
+        <div class="flag">
+          <span class="sw" role="img" aria-label="off"></span>
+          <span><span class="flag-name">cross_model_audit</span>
+            <span class="flag-desc">Audit with a different provider so blind spots don't propagate. Per-sector boolean, defaults false. <strong>The August sweep asked for this by name five weeks ago.</strong></span></span>
+          <span class="flag-state">off</span>
+        </div>
+        <div class="flag">
+          <span class="sw" role="img" aria-label="off"></span>
+          <span><span class="flag-name">parallel_impl_attempts = 1</span>
+            <span class="flag-desc">Best-of-N implementation tournament with composite scoring. Wired end to end, running one attempt.</span></span>
+          <span class="flag-state">off</span>
+        </div>
+        <div class="flag">
+          <span class="sw" role="img" aria-label="off"></span>
+          <span><span class="flag-name">outcome_autonomy_tiers_enabled</span>
+            <span class="flag-desc">Graduated per-sector autonomy earned from merge history. Needs a merge history it does not have.</span></span>
+          <span class="flag-state">off</span>
+        </div>
+        <div class="flag">
+          <span class="sw" role="img" aria-label="off"></span>
+          <span><span class="flag-name">knowledge_context_enabled</span>
+            <span class="flag-desc">Inject curated indexes and relevant wiki pages into phase prompts.</span></span>
+          <span class="flag-state">off</span>
+        </div>
+        <div class="flag">
+          <span class="sw" role="img" aria-label="off"></span>
+          <span><span class="flag-name">wire_enabled</span>
+            <span class="flag-desc">Compact artifact notation. First A/B pair: &minus;6% cost, zero fallbacks.</span></span>
+          <span class="flag-state">off</span>
+        </div>
+      </div>
+      <div class="board-foot">
+        Every flag here defaults to <code>false</code> in <code>config/config.exs</code>;
+        the seven that are on were turned on by hand on the box, five of them on
+        9&nbsp;September. So the learning machinery is running and has eleven days and
+        about two merged PRs of material. The two remaining gaps are the ones the field
+        agrees on hardest &mdash; an independent cross-vendor reviewer, and more than one
+        implementation to choose between. <strong>Both are per-sector settings the
+        sectors API does not expose, so their state on the box is asserted from the
+        code default rather than read back.</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="col">
+    <h2>The moat is expiring right now</h2>
+    <p class="h2note">Warp &middot; 1M+ users &middot; ADE open-sourced</p>
+    <p>
+      August's warning was directional. This is what it looks like as a date
+      sequence. These are the two capabilities the August sweep said
+      <em>nobody has shipped</em>, being shipped:
+    </p>
+    <div class="tl">
+      <div class="tl-row">
+        <span class="date">2026-08-03</span>
+        <span class="tl-what">Computer-use verification</span>
+      </div>
+      <div class="tl-row">
+        <span class="date">2026-08-18</span>
+        <span class="tl-what">Warp Factories</span>
+      </div>
+      <div class="tl-row hit">
+        <span class="date">2026-08-27</span>
+        <span class="tl-what">Self-improving factories
+          <span class="tl-note">GiTF equivalent: outcome learning + skill refinement, both off</span></span>
+      </div>
+      <div class="tl-row">
+        <span class="date">2026-09-03</span>
+        <span class="tl-what">Factory Benchmarks</span>
+      </div>
+      <div class="tl-row hit">
+        <span class="date">2026-09-18</span>
+        <span class="tl-what">LLM-as-a-judge scoring
+          <span class="tl-note">Dated the day of this scan. GiTF equivalent: tournament judging, off</span></span>
+      </div>
+    </div>
+    <p style="margin-top:22px">
+      A second confirmation arrived from a different direction: Greptile, whose
+      entire market position is auditing AI-written PRs, published
+      <em>&ldquo;Models are worse at reviewing their own code&rdquo;</em> on 21 July.
+      That is the empirical case for a flag GiTF has had since before August.
+    </p>
+    <p>
+      The capital asymmetry settles what follows. Cognition sits at a <strong>$48B
+      valuation on more than $2B raised</strong>; Factory at $5B on $200M. GiTF
+      cannot win on breadth or shipping speed. It can win on what those companies
+      are structurally unable to prioritise.
+    </p>
+  </section>
+
+  <section>
+    <h2>Where GiTF actually stands</h2>
+    <p class="h2note">Nine primitives the field converged on, from ~25 open-source factories</p>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:38%">Primitive</th>
+            <th style="width:14%">GiTF</th>
+            <th>Evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Isolated worktree per unit of work</td>
+            <td><span class="tag ship">shipped</span></td>
+            <td>Shell per op on its own <code>ghost/&lt;id&gt;</code> branch, plus chained worktrees and merge-as-you-go<span class="sub">Universal across the field. Nobody builds on a shared checkout any more.</span></td>
+          </tr>
+          <tr>
+            <td>Independent reviewer, different vendor, blind to the implementer's reasoning</td>
+            <td><span class="tag off">built, off</span></td>
+            <td><code>CrossModelAudit</code> picks a different provider — defaults false per sector<span class="sub">The single most agreed-upon primitive in the category.</span></td>
+          </tr>
+          <tr>
+            <td>Tracker as the state store</td>
+            <td><span class="tag ship">rejected</span></td>
+            <td>Archive is ETS-as-truth; the ready-set is the scheduler hot path<span class="sub">A deliberate divergence, settled and not to be re-litigated.</span></td>
+          </tr>
+          <tr>
+            <td>Typed hand-offs between stages, not conversation</td>
+            <td><span class="tag ship">shipped</span></td>
+            <td>Structured phase artifacts; Wire notation goes further still<span class="sub">Everyone independently concluded context must cross a seam as a validated structure.</span></td>
+          </tr>
+          <tr>
+            <td>Deterministic code owns control flow; agents own bounded nodes</td>
+            <td><span class="tag ship">shipped</span></td>
+            <td>Eight YAML workflows with conditional routing; the Major schedules, ghosts execute</td>
+          </tr>
+          <tr>
+            <td>Gates separating &ldquo;phases passed&rdquo; from &ldquo;the run is acceptable&rdquo;</td>
+            <td><span class="tag ship">shipped</span></td>
+            <td>Out-of-band ground truth, holdout scenarios, an LLM judge that never sees the code<span class="sub">Stronger than most of the field: the validation command runs where the model cannot paraphrase it away.</span></td>
+          </tr>
+          <tr>
+            <td>Evidence attached to the delivery</td>
+            <td><span class="tag ship">shipped</span></td>
+            <td>Verified push by SHA, 201-only PR creation, per-op audit verdicts<span class="sub">Ahead of some leaders: Google Jules ships a VM preloaded with pytest, Playwright and Ruff but never documents a test-run-and-report step — the toolchain is present, the evidence artifact isn't promised.</span></td>
+          </tr>
+          <tr>
+            <td>Human owns the ship decision</td>
+            <td><span class="tag ship">shipped</span></td>
+            <td>Approval gate plus a distinct mid-flight inquiry gate<span class="sub">More expressive than the field's common answer, which is capping unattended work at draft PRs.</span></td>
+          </tr>
+          <tr>
+            <td>Learning distilled back from completed work</td>
+            <td><span class="tag off">built, off</span></td>
+            <td>Outcomes, skills, refinement, autonomy tiers — every one defaulting false<span class="sub">Present in six competing projects and switched on in all of them.</span></td>
+          </tr>
+          <tr>
+            <td>Track record</td>
+            <td><span class="tag gap">the gap</span></td>
+            <td>~2 merged-quality PRs, one sector<span class="sub">orbi publishes 414 merged PRs / 537 closed issues / 36 tags. Stripe ships ~1,300 PRs a week.</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="col">
+    <h2>What GiTF has that nothing else does</h2>
+    <p class="h2note">Verified absent across ~25 open-source and ~20 commercial systems</p>
+    <ul class="tight">
+      <li><strong>OTP supervision with reasoned restart domains.</strong> Ghosts sit above the Major under <code>rest_for_one</code>, so a Major crash doesn't mark the in-flight fleet failed. No competitor has a failure model at this altitude.</li>
+      <li><strong>Sleep-to-zero fleet economics.</strong> Boxes idle-stop to $0; a clock records sleep intervals and subtracts them from every deadline; holds carry mandatory expiry. Tembo meters VMs per second, which is the closest anyone comes.</li>
+      <li><strong>Cabinet and Ministries.</strong> One always-on front door over a fleet of sleeping per-client factories, with a decision table resolving every failure to <em>queue</em>, never <em>wake</em>.</li>
+      <li><strong>Fail-closed budget caps.</strong> Per-mission and rolling-24h ceilings that pause the factory, plus a subscription variant that rations by request count.</li>
+      <li><strong>Out-of-band ground truth.</strong> The sector's validation command runs under a sector lock outside the model's reach, because a previous run's guard depended on the validator echoing sentinels and the model paraphrased them away.</li>
+    </ul>
+    <p>
+      This is the asset base. &ldquo;Widen the lead&rdquo; means converting it into
+      demonstrated reliability — which is precisely where every competitor is
+      weakest, and where none of them can follow quickly.
+    </p>
+  </section>
+
+  <section>
+    <h2>The smallest factory in the survey</h2>
+    <p class="h2note">Pinky and the Brain &middot; one developer, Athens &middot; le0nidas.gr</p>
+    <div class="col">
+      <p>
+        Everything else in this report is funded, staffed, or both. This one is a
+        personal project on a blog, and it earns a section because of
+        <em>why</em> it was rebuilt &mdash; a reason no competitor in the field
+        cites, and the one GiTF is architecturally built around.
+      </p>
+    </div>
+    <div class="two" style="margin-top:6px">
+      <div class="card">
+        <h3>v1 &middot; January 2026</h3>
+        <p>
+          <strong>Brain</strong> (Opus) plans and orchestrates; <strong>Pinky</strong>
+          (Haiku) executes one task at a time; Beads persists the task list; the human
+          reviews between every task. Built on OpenCode agents.
+        </p>
+        <p>
+          The stated win was review cadence, not autonomy:
+          <em>&ldquo;I am finally in the loop. I review fewer changes at a time and
+          sooner.&rdquo;</em>
+        </p>
+      </div>
+      <div class="card">
+        <h3>v2 &middot; March 2026</h3>
+        <p>
+          <strong>A bash script took over the orchestration.</strong> Brain plans only,
+          saving its output as retrievable skills. Pinky executes only. The script loads
+          the next task with <code>bd</code>, feeds it to Pinky, closes the task, calls
+          <code>ai-commit.sh</code>, and loops &mdash; with the human checkpoint in the
+          script rather than in an agent.
+        </p>
+        <p>
+          <em>&ldquo;I was violating the single responsibility principle big time. No
+          matter the change I've kept editing the same component.&rdquo;</em>
+        </p>
+      </div>
+    </div>
+    <div class="col" style="margin-top:26px">
+      <h3>What forced the rewrite</h3>
+      <p>
+        Not safety, not trust, not throughput &mdash; <strong>cost</strong>.
+        <em>&ldquo;Whenever I did I also saw the number of my available copilot requests
+        decreasing fast&rdquo;</em>, multiplied by three for running Opus. So he took the
+        orchestration away from the model and gave it to a shell script, on an explicitly
+        Unix argument: <em>&ldquo;The terminal has led the way by having small tools that
+        do one thing&hellip; My tools need to embrace that as well.&rdquo;</em>
+      </p>
+      <p>
+        That lands on the field's fifth consensus &mdash; deterministic code owns the
+        control flow, agents own bounded nodes &mdash; arrived at independently, by one
+        person, for reasons of spend. It is the cheapest possible confirmation that the
+        consensus is real rather than fashionable.
+      </p>
+
+      <h3>What GiTF should take from it</h3>
+      <p>
+        Not the architecture. GiTF already does this harder: the YAML workflows are the
+        deterministic control plane, and a ghost is already a bounded node. The
+        transferable thing is the <strong>discipline</strong> &mdash; he measured his own
+        consumption, concluded the shape was wrong, and restructured around the number.
+        That is <span class="mono">D5</span> practised by instinct at one-person scale,
+        and GiTF has the ledger to do it with real figures and hasn't.
+      </p>
+      <p>
+        One concrete idea worth stealing: <strong>Brain saves its plans as retrievable
+        skills.</strong> In GiTF, plans are op DAGs and skills are a separate system; the
+        two never meet. <code>skills_enabled</code> is now on, so the library exists and is
+        being written to &mdash; what it lacks is material, and a planner whose output is
+        also a reusable skill is the cheapest source of material available, because every
+        mission produces a plan whether or not it produces a merged PR.
+      </p>
+      <p>
+        Its position on autonomy is also worth recording, because it is the opposite of
+        this project's: <em>&ldquo;Always review the code&hellip; You are responsible for
+        it. It is your solution, you just used a different medium to implement it.&rdquo;</em>
+        A deliberately bright factory, from someone who ships with one.
+      </p>
+      <p>
+        Footnote for the record: it stores tasks in <strong>Beads</strong>, which GiTF
+        evaluated and rejected as a core substrate because the ready-set is the scheduler
+        hot path. Nothing here overturns that &mdash; it is evidence the rejection was
+        scale-dependent, and correct at both scales.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Proposed additions</h2>
+    <p class="h2note">Seven deltas against the existing eleven tracks &middot; ordered by leverage</p>
+
+    <div class="delta">
+      <span class="d-id">D1</span>
+      <div>
+        <p class="d-meta">New &middot; Track 3 &middot; Large</p>
+        <h3>Fault drills for the factory's own guarantees</h3>
+        <p>
+          The best idea in the survey, from <code>sjarmak/software-factory-reliability</code>.
+          A guarantee that has never been falsified is not a guarantee. It formalises
+          three evidence states — <strong>declared</strong>, <strong>enforced</strong>,
+          <strong>fault-tested</strong> — and the rule that makes them mean something:
+          the unsafe control must <em>fail</em>. An unsafe control that passes means the
+          fault never reached the boundary, which makes it a broken test rather than a
+          safe system.
+        </p>
+        <p>
+          GiTF has the guarantee surface and no way to prove it holds: the sector lock,
+          fail-closed budgets, <code>sandbox_required</code>, the approval timeout,
+          proposal spend-once, the split provider/capability retry budgets. It also
+          closes a real hole — the August BEAM audit found ~66 issues, ~31 of them high,
+          and fix batches two through five are still queued. Drills convert that from
+          findings believed fixed into faults that now fail closed.
+        </p>
+        <p>
+          Nobody else can do this: sjarmak has the method and no factory; everyone else
+          has a factory and no method.
+        </p>
+      </div>
+    </div>
+
+    <div class="delta">
+      <span class="d-id">D2</span>
+      <div>
+        <p class="d-meta">Track 2 &middot; Small</p>
+        <h3>Turn on cross-model audit by default</h3>
+        <p>
+          The field's most agreed-upon primitive, arrived at independently by three
+          open-source projects — and already GiTF's own August recommendation, unactioned
+          for a month. The machinery exists and picks a different provider so blind spots
+          don't propagate. An adversarial inspector not sharing the primary's model or
+          context recovered <strong>96.4%</strong> of injected errors in the cited work.
+        </p>
+        <p>
+          Worth adopting the stronger form that <code>ai-sdlc</code> uses: record the
+          implementing harness on the op and have the audit <em>refuse</em> when they
+          match, so self-review is impossible rather than merely discouraged.
+        </p>
+      </div>
+    </div>
+
+    <div class="delta">
+      <span class="d-id">D3</span>
+      <div>
+        <p class="d-meta">Track 4 &middot; Medium</p>
+        <h3>Token hibernation instead of silent tier degradation</h3>
+        <p>
+          Diagnosed internally in August and never built: when the thinking-tier model is
+          quota-dead, hard ops silently degrade to a weaker model and burn the mission.
+          That same audit named the fix the highest-leverage scheduler feature available —
+          park the mission until quota returns, because the factory already hibernates for
+          compute and tokens are the same shape.
+        </p>
+        <p>
+          This is the purest lead-widener on the list, and it is only available to GiTF.
+          No other system — open-source or commercial — can park work on a token budget,
+          because no other system treats time-asleep as a first-class quantity.
+        </p>
+      </div>
+    </div>
+
+    <div class="delta">
+      <span class="d-id">D4</span>
+      <div>
+        <p class="d-meta">Track 3 &middot; Medium</p>
+        <h3>Executable safety evals</h3>
+        <p>
+          Vercel's Foreman is the only system in the survey that tests its guardrails as
+          assertions: prompt-injection, no-direct-push-to-main, write-requires-approval,
+          ship-gate-parks. GiTF has more safety machinery and zero adversarial tests of
+          it — the never-agent-input rule for relayed text, the sandbox, the approval
+          gate, the Cabinet's queue-on-failure, the new Discord guild gate. Each needs a
+          test that fails when the control is removed.
+        </p>
+      </div>
+    </div>
+
+    <div class="delta">
+      <span class="d-id">D5</span>
+      <div>
+        <p class="d-meta">Track 3 &middot; Medium</p>
+        <h3>Outcome-shaped benchmarks, not capability ones</h3>
+        <p>
+          Cosine concluded that chasing SWE-bench against frontier labs was unwinnable for
+          a small team, changed the question to <em>which model produces code a senior
+          engineer will actually merge</em>, and invented benchmarks to match — including
+          cost per successful task.
+        </p>
+        <p>
+          Track 3 currently reads as a golden eval suite in the capability sense. It should
+          instead measure what only GiTF can: cost per merged PR, unattended completion
+          rate, operator interventions per mission, and failure-class distribution — where
+          the current seven-day window shows <strong>89 unclassified</strong>, a number
+          that is itself the finding.
+        </p>
+      </div>
+    </div>
+
+    <div class="delta">
+      <span class="d-id">D6</span>
+      <div>
+        <p class="d-meta">Track 11 &middot; Small</p>
+        <h3>Publish what the factory deliberately does not do</h3>
+        <p>
+          Three of the most-starred projects substitute this for a roadmap, and it reads
+          as more honest than one. GiTF half-does it already in the roadmap's
+          <em>settled &mdash; do not re-litigate</em> section; the missing half is a
+          user-facing statement of non-goals.
+        </p>
+      </div>
+    </div>
+
+    <div class="delta">
+      <span class="d-id">D7</span>
+      <div>
+        <p class="d-meta">Track 6 &middot; Medium &middot; added 19 Sep, operator-raised</p>
+        <h3>A polyglot quality harness &mdash; the sector declares how it is measured</h3>
+        <p>
+          The fleet is polyglot by design: cora is Tauri (Rust + TS), another ministry is
+          Next.js, and the factory itself is Elixir. A quality harness that switches on
+          language is therefore structurally wrong for this product &mdash;
+          <strong>the harness must not dictate the implementation language.</strong>
+        </p>
+        <p>
+          Four layers are worth separating, and GiTF has only two of them:
+        </p>
+        <div class="scroller" style="margin:0 0 18px">
+          <table style="min-width:520px">
+            <thead>
+              <tr><th style="width:52%">Question</th><th style="width:16%">GiTF</th><th>Where</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Did the agent write suspicious crap?</td>
+                <td><span class="tag gap">absent</span></td>
+                <td>No slop detection of any kind</td>
+              </tr>
+              <tr>
+                <td>Did it make the codebase structurally worse?</td>
+                <td><span class="tag gap">absent</span></td>
+                <td>No structural-regression gate</td>
+              </tr>
+              <tr>
+                <td>Is this valid, idiomatic code?</td>
+                <td><span class="tag off">present, broken</span></td>
+                <td><code>StaticAnalysis.analyze/2</code> &mdash; per-language dispatch, see below</td>
+              </tr>
+              <tr>
+                <td>Does it satisfy the spec?</td>
+                <td><span class="tag ship">strong</span></td>
+                <td>Sector <code>validation_command</code>, out-of-band ground truth, holdout scenarios, a judge that never sees the code</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top:22px">What checking this found</h3>
+        <p>
+          Layer 3 was not merely language-bound, it was <em>lying</em>. An unrecognised
+          language scored 100 with <code>available: true</code>; the JSON-decode-failure
+          branches &mdash; the exact path a missing or failing credo, eslint or pylint
+          takes &mdash; returned 100 with no availability flag at all, which
+          <code>Quality.analyze_static/3</code> defaults to true; the audit consumer
+          ignored the flag even when set; and the composite averaged the fabricated 100
+          into the score that reaches the verdict.
+        </p>
+        <p>
+          This is the same defect the 2026-08-28 BEAM audit found and fixed in the
+          dependency scanner, whose moduledoc states it plainly &mdash;
+          <em>&ldquo;a missing npm used to make every op's security gate green
+          forever&rdquo;</em>. The static path kept the identical shape and was missed.
+          <strong>Fixed 19 Sep</strong>, with a test that fails if any analyser return
+          path omits the flag again.
+        </p>
+
+        <h3 style="margin-top:22px">The proposal</h3>
+        <p>
+          Not a tool &mdash; a contract. <strong>Take baseline-delta from Trellis and let
+          each sector declare its analyser the way it already declares
+          <code>validation_command</code>.</strong> &ldquo;Did this change make the
+          codebase structurally worse?&rdquo; is answerable by any per-language analyser
+          given three things: a stable identity for what is measured, a baseline captured
+          before the change, and a policy that fails on regression.
+        </p>
+        <p>
+          GiTF holds all three already &mdash; a canonical worktree, the sector's base
+          branch, ground truth running out-of-band under the sector lock, and a
+          <code>VerdictCache</code> keyed on tree identity. Measure the base, measure the
+          op's branch, fail on the delta. A sector that declares its own analyser also
+          cannot be guessed wrong, which removes the root cause of the bug above rather
+          than patching its symptom.
+        </p>
+
+        <h3 style="margin-top:22px">The tools, and why none of them is the answer alone</h3>
+        <div class="scroller">
+          <table style="min-width:560px">
+            <thead>
+              <tr><th style="width:24%">Tool</th><th style="width:30%">What it answers</th><th>Reach</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Trellis</strong><span class="sub">33&#9733; &middot; MIT &middot; Bun</span></td>
+                <td>Structural debt: complexity, erosion, duplication incl. renamed clones, import cycles. 0&ndash;100 sloppiness index.</td>
+                <td><strong>TypeScript only.</strong> But the best-engineered of the group: baseline-delta is first-class, hotspot identity survives edits, it runs offline with no installed dependencies, and it refuses to let safeguard config offset debt.</td>
+              </tr>
+              <tr>
+                <td><strong>Mehen</strong><span class="sub">5&#9733; &middot; AGPL-3.0 &middot; Rust</span></td>
+                <td>Complexity, maintainability, documentation health over time.</td>
+                <td>Eleven languages via <em>native</em> parsers (Oxc for TS, <code>ra_ap_syntax</code> for Rust, Ruff for Python), tree-sitter only as fallback for Go/C/PowerShell. <strong>No Elixir</strong> &mdash; it cannot see the factory.</td>
+              </tr>
+              <tr>
+                <td><strong>agent-slop-lint</strong><span class="sub">41&#9733; &middot; Apache-2.0</span></td>
+                <td>Structural regression on cited metrics: McCabe, Chidamber &amp; Kemerer, Halstead, Tornhill &mdash; at thresholds tuned for agent-pace diffs.</td>
+                <td>The most rigorous basis of the three. Language coverage unverified; published to PyPI, so possibly Python-first.</td>
+              </tr>
+              <tr>
+                <td><strong>AntiSlop</strong><span class="sub">15&#9733; &middot; MIT/Apache</span></td>
+                <td>Lexical slop: placeholders, deferrals, hedging &mdash; <code>TODO</code>, &ldquo;for now&rdquo;, &ldquo;should work&rdquo;.</td>
+                <td>Multi-language, on crates.io and npm. Phrase-level, not AST-level &mdash; it is layer 1, not layer 2.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:18px">
+          <strong>No single tool sees the whole fleet</strong>, and the two most capable
+          both stop short of Elixir. That is not an argument against adopting them &mdash;
+          it is the argument for the contract: per-sector declaration is the only shape
+          that covers Dark Factory itself.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="col">
+    <div class="callout">
+      <span class="ui">Flagged, deferred by operator decision</span>
+      <p>
+        <strong>Volume is the prerequisite none of the above can substitute for.</strong>
+        Track 2's stated blocker is ground truth; ground truth needs runs; D1's drills and
+        D5's benchmarks both produce weak signal on a sample of two. Nothing proposed here
+        is wrong without it — but nothing can be <em>proven</em> without it either. Worth
+        revisiting once D1 and D2 make failures diagnosable, since each run is then worth
+        more.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Watch, don't build</h2>
+    <p class="h2note">Good ideas that are someone else's to prove first</p>
+    <div class="two">
+      <div class="card">
+        <h3>Probabilistic completion judge</h3>
+        <p>
+          <code>thruwire/foreman</code> scores factory evidence as probabilities —
+          <code>worker_stuck .02</code>, <code>requirements_satisfied .79</code> — instead
+          of a boolean gate. Structurally different from every verdict in GiTF.
+        </p>
+        <p>The repo was created one day before this scan. Re-check in a month.</p>
+      </div>
+      <div class="card">
+        <h3>Verification by use</h3>
+        <p>
+          Tembo streams a sandbox desktop at 60&nbsp;FPS and lets the agent drive the
+          running application. Codex goes further and more usefully: an in-app browser
+          with controlled Chrome DevTools Protocol access for console, DOM and network
+          inspection, plus <em>Appshots</em> — which capture the frontmost window as
+          image <strong>and text</strong>, including text the app exposes outside the
+          visible scroll area.
+        </p>
+        <p>
+          That last detail is the one to steal. August warned that hard-coded verifiers
+          beat vision judges because app state can't be inferred from pixels; extracting
+          the app's own text is how you get an assertable artifact instead of a
+          screenshot to squint at. GiTF's <code>:web</code> driver is still unbuilt — this
+          is what it should produce.
+        </p>
+      </div>
+      <div class="card">
+        <h3>DAEMON.md</h3>
+        <p>
+          Charlie's always-on roles are defined in a repo-local, version-controlled file
+          that ships as a reviewed pull request, with an open published spec.
+        </p>
+        <p>
+          GiTF's YAML workflows already occupy this niche and are more expressive. The
+          borrowable half is that the definition itself goes through review.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Model stylesheet</h3>
+        <p>
+          Fabro assigns models over a workflow graph with a CSS-like cascade, so process
+          and model assignment are two independently versioned artifacts.
+        </p>
+        <p>
+          Elegant, but GiTF already has per-phase model tiers in YAML plus a model policy.
+          A refinement, not a gap.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      <strong>Method and limits.</strong> Open-source figures verified via the
+      authenticated GitHub API on 18 September 2026; commercial status by direct fetch of
+      primary sources. GiTF claims are anchored to the working tree at
+      <code>b5d5fd1</code>, v0.65.358 — flag defaults move, so re-verify before citing.
+    </p>
+    <p>
+      Three claims are deliberately not relied upon. AttractorBench's leaderboard is
+      disowned by its own maintainers as <em>not valid for ranking</em>, with run-to-run
+      variance of 0.63&ndash;0.76 on identical configs. The shaziyev dark-factory benchmark
+      is n=1 per agent, four days apart, with no cost data and non-identical verification.
+      And <code>thruwire/foreman</code> had existed for one day at the time of the scan.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>
