@@ -13,12 +13,17 @@ defmodule GiTF.Web.WebhookControllerTest do
     prior_outcomes = Application.get_env(:gitf, :outcomes_enabled, false)
     prior_sentry_secret = Application.get_env(:gitf, :sentry_webhook_secret)
     prior_sentry_map = Application.get_env(:gitf, :sentry_project_to_sector)
+    prior_aramaki = Application.get_env(:gitf, :aramaki_enabled)
 
     Application.put_env(:gitf, :webhooks_enabled, true)
     Application.put_env(:gitf, :github_webhook_secret, @secret)
     Application.put_env(:gitf, :sentry_webhook_secret, @secret)
     Application.put_env(:gitf, :sentry_project_to_sector, %{"frontend-app" => "sec-fe"})
     Application.put_env(:gitf, :outcomes_enabled, true)
+    # Sentry intake is gated on the admission layer since 2026-09-20: a
+    # channel that creates missions while Aramaki is off produces pending
+    # work nothing will ever start.
+    Application.put_env(:gitf, :aramaki_enabled, true)
 
     GiTF.Archive.all(:mission_outcomes)
     |> Enum.each(fn o -> GiTF.Archive.delete(:mission_outcomes, o.id) end)
@@ -32,6 +37,7 @@ defmodule GiTF.Web.WebhookControllerTest do
       Application.put_env(:gitf, :outcomes_enabled, prior_outcomes)
       Application.put_env(:gitf, :sentry_webhook_secret, prior_sentry_secret)
       Application.put_env(:gitf, :sentry_project_to_sector, prior_sentry_map)
+      Application.put_env(:gitf, :aramaki_enabled, prior_aramaki)
     end)
 
     :ok
@@ -230,6 +236,18 @@ defmodule GiTF.Web.WebhookControllerTest do
       body2 = sentry_issue_body(issue_id: "777", action: "triggered")
       conn2 = sentry_conn(body2, sentry_signature(body2)) |> WebhookController.sentry(%{})
       assert json_response(conn2, 200)["result"] == "deduped"
+    end
+
+    test "a Sentry alert is ignored while the admission layer is off" do
+      # Creating missions with Aramaki disabled is how Sentry intake silently
+      # accumulated pending work nothing would ever start.
+      Application.put_env(:gitf, :aramaki_enabled, false)
+
+      body = sentry_issue_body()
+      conn = sentry_conn(body, sentry_signature(body)) |> WebhookController.sentry(%{})
+
+      assert json_response(conn, 200)["result"] == "aramaki_disabled"
+      assert GiTF.Archive.all(:missions) == []
     end
 
     test "ignored on unmapped project" do

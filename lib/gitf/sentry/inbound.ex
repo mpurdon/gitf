@@ -41,6 +41,7 @@ defmodule GiTF.Sentry.Inbound do
 
   require Logger
 
+  alias GiTF.Aramaki.Policy
   alias GiTF.Archive
   alias GiTF.Missions
 
@@ -113,15 +114,25 @@ defmodule GiTF.Sentry.Inbound do
       {:error, :missing_issue_id}
     else
       case find_existing(sector_id, issue_id) do
-        nil -> create_new(issue, sector_id, action)
-        mission -> dedupe(mission, issue, action)
+        nil ->
+          # Severity is Sentry's stand-in for the `gitf:build` label: nobody
+          # hand-labels an alert, so admitting every level would make a noisy
+          # deploy a queue of work. Deduping an already-known issue is not
+          # re-admission, so the gate only guards creation.
+          case Policy.admit_sentry?(issue) do
+            {:admit, priority} -> create_new(issue, sector_id, action, priority)
+            {:reject, reason} -> {:ok, :ignored, reason}
+          end
+
+        mission ->
+          dedupe(mission, issue, action)
       end
     end
   end
 
   # -- Mission creation ------------------------------------------------------
 
-  defp create_new(issue, sector_id, action) do
+  defp create_new(issue, sector_id, action, priority) do
     title = issue["title"] || issue["shortId"] || "Sentry issue"
     short_id = issue["shortId"] || issue["id"]
     level = issue["level"] || "error"
@@ -154,7 +165,12 @@ defmodule GiTF.Sentry.Inbound do
       goal: goal,
       name: name,
       sector_id: sector_id,
-      issue_ref: issue_ref
+      issue_ref: issue_ref,
+      # Without this the mission has no `source`, which Aramaki reads as
+      # operator-created and deliberately never auto-starts — so every Sentry
+      # mission sat pending forever, silently. See `GiTF.Aramaki` @owned_sources.
+      source: "sentry",
+      priority: priority
     }
 
     sentry_artifacts = %{

@@ -9,9 +9,13 @@ defmodule GiTF.Aramaki do
   Responsibilities:
 
     * **Ingest** signals — GitHub issues (via `Aramaki.Intake` off the webhook),
-      and any other pending, un-started missions (inbox / Sentry). This also
-      closes a long-standing gap: pending missions from those sources were
-      never auto-started.
+      Jira tickets (`Aramaki.Jira.Intake`), Sentry alerts
+      (`GiTF.Sentry.Inbound`), project roadmap items, and PR-review
+      follow-ups. Each intake channel owns its own admission predicate in
+      `Aramaki.Policy` — a label for issues and tickets, severity for alerts
+      — but they all share ONE concurrency ceiling, because admission is a
+      multiplier on every runaway risk and per-channel allowances would
+      multiply the ceiling by the number of channels.
     * **Admit** work within capacity — a periodic tick (and event nudges) start
       pending Aramaki missions in priority order, but only while
       `Aramaki.Policy.capacity_available?/1` holds (factory daily budget +
@@ -42,7 +46,7 @@ defmodule GiTF.Aramaki do
   # concurrency budget: admission is a multiplier on every runaway risk, and
   # giving each intake channel its own allowance would multiply the ceiling
   # by the number of channels.
-  @owned_sources ~w(github_issue project pr_review)
+  @owned_sources ~w(github_issue jira_issue sentry project pr_review)
 
   # -- Client ----------------------------------------------------------------
 

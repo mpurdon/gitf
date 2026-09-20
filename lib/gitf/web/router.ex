@@ -182,6 +182,7 @@ defmodule GiTF.Web.Router do
     pipe_through(:webhooks)
     post("/github", WebhookController, :github)
     post("/sentry", WebhookController, :sentry)
+    post("/jira", WebhookController, :jira)
   end
 
   # Cabinet ingress: every ministry's GitHub webhooks land here, verified

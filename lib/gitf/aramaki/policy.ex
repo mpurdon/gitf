@@ -7,19 +7,27 @@ defmodule GiTF.Aramaki.Policy do
   an active mission. Kept pure (no Archive writes, no side effects) so the
   decisions are testable and the GenServer owns the effects.
 
-  Two gates matter most:
+  Three gates matter most:
 
-    * **Trigger label** (`admit_issue?/2`) — the untrusted-input safety gate.
-      An issue body is attacker-controllable on public repos, and admitted
-      work runs as ghosts with real tool access. So only issues carrying an
-      explicit maintainer-applied label (default `gitf:build`) are admitted.
+    * **Trigger label** (`admit_issue?/2`, `admit_jira?/2`) — the
+      untrusted-input safety gate. An issue body is attacker-controllable on
+      public repos, and admitted work runs as ghosts with real tool access.
+      So only issues carrying an explicit maintainer-applied label (default
+      `gitf:build`) are admitted.
+    * **Severity** (`admit_sentry?/2`) — an alerting system has no label to
+      apply, so the equivalent gate is the event's own severity. A warning is
+      not a bug report, and a monitoring feed that admitted everything would
+      turn an error spike into unbounded concurrent work at exactly the
+      moment the system is least healthy.
     * **Capacity** (`capacity_available?/1`) — never admit past the factory
       daily budget ceiling or the concurrent-mission cap; admission is a
-      multiplier on every runaway risk.
+      multiplier on every runaway risk. Every intake channel shares this one
+      ceiling, deliberately.
   """
 
   @default_trigger_label "gitf:build"
   @default_max_concurrent 5
+  @default_sentry_levels ~w(error fatal)
 
   @doc "The label that opts an issue into the factory (config `[:aramaki, :trigger_label]`)."
   @spec trigger_label() :: String.t()
@@ -97,6 +105,83 @@ defmodule GiTF.Aramaki.Policy do
       trigger_label() not in labels -> {:reject, :not_labeled}
       true -> {:admit, priority(labels)}
     end
+  end
+
+  @doc """
+  Should this Sentry issue be admitted as a mission?
+
+  Sentry has no `gitf:build` equivalent — nobody hand-labels an alert — so
+  severity is the gate that stands in for it. Only `error` and `fatal` are
+  admitted; `warning`, `info` and `debug` are monitoring signal, not bug
+  reports, and admitting them would make every noisy deploy a queue of work.
+
+  `issue` is Sentry's issue object. Returns `{:admit, priority}` or
+  `{:reject, reason}`.
+  """
+  @spec admit_sentry?(map(), keyword()) :: {:admit, integer()} | {:reject, atom()}
+  def admit_sentry?(issue, _opts \\ []) do
+    level = issue |> Map.get("level", "error") |> to_string() |> String.downcase()
+
+    cond do
+      Map.get(issue, "status") in ["resolved", "ignored"] -> {:reject, :not_actionable}
+      level in admitted_levels() -> {:admit, sentry_priority(level)}
+      true -> {:reject, :level_below_threshold}
+    end
+  end
+
+  @doc "Sentry levels that become missions (config `[:aramaki, :sentry_levels]`)."
+  @spec admitted_levels() :: [String.t()]
+  def admitted_levels do
+    Application.get_env(:gitf, :aramaki, [])
+    |> Keyword.get(:sentry_levels, @default_sentry_levels)
+  end
+
+  # A crash outranks an error the way "security" outranks "bug" for issues —
+  # same scale, so one queue orders work from every intake channel.
+  defp sentry_priority("fatal"), do: 0
+  defp sentry_priority(_), do: 1
+
+  @doc """
+  Should this Jira issue be admitted?
+
+  Same reasoning as GitHub: the description is attacker-controllable in any
+  project that accepts outside reporters, so admission requires the trigger
+  label rather than trusting the ticket. `issue` is Jira's issue object with
+  its `fields` map. Returns `{:admit, priority}` or `{:reject, reason}`.
+  """
+  @spec admit_jira?(map(), keyword()) :: {:admit, integer()} | {:reject, atom()}
+  def admit_jira?(issue, opts \\ []) do
+    fields = Map.get(issue, "fields") || %{}
+    labels = jira_labels(fields)
+    author = get_in(fields, ["reporter", "accountId"]) || get_in(fields, ["reporter", "name"])
+    bot_account = Keyword.get(opts, :bot_account)
+    status = get_in(fields, ["status", "statusCategory", "key"]) |> to_string()
+
+    cond do
+      status == "done" -> {:reject, :closed}
+      bot_account && author && author == bot_account -> {:reject, :own_activity}
+      trigger_label() not in labels -> {:reject, :not_labeled}
+      true -> {:admit, jira_priority(fields, labels)}
+    end
+  end
+
+  # Jira carries its own issue type and priority, which are better signal than
+  # labels alone — but labels still win when present, so the ordering matches
+  # what an operator sees on a GitHub issue.
+  defp jira_priority(fields, labels) do
+    type = fields |> get_in(["issuetype", "name"]) |> to_string() |> String.downcase()
+
+    cond do
+      "security" in labels -> 0
+      type == "bug" or "bug" in labels -> 1
+      type in ["story", "new feature", "feature"] -> 3
+      true -> priority(labels)
+    end
+  end
+
+  defp jira_labels(fields) do
+    (Map.get(fields, "labels") || [])
+    |> Enum.filter(&is_binary/1)
   end
 
   @doc """

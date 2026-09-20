@@ -1,7 +1,10 @@
 defmodule GiTF.Web.WebhookController do
   @moduledoc """
-  Inbound webhook receiver for external systems (GitHub today; Sentry,
-  Linear, generic to follow).
+  Inbound webhook receiver for external systems: GitHub issues and pull
+  requests, Sentry alerts, and Jira tickets. Every intake channel is gated
+  on `GiTF.Aramaki.enabled?/0` — the admission layer is opt-in, and a
+  channel that creates missions while it is off produces pending work
+  nothing will ever start.
 
   Webhooks short-circuit polling: when GitHub fires a `pull_request`
   event for a PR the Factory is tracking, the outcome's `next_poll_at`
@@ -20,6 +23,7 @@ defmodule GiTF.Web.WebhookController do
 
   alias GiTF.GitHub.ReviewIntake
   alias GiTF.Outcomes
+  alias GiTF.Jira.Inbound, as: JiraInbound
   alias GiTF.Sentry.Inbound, as: SentryInbound
 
   @doc """
@@ -66,7 +70,7 @@ defmodule GiTF.Web.WebhookController do
 
       true ->
         result =
-          case SentryInbound.dispatch(conn.body_params) do
+          case sentry_dispatch(conn.body_params) do
             {:ok, :ignored, reason} ->
               reason
 
@@ -184,6 +188,66 @@ defmodule GiTF.Web.WebhookController do
       get_req_header(conn, "x-hub-signature-256") |> List.first(),
       conn.assigns[:raw_body]
     )
+  end
+
+  # Aramaki owns admission for every intake channel. Creating missions while
+  # it is disabled produces pending work nothing will ever start — which is
+  # precisely the state Sentry intake shipped in, silently, until 2026-09-20.
+  defp sentry_dispatch(payload) do
+    if GiTF.Aramaki.enabled?() do
+      SentryInbound.dispatch(payload)
+    else
+      Logger.debug("Sentry webhook: ignored (Aramaki disabled)")
+      {:ok, :ignored, :aramaki_disabled}
+    end
+  end
+
+  @doc """
+  Jira webhook receiver. Verified payloads are handed to
+  `GiTF.Jira.Inbound.dispatch/1`, which creates or dedupes a pending mission.
+
+  Returns 200 on every accepted payload (including ignored ones — we do not
+  leak which projects are tracked), 401 on bad signature, 503 when disabled.
+  """
+  def jira(conn, _params) do
+    cond do
+      not enabled?() ->
+        conn |> put_status(503) |> json(%{error: "webhook ingestion disabled"})
+
+      not jira_signature_valid?(conn) ->
+        Logger.warning("Jira webhook: signature verification failed")
+        conn |> put_status(401) |> json(%{error: "invalid signature"})
+
+      not GiTF.Aramaki.enabled?() ->
+        Logger.debug("Jira webhook: ignored (Aramaki disabled)")
+        json(conn, %{ok: true, result: "ignored"})
+
+      true ->
+        case JiraInbound.dispatch(conn.body_params) do
+          {:ok, outcome, _} ->
+            json(conn, %{ok: true, result: to_string(outcome)})
+
+          {:error, reason} ->
+            Logger.warning("Jira webhook: dispatch failed: #{inspect(reason)}")
+            json(conn, %{ok: true, result: "ignored"})
+        end
+    end
+  end
+
+  # Jira: `X-Hub-Signature` over the raw body with the webhook secret. Jira
+  # Cloud sends `sha256=<hex>`; Server/DC omits the prefix, and the verifier
+  # accepts both.
+  defp jira_signature_valid?(conn) do
+    GiTF.Web.Signature.verify(
+      jira_secret(),
+      get_req_header(conn, "x-hub-signature") |> List.first(),
+      conn.assigns[:raw_body]
+    )
+  end
+
+  defp jira_secret do
+    Application.get_env(:gitf, :jira_webhook_secret) ||
+      System.get_env("GITF_JIRA_WEBHOOK_SECRET")
   end
 
   # Sentry: `Sentry-Hook-Signature: <hex>` (no `sha256=` prefix) over
