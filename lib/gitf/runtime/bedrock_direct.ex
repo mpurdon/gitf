@@ -396,93 +396,16 @@ defmodule GiTF.Runtime.BedrockDirect do
   # -- AWS Helpers -------------------------------------------------------------
 
   defp build_aws_credentials(region) do
-    access_key = System.get_env("AWS_ACCESS_KEY_ID")
-    secret_key = System.get_env("AWS_SECRET_ACCESS_KEY")
-    session_token = System.get_env("AWS_SESSION_TOKEN")
+    # One implementation, in GiTF.AWS.Credentials — GiTF.Secrets signs SSM
+    # requests with the same instance-role credentials, and two expiry caches
+    # is two places for the expiry rule to drift.
+    case GiTF.AWS.Credentials.resolve(region) do
+      {:ok, creds} ->
+        creds
 
-    cond do
-      access_key && secret_key && not GiTF.Runtime.Keys.env_creds_expired?() ->
-        creds = %{
-          access_key_id: access_key,
-          secret_access_key: secret_key,
-          region: region
-        }
-
-        creds = if session_token, do: Map.put(creds, :session_token, session_token), else: creds
-        AWSAuth.Credentials.from_map(creds)
-
-      true ->
-        # No resident keys — the EC2 deployment authenticates via the
-        # instance role. Fetch (and cache) role credentials from IMDSv2.
-        case instance_role_credentials() do
-          {:ok, creds} ->
-            AWSAuth.Credentials.from_map(Map.put(creds, :region, region))
-
-          :error ->
-            raise "AWS credentials not available: no env keys and no EC2 instance role (IMDS unreachable)."
-        end
+      {:error, :unavailable} ->
+        raise "AWS credentials not available: no env keys and no EC2 instance role (IMDS unreachable)."
     end
-  end
-
-  # IMDSv2 instance-role credentials, cached until 5 minutes before expiry.
-  defp instance_role_credentials do
-    now = System.system_time(:second)
-
-    case :persistent_term.get({__MODULE__, :imds_creds}, nil) do
-      %{expires_at: exp} = cached when exp - 300 > now ->
-        {:ok, Map.delete(cached, :expires_at)}
-
-      _ ->
-        fetch_imds_credentials(now)
-    end
-  end
-
-  defp fetch_imds_credentials(now) do
-    base = "http://169.254.169.254"
-    req_opts = [receive_timeout: 2_000, retry: false]
-
-    with {:ok, %{status: 200, body: token}} <-
-           Req.put(
-             base <> "/latest/api/token",
-             [headers: %{"x-aws-ec2-metadata-token-ttl-seconds" => "21600"}] ++ req_opts
-           ),
-         hdrs = %{"x-aws-ec2-metadata-token" => token},
-         {:ok, %{status: 200, body: role_body}} <-
-           Req.get(
-             base <> "/latest/meta-data/iam/security-credentials/",
-             [headers: hdrs] ++ req_opts
-           ),
-         role when is_binary(role) <-
-           role_body |> to_string() |> String.split("\n", trim: true) |> List.first(),
-         {:ok, %{status: 200, body: body}} <-
-           Req.get(
-             base <> "/latest/meta-data/iam/security-credentials/" <> role,
-             [headers: hdrs] ++ req_opts
-           ) do
-      data = if is_binary(body), do: Jason.decode!(body), else: body
-
-      # An unparseable Expiration must NOT invent an hour of validity —
-      # cache for 60s only so a real expiry can't outlive our belief.
-      expires_at =
-        case DateTime.from_iso8601(data["Expiration"] || "") do
-          {:ok, dt, _} -> DateTime.to_unix(dt)
-          _ -> now + 360
-        end
-
-      creds = %{
-        access_key_id: data["AccessKeyId"],
-        secret_access_key: data["SecretAccessKey"],
-        session_token: data["Token"],
-        expires_at: expires_at
-      }
-
-      :persistent_term.put({__MODULE__, :imds_creds}, creds)
-      {:ok, Map.delete(creds, :expires_at)}
-    else
-      _ -> :error
-    end
-  rescue
-    _ -> :error
   end
 
   defp parse_arn_region(arn) do

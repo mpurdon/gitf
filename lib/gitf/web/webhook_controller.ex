@@ -262,12 +262,12 @@ defmodule GiTF.Web.WebhookController do
 
   defp github_secret do
     Application.get_env(:gitf, :github_webhook_secret) ||
-      System.get_env("GITF_GITHUB_WEBHOOK_SECRET")
+      GiTF.Secrets.get("GITF_GITHUB_WEBHOOK_SECRET")
   end
 
   defp sentry_secret do
     Application.get_env(:gitf, :sentry_webhook_secret) ||
-      System.get_env("GITF_SENTRY_WEBHOOK_SECRET")
+      GiTF.Secrets.get("GITF_SENTRY_WEBHOOK_SECRET")
   end
 
   defp enabled? do

@@ -259,7 +259,7 @@ defmodule GiTF.Plugin.Builtin.Channels.Discord do
 
   defp secret do
     Application.get_env(:gitf, :github_webhook_secret) ||
-      System.get_env("GITF_GITHUB_WEBHOOK_SECRET")
+      GiTF.Secrets.get("GITF_GITHUB_WEBHOOK_SECRET")
   end
 
   defp server_url do

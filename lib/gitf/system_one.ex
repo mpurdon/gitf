@@ -114,13 +114,23 @@ defmodule GiTF.SystemOne do
     Application.get_env(:gitf, :system_one_enabled, false) and api_key() != nil
   end
 
-  @doc "The API key, from the environment only. Never from config."
+  @doc """
+  The API key. Never from config — config is readable by anything that can
+  read the config.
+
+  `GiTF.Secrets` resolves it from the environment first, then SSM Parameter
+  Store, so on the box the key need not exist on disk at all.
+  `TYPESAFE_API_KEY` is honoured as a second env name because it is what
+  their own SDKs read, and a key already exported for a local script should
+  just work.
+  """
   @spec api_key() :: String.t() | nil
   def api_key do
-    case System.get_env("GITF_SYSTEM_ONE_API_KEY") || System.get_env("TYPESAFE_API_KEY") do
-      k when is_binary(k) and k != "" -> k
-      _ -> nil
-    end
+    GiTF.Secrets.get("GITF_SYSTEM_ONE_API_KEY") ||
+      case System.get_env("TYPESAFE_API_KEY") do
+        k when is_binary(k) and k != "" -> k
+        _ -> nil
+      end
   end
 
   @doc "The one endpoint every question goes to."

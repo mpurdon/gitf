@@ -604,6 +604,13 @@ defmodule GiTF.MCPServer.Handlers do
     result = %{
       status: to_string(health.status),
       checks: checks,
+      # Where each runtime secret is coming from — env, SSM, or absent, never
+      # the values. This is the question the hand-maintained env file made
+      # unanswerable: "did my Parameter Store change take effect?" A secret
+      # reading :env when you expected :ssm means the env file still has a
+      # copy and is shadowing it.
+      secrets:
+        Map.new(GiTF.Secrets.sources(), fn {name, source} -> {name, to_string(source)} end),
       timestamp: DateTime.to_iso8601(health.timestamp)
     }
 

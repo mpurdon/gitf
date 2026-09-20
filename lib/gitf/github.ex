@@ -548,12 +548,13 @@ defmodule GiTF.GitHub do
 
   defp github_token do
     # Resolution order:
-    #   1. GITHUB_TOKEN env var
+    #   1. GITHUB_TOKEN env var, then SSM /gitf/github_token (GiTF.Secrets) —
+    #      on the box the token need not be on disk at all
     #   2. <gitf_root>/.gitf/config.toml [github] token
     #   3. `gh auth token` — falls back to gh CLI's keyring if user is
     #      already authenticated there (avoids duplicate token setup).
     cond do
-      env = sanitize(System.get_env("GITHUB_TOKEN")) -> env
+      env = sanitize(GiTF.Secrets.get("GITHUB_TOKEN")) -> env
       cfg = read_token_from_config() -> cfg
       gh = read_token_from_gh_cli() -> gh
       true -> nil
