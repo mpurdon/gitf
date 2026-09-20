@@ -46,8 +46,13 @@ defmodule GiTF.SystemOne do
       config :gitf, :system_one_timeout_ms, 2_000
 
   The key comes from `GITF_SYSTEM_ONE_API_KEY` (or `TYPESAFE_API_KEY`), never
-  from config — it is a secret and belongs in `/etc/gitf/gitf.env`, rendered
-  from SSM Parameter Store at boot like every other one.
+  from config — it is a secret, and config is readable by anything that can
+  read the config. On the box it lives in `/etc/gitf/gitf.env`, which is
+  operator-maintained: SSM Parameter Store holds the copy of record (free, at
+  Standard tier) but nothing renders it automatically, so the env file and the
+  parameter are written together or they drift. Systemd reads
+  `EnvironmentFile=` at unit start, so a new key needs a restart — the flag
+  next to it does not.
 
   Tests swap the whole module out:
 

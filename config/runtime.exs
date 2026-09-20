@@ -41,7 +41,9 @@ boolean_flags = [
   {"GITF_SANDBOX_REQUIRED", :sandbox_required},
   {"GITF_LOG_STDOUT", :log_stdout},
   {"GITF_BEDROCK_PROMPT_CACHE", :bedrock_prompt_cache},
-  {"GITF_WIRE_ENABLED", :wire_enabled}
+  {"GITF_WIRE_ENABLED", :wire_enabled},
+  {"GITF_SYSTEM_ONE_ENABLED", :system_one_enabled},
+  {"GITF_FAILURE_JUDGE_ENABLED", :failure_judge_enabled}
 ]
 
 for {env_var, key} <- boolean_flags do

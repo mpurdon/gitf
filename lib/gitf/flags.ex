@@ -49,7 +49,9 @@ defmodule GiTF.Flags do
     bedrock_prompt_cache: "Bedrock prompt caching",
     wire_enabled: "Wire notation in phase prompts (specs/WIRE.md)",
     aramaki_enabled:
-      "Admit GitHub issues labelled with the trigger label (gitf:build) as missions"
+      "Admit GitHub issues labelled with the trigger label (gitf:build) as missions",
+    system_one_enabled: "Call TypeSafe System One (Jev) for calibrated typed decisions",
+    failure_judge_enabled: "Ask System One about failures the signature matcher left :unknown"
   ]
 
   @known Keyword.keys(@flags)
