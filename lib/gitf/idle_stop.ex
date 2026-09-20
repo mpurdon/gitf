@@ -185,7 +185,22 @@ defmodule GiTF.IdleStop do
     elapsed =
       DateTime.diff(DateTime.utc_now(), GiTF.Observability.Activity.last_activity_at(), :minute)
 
-    set(min(max(elapsed, 0) + minutes, @max_idle_minutes), minutes, opts)
+    case remaining_minutes() do
+      # A hold NEVER shortens an existing one. `set/3` overwrites, so
+      # without this, tapping "Keep awake 1h" while four hours were already
+      # held would take three of them away — a button labelled "keep awake"
+      # making the box sleep sooner, which nobody taps expecting.
+      #
+      # Extending is not the alternative: the labels say "keep awake 4h",
+      # not "add 4h", so the answer to two taps is the later of the two
+      # deadlines, and the order they are tapped in stops mattering.
+      remaining when remaining >= minutes ->
+        Logger.info("Idle-stop hold: #{minutes}m asked, #{remaining}m already held — keeping it")
+        {:ok, active()}
+
+      _ ->
+        set(min(max(elapsed, 0) + minutes, @max_idle_minutes), minutes, opts)
+    end
   end
 
   @doc "Minutes remaining on the active override, or 0."

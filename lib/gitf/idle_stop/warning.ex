@@ -78,6 +78,7 @@ defmodule GiTF.IdleStop.Warning do
       "The factory has been idle since #{fmt(idle_since)} and powers off at " <>
         "#{fmt(stop_at)} (~#{minutes_left} min). Hold it if you still need it.",
       dedup_key: "idle_stop_imminent:#{DateTime.to_iso8601(idle_since)}",
+      dedup_window: dedup_window_seconds(),
       data: %{
         stop_at: DateTime.to_iso8601(stop_at),
         idle_since: DateTime.to_iso8601(idle_since),
@@ -86,6 +87,24 @@ defmodule GiTF.IdleStop.Warning do
       }
     )
   end
+
+  @doc """
+  How long one warning suppresses the next.
+
+  The dedup key alone was not enough. `dispatch_webhook` defaults to a
+  five-minute window, and a ten-minute descent checked once a minute
+  produced a warning at ten minutes left, another at five, and another at
+  zero — three messages, three sets of buttons, each repeating the same
+  numbers, the last one offering to keep awake a box that was already
+  powering off. The moduledoc has claimed one warning per idle episode
+  since it was written; this is what makes that true.
+
+  It spans one descent plus a margin, and deliberately stays under the
+  shortest hold on offer (60 minutes) so a box that is held, and then falls
+  quiet again after the hold expires, still gets its next warning.
+  """
+  @spec dedup_window_seconds() :: pos_integer()
+  def dedup_window_seconds, do: warn_minutes() * 60 + 300
 
   defp warn_minutes do
     case Integer.parse(System.get_env("GITF_IDLE_STOP_WARN_MINUTES") || "") do

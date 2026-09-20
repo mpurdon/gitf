@@ -69,6 +69,28 @@ defmodule GiTF.IdleStop.WarningTest do
     refute_receive {:alert, %{type: :idle_stop_imminent}}, 200
   end
 
+  test "the suppression lasts longer than the descent it is suppressing" do
+    # Two back-to-back checks pass on the 5-minute default too, which is why
+    # the test above never caught the real bug: a ten-minute descent checked
+    # once a minute warned at ten minutes left, again at five, and again at
+    # zero. What matters is the window against the descent, not two calls in
+    # the same instant.
+    warn_window = 10 * 60
+    assert Warning.dedup_window_seconds() > warn_window
+
+    # And under the shortest hold on offer, so a box that is held for an
+    # hour and then falls quiet again is still warned the next time.
+    assert Warning.dedup_window_seconds() < 60 * 60
+  end
+
+  test "a longer warning window widens the suppression with it" do
+    System.put_env("GITF_IDLE_STOP_WARN_MINUTES", "20")
+    on_exit(fn -> System.delete_env("GITF_IDLE_STOP_WARN_MINUTES") end)
+
+    assert Warning.dedup_window_seconds() > 20 * 60
+    assert Warning.dedup_window_seconds() < 60 * 60
+  end
+
   test "a hold moves the stop out of the window and the warning goes quiet" do
     {:ok, _} = GiTF.IdleStop.hold(120)
     assert Warning.check() == :quiet

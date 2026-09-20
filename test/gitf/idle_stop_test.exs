@@ -59,6 +59,56 @@ defmodule GiTF.IdleStopTest do
     assert IdleStop.active() == nil
   end
 
+  describe "tapping keep-awake twice" do
+    test "a shorter hold never takes time off a longer one" do
+      # The question that found this: tap "Keep awake 4h", then "Keep awake
+      # 1h". `set/3` overwrites, so the second tap used to throw away three
+      # hours — a button labelled "keep awake" making the box sleep sooner.
+      {:ok, long} = GiTF.IdleStop.hold(240)
+      assert GiTF.IdleStop.remaining_minutes() >= 239
+
+      {:ok, after_short} = GiTF.IdleStop.hold(60)
+
+      assert GiTF.IdleStop.remaining_minutes() >= 239,
+             "a 1h hold shortened an existing 4h hold"
+
+      assert DateTime.compare(after_short.expires_at, long.expires_at) != :lt
+    end
+
+    test "a longer hold replaces a shorter one" do
+      {:ok, short} = GiTF.IdleStop.hold(60)
+      {:ok, long} = GiTF.IdleStop.hold(240)
+
+      assert DateTime.compare(long.expires_at, short.expires_at) == :gt
+      assert GiTF.IdleStop.remaining_minutes() >= 239
+    end
+
+    test "two taps give the later deadline, not the sum, in either order" do
+      # Replace, not accumulate: the buttons say "keep awake 4h", not
+      # "add 4h", so 1h then 4h is four hours and not five.
+      {:ok, _} = GiTF.IdleStop.hold(60)
+      {:ok, _} = GiTF.IdleStop.hold(240)
+      ascending = GiTF.IdleStop.remaining_minutes()
+
+      GiTF.IdleStop.clear()
+      {:ok, _} = GiTF.IdleStop.hold(240)
+      {:ok, _} = GiTF.IdleStop.hold(60)
+      descending = GiTF.IdleStop.remaining_minutes()
+
+      assert ascending in 239..241
+      assert descending in 239..241
+      assert abs(ascending - descending) <= 1, "the order of the taps changed the outcome"
+    end
+
+    test "clearing then holding again starts fresh" do
+      {:ok, _} = GiTF.IdleStop.hold(240)
+      GiTF.IdleStop.clear()
+      {:ok, _} = GiTF.IdleStop.hold(60)
+
+      assert GiTF.IdleStop.remaining_minutes() in 59..61
+    end
+  end
+
   test "even the most patient override still expires" do
     # There is deliberately no permanent hold — that is how a box stays up
     # for a month on someone's bill.

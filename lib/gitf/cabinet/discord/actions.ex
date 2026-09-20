@@ -80,7 +80,15 @@ defmodule GiTF.Cabinet.Discord.Actions do
   def resolved({:hold, _slug, minutes}) do
     [
       title: "Staying awake",
-      description: "Awake for another #{duration(minutes)}. The idle timer starts again after."
+      # "for", not "for another": a hold replaces rather than accumulates,
+      # so two taps give the later of the two deadlines and not their sum.
+      # `GiTF.IdleStop.hold/2` refuses to shorten an existing hold, which is
+      # what makes the order of the taps stop mattering.
+      # "at least", because `IdleStop.hold/2` keeps a longer existing hold
+      # rather than replacing it. Naming the requested duration outright
+      # would be false in exactly the case that guard exists for — asking
+      # for an hour while four are already held.
+      description: "Awake for at least #{duration(minutes)}. The idle timer restarts after that."
     ]
   end
 
@@ -156,7 +164,7 @@ defmodule GiTF.Cabinet.Discord.Actions do
           %{"hold_minutes" => minutes, "reason" => "held from Discord by #{who}"},
           actor
         )
-        |> outcome("kept awake #{minutes} min by #{who}")
+        |> outcome("kept awake by #{who}")
 
       {:sleep, slug} ->
         with %{} = ministry <- Registry.by_slug(slug) || {:error, :unknown_ministry},

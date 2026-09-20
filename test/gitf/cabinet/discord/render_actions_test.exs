@@ -246,9 +246,15 @@ defmodule GiTF.Cabinet.Discord.RenderActionsTest do
     embed = hd(settled.embeds)
 
     assert embed.title == "Staying awake"
-    assert embed.description =~ "Awake for another 4 hours"
+    assert embed.description =~ "Awake for at least 4 hours"
     refute embed.description =~ "Powers off"
     refute embed.description =~ "Idle since"
+
+    # "at least", never a flat promise of the asked-for duration:
+    # IdleStop.hold/2 keeps a longer existing hold, so naming 1 hour while
+    # four are already held would be false in exactly the case that guard
+    # exists for. "another" would be wrong too — holds replace, not stack.
+    refute embed.description =~ "another"
   end
 
   test "a failed act leaves the heading and body alone" do
