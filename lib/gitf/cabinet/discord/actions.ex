@@ -61,6 +61,51 @@ defmodule GiTF.Cabinet.Discord.Actions do
   end
 
   @doc """
+  How the message should read once this action has succeeded.
+
+  Returns a keyword list for `GiTF.Cabinet.Discord.Render.settled/3` —
+  `:title`, `:description`, or neither.
+
+  Only the acts that make the original wording *false* answer here. A hold
+  or a sleep contradicts a heading that announces an imminent power-off and a
+  body that names the time; leaving those in place produced the message this
+  exists to prevent — "Sleeping in ~0 min", over a power-off time, under a
+  footer saying the box had just been kept awake for four hours.
+
+  An approval is the opposite case: its body is the mission goal, which is
+  exactly what a reader scrolling back wants, and which approving does not
+  make untrue. Those return `[]` and only their footer changes.
+  """
+  @spec resolved(parsed) :: keyword()
+  def resolved({:hold, _slug, minutes}) do
+    [
+      title: "Staying awake",
+      description: "Awake for another #{duration(minutes)}. The idle timer starts again after."
+    ]
+  end
+
+  def resolved({:sleep, _slug}),
+    do: [title: "Asleep", description: "Powered off. Waking it takes about a minute."]
+
+  def resolved({:wake, _slug}),
+    do: [title: "Awake", description: "Powered on and accepting work."]
+
+  # Everything else keeps its body: the question, the goal, the failure
+  # reason. Those are the record of what was decided, and the footer already
+  # says who decided it.
+  def resolved(_action), do: []
+
+  defp duration(minutes) when minutes < 60, do: "#{minutes} minutes"
+  defp duration(60), do: "an hour"
+
+  defp duration(minutes) do
+    case {div(minutes, 60), rem(minutes, 60)} do
+      {h, 0} -> "#{h} hours"
+      {h, m} -> "#{h}h #{m}m"
+    end
+  end
+
+  @doc """
   Performs a parsed action as `actor` (`"discord:<username>"`).
 
   Returns `{:ok, outcome_line}` — the sentence written under the message

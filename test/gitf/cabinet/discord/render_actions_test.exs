@@ -129,8 +129,22 @@ defmodule GiTF.Cabinet.Discord.RenderActionsTest do
       })
 
     message = Render.render(event, @ministry)
-    assert hd(message.embeds).title == "Sleeping in ~9 min"
-    assert hd(message.embeds).description =~ "1 mission(s) are holding"
+    embed = hd(message.embeds)
+
+    # No countdown in the title: an embed title cannot carry a Discord
+    # timestamp, so a baked-in "~9 min" is wrong a minute later and reads
+    # "~0 min" forever after.
+    assert embed.title == "Sleeping soon"
+    refute embed.title =~ "min"
+
+    # The live figure goes in the description, where Discord expands it in
+    # the reader's own timezone and keeps it counting.
+    assert embed.description =~ "<t:#{DateTime.to_unix(~U[2026-09-10 01:12:00Z])}:R>"
+    assert embed.description =~ "<t:#{DateTime.to_unix(~U[2026-09-10 00:42:00Z])}:t>"
+    refute embed.description =~ "UTC"
+
+    assert embed.description =~ "One mission is holding"
+    refute embed.description =~ "mission(s)"
 
     assert [
              {:ok, {:hold, "home-affairs", 60}},
@@ -192,10 +206,99 @@ defmodule GiTF.Cabinet.Discord.RenderActionsTest do
 
   test "a settled message disables every component and records who acted" do
     event = relayed("approval_requested", "critical", %{"mission_id" => "msn-9", "goal" => "x"})
-    settled = event |> Render.render(@ministry) |> Render.settled("✓ approved by @matt · 21:04")
+    settled = event |> Render.render(@ministry) |> Render.settled("approved by @matt")
+    embed = hd(settled.embeds)
 
     assert Enum.all?(settled.components, fn row -> Enum.all?(row.components, & &1.disabled) end)
-    assert hd(settled.embeds).footer.text == "✓ approved by @matt · 21:04"
+    assert embed.footer.text =~ "approved by @matt"
+  end
+
+  test "settling keeps the identity that says which box it was about" do
+    # A fleet message that has lost "Home Affairs · v..." no longer says
+    # which box was acted on, and the outcome line alone does not tell you.
+    event = relayed("approval_requested", "critical", %{"mission_id" => "msn-9", "goal" => "x"})
+    rendered = Render.render(event, @ministry)
+    identity = hd(rendered.embeds).footer.text
+
+    settled = Render.settled(rendered, "approved by @matt")
+
+    assert hd(settled.embeds).footer.text == "approved by @matt · " <> identity
+    assert hd(settled.embeds).footer.text =~ "Home Affairs"
+  end
+
+  test "settling an idle warning rewrites the heading and body it just made false" do
+    # The bug this exists for: tapping "Keep awake 4h" left a message headed
+    # "Sleeping in ~0 min" over a body naming the power-off time, under a
+    # footer saying it had been kept awake for 240 minutes. Two thirds of it
+    # was false and the reader could not tell whether the box was awake.
+    event =
+      relayed("idle_stop_imminent", "high", %{
+        "stop_at" => "2026-09-10T01:12:00Z",
+        "idle_since" => "2026-09-10T00:42:00Z",
+        "minutes_left" => 0
+      })
+
+    rendered = Render.render(event, @ministry)
+
+    settled =
+      Render.settled(rendered, "kept awake by @matt", Actions.resolved({:hold, "ha", 240}))
+
+    embed = hd(settled.embeds)
+
+    assert embed.title == "Staying awake"
+    assert embed.description =~ "Awake for another 4 hours"
+    refute embed.description =~ "Powers off"
+    refute embed.description =~ "Idle since"
+  end
+
+  test "a failed act leaves the heading and body alone" do
+    # Nothing happened, so the original warning is still the truth.
+    event =
+      relayed("idle_stop_imminent", "high", %{
+        "stop_at" => "2026-09-10T01:12:00Z",
+        "idle_since" => "2026-09-10T00:42:00Z"
+      })
+
+    rendered = Render.render(event, @ministry)
+    settled = Render.settled(rendered, "could not: timed out", [])
+
+    assert hd(settled.embeds).title == "Sleeping soon"
+    assert hd(settled.embeds).description =~ "Powers off"
+  end
+
+  test "the settled timestamp moves to now, so one moment is shown once" do
+    event = relayed("approval_requested", "critical", %{"mission_id" => "msn-9", "goal" => "x"})
+    rendered = Render.render(event, @ministry)
+
+    settled = Render.settled(rendered, "approved by @matt")
+
+    refute hd(settled.embeds).timestamp == hd(rendered.embeds).timestamp
+    {:ok, at, _} = DateTime.from_iso8601(hd(settled.embeds).timestamp)
+    assert DateTime.diff(DateTime.utc_now(), at) < 5
+
+    # And no second time of our own in the footer, in a different zone from
+    # the one Discord renders beneath it.
+    refute hd(settled.embeds).footer.text =~ "UTC"
+  end
+
+  test "resolved/1 only rewrites the acts that make the wording false" do
+    assert Actions.resolved({:hold, "ha", 60})[:title] == "Staying awake"
+    assert Actions.resolved({:sleep, "ha"})[:title] == "Asleep"
+    assert Actions.resolved({:wake, "ha"})[:title] == "Awake"
+
+    # An approval's body is the mission goal — still true, still worth
+    # reading, so nothing is replaced.
+    assert Actions.resolved({:approve, "ha", "msn-9"}) == []
+    assert Actions.resolved({:answer, "ha", "q-1", "a"}) == []
+    assert Actions.resolved({:proposal, "p-1"}) == []
+    assert Actions.resolved(nil) == []
+  end
+
+  test "hold durations read as durations, not as minute counts" do
+    assert Actions.resolved({:hold, "ha", 30})[:description] =~ "30 minutes"
+    assert Actions.resolved({:hold, "ha", 60})[:description] =~ "an hour"
+    assert Actions.resolved({:hold, "ha", 240})[:description] =~ "4 hours"
+    assert Actions.resolved({:hold, "ha", 90})[:description] =~ "1h 30m"
   end
 
   test "settling a gateway struct strips nils rather than sending nulls back" do

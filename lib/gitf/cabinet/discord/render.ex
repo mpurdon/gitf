@@ -165,7 +165,7 @@ defmodule GiTF.Cabinet.Discord.Render do
   line saying who did what — "answered by @matt 21:04" — so a second
   reader sees a decision, not a live question.
   """
-  def settled(message, outcome_line) do
+  def settled(message, outcome_line, opts \\ []) do
     message = plain(message)
 
     components =
@@ -175,12 +175,52 @@ defmodule GiTF.Cabinet.Discord.Render do
 
     embeds =
       case message[:embeds] || [] do
-        [first | rest] -> [Map.put(first, :footer, %{text: outcome_line}) | rest]
+        [first | rest] -> [resettle(first, outcome_line, opts) | rest]
         [] -> [%{description: outcome_line}]
       end
 
     %{content: message[:content], embeds: embeds, components: components}
   end
+
+  # A settled message must describe the world as it is now, not the world
+  # that prompted the button.
+  #
+  # This used to replace the footer and nothing else, which produced the
+  # message that started this: a heading of "Sleeping in ~0 min" over a body
+  # reading "powers off at 17:07 UTC", under a footer saying it had just been
+  # kept awake for 240 minutes. Every word of that was written by us, and two
+  # thirds of it was false. An operator scrolling back could not tell whether
+  # the box was awake.
+  #
+  # So a caller that knows the act invalidated the heading or the body says
+  # so, and both are replaced. A caller that does not — an approval, where
+  # the body is the mission goal and stays worth reading — passes neither and
+  # only the footer moves.
+  defp resettle(embed, outcome_line, opts) do
+    embed
+    |> put_if(:title, opts[:title])
+    |> put_if(:description, opts[:description])
+    |> Map.put(:footer, %{text: settled_footer(embed, outcome_line)})
+    # The embed's timestamp is what Discord renders in the reader's own
+    # timezone, at the bottom of the message. Once settled, the moment worth
+    # showing is when it was settled — and having it right there is why the
+    # outcome line no longer carries a UTC stamp of its own. One time, in the
+    # reader's zone, instead of two in different ones.
+    |> Map.put(:timestamp, DateTime.utc_now() |> DateTime.to_iso8601())
+  end
+
+  # Keep whatever identified the box. In a fleet, a settled message that has
+  # lost "Home Affairs · v0.65.365" no longer says which box it was about,
+  # and the outcome alone does not tell you.
+  defp settled_footer(embed, outcome_line) do
+    case get_in(embed, [:footer, :text]) do
+      identity when is_binary(identity) and identity != "" -> outcome_line <> " · " <> identity
+      _ -> outcome_line
+    end
+  end
+
+  defp put_if(map, _key, nil), do: map
+  defp put_if(map, key, value), do: Map.put(map, key, value)
 
   # A message that came back from the gateway is Nostrum structs whose
   # every unset field is nil; Discord wants those absent, not null.
@@ -217,7 +257,11 @@ defmodule GiTF.Cabinet.Discord.Render do
 
   defp title(%{type: "input_stalled", data: d}), do: "Still waiting · #{d[:mission_id]}"
   defp title(%{type: "approval_requested", data: d}), do: "Approval · #{d[:mission_id]}"
-  defp title(%{type: "idle_stop_imminent", data: d}), do: "Sleeping in ~#{d[:minutes_left]} min"
+  # No countdown in the title: an embed title cannot carry a Discord
+  # timestamp, so "~5 min" is frozen at the moment it was written and reads
+  # "~0 min" forever after. The live figure is in the description, where it
+  # keeps counting; the colour carries the urgency.
+  defp title(%{type: "idle_stop_imminent"}), do: "Sleeping soon"
   defp title(%{type: "quest_failed", data: d}), do: "Failed · #{d[:mission_id]}"
   defp title(%{type: "mission_created", data: d}), do: "Mission #{d[:mission_id]} started"
   defp title(%{type: "mission_completed", data: d}), do: "Mission #{d[:mission_id]} completed"
@@ -237,11 +281,13 @@ defmodule GiTF.Cabinet.Discord.Render do
   defp description(%{type: "idle_stop_imminent", data: d}) do
     held =
       case d[:held_missions] do
-        n when is_integer(n) and n > 0 -> "\n#{n} mission(s) are holding for you and will wait."
+        1 -> "\nOne mission is holding for you and will wait."
+        n when is_integer(n) and n > 1 -> "\n#{n} missions are holding for you and will wait."
         _ -> ""
       end
 
-    "Idle since #{short_time(d[:idle_since])}, powers off at #{short_time(d[:stop_at])}." <> held
+    "Idle since #{short_time(d[:idle_since])}. Powers off #{short_time(d[:stop_at], "R")}." <>
+      held
   end
 
   defp description(%{type: "inbox_queued", data: d}), do: d[:summary] || ""
@@ -382,11 +428,25 @@ defmodule GiTF.Cabinet.Discord.Render do
 
   defp humanize(type), do: type |> to_string() |> String.replace("_", " ") |> String.capitalize()
 
-  defp short_time(nil), do: "?"
+  # Times render as Discord timestamp markdown, which every reader sees in
+  # their own timezone and which keeps counting after the message is posted.
+  #
+  # Both properties fix something real. A message that said "powers off at
+  # 17:07 UTC" while Discord's own footer beneath it said "Today at 1:01 PM"
+  # made the reader convert between two zones to place a single event. And a
+  # rendered-once "~5 min" is wrong sixty seconds later, where `:R` reads
+  # "in 5 minutes" now and "6 minutes ago" later, on its own.
+  #
+  # `:t` is a wall-clock time, `:R` is relative. Neither works in an embed
+  # title or footer — Discord only expands them in the description and in
+  # fields — so nothing that needs a live time may live in a title.
+  defp short_time(iso, style \\ "t")
 
-  defp short_time(iso) when is_binary(iso) do
+  defp short_time(nil, _style), do: "an unknown time"
+
+  defp short_time(iso, style) when is_binary(iso) do
     case DateTime.from_iso8601(iso) do
-      {:ok, dt, _} -> Calendar.strftime(dt, "%H:%M UTC")
+      {:ok, dt, _} -> "<t:#{DateTime.to_unix(dt)}:#{style}>"
       _ -> iso
     end
   end
