@@ -119,7 +119,8 @@ defmodule GiTF.Cabinet.Discord.Bot do
       "at" => DateTime.to_iso8601(entry.at)
     }
 
-    {:noreply, digest(state, "cabinet", event, %{slug: "cabinet", name: "Cabinet"})}
+    {:noreply,
+     digest(state, Guild.channel("cabinet"), event, %{slug: "cabinet", name: "Cabinet"})}
   end
 
   def handle_info({:cabinet_activity, _entry}, state), do: {:noreply, state}
@@ -211,6 +212,23 @@ defmodule GiTF.Cabinet.Discord.Bot do
   end
 
   defp send_now(nil, _message), do: false
+
+  # A fixed channel may be addressed by name. Every caller is supposed to
+  # resolve the id first, and the one that did not — fleet observations,
+  # digested under the literal string "cabinet" — raised inside the rescue
+  # below on every digest tick for weeks, warned once a minute, and put
+  # nothing in Discord. A name is an unambiguous thing to resolve, so
+  # resolve it rather than making each caller remember.
+  defp send_now(name, message) when is_binary(name) do
+    case Guild.channel(name) do
+      id when is_integer(id) ->
+        send_now(id, message)
+
+      _ ->
+        Logger.error("Cabinet Discord: no channel id for #{inspect(name)} — message dropped")
+        false
+    end
+  end
 
   defp send_now(channel_id, message) do
     payload = message |> Map.reject(fn {_, v} -> v in [nil, []] end)

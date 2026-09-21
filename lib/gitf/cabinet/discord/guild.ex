@@ -89,8 +89,17 @@ defmodule GiTF.Cabinet.Discord.Guild do
 
   def retire_ministry_channel(_), do: :ok
 
-  @doc "The id of a fixed channel (\"cabinet\", \"plan\", \"aramaki\")."
+  @doc """
+  The id of a fixed channel (`"cabinet"`, `"plan"`, `"aramaki"`), or nil.
+
+  Total, deliberately: a lookup that raises on an unknown name gives its
+  callers nothing they can act on, and `Bot.send_now/2` resolves names
+  from a supervised process where a `FunctionClauseError` would take the
+  bot down rather than drop one message. Unknown names come back nil and
+  are logged loudly there.
+  """
   def channel(name) when name in @fixed_channels, do: get_in(state(), [:channels, name])
+  def channel(_name), do: nil
 
   @doc """
   Which fixed channel an id is, or nil. The inverse of `channel/1`, used to
