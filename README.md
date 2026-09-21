@@ -152,8 +152,39 @@ Beyond the core pipeline, GiTF has an opt-in learning loop — each piece is a f
 | Workflow inference — pick the right workflow per mission automatically | `GITF_WORKFLOW_INFERENCE_ENABLED` |
 | Implementation tournaments — N parallel variants, best one merges | `GITF_PARALLEL_IMPL_ATTEMPTS=N` |
 | Aramaki GitHub admission | `GITF_ARAMAKI_ENABLED` |
+| Calibrated typed decisions via System One (Jev) | `GITF_SYSTEM_ONE_ENABLED` |
+| └ Judge the failures the signature matcher left `:unknown` | `GITF_FAILURE_JUDGE_ENABLED` |
 
 All flags are logged at boot.
+
+### Calibrated decisions (System One / Jev)
+
+Some decisions in the factory are a choice from a fixed set, and are made
+either by substring matching — precise on the phrasings it knows, blind to
+every other one — or by asking a generative model for a verdict it states with
+the same flatness whether it is certain or guessing.
+
+GiTF can route those to [TypeSafe's](https://typesafe.ai) **Jev**, a System One
+model: it takes a state and typed questions and returns typed answers with a
+**calibrated probability distribution**. No prose, no tool calls. The point is
+the third answer neither a regex nor a generative verdict can give — *I do not
+know*, as a number you can threshold on.
+
+One consumer ships today: failures the signature matcher could not name are
+classified into the taxonomy, promoted only above a confidence threshold
+(higher for `fatal`, which abandons an op, than for classes that cost one
+misattributed attempt). It runs **only** on `:unknown`, so a signature hit is
+never second-guessed, and every fallback — off, timed out, throttled, unsure —
+leaves exactly the behaviour you get without it. Input-only billing (~$0.042
+per million tokens, output free) is what makes it reasonable to judge something
+the factory otherwise leaves in a pile.
+
+Needs **both** the flag and a key (`GITF_SYSTEM_ONE_API_KEY`, or
+`TYPESAFE_API_KEY`); it is deliberately not settable from chat, since starting
+a metered third-party spend line should not be one message away.
+[`docs/system-one.md`](docs/system-one.md) covers the mechanism, the four-part
+test for when this beats an LLM, and one place it was rejected for being a
+downgrade from a structural guarantee.
 
 ## Deployment
 
@@ -225,6 +256,7 @@ RELEASE_TAR=1 MIX_ENV=prod mix release   # deployable tarball (CI builds arm64)
 - [`specs/GLOSSARY.md`](specs/GLOSSARY.md) — Full terminology reference.
 - [`specs/DELEGATION.md`](specs/DELEGATION.md) — Major delegation principle and enforcement.
 - [`docs/deploy-aws.md`](docs/deploy-aws.md) — AWS deployment runbook.
+- [`docs/system-one.md`](docs/system-one.md) — System One (Jev): what it decides, and why not a generative LLM.
 
 ## License
 
