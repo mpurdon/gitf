@@ -133,9 +133,14 @@ before the feature was.
 
 ### Still to decide
 
-- **The Cabinet keeps the SSM install path.** It is always-on and never wakes,
-  so it has no upgrade window — and the orchestrator cannot be upgraded by the
-  mechanism it orchestrates.
+- **The Cabinet keeps the SSM install path**, and `install-systemd.sh` now
+  *disables* `gitf-upgrade.service` there rather than leaving it enabled (found
+  by auditing the Cabinet after the first deploy — the installer enabled it
+  unconditionally while correctly gating the other two timers). Two reasons,
+  the second being the real one: it is always-on, so it never gets the
+  boot-time window the mechanism depends on; and it is the control plane —
+  pinning, rolling back and stopping the fleet all run from it, so if a bad
+  release is promoted the Cabinet must be the box that did not take it.
 - Nothing publishes the pointer automatically. Wiring `--promote` into CI would
   need an OIDC role in Terraform, and would make every `main` push a fleet-wide
   deploy. Deliberately not done.

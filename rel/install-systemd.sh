@@ -146,23 +146,30 @@ else
   systemctl enable --now gitf
 fi
 
-# Off by default. A box only upgrades itself once an operator has published
-# a version pointer and switched this on — the unit being installed is not
-# consent to self-upgrade.
-systemctl enable gitf-upgrade.service 2>/dev/null || true
-
 # The Cabinet is the fleet's always-on node: it must never idle-stop, and
 # it has no sectors to back up. Every earlier install re-enabled both
 # timers there, to be undone by hand each time (OPERATING §9c).
 if grep -Eq '^\[cabinet\]' /var/lib/gitf/.config/gitf/config.toml 2>/dev/null &&
    awk '/^\[cabinet\]/{f=1;next} /^\[/{f=0} f && /^enabled *= *true/{found=1} END{exit !found}' /var/lib/gitf/.config/gitf/config.toml; then
-  echo "cabinet mode: idle-stop and backup timers stay off"
+  echo "cabinet mode: idle-stop, backup and self-upgrade stay off"
   systemctl disable --now gitf-idle-stop.timer gitf-backup.timer 2>/dev/null || true
+
+  # The Cabinet does NOT upgrade itself, and this is the important one. It is
+  # the control plane: pinning a version, rolling back, and stopping the rest
+  # of the fleet all run from here. If a bad release is promoted, the Cabinet
+  # must be the box that did not take it, or there is nothing left to fix the
+  # fleet with. It is also always-on, so it never gets the boot-time window
+  # the mechanism depends on. Upgrade it by SSM, deliberately.
+  systemctl disable gitf-upgrade.service 2>/dev/null || true
 else
   systemctl enable --now gitf-idle-stop.timer
   # Backups only make sense with a bucket configured; enable but let the script
   # no-op when GITF_BACKUP_BUCKET is unset.
   systemctl enable --now gitf-backup.timer
+
+  # Enabled, but inert until an operator publishes a version pointer:
+  # installing the unit is not consent to self-upgrade.
+  systemctl enable gitf-upgrade.service 2>/dev/null || true
 fi
 
 echo
