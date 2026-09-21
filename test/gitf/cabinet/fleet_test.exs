@@ -21,7 +21,10 @@ defmodule GiTF.Cabinet.FleetTest do
       end
     end
 
-    def ec2(["start-instances" | _] = args) do
+    def ec2(["start-instances" | _] = args), do: record(args)
+    def ec2(["stop-instances" | _] = args), do: record(args)
+
+    defp record(args) do
       Application.put_env(:gitf, :test_ec2_calls, [
         args | Application.get_env(:gitf, :test_ec2_calls, [])
       ])
@@ -125,5 +128,21 @@ defmodule GiTF.Cabinet.FleetTest do
 
   defmodule NoAws do
     def ec2(_args), do: raise(ErlangError, original: :enoent)
+  end
+
+  describe "graceful stop" do
+    test "a ministry that cannot be drained is not stopped", %{ministry: m} do
+      # The whole point of the graceful mode is that the box is told to stop
+      # taking work BEFORE the power goes. If that message never lands, the
+      # honest outcome is to stop nothing and say so — silently falling back
+      # to a hard stop would make "graceful" a word that sometimes means its
+      # opposite, on the one path where the operator asked for care.
+      box("running")
+
+      assert {:error, {:drain_failed, _}} = Fleet.drain_and_stop(m, timeout_ms: 0)
+
+      assert Application.get_env(:gitf, :test_ec2_calls) == [],
+             "a box that could not be drained was stopped anyway"
+    end
   end
 end

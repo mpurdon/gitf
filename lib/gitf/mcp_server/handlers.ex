@@ -536,9 +536,20 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("stop_ministry", %{"slug" => slug} = args) do
     with :ok <- require_confirm(args),
-         %{} = m <- GiTF.Cabinet.Registry.by_slug(slug) || {:error, "no ministry #{slug}"},
-         :ok <- GiTF.Cabinet.Fleet.stop(m) do
-      {:ok, json_text(%{slug: slug, status: "stopping"})}
+         %{} = m <- GiTF.Cabinet.Registry.by_slug(slug) || {:error, "no ministry #{slug}"} do
+      case args["mode"] || "graceful" do
+        "force" ->
+          case GiTF.Cabinet.Fleet.stop(m) do
+            :ok -> {:ok, json_text(%{slug: slug, mode: "force", status: "stopping"})}
+            {:error, reason} -> {:error, "stop failed: #{inspect(reason)}"}
+          end
+
+        "graceful" ->
+          graceful_stop(m, args["reason"])
+
+        other ->
+          {:error, "unknown mode #{inspect(other)} — graceful or force"}
+      end
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
       {:error, reason} -> {:error, "stop failed: #{inspect(reason)}"}
@@ -1511,6 +1522,38 @@ defmodule GiTF.MCPServer.Handlers do
     end)
   end
 
+  def call("drain_factory", %{"cancel" => true} = args) do
+    with :ok <- require_confirm(args) do
+      GiTF.Drain.cancel()
+      {:ok, json_text(%{status: "accepting", note: "New missions are admitted again."})}
+    end
+  end
+
+  def call("drain_factory", args) do
+    with :ok <- require_confirm(args) do
+      opts =
+        [reason: args["reason"], actor: "mcp"] ++
+          if(is_integer(args["minutes"]), do: [minutes: args["minutes"]], else: [])
+
+      {:ok, drain} = GiTF.Drain.begin(opts)
+      %{idle: idle, running: running, held: held} = GiTF.Observability.Health.idle_state()
+
+      {:ok,
+       json_text(%{
+         status: "draining",
+         since: DateTime.to_iso8601(drain.since),
+         expires_at: DateTime.to_iso8601(drain.expires_at),
+         reason: drain.reason,
+         # What is left to wait for. Held missions are listed but do not
+         # hold the drain open — a box waiting on a person is not busy,
+         # which is the same rule idle-stop has always used.
+         idle: idle,
+         running_missions: length(running),
+         held_missions: length(held)
+       })}
+    end
+  end
+
   def call("idle_stop_override", %{"clear" => true}) do
     safe_handler("idle_stop_override", %{}, fn ->
       GiTF.IdleStop.clear()
@@ -1975,6 +2018,36 @@ defmodule GiTF.MCPServer.Handlers do
     case GiTF.Validator.validate_timeout_override(timeout_ms) do
       {:ok, _} -> :ok
       {:error, msg} -> {:error, msg <> " (or pass clear: true)"}
+    end
+  end
+
+  # Both outcomes are successes and say what actually happened: a drained,
+  # quiet box whose instance is stopping, or a drained box still finishing
+  # that its own idle-stop timer will sleep. Neither is a failure, so
+  # neither is reported as one.
+  defp graceful_stop(ministry, reason) do
+    case GiTF.Cabinet.Fleet.drain_and_stop(ministry, reason: reason) do
+      {:ok, :stopped} ->
+        {:ok, json_text(%{slug: ministry.slug, mode: "graceful", status: "stopping"})}
+
+      {:ok, :draining} ->
+        {:ok,
+         json_text(%{
+           slug: ministry.slug,
+           mode: "graceful",
+           status: "draining",
+           note:
+             "Still finishing work. It accepts nothing new and its idle-stop timer " <>
+               "will sleep it when it goes quiet — poll cabinet_status."
+         })}
+
+      {:error, {:drain_failed, reason}} ->
+        {:error,
+         "could not drain #{ministry.slug}: #{inspect(reason)} — nothing was stopped. " <>
+           "Use mode:'force' to stop it anyway."}
+
+      {:error, reason} ->
+        {:error, "stop failed: #{inspect(reason)}"}
     end
   end
 

@@ -86,6 +86,10 @@ defmodule GiTF.Major.Orchestrator do
   def start_quest(mission_id, opts \\ []) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          :ok <- validate_quest_ready(mission),
+         # First, and before any state is touched: a draining box is one
+         # that is about to stop, and the cheapest mission to recover is
+         # the one that never started.
+         :ok <- GiTF.Drain.preflight(),
          :ok <- budget_preflight(mission_id),
          :ok <- provider_preflight(),
          # `validate_quest_ready` may have auto-assigned a sector (writing

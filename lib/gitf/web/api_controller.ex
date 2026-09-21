@@ -40,7 +40,11 @@ defmodule GiTF.Web.ApiController do
         held_missions: length(held),
         idle: idle,
         idle_since: idle_since,
-        idle_stop_at: GiTF.IdleStop.projected_stop_at(idle_since)
+        idle_stop_at: GiTF.IdleStop.projected_stop_at(idle_since),
+        # What the Cabinet watches to know a graceful stop has landed:
+        # `draining` says the door is shut, `idle` says the room is empty.
+        # Both true is the moment it is safe to stop the instance.
+        draining: GiTF.Drain.draining?()
       }
     })
   end

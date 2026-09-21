@@ -286,11 +286,20 @@ defmodule GiTF.MCPServer.Tools do
       %{
         name: "stop_ministry",
         description:
-          "[WRITE] Stop a ministry's box. In-flight missions die with it — check first. " <>
-            "Requires confirm: true.",
+          "[WRITE] Stop a ministry's box. mode:'graceful' (the default) tells it to stop " <>
+            "accepting new missions, waits briefly for the work in flight to finish, and stops " <>
+            "the instance once it is quiet; if it is still busy it stays drained and its own " <>
+            "idle-stop timer sleeps it when it goes quiet. mode:'force' stops the instance now " <>
+            "— running missions are interrupted, though they are checkpointed on the way down " <>
+            "and resume on the next boot. Requires confirm: true.",
         inputSchema: %{
           type: "object",
-          properties: %{slug: %{type: "string"}, confirm: %{type: "boolean"}},
+          properties: %{
+            slug: %{type: "string"},
+            mode: %{type: "string", enum: ["graceful", "force"], default: "graceful"},
+            reason: %{type: "string", description: "Recorded on the ministry while it drains"},
+            confirm: %{type: "boolean"}
+          },
           required: ["slug", "confirm"]
         }
       },
@@ -1097,6 +1106,29 @@ defmodule GiTF.MCPServer.Tools do
             mission_id: %{type: "string", description: "Mission that opened the PR"},
             pr_url: %{type: "string", description: "Full pull request URL"}
           }
+        }
+      },
+      %{
+        name: "drain_factory",
+        description:
+          "[WRITE] Stop this factory accepting NEW missions, so it can go quiet before being " <>
+            "stopped. Work already running is left alone and finishes; missions holding for a " <>
+            "person do not hold the drain open. Nothing is powered off — this only closes the " <>
+            "door, so that 'stop it when it is not busy' terminates. Pass cancel:true to accept " <>
+            "work again. The drain expires on its own and never survives a reboot: a box always " <>
+            "wakes ready to work. Requires confirm: true.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            cancel: %{type: "boolean", description: "Accept missions again", default: false},
+            minutes: %{
+              type: "integer",
+              description: "How long the door stays shut before it opens by itself (max 240)"
+            },
+            reason: %{type: "string", description: "Why — shown on /health and when inspected"},
+            confirm: %{type: "boolean"}
+          },
+          required: ["confirm"]
         }
       },
       %{

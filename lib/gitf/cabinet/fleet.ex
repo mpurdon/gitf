@@ -186,6 +186,75 @@ defmodule GiTF.Cabinet.Fleet do
     end
   end
 
+  @doc """
+  Graceful stop — the fleet's answer to `shutdown` rather than to the
+  power switch.
+
+  Three steps, in the order an OS does them: tell the Section to stop
+  accepting new missions (`drain_factory`), wait for the work already in
+  flight to finish, then stop the instance. `wake_and_await/2` is the
+  symmetric partner; this is the way down.
+
+  The wait is bounded (default 45s — an MCP call has a ~60s budget) and a
+  timeout is **not** a failure. A box still busy at the deadline stays
+  drained, and its own root idle-stop timer sleeps it when it finally goes
+  quiet: the drain is what makes that terminate, because nothing new can
+  arrive to reset the countdown. So the two honest answers are
+  `{:ok, :stopped}` — it is quiet and the instance is stopping — and
+  `{:ok, :draining}` — it is still finishing, and will sleep itself.
+
+  A mission holding for a person does not hold this open. That is
+  `Health.idle_state/0`'s definition of idle and it is deliberate: a box
+  waiting on a human is not busy, and a drain that waited for an approval
+  nobody is watching would never end.
+  """
+  @spec drain_and_stop(map(), keyword()) ::
+          {:ok, :stopped | :draining} | {:error, term()}
+  def drain_and_stop(ministry, opts \\ []) do
+    timeout_ms = Keyword.get(opts, :timeout_ms, 45_000)
+
+    with :ok <- drain(ministry, Keyword.get(opts, :reason)) do
+      case await_quiet(ministry, System.monotonic_time(:millisecond) + timeout_ms) do
+        :ok ->
+          with :ok <- stop(ministry), do: {:ok, :stopped}
+
+        {:error, :still_busy} ->
+          Logger.info(
+            "Cabinet: #{ministry.slug} still busy — left draining, it will sleep itself"
+          )
+
+          {:ok, :draining}
+      end
+    end
+  end
+
+  @doc "Tells the Section to stop admitting new missions. Does not stop anything."
+  def drain(%{slug: slug}, reason) do
+    args = %{confirm: true, reason: reason || "graceful stop from the Cabinet"}
+
+    case GiTF.Cabinet.Proxy.call(slug, "drain_factory", args) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:drain_failed, reason}}
+    end
+  end
+
+  # Quiet means the Section's own /health says so, not that the Cabinet
+  # guessed: one definition of idle, on the box that has the facts.
+  defp await_quiet(ministry, deadline) do
+    case health(ministry) do
+      {:ok, %{"data" => %{"idle" => true}}} ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) > deadline do
+          {:error, :still_busy}
+        else
+          Process.sleep(5_000)
+          await_quiet(ministry, deadline)
+        end
+    end
+  end
+
   defp runner do
     Application.get_env(:gitf, :cabinet_ec2_runner, GiTF.Cabinet.Fleet.AwsCli)
   end
