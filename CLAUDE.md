@@ -68,3 +68,4 @@ mix escript.build # dev CLI binary → ./gitf
 | [`specs/GLOSSARY.md`](specs/GLOSSARY.md) | Terminology (sector, ghost, op, mission) |
 | [`specs/DELEGATION.md`](specs/DELEGATION.md) | Major delegation principle |
 | [`specs/WIRE.md`](specs/WIRE.md) | Wire — the compact artifact notation phase ghosts read/write (flag `wire_enabled`) |
+| [`docs/system-one.md`](docs/system-one.md) | System One (Jev) — what it decides, and why not a generative LLM |
