@@ -5,7 +5,11 @@
 #
 # Idempotent: safe to re-run for upgrades (stops the service, replaces
 # /opt/gitf, restarts). Creates the gitf user, directories, env file with
-# generated secrets, and installs the daemon + idle-stop + backup units.
+# generated secrets, and installs the daemon + idle-stop + backup + upgrade
+# units.
+#
+# GITF_INSTALL_NO_START=1 installs without starting gitf.service — for the
+# boot-time upgrade path, which runs before systemd starts it anyway.
 set -euo pipefail
 
 TARBALL="${1:?usage: install-systemd.sh <release-tarball.tar.gz>}"
@@ -122,11 +126,30 @@ install -m 0644 "$HERE/gitf-idle-stop.service" /etc/systemd/system/gitf-idle-sto
 install -m 0644 "$HERE/gitf-idle-stop.timer" /etc/systemd/system/gitf-idle-stop.timer
 install -m 0644 "$HERE/gitf-backup.service" /etc/systemd/system/gitf-backup.service
 install -m 0644 "$HERE/gitf-backup.timer" /etc/systemd/system/gitf-backup.timer
+install -m 0644 "$HERE/gitf-upgrade.service" /etc/systemd/system/gitf-upgrade.service
 install -m 0755 "$HERE/gitf-idle-stop.sh" /usr/local/bin/gitf-idle-stop
 install -m 0755 "$HERE/gitf-backup.sh" /usr/local/bin/gitf-backup
+install -m 0755 "$HERE/gitf-upgrade.sh" /usr/local/bin/gitf-upgrade
 
 systemctl daemon-reload
-systemctl enable --now gitf
+
+# GITF_INSTALL_NO_START is set by gitf-upgrade.service, which runs this
+# script from Before=gitf.service. Starting gitf.service from in there
+# would block on a unit systemd has ordered AFTER the one doing the
+# blocking — a deadlock that ends at TimeoutStartSec with the box booting
+# nothing. Enable it and let systemd start it when the oneshot returns,
+# which is this boot's ordinary start.
+if [[ -n "${GITF_INSTALL_NO_START:-}" ]]; then
+  echo "boot-time upgrade: enabling gitf, leaving the start to systemd"
+  systemctl enable gitf
+else
+  systemctl enable --now gitf
+fi
+
+# Off by default. A box only upgrades itself once an operator has published
+# a version pointer and switched this on — the unit being installed is not
+# consent to self-upgrade.
+systemctl enable gitf-upgrade.service 2>/dev/null || true
 
 # The Cabinet is the fleet's always-on node: it must never idle-stop, and
 # it has no sectors to back up. Every earlier install re-enabled both

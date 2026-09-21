@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Publishes a CI-built release to the artifacts prefix, where boxes look
+# for it when they wake (see rel/gitf-upgrade.sh).
+#
+# Usage:
+#   bin/publish-release <ci-run-id>              upload, do not promote
+#   bin/publish-release <ci-run-id> --promote    upload AND point every box at it
+#
+# Upload and promote are deliberately separate verbs. Uploading is inert:
+# the bytes sit in the bucket and nothing changes. Promoting rewrites
+# artifacts/current, and every ministry that wakes after that takes the new
+# release, unattended. That is a fleet-wide action and it should take a
+# second flag to say so.
+#
+# Rolling back is the same command against an older run — or, on one box,
+# `echo 0.65.360 > /etc/gitf/pin-version`, which outranks the pointer.
+set -euo pipefail
+
+RUN="${1:?usage: publish-release <ci-run-id> [--promote]}"
+PROMOTE="${2:-}"
+
+BUCKET="${GITF_BACKUP_BUCKET:-}"
+if [[ -z "$BUCKET" ]]; then
+  BUCKET=$(aws s3 ls --profile "${AWS_PROFILE:-gitf}" \
+    | awk '{print $3}' | grep -m1 '^gitf-backup-') \
+    || { echo "no backup bucket found — set GITF_BACKUP_BUCKET" >&2; exit 1; }
+fi
+
+work=$(mktemp -d /tmp/gitf-publish.XXXXXX)
+trap 'rm -rf "$work"' EXIT
+
+echo "Downloading artifacts from CI run ${RUN}…"
+gh run download "$RUN" -n gitf-release-arm64 -D "${work}/rel"
+gh run download "$RUN" -n gitf-installer -D "${work}/inst"
+
+rel=$(ls "${work}"/rel/gitf-*.tar.gz)
+version=$(basename "$rel" .tar.gz); version="${version#gitf-}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version '$version'" >&2; exit 1; }
+
+echo "Publishing ${version} to s3://${BUCKET}/artifacts/"
+
+# The installer ships versioned alongside the release. The box has no
+# checkout, so it needs rel/ and bin/ to install anything — and it must be
+# the installer that MATCHES the release, not whatever was uploaded last.
+aws s3 cp "$rel" "s3://${BUCKET}/artifacts/gitf-${version}.tar.gz" --sse AES256 --only-show-errors
+aws s3 cp "${work}/inst/gitf-installer.tar.gz" \
+  "s3://${BUCKET}/artifacts/gitf-installer-${version}.tar.gz" --sse AES256 --only-show-errors
+
+if [[ "$PROMOTE" == "--promote" ]]; then
+  printf '%s' "$version" > "${work}/current"
+  aws s3 cp "${work}/current" "s3://${BUCKET}/artifacts/current" --sse AES256 --only-show-errors
+  echo "Promoted: every ministry now upgrades to ${version} on its next wake."
+else
+  echo "Uploaded, NOT promoted. Nothing upgrades until:"
+  echo "  bin/publish-release ${RUN} --promote"
+fi

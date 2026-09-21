@@ -371,6 +371,23 @@ enough, the daemon caches at boot.
 Upgrades: CI builds an arm64 tarball on every `main` push; install with
 `sudo rel/install-systemd.sh <tarball>`. State is untouched.
 
+**Upgrade on wake (0.65.369+).** A ministry can install a release itself on
+the way up, which is the whole reason `stop_ministry mode: "graceful"` and
+this share a plan (`docs/plans/fleet-lifecycle.md`): "upgrade yourself" is
+*drain, sleep, wake*. Publish, then promote:
+
+```sh
+bin/publish-release <ci-run-id>            # upload both tarballs — inert
+bin/publish-release <ci-run-id> --promote  # rewrite artifacts/current
+```
+
+Promoting is fleet-wide and unattended: every ministry that wakes after it
+takes that release. `gitf-upgrade.service` runs before `gitf.service`, fails
+open on every path (a box that cannot upgrade still boots), and is outranked
+by two brakes on the box — `/etc/gitf/upgrade-disabled` and
+`/etc/gitf/pin-version` (the rollback that needs no republish). The Cabinet
+is always-on, never wakes, and so keeps the SSM path above.
+
 ## 9b. The node_modules cache and the validation command
 
 `GiTF.InstallCache` hardlinks a cached `node_modules` (keyed by the SHA-256 of

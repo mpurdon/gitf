@@ -1,0 +1,26 @@
+[Unit]
+Description=Install a newer GiTF release before the factory starts
+# The whole design: a box that sleeps to $0 and wakes on demand gets a free
+# upgrade window on the way up, when nothing is running and nothing is in
+# flight. Ordering it before gitf.service is what makes the daemon that
+# comes up the new one.
+Before=gitf.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/gitf/gitf.env
+EnvironmentFile=-/etc/gitf/aws.env
+ExecStart=/usr/local/bin/gitf-upgrade
+# A wake must not hang on a slow or unreachable S3. The script fails open,
+# and so does the unit: if it is killed at the deadline the boot carries on
+# with the version already installed.
+TimeoutStartSec=300
+# Never block the boot. An upgrade that fails is a box on the old release,
+# which is a thing to look at — not an outage.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

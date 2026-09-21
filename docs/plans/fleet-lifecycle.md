@@ -1,6 +1,6 @@
 # Fleet lifecycle — commanded shutdown and self-upgrade
 
-Status: **Phase 1 built (0.65.369, not yet deployed). Phase 2 designed, blocked on an IAM change.**
+Status: **Phase 1 and Phase 2 built (0.65.369+, not yet deployed). Self-upgrade is installed but OFF until a version pointer is promoted.**
 
 The Cabinet could stop a ministry exactly one way: `ec2 stop-instances`, whose
 own tool description admitted *"In-flight missions die with it — check first"*
@@ -77,7 +77,7 @@ is an ACPI shutdown that runs `Exfil` via `systemctl stop` (`TimeoutStopSec=45`)
   used; a drain waiting on an approval nobody is watching would never end.
 - No Discord button yet. The Cabinet's `stop_ministry` is the surface.
 
-## Phase 2 — upgrade on wake (designed, blocked)
+## Phase 2 — upgrade on wake (built, off by default)
 
 The chosen mechanism: **a box checks for a newer release at boot and installs it
 before it accepts anything.** "Upgrade yourself" therefore = *drain, sleep, wake*
@@ -90,32 +90,57 @@ the boot path is a free, verified upgrade window — and the Cabinet's existing
 `/health` poll (which already reports `version`) observes the outcome with no
 new machinery.
 
-Shape:
+**No Terraform change was needed.** An earlier draft of this plan said the work
+was blocked on granting the instance role `s3:GetObject`. That was wrong: the
+role has had `s3:GetObject` and `s3:ListBucket` on the backup bucket since it
+was written (`infra/aws/iam.tf`, `sid = "BackupBucket"`), and `artifacts/` is
+already the documented CI hand-off prefix in that same bucket. The bucket is
+SSE-S3 (`AES256`), so no KMS grant is involved either. The AWS side was ready
+before the feature was.
 
-1. `gitf-upgrade.service` — `Type=oneshot`, `Before=gitf.service`, root.
-2. Reads a version pointer from S3 (`artifacts/current`), compares to the
-   installed `/opt/gitf` version, and on a difference downloads the tarball and
-   runs the existing `rel/install-systemd.sh`.
-3. Fails **open**: any failure (no network, bad pointer, failed install) logs and
-   boots the version already on disk. A box that cannot upgrade must still come
-   up, or an S3 typo bricks the fleet's boot path.
-4. CI already builds the arm64 tarball on every `main` push; publishing the
-   pointer is one `s3 cp` at the end of the existing deploy.
+### What it is
 
-**Blocked on:** the instance role needs `s3:GetObject` on the artifacts prefix.
-That is a Terraform change to the AWS account, and per standing instruction
-nothing that touches the AWS account or the bill gets applied without reading
-the full plan and asking first. Not started.
+- `rel/gitf-upgrade.sh` → `/usr/local/bin/gitf-upgrade`, run by
+  `gitf-upgrade.service`: `Type=oneshot`, `Before=gitf.service`,
+  `After=network-online.target`, root.
+- It compares `/opt/gitf/releases/start_erl.data` (written by the release, so it
+  cannot drift from what will boot) against `artifacts/current`, and on a
+  difference downloads `gitf-<v>.tar.gz` **and the matching
+  `gitf-installer-<v>.tar.gz`** — the box has no checkout, so it needs `rel/`
+  and `bin/` to install anything, and it needs the installer that *matches*.
+- `bin/publish-release <ci-run-id> [--promote]` uploads both and, only with the
+  second flag, rewrites the pointer.
 
-**Risks to weigh before building:**
+### The properties that matter
 
-- It puts a network fetch on the critical boot path of every wake. Mitigated by
-  fail-open and a short timeout, but a wake gets slower.
-- A bad release now propagates on the next wake of every box, unattended. Wants
-  a pinned-version escape hatch (`/etc/gitf/pin-version`) before the fleet grows.
-- The Cabinet upgrades the same way, but it is always-on and never wakes — so it
-  keeps the SSM install path. The orchestrator cannot be upgraded by the
+- **Fail-open, everywhere.** Every failure path exits 0 and boots the version on
+  disk: no bucket, no aws CLI, no pointer, a non-version string, a missing or
+  truncated tarball, an installer that will not unpack, a failed install. A box
+  that cannot upgrade needs a look; a box that cannot boot is an outage, and one
+  bad pointer must not be able to cause one across the fleet at once. Both
+  tarballs are validated with `tar tzf` before anything is touched.
+- **Two brakes, both outranking the pointer.** `/etc/gitf/upgrade-disabled`
+  (never upgrade — the same shape as idle-stop's) and `/etc/gitf/pin-version`
+  (hold at a version). The pin is the rollback that does not need a republish.
+- **Upload ≠ promote.** Uploading is inert. Promoting is a fleet-wide,
+  unattended action and takes its own flag.
+- **The deadlock that would otherwise eat the boot.** `install-systemd.sh` ends
+  in `systemctl enable --now gitf`. Called from a unit ordered
+  `Before=gitf.service`, that blocks on a unit systemd has ordered *after* the
+  one doing the blocking, and the boot dies at `TimeoutStartSec` having started
+  nothing. The installer now honours `GITF_INSTALL_NO_START=1`: enable, and let
+  systemd do the start when the oneshot returns.
+
+### Still to decide
+
+- **The Cabinet keeps the SSM install path.** It is always-on and never wakes,
+  so it has no upgrade window — and the orchestrator cannot be upgraded by the
   mechanism it orchestrates.
+- Nothing publishes the pointer automatically. Wiring `--promote` into CI would
+  need an OIDC role in Terraform, and would make every `main` push a fleet-wide
+  deploy. Deliberately not done.
+- A wake now carries a network fetch on the critical path (bounded:
+  `TimeoutStartSec=300`, and it fails open).
 
 ## Acceptance test
 
@@ -132,5 +157,7 @@ don't do it by hand through another channel:
 ## Bootstrapping note
 
 None of this exists on any box until 0.65.369+ is installed there — including,
-inevitably, the drain that would have made installing it graceful. The first
-deploy of this feature is a force stop.
+inevitably, the drain that would have made installing it graceful, and the
+upgrade unit that would have installed it unattended. The first deploy of this
+feature is a force stop and a hand-driven SSM install. Every one after it is
+`bin/publish-release <run> --promote` plus a sleep and a wake.
