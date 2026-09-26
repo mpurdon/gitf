@@ -28,7 +28,15 @@ Environment=GITF_HOME=/var/lib/gitf
 # out because %h is the service MANAGER's home (/root), not User='s — the
 # 0.65.282 unit shipped PATH=/root/.local/bin. The runtime also falls back
 # to it for claude, but the unit is the fix for everything the ghosts exec.
-Environment=PATH=/var/lib/gitf/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+#
+# ~/.cargo/bin for the same reason, and absolute for a sharper one: the
+# sandbox points HOME into the worktree, so anything that finds cargo via
+# $HOME/.cargo/bin finds nothing there. The hand-made /usr/local/bin cargo
+# symlinks that used to paper over this lived on the root volume and went
+# with it in the 2026-09-01 box replacement; from then on every op audit
+# that touched Rust failed "cargo: not found" while the ghost itself —
+# which had exported the path by hand — reported a clean build.
+Environment=PATH=/var/lib/gitf/.local/bin:/var/lib/gitf/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=GITF_PORT=4000
 # Bind loopback by default; front with a reverse proxy or set GITF_HOST in the
 # env file to expose. Never expose the dashboard directly to the internet.

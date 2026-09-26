@@ -216,6 +216,44 @@ defmodule GiTF.Runtime.LLMClient.Default do
     if String.starts_with?(clean, "models/"), do: clean, else: "models/#{clean}"
   end
 
+  # ReqLLM's Bedrock provider finds credentials in environment variables and
+  # nowhere else. The boxes authenticate to AWS through their instance role,
+  # which lives behind IMDS — so every in-process Bedrock call that went
+  # through ReqLLM failed "AWS credentials required for Bedrock", while
+  # `BedrockDirect`, which asks `GiTF.AWS.Credentials`, worked on the same
+  # box. The Cabinet's Discord agent is one such caller: every question put
+  # to it in a channel came back "the model call failed".
+  #
+  # Same resolver, same order (resident env keys, then the instance role),
+  # so both paths agree on which credentials a box has. Explicit options win.
+  @doc false
+  def inject_aws_credentials(provider, opts) when provider in ["bedrock", "amazon_bedrock"] do
+    if Keyword.has_key?(opts, :access_key_id) or Keyword.has_key?(opts, :api_key) do
+      opts
+    else
+      region = Keyword.get(opts, :region) || GiTF.AWS.Credentials.default_region()
+
+      case GiTF.AWS.Credentials.resolve(region) do
+        {:ok, creds} ->
+          opts
+          |> Keyword.put(:access_key_id, creds.access_key_id)
+          |> Keyword.put(:secret_access_key, creds.secret_access_key)
+          |> Keyword.put(:region, region)
+          |> then(fn o ->
+            if creds.session_token,
+              do: Keyword.put(o, :session_token, creds.session_token),
+              else: o
+          end)
+
+        {:error, _} ->
+          # Leave ReqLLM to report the absence in its own words.
+          opts
+      end
+    end
+  end
+
+  def inject_aws_credentials(_provider, opts), do: opts
+
   defp inject_api_key(model, opts) do
     provider = model |> to_string() |> String.split(":") |> List.first()
 
@@ -228,6 +266,8 @@ defmodule GiTF.Runtime.LLMClient.Default do
           key -> Keyword.put(opts, :api_key, key)
         end
       end
+
+    opts = inject_aws_credentials(provider, opts)
 
     if provider == "ollama" or GiTF.Runtime.ModelResolver.ollama_mode?() do
       base = System.get_env("OLLAMA_BASE_URL") || "http://localhost:11434"
