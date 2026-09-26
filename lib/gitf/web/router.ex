@@ -122,6 +122,7 @@ defmodule GiTF.Web.Router do
     pipe_through(:dashboard_action)
 
     post("/idle-stop/hold", IdleStopController, :hold)
+    post("/idle-stop/release", IdleStopController, :release)
   end
 
   scope "/floor", GiTF.Web do

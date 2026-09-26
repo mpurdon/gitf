@@ -119,6 +119,27 @@ defmodule GiTF.Plugin.Builtin.Channels.Discord do
     {:noreply, state}
   end
 
+  # A hold is not an alert and is relayed whatever `min_severity` says: its
+  # only job is to let the Cabinet settle a sleep warning it has already
+  # posted, and a warning is posted at high severity — a filter that let the
+  # warning through and stopped its resolution would leave exactly the
+  # stale "Sleeping soon" this exists to prevent.
+  def handle_cast({:notification, :held, payload}, state) do
+    until = payload[:expires_at] && DateTime.to_iso8601(payload[:expires_at])
+
+    env =
+      envelope(
+        "idle_stop",
+        :idle_stop_held,
+        :low,
+        "Kept awake until #{until}",
+        %{outcome: to_string(payload[:outcome]), expires_at: until, reason: payload[:reason]}
+      )
+
+    spawn_deliver(env, state)
+    {:noreply, state}
+  end
+
   def handle_cast({:notification, _event, _payload}, state), do: {:noreply, state}
 
   @impl true
@@ -127,6 +148,11 @@ defmodule GiTF.Plugin.Builtin.Channels.Discord do
   @doc false
   def forward_alert(_event, _measurements, metadata, _config) do
     GenServer.cast(__MODULE__, {:notification, :alert, metadata})
+  end
+
+  @doc false
+  def forward_hold(_event, _measurements, metadata, _config) do
+    GenServer.cast(__MODULE__, {:notification, :held, metadata})
   end
 
   @doc false
@@ -241,6 +267,13 @@ defmodule GiTF.Plugin.Builtin.Channels.Discord do
       "section-discord-alerts",
       [:gitf, :alert, :raised],
       &__MODULE__.forward_alert/4,
+      %{}
+    )
+
+    :telemetry.attach(
+      "section-discord-holds",
+      [:gitf, :idle_stop, :held],
+      &__MODULE__.forward_hold/4,
       %{}
     )
 

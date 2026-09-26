@@ -18,9 +18,23 @@ defmodule GiTF.Web.IdleStopController do
     minutes = params |> Map.get("minutes", "60") |> to_string() |> Integer.parse()
 
     with {minutes, _} when minutes >= @min_minutes and minutes <= @max_minutes <- minutes,
-         {:ok, override} <- GiTF.IdleStop.hold(minutes, reason: reason(conn)) do
-      GiTF.AuditLog.record(actor(conn), "idle_stop.hold", "factory", %{minutes: minutes})
-      json(conn, %{data: %{until: override.expires_at, idle_minutes: override.idle_minutes}})
+         {:ok, override, outcome} <- GiTF.IdleStop.hold(minutes, reason: reason(conn)) do
+      # The outcome goes in the record: a tap that found a longer hold
+      # already in place changed nothing, and the audit log used to say it
+      # had set one.
+      GiTF.AuditLog.record(actor(conn), "idle_stop.hold", "factory", %{
+        minutes: minutes,
+        outcome: outcome,
+        until: override.expires_at
+      })
+
+      json(conn, %{
+        data: %{
+          outcome: outcome,
+          until: override.expires_at,
+          idle_minutes: override.idle_minutes
+        }
+      })
     else
       {:error, reason} ->
         conn |> put_status(422) |> json(%{error: inspect(reason)})
@@ -30,6 +44,26 @@ defmodule GiTF.Web.IdleStopController do
         |> put_status(422)
         |> json(%{error: "minutes must be #{@min_minutes}-#{@max_minutes}"})
     end
+  end
+
+  @doc """
+  Gives a hold back: the configured idle threshold applies again at once.
+
+  The only way to undo a hold used to be the MCP. Someone who held the box
+  four hours from the Catwalk and then finished early had two choices —
+  find an MCP client, or press "Sleep now" in Discord, which stops the
+  instance outright rather than letting it idle down on its own terms.
+  """
+  def release(conn, _params) do
+    held = GiTF.IdleStop.active()
+    :ok = GiTF.IdleStop.clear()
+
+    GiTF.AuditLog.record(actor(conn), "idle_stop.release", "factory", %{
+      had_hold: held != nil,
+      until: held && held.expires_at
+    })
+
+    json(conn, %{data: %{released: held != nil}})
   end
 
   defp actor(conn) do

@@ -92,7 +92,7 @@ defmodule GiTF.IdleStop.WarningTest do
   end
 
   test "a hold moves the stop out of the window and the warning goes quiet" do
-    {:ok, _} = GiTF.IdleStop.hold(120)
+    {:ok, _, _} = GiTF.IdleStop.hold(120)
     assert Warning.check() == :quiet
     refute_receive {:alert, _}, 200
   end

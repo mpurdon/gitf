@@ -179,12 +179,23 @@ defmodule GiTF.IdleStop do
   itself lasts exactly `minutes`. This is the one shape every "keep awake"
   surface wants — the Catwalk's sleep banner, the MCP, a Discord button —
   and the arithmetic used to live in the controller alone.
+
+  Returns `{:ok, override, :set}` when this call wrote a new hold, or
+  `{:ok, override, :kept}` when a longer one was already in place and this
+  call changed nothing. Callers used to get `{:ok, override}` either way,
+  so the MCP replied as if it had set a hold it had declined, and the audit
+  log recorded a four-hour hold for what was a no-op. Whichever it was, the
+  override returned is the one actually in force.
+
+  Emits `[:gitf, :idle_stop, :held]` with the outcome, so the Discord relay
+  can tell the Cabinet — the only way a hold placed from the Catwalk or the
+  MCP can settle a sleep warning already posted in a channel.
   """
-  @spec hold(pos_integer(), keyword()) :: {:ok, t()} | {:error, term()}
+  @spec hold(pos_integer(), keyword()) :: {:ok, t(), :set | :kept} | {:error, term()}
   def hold(minutes, opts \\ []) when is_integer(minutes) do
     # One read of the override answers both questions asked of it below.
     # Reading it a second time to return it risks finding it expired in
-    # between and answering `{:ok, nil}`, which every caller dereferences.
+    # between and answering with nil, which every caller dereferences.
     held = active()
 
     # A hold NEVER shortens an existing one. `set/3` overwrites, so without
@@ -195,23 +206,40 @@ defmodule GiTF.IdleStop do
     # Extending is not the alternative: the labels say "keep awake 4h", not
     # "add 4h", so the answer to two taps is the later of the two deadlines,
     # and the order they are tapped in stops mattering.
-    case minutes_left(held) do
-      remaining when remaining >= minutes ->
-        Logger.info("Idle-stop hold: #{minutes}m asked, #{remaining}m already held — keeping it")
-        {:ok, held}
-
-      _ ->
-        # The countdown runs from the last activity, so the threshold has to
-        # cover what has already elapsed plus the ask.
-        elapsed =
-          DateTime.diff(
-            DateTime.utc_now(),
-            GiTF.Observability.Activity.last_activity_at(),
-            :minute
+    result =
+      case minutes_left(held) do
+        remaining when remaining >= minutes ->
+          Logger.info(
+            "Idle-stop hold: #{minutes}m asked, #{remaining}m already held — keeping it"
           )
 
-        set(min(max(elapsed, 0) + minutes, @max_idle_minutes), minutes, opts)
+          {:ok, held, :kept}
+
+        _ ->
+          # The countdown runs from the last activity, so the threshold has
+          # to cover what has already elapsed plus the ask.
+          elapsed =
+            DateTime.diff(
+              DateTime.utc_now(),
+              GiTF.Observability.Activity.last_activity_at(),
+              :minute
+            )
+
+          with {:ok, override} <-
+                 set(min(max(elapsed, 0) + minutes, @max_idle_minutes), minutes, opts) do
+            {:ok, override, :set}
+          end
+      end
+
+    with {:ok, override, outcome} <- result do
+      :telemetry.execute([:gitf, :idle_stop, :held], %{minutes: minutes}, %{
+        outcome: outcome,
+        expires_at: override.expires_at,
+        reason: Keyword.get(opts, :reason)
+      })
     end
+
+    result
   end
 
   @doc "Minutes remaining on the active override, or 0."

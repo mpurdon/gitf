@@ -97,6 +97,14 @@ defmodule GiTF.Cabinet.Discord.Bot do
 
         {:noreply, state}
 
+      # A hold resolves a warning without posting one: it only rewrites a
+      # message already standing. Placed from the Catwalk or the MCP, a
+      # hold used to leave the warning live until the box's next
+      # transition — "Sleeping soon" over a box that had just been kept
+      # awake for four hours.
+      event["type"] == "idle_stop_held" ->
+        {:noreply, settle_warnings(state, ministry[:slug], held_line(event), held_opts(event))}
+
       event["type"] == "idle_stop_imminent" ->
         message = Render.render(event, ministry)
         slug = ministry[:slug]
@@ -271,6 +279,35 @@ defmodule GiTF.Cabinet.Discord.Bot do
 
     %{state | warnings: warnings}
   end
+
+  # The Section reports the expiry actually in force — which, when a longer
+  # hold was already there, is not the one just asked for. So this can say
+  # exactly when the box sleeps next, where a Discord tap alone could only
+  # say "at least". Rendered as Discord timestamps, which expand in an
+  # embed description in the reader's own zone.
+  @doc false
+  def held_opts(%{"data" => %{"expires_at" => iso}}) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, until, _} ->
+        unix = DateTime.to_unix(until)
+
+        [
+          title: "Staying awake",
+          description:
+            "Awake until <t:#{unix}:t> (<t:#{unix}:R>). The idle timer restarts after that."
+        ]
+
+      _ ->
+        [title: "Staying awake"]
+    end
+  end
+
+  def held_opts(_event), do: [title: "Staying awake"]
+
+  @doc false
+  def held_line(%{"data" => %{"outcome" => "kept"}}), do: "a longer hold was already in place"
+  def held_line(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
+  def held_line(_event), do: "kept awake"
 
   # `send_now/2` answers "did it go?"; this answers "where did it land?",
   # which is what a message we may need to rewrite later requires.

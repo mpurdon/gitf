@@ -1580,9 +1580,24 @@ defmodule GiTF.MCPServer.Handlers do
         end
 
       case result do
+        # hold/2 says whether it wrote anything. A kept hold is a success
+        # the caller must be able to see as one: the override returned is
+        # the longer one already in force, with its own reason, and
+        # replying "active" alone read as if this request had set it.
+        {:ok, override, outcome} ->
+          {:ok,
+           json_text(%{
+             outcome: to_string(outcome),
+             idle_minutes: override.idle_minutes,
+             expires_at: DateTime.to_iso8601(override.expires_at),
+             reason: override.reason,
+             status: "active"
+           })}
+
         {:ok, override} ->
           {:ok,
            json_text(%{
+             outcome: "set",
              idle_minutes: override.idle_minutes,
              expires_at: DateTime.to_iso8601(override.expires_at),
              reason: override.reason,
