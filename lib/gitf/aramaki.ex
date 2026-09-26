@@ -223,6 +223,20 @@ defmodule GiTF.Aramaki do
     end)
   end
 
+  @doc """
+  Whether Aramaki will start this pending mission on its own.
+
+  Only a mission that came in through one of Aramaki's intake channels, and
+  only while Aramaki is enabled. Anything else sitting in `pending` waits for
+  a person to call `start_mission` — see `GiTF.Missions.awaiting_admission?/1`,
+  which is why this is public.
+  """
+  @spec will_admit?(map()) :: boolean()
+  def will_admit?(mission) do
+    Map.get(mission, :status) == "pending" and Map.get(mission, :source) in @owned_sources and
+      enabled?()
+  end
+
   # Pending missions that Aramaki owns (came in through an owned intake
   # channel). We deliberately do NOT auto-start arbitrary pending missions —
   # only ones that came through Aramaki's admission gate.

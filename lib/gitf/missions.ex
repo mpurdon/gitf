@@ -213,13 +213,48 @@ defmodule GiTF.Missions do
   def held_for_human?(_), do: false
 
   @doc """
-  True when the mission wants the factory right now: non-terminal and not
-  held for a person. This is the question every liveness, stall, stuck and
-  idle check must ask — `non_terminal?/1` alone counts a mission that is
-  waiting on a human as work in progress.
+  True for a mission nobody has started and nothing in the factory will
+  start on its own — an admission decision waiting for a person.
+
+  `create_mission` does not start a mission. Until someone calls
+  `start_mission` it is `pending` with no ops and no phase, and it needs
+  nothing from the box. The exception is a mission Aramaki owns while
+  Aramaki is enabled: that one the factory will admit itself, so it is
+  work (`GiTF.Aramaki.will_admit?/1`).
+  """
+  #
+  # Status alone is not enough, and getting this wrong would power a box off
+  # mid-mission. The stored status can stay "pending" after a mission has
+  # started — `derive_status/1` exists to paper over exactly that in the
+  # list views — while `current_phase` has moved on to triage. Liveness
+  # reads the raw Archive, so "never started" must mean what derive_status
+  # means by it: pending AND no phase yet.
+  @spec awaiting_admission?(map()) :: boolean()
+  def awaiting_admission?(%{status: "pending"} = mission) do
+    Map.get(mission, :current_phase) in [nil, "pending"] and
+      not GiTF.Aramaki.will_admit?(mission)
+  end
+
+  def awaiting_admission?(_mission), do: false
+
+  @doc """
+  True when the mission wants the factory right now: non-terminal, not held
+  for a person, and not waiting for a person to start it. This is the
+  question every liveness, stall, stuck and idle check must ask —
+  `non_terminal?/1` alone counts a mission that is waiting on a human as
+  work in progress.
+
+  The admission clause is the newer one. A single forgotten
+  `create_mission` used to count as running, so `/health` reported the box
+  **stalled** (a running mission with no op activity), the idle-stop script
+  — which resets its countdown on a stalled daemon — never powered it off,
+  and the stuck-mission alert fired for work nobody had asked to begin.
   """
   @spec running?(map()) :: boolean()
-  def running?(mission), do: non_terminal?(mission) and not held_for_human?(mission)
+  def running?(mission),
+    do:
+      non_terminal?(mission) and not held_for_human?(mission) and
+        not awaiting_admission?(mission)
 
   @doc """
   When the mission actually ENDED: the timestamp of its transition into a

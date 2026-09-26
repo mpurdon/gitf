@@ -150,7 +150,13 @@ defmodule GiTF.Observability.Health do
         }
   def idle_state do
     missions = active_missions()
-    {held, running} = Enum.split_with(missions, &GiTF.Missions.held_for_human?/1)
+
+    # `running?/1`, not `held_for_human?/1`: this split used to be its own
+    # definition of busy, and it drifted — a mission nobody had started
+    # counted as running here while the stuck and zombie checks were meant
+    # to ask the canonical question. Whatever is not running is waiting on
+    # a person, whether for an answer or for someone to start it.
+    {running, held} = Enum.split_with(missions, &GiTF.Missions.running?/1)
     ghosts = active_ghost_count()
     idle = idle?(ghosts, running)
 
