@@ -60,6 +60,9 @@ defmodule GiTF.Cabinet.Discord.Bot do
        guild_id: Discord.guild_id(cfg),
        categories: Discord.categories(cfg),
        digest: %{},
+       # The outstanding idle-stop warning per ministry, so the world
+       # resolving it can settle the message a human never touched.
+       warnings: %{},
        ready: false
      }}
   end
@@ -94,14 +97,29 @@ defmodule GiTF.Cabinet.Discord.Bot do
 
         {:noreply, state}
 
-      urgent?(event) ->
+      event["type"] == "idle_stop_imminent" ->
         message = Render.render(event, ministry)
-        send_now(channel_id, message)
+        slug = ministry[:slug]
 
-        if event["type"] == "idle_stop_imminent" do
-          send_now(Guild.channel("cabinet"), message)
-        end
+        # A fresh warning makes the previous one untrue: the numbers in it
+        # are stale and its buttons act on a countdown that has moved. The
+        # screenshot that prompted this had two of them stacked, both live.
+        state = settle_warnings(state, slug, "superseded by a later warning", [])
 
+        posted =
+          [channel_id, Guild.channel("cabinet")]
+          |> Enum.uniq()
+          |> Enum.flat_map(fn id ->
+            case post_message(id, message) do
+              {:ok, message_id} -> [%{channel_id: id, message_id: message_id, message: message}]
+              :error -> []
+            end
+          end)
+
+        {:noreply, put_in(state.warnings[slug], posted)}
+
+      urgent?(event) ->
+        send_now(channel_id, Render.render(event, ministry))
         {:noreply, state}
 
       true ->
@@ -111,6 +129,32 @@ defmodule GiTF.Cabinet.Discord.Bot do
 
   @impl true
   def handle_info({:cabinet_activity, %{action: "observed"} = entry}, state) do
+    # The world resolved it. Until now `Render.settled/3` had exactly one
+    # caller — a human pressing a button — so a box that slept on its own
+    # left a message reading "Sleeping soon", counting live, still offering
+    # to keep awake a box that had been off for hours.
+    #
+    # State wording, not act wording. `Actions.resolved/1` says "Powering
+    # off" because a button tap lands ~90s before EC2 agrees; here EC2 has
+    # already agreed, so the box IS asleep and the message may say so.
+    state =
+      case entry.result do
+        "stopped" ->
+          settle_warnings(state, entry.target, "it slept",
+            title: "Asleep",
+            description: "Powered off on its own. Waking it takes about a minute."
+          )
+
+        "running" ->
+          settle_warnings(state, entry.target, "it woke",
+            title: "Awake",
+            description: "Powered on and accepting work."
+          )
+
+        _ ->
+          state
+      end
+
     event = %{
       "kind" => "cabinet",
       "type" => "fleet",
@@ -209,6 +253,47 @@ defmodule GiTF.Cabinet.Discord.Bot do
       |> Enum.flat_map(fn {event, ministry} -> Render.render(event, ministry).embeds end)
 
     send_now(channel_id, %{content: nil, embeds: embeds, components: []})
+  end
+
+  # Settles every message still standing for `slug` and forgets them. The
+  # outcome line and overrides are the same ones a button tap produces, so
+  # a warning the world resolved and one a human resolved read alike.
+  defp settle_warnings(state, slug, line, opts) do
+    {outstanding, warnings} = Map.pop(state.warnings, slug, [])
+
+    Enum.each(outstanding, fn %{channel_id: cid, message_id: mid, message: message} ->
+      try do
+        Api.Message.edit(cid, mid, Render.settled(message, line, opts))
+      rescue
+        e -> Logger.warning("Cabinet Discord: could not settle #{slug}: #{Exception.message(e)}")
+      end
+    end)
+
+    %{state | warnings: warnings}
+  end
+
+  # `send_now/2` answers "did it go?"; this answers "where did it land?",
+  # which is what a message we may need to rewrite later requires.
+  defp post_message(nil, _message), do: :error
+
+  defp post_message(channel_id, message) when is_binary(channel_id),
+    do: post_message(Guild.channel(channel_id), message)
+
+  defp post_message(channel_id, message) do
+    payload = Map.reject(message, fn {_, v} -> v in [nil, []] end)
+
+    case Api.Message.create(channel_id, payload) do
+      {:ok, %{id: id}} ->
+        {:ok, id}
+
+      other ->
+        Logger.warning("Cabinet Discord: post to #{channel_id} failed: #{inspect(other)}")
+        :error
+    end
+  rescue
+    e ->
+      Logger.warning("Cabinet Discord: post to #{channel_id} raised: #{Exception.message(e)}")
+      :error
   end
 
   defp send_now(nil, _message), do: false
