@@ -37,6 +37,12 @@ Environment=GITF_HOME=/var/lib/gitf
 # that touched Rust failed "cargo: not found" while the ghost itself —
 # which had exported the path by hand — reported a clean build.
 Environment=PATH=/var/lib/gitf/.local/bin:/var/lib/gitf/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# PATH alone finds the rustup shim, which then resolves its toolchain from
+# $HOME/.rustup — the worktree, under the sandbox — and fails "rustup could
+# not choose a version of cargo to run". Both homes absolute, for the same
+# reason as PATH above.
+Environment=RUSTUP_HOME=/var/lib/gitf/.rustup
+Environment=CARGO_HOME=/var/lib/gitf/.cargo
 Environment=GITF_PORT=4000
 # Bind loopback by default; front with a reverse proxy or set GITF_HOST in the
 # env file to expose. Never expose the dashboard directly to the internet.
